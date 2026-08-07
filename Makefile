@@ -1,7 +1,7 @@
 CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 
-.PHONY: all clean test verify waveform compiler-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test verify waveform compiler-waveform mac-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
@@ -11,7 +11,7 @@ pigen: src/pigen.c src/assignments.c src/declarations.c src/procedural.c src/fsm
 test: pigen
 	./tests/smoke.sh ./pigen
 
-verify: test waveform compiler-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
+verify: test waveform compiler-waveform mac-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
 
 clear-test:
 	verilator --binary --top-module fifo_discard_tb --Mdir /tmp/pigen-clear-verilator rtl/pigen_primitives.sv tests/fifo_discard_tb.sv
@@ -39,6 +39,13 @@ compiler-waveform: pigen
 	./pigen examples/compiler_pipeline.pigen -o examples/compiler_pipeline.sv
 	verilator --binary --trace --top-module compiler_pipeline_tb --Mdir /tmp/pigen-compiler-verilator rtl/pigen_primitives.sv examples/compiler_pipeline.sv examples/compiler_pipeline_tb.sv
 	/tmp/pigen-compiler-verilator/Vcompiler_pipeline_tb
+
+mac-waveform: pigen
+	truncate -s 0 examples/fixed_point_mac.vcd
+	./pigen examples/fixed_point_mac.pigen -o examples/fixed_point_mac.sv
+	verilator --binary --trace --top-module fixed_point_mac_tb --Mdir /tmp/pigen-mac-verilator rtl/pigen_primitives.sv examples/fixed_point_mac.sv examples/fixed_point_mac_tb.sv
+	/tmp/pigen-mac-verilator/Vfixed_point_mac_tb
+	verilator --lint-only -Wno-fatal --top-module fixed_point_mac_vanilla examples/fixed_point_mac_vanilla.sv
 
 join-waveform: pigen
 	truncate -s 0 examples/join_pipeline.vcd

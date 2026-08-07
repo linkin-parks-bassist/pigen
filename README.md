@@ -84,6 +84,72 @@ module easy_pipeline
 endmodule
 ```
 
+## A concrete comparison: fixed-point MAC
+
+Here is an 8.8 fixed-point multiply-add with an elastic product stage. The
+three inputs are independently backpressured; the multiply is an atomic join,
+and the output is buffered. In Pigen, the datapath is simply the datapath:
+
+```systemverilog
+buf [31:0] product;
+
+always_ff @(posedge clk)
+begin
+    product <= sample * coefficient;
+    result <= product[23:8] + bias;
+end
+```
+
+The equivalent hand-written ready/valid SV needs explicit valid state, ready
+equations, routing, and update priority for the intermediate and output
+stages:
+
+```systemverilog
+logic [31:0] product;
+logic product_valid, product_in_ready, product_out_ready;
+logic result_in_ready;
+
+assign result_in_ready = !result_valid || result_ready;
+assign product_out_ready = result_in_ready && bias_valid;
+assign product_in_ready = !product_valid || product_out_ready;
+
+assign sample_ready = product_in_ready && coefficient_valid;
+assign coefficient_ready = product_in_ready && sample_valid;
+assign bias_ready = result_in_ready && product_valid;
+
+always_ff @(posedge clk)
+begin
+    if (reset)
+        product_valid <= 1'b0;
+    else if (sample_valid && coefficient_valid && product_in_ready)
+    begin
+        product_valid <= 1'b1;
+        product <= sample * coefficient;
+    end
+    else if (product_valid && product_out_ready)
+        product_valid <= 1'b0;
+end
+
+always_ff @(posedge clk)
+begin
+    if (reset)
+        result_valid <= 1'b0;
+    else if (product_valid && bias_valid && result_in_ready)
+    begin
+        result_valid <= 1'b1;
+        result <= product[23:8] + bias;
+    end
+    else if (result_valid && result_ready)
+        result_valid <= 1'b0;
+end
+```
+
+Both versions are included: [Pigen MAC](examples/fixed_point_mac.pigen) and
+[hand-written SV MAC](examples/fixed_point_mac_vanilla.sv). The Pigen version
+is simulated with input/output stalls by `make mac-waveform`, which writes
+[its VCD](examples/fixed_point_mac.vcd). The vanilla version is linted by the
+same target.
+
 The same notation handles joins: all buffered inputs are consumed together,
 never half a packet at a time.
 
@@ -174,6 +240,7 @@ under a disabled guard, then transferring ordered values when enabled.
 | --- | --- | --- |
 | [buf pipeline](examples/buf_pipeline.pigen) | Three explicit elastic stages under backpressure | [VCD](examples/buf_pipeline.vcd) |
 | [expression pipeline](examples/compiler_pipeline.pigen) | Compiler-lowered `sum <= a_value + b_value` join | [VCD](examples/compiler_pipeline.vcd) |
+| [fixed-point MAC](examples/fixed_point_mac.pigen) | Atomic multiply-add join, elastic product stage, and output backpressure | [VCD](examples/fixed_point_mac.vcd) |
 | [buffered join pipeline](examples/join_pipeline.pigen) | Atomic join of two independently pulsed `input buf` values | [VCD](examples/join_pipeline.vcd) |
 | [FIFO pipeline](examples/fifo_pipeline.pigen) | `fifo[7:0][4]` fill, backpressure, and drain | [VCD](examples/fifo_pipeline.vcd) |
 | [skid pipeline](examples/skid_pipeline.pigen) | Exact two-entry skid capacity | [VCD](examples/skid_pipeline.vcd) |

@@ -1,0 +1,20 @@
+module fixed_point_mac
+	(
+		input logic clk,
+		input logic reset,
+		input buf [15:0] sample,
+		input buf [15:0] coefficient,
+		input buf [15:0] bias,
+		output buf [15:0] result
+	);
+
+	buf [31:0] product;
+
+	always_ff @(posedge clk)
+	begin
+		// 8.8 fixed point: (sample * coefficient) >> 8, then add bias.
+		product <= sample * coefficient;
+		result <= product[23:8] + bias;
+	end
+
+endmodule
