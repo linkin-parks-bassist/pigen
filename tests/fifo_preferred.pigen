@@ -1,0 +1,16 @@
+module fifo_preferred
+	(
+		input logic clk,
+		input logic reset,
+		input fifo[7:0][4] incoming,
+		input logic [7:0] data
+	);
+
+	fifo[7:0][4] queue;
+
+	always_ff @(posedge clk)
+	begin
+		queue <= data;
+	end
+
+endmodule

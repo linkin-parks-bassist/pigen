@@ -1,0 +1,21 @@
+module port_bram
+	(
+		input logic clk,
+		input logic reset,
+		input logic read_enable,
+		input logic [3:0] read_address,
+		input logic [3:0] write_address,
+		input port [7:0] data_in
+	);
+
+	reg [7:0] mem [0:15];
+	port [7:0] bram_port;
+
+	always_ff @(posedge clk)
+	begin
+		if (read_enable)
+			bram_port <= mem[read_address];
+		mem[write_address] <= data_in;
+	end
+
+endmodule

@@ -1,0 +1,8 @@
+module fsm_bad_event(input logic clk, input logic reset);
+	fsm sender @(posedge clk or posedge reset) reset (reset) initial idle
+	begin
+		state idle:
+		begin
+		end
+	end
+endmodule

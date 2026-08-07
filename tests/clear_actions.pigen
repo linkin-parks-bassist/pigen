@@ -1,0 +1,19 @@
+module clear_actions
+	(
+		input logic clk,
+		input logic reset,
+		input logic discard
+	);
+
+	buf [7:0] stage;
+	fifo [7:0][4] queue;
+
+	always_ff @(posedge clk)
+	begin
+		if (discard)
+			invalidate(stage);
+		else
+			flush(queue);
+	end
+
+endmodule

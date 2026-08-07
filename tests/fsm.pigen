@@ -1,0 +1,24 @@
+module fsm_example
+	(
+		input logic clk,
+		input logic reset,
+		input logic start,
+		input buf [7:0] source,
+		output buf [7:0] destination
+	);
+
+	fsm sender @(posedge clk) reset (reset) initial idle
+	begin
+		state idle:
+		begin
+			if (start)
+				goto send;
+		end
+		state send:
+		begin
+			destination <= source;
+			if (accepts(destination, source))
+				goto idle;
+		end
+	end
+endmodule

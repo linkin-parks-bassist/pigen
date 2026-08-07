@@ -1,0 +1,19 @@
+module lexical
+	(
+		input logic clk,
+		input logic reset
+	);
+
+	// A fake declaration; valid(stage); must stay a comment.
+	wire [7:0] source;
+	buf [7:0] stage;
+
+	assign source = 8'h5a;
+
+	always_ff @(posedge clk)
+	begin
+		$display("literal semicolon; valid(stage) is not an accessor");
+		stage <= source; // A source comment; ready(stage) is also opaque.
+	end
+
+endmodule

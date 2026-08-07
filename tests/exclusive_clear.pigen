@@ -1,0 +1,18 @@
+module exclusive_clear
+	(
+		input logic clk,
+		input logic reset,
+		input logic select
+	);
+
+	buf [7:0] source;
+	buf [7:0] stage;
+
+	always_ff @(posedge clk)
+	begin
+		if (select)
+			stage <= source;
+		else
+			invalidate(stage);
+	end
+endmodule

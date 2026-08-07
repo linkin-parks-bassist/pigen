@@ -1,0 +1,19 @@
+module case_guard
+	(
+		input logic clk,
+		input logic reset,
+		input logic [1:0] select
+	);
+
+	buf [7:0] source;
+	buf [7:0] stage;
+
+	always_ff @(posedge clk)
+	begin
+		unique case (select)
+			2'd0: stage <= source;
+			2'd1: stage <= source + 1'b1;
+			default: invalidate(stage);
+		endcase
+	end
+endmodule

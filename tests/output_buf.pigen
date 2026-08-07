@@ -1,0 +1,15 @@
+module output_buf
+	(
+		input logic clk,
+		input logic reset,
+
+		input  buf [7:0] in_packet,
+		output buf [7:0] out_packet
+	);
+
+	always_ff @(posedge clk)
+	begin
+		out_packet <= in_packet;
+	end
+
+endmodule

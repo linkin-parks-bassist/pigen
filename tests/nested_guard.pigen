@@ -1,0 +1,27 @@
+module nested_guard
+	(
+		input logic clk,
+		input logic reset,
+		input logic outer_enable,
+		input logic inner_enable
+	);
+
+	wire [7:0] source;
+	buf [7:0] first_stage;
+	buf [7:0] second_stage;
+
+	assign source = 8'h42;
+
+	always_ff @(posedge clk)
+	begin
+		if (outer_enable)
+		begin
+			if (inner_enable)
+			begin
+				first_stage <= source;
+				second_stage <= source;
+			end
+		end
+	end
+
+endmodule

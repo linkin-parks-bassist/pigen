@@ -1,0 +1,17 @@
+module accessors
+	(
+		input logic clk,
+		input logic reset
+	);
+
+	buf [7:0] item;
+	logic observed_valid;
+	logic observed_ready;
+
+	always_comb
+	begin
+	observed_valid = valid ( item );
+	observed_ready = ready ( item );
+	end
+
+endmodule

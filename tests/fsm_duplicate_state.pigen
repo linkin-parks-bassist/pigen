@@ -1,0 +1,11 @@
+module fsm_duplicate_state(input logic clk, input logic reset);
+	fsm sender @(posedge clk) reset (reset) initial idle
+	begin
+		state idle:
+		begin
+		end
+		state idle:
+		begin
+		end
+	end
+endmodule

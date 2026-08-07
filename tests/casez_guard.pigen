@@ -1,0 +1,18 @@
+module casez_guard
+	(
+		input logic clk,
+		input logic reset,
+		input logic [3:0] select
+	);
+
+	buf [7:0] source;
+	buf [7:0] stage;
+
+	always_ff @(posedge clk)
+	begin
+		priority casez (select)
+			4'b1???: stage <= source;
+			default: invalidate(stage);
+		endcase
+	end
+endmodule

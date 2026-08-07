@@ -1,0 +1,24 @@
+module exclusive_routes
+	(
+		input logic clk,
+		input logic reset,
+		input logic select
+	);
+
+	buf [7:0] source;
+	buf [7:0] left;
+	buf [7:0] right;
+	buf [7:0] merged;
+
+	always_ff @(posedge clk)
+	begin
+		if (select)
+			left <= source;
+		else
+			right <= source;
+		if (select)
+			merged <= left;
+		else
+			merged <= right;
+	end
+endmodule

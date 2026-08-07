@@ -1,0 +1,17 @@
+module guarded_assignment
+	(
+		input logic clk,
+		input logic reset,
+		input logic enable
+	);
+
+	wire [7:0] value;
+	buf [7:0] stage;
+
+	always_ff @(posedge clk)
+	begin
+		if (enable)
+			stage <= value;
+	end
+
+endmodule

@@ -1,0 +1,26 @@
+module else_guard
+	(
+		input logic clk,
+		input logic reset,
+		input logic select_first
+	);
+
+	wire [7:0] source;
+	buf [7:0] first_stage;
+	buf [7:0] second_stage;
+
+	assign source = 8'h17;
+
+	always_ff @(posedge clk)
+	begin
+		if (select_first)
+		begin
+			first_stage <= source;
+		end
+		else
+		begin
+			second_stage <= source;
+		end
+	end
+
+endmodule

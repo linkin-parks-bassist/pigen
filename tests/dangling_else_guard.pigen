@@ -1,0 +1,24 @@
+module dangling_else_guard
+	(
+		input logic clk,
+		input logic reset,
+		input logic outer_enable,
+		input logic inner_enable
+	);
+
+	wire [7:0] source;
+	buf [7:0] first_stage;
+	buf [7:0] second_stage;
+
+	assign source = 8'h51;
+
+	always_ff @(posedge clk)
+	begin
+		if (outer_enable)
+			if (inner_enable)
+				first_stage <= source;
+			else
+				second_stage <= source;
+	end
+
+endmodule

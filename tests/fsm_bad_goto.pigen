@@ -1,0 +1,9 @@
+module fsm_bad_goto(input logic clk, input logic reset);
+	fsm sender @(posedge clk) reset (reset) initial idle
+	begin
+		state idle:
+		begin
+			goto missing;
+		end
+	end
+endmodule

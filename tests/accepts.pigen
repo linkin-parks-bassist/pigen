@@ -1,0 +1,16 @@
+module accepts_example
+	(
+		input logic clk,
+		input logic reset
+	);
+
+	buf [7:0] source;
+	buf [7:0] destination;
+
+	always_ff @(posedge clk)
+	begin
+		if (accepts( destination, source ))
+			destination <= source;
+	end
+
+endmodule

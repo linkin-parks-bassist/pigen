@@ -1,0 +1,19 @@
+module skid_compare
+	(
+		input logic clk,
+		input logic reset,
+
+		input  buf  [7:0] plain_in,
+		output buf  [7:0] plain_out,
+
+		input  buf  [7:0] skid_in,
+		output skid [7:0] skid_out
+	);
+
+	always_ff @(posedge clk)
+	begin
+		plain_out <= plain_in;
+		skid_out <= skid_in;
+	end
+
+endmodule

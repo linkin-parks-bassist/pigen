@@ -1,0 +1,5 @@
+module basic(input logic clk, input logic reset);
+    wire [7:0] combinatorial;
+    reg  [7:0] state;
+    buf  [7:0] stage;
+endmodule

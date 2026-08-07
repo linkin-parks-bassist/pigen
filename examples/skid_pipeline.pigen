@@ -1,0 +1,15 @@
+module skid_pipeline
+	(
+		input  logic		clk,
+		input  logic		reset,
+		input  logic [7:0]	in_packet
+	);
+
+	skid [7:0] queue;
+
+	always_ff @(posedge clk)
+	begin
+		queue <= in_packet;
+	end
+
+endmodule

@@ -1,0 +1,20 @@
+module buf_pipeline
+	(
+		input  logic		clk,
+		input  logic		reset,
+
+		input  buf [7:0]	in_packet,
+		output buf [7:0]	out_packet
+	);
+
+	buf [7:0] stage_a;
+	buf [7:0] stage_b;
+
+	always_ff @(posedge clk)
+	begin
+		stage_a <= in_packet;
+		stage_b <= stage_a;
+		out_packet <= stage_b;
+	end
+
+endmodule

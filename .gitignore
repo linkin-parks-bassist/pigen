@@ -1,0 +1,6 @@
+/pigen
+/a.out
+*.vcd
+*.sv
+!rtl/*.sv
+!examples/*_tb.sv

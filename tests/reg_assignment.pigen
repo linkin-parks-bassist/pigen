@@ -1,0 +1,15 @@
+module reg_assignment
+	(
+		input logic clk,
+		input logic reset
+	);
+
+	buf [7:0] source;
+	reg [7:0] destination;
+
+	always_ff @(posedge clk)
+	begin
+		destination <= source;
+	end
+
+endmodule

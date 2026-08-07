@@ -1,0 +1,9 @@
+module async_domain_error(input logic clk, input logic reset);
+	buf [7:0] source;
+	buf [7:0] destination;
+
+	always_ff @(posedge clk or posedge reset)
+	begin
+		destination <= source;
+	end
+endmodule

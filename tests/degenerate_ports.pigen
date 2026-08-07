@@ -1,0 +1,14 @@
+module degenerate_ports
+	(
+		input logic clk,
+		input logic reset,
+		input wire [7:0] source,
+		output reg [7:0] state
+	);
+
+	always_ff @(posedge clk)
+	begin
+		state <= source;
+	end
+
+endmodule

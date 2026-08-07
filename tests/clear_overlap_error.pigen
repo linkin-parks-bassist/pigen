@@ -1,0 +1,16 @@
+module clear_overlap_error
+	(
+		input logic clk,
+		input logic reset
+	);
+
+	buf [7:0] source;
+	buf [7:0] stage;
+
+	always_ff @(posedge clk)
+	begin
+		stage <= source;
+		invalidate(stage);
+	end
+
+endmodule

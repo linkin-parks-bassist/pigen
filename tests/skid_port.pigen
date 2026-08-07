@@ -1,0 +1,20 @@
+module skid_port
+	(
+		input logic clk,
+		input logic reset,
+		input logic [7:0] data
+	);
+
+	wire [7:0] input_data;
+	skid [7:0] skid_queue;
+	port [7:0] pulse;
+
+	assign input_data = data;
+
+	always_ff @(posedge clk)
+	begin
+		skid_queue <= input_data;
+		pulse <= skid_queue;
+	end
+
+endmodule

@@ -1,0 +1,8 @@
+module fsm_bad_initial(input logic clk, input logic reset);
+	fsm sender @(posedge clk) reset (reset) initial missing
+	begin
+		state idle:
+		begin
+		end
+	end
+endmodule

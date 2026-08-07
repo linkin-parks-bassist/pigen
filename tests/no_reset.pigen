@@ -1,0 +1,8 @@
+module no_reset(input logic clk, input logic [7:0] data);
+	buf [7:0] stage;
+
+	always_ff @(posedge clk)
+	begin
+		stage <= data;
+	end
+endmodule

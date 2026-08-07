@@ -1,0 +1,16 @@
+module port_pipeline
+	(
+		input logic		clk,
+		input logic		reset,
+
+		input buf [7:0]	in_packet
+	);
+
+	port [7:0] pulse;
+
+	always_ff @(posedge clk)
+	begin
+		pulse <= in_packet;
+	end
+
+endmodule

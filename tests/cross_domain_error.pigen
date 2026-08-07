@@ -1,0 +1,20 @@
+module cross_domain_error
+	(
+		input logic clk_a,
+		input logic clk_b,
+		input logic reset
+	);
+
+	buf [7:0] source;
+	buf [7:0] left;
+	buf [7:0] right;
+
+	always_ff @(posedge clk_a)
+	begin
+		left <= source;
+	end
+	always_ff @(posedge clk_b)
+	begin
+		right <= source;
+	end
+endmodule

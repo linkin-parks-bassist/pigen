@@ -1,0 +1,17 @@
+module join_pipeline
+	(
+		input logic		clk,
+		input logic		reset,
+
+		input buf [7:0]	left,
+		input buf [7:0]	right
+	);
+
+	buf [7:0] sum;
+
+	always_ff @(posedge clk)
+	begin
+		sum <= left + right;
+	end
+
+endmodule

@@ -1,0 +1,19 @@
+module compiler_pipeline
+	(
+		input  logic		clk,
+		input  logic		reset,
+		input  logic [7:0]	a,
+		input  logic [7:0]	b,
+	    
+	    output buf [7:0] delayed_sum
+	);
+
+	buf [7:0] sum;
+
+	always_ff @(posedge clk)
+	begin
+		sum <= a + b;
+		delayed_sum <= sum;
+	end
+
+endmodule

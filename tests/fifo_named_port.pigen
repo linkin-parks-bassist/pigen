@@ -1,0 +1,10 @@
+typedef logic [7:0] packet_t;
+
+module fifo_named_port
+	(
+		input logic clk,
+		input logic reset,
+		input fifo packet_t[4] incoming
+	);
+
+endmodule

@@ -1,0 +1,15 @@
+module repeated_operand
+	(
+		input logic clk,
+		input logic reset
+	);
+
+	buf [7:0] source;
+	buf [8:0] destination;
+
+	always_ff @(posedge clk)
+	begin
+		destination <= source + source;
+	end
+
+endmodule

@@ -1,0 +1,15 @@
+module fifo_named_type
+	(
+		input logic clk,
+		input logic reset,
+		input logic [7:0] data
+	);
+
+	typedef logic [7:0] packet_t;
+	fifo packet_t[4] queue;
+
+	always_ff @(posedge clk)
+	begin
+		queue <= data;
+	end
+endmodule

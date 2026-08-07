@@ -1,0 +1,17 @@
+module fanout_error
+	(
+		input logic clk,
+		input logic reset
+	);
+
+	buf [7:0] source;
+	buf [7:0] left;
+	buf [7:0] right;
+
+	always_ff @(posedge clk)
+	begin
+		left <= source;
+		right <= source;
+	end
+
+endmodule
