@@ -1,4 +1,4 @@
-# Pigen (next)
+# Pigen
 
 This directory is the clean-room successor to `../pigen`.
 
@@ -30,6 +30,63 @@ be explicitly cleared inside an `always_ff` block with `invalidate(value);`
 
 Inside `always_ff`, `if (destination <= source)` both tests the same condition
 as `accepts(destination, source)` and performs that transfer when accepted.
+
+## Make pipelines feel like plumbing
+
+Declare the places data can wait, then connect them.  Each `<=` is an atomic
+ready/valid transfer: it waits when the next stage is full and naturally
+pushes back through the whole chain.  No hand-written `valid`, `ready`, or
+enable plumbing required.
+
+```systemverilog
+module easy_pipeline
+    (
+        input logic clk,
+        input logic reset,
+        input buf [31:0] incoming,
+        output buf [31:0] outgoing
+    );
+
+    buf  [31:0] decode;
+    fifo [31:0][8] queue;
+
+    always_ff @(posedge clk)
+    begin
+        decode <= incoming;
+        queue <= decode;
+        outgoing <= queue;
+    end
+endmodule
+```
+
+The same notation handles joins: all buffered inputs are consumed together,
+never half a packet at a time.
+
+```systemverilog
+always_ff @(posedge clk)
+begin
+    // Fires only when both operands are available and sum can accept.
+    sum <= left + right;
+
+    // Test-and-transfer in one line.
+    if (result <= sum)
+        completed <= 1'b1;
+end
+```
+
+Guards simply decide when a route is live; the source stays put until that
+route can actually accept it.
+
+```systemverilog
+always_ff @(posedge clk)
+begin
+    if (launch)
+        request_queue <= request;
+
+    if (flush_requested)
+        flush(request_queue);
+end
+```
 
 FIFO declarations always spell payload before depth: `fifo[7:0][4] queue;`.
 The earlier depth-before-payload spelling is rejected.
