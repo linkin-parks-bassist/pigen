@@ -4,3 +4,4 @@
 *.sv
 !rtl/*.sv
 !examples/*_tb.sv
+PLAN.md

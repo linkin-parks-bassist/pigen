@@ -1,16 +1,21 @@
 # Pigen
 
-This directory is the clean-room successor to `../pigen`.
+Pigen is a small, synthesizable extension of SystemVerilog for writing
+synchronous ready/valid datapaths as direct connections between named pieces
+of storage. Declare where values may wait, connect them with `<=`, and let
+Pigen elaborate the handshake, backpressure, atomic joins, and storage
+plumbing into ordinary readable SystemVerilog. It is designed to sit naturally
+inside an `always_ff` block while leaving the rest of your SV alone.
 
-The intended implementation is a normal C program that parses a small
-SystemVerilog extension and lowers it to ordinary SystemVerilog.  The existing
-Python project is reference material only: its tested elastic-buffer behavior
-is useful, but its frontend and architecture are not being continued here.
+The complete language contract lives in [`SPEC.md`](SPEC.md). Pigen's emitted
+RTL uses the deliberately simple primitives in
+[`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv): `pigen_buf`,
+`pigen_fifo`, and `pigen_skid`. You can inspect, lint, and synthesize the
+result without needing a special runtime.
 
-The language contract is in [`SPEC.md`](SPEC.md); the implementation roadmap
-is in [`PLAN.md`](PLAN.md).
+## Quick start
 
-Build and run the prototype with:
+Build and run Pigen with:
 
 ```sh
 make
@@ -18,18 +23,35 @@ make
 ./pigen example.pigen -o out.sv    # explicit destination
 ```
 
-Elaborated designs use the companion SystemVerilog library at
-[`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv).  It contains readable
-`pigen_buf`, `pigen_fifo`, `pigen_skid`, and `pigen_port` implementations.
+To run the compiler checks and all simulations:
 
-Pigen transport actions are atomic ready/valid transfers.  Use `valid(x)` and
-`ready(x)` to inspect a transport value, or `accepts(destination, source)` as
-the shorthand for `ready(destination) && valid(source)`.  Buffered values may
-be explicitly cleared inside an `always_ff` block with `invalidate(value);`
-(drop one offered item) or `flush(value);` (empty all buffered items).
+```sh
+make verify
+```
 
-Inside `always_ff`, `if (destination <= source)` both tests the same condition
-as `accepts(destination, source)` and performs that transfer when accepted.
+## The model in one minute
+
+Pigen adds transport declarations to familiar SV. `buf`, `fifo`, and `skid`
+hold values elastically; a `port` is a directly written payload register with a
+one-cycle valid pulse. `wire`, `reg`, and ordinary `logic` remain useful for
+always-available combinational or state values.
+
+Within a synchronous `always_ff` domain, a transport assignment is atomic:
+
+- `destination <= source;` fires only when the destination can accept and all
+  transport operands on the right-hand side are valid.
+- `sum <= left + right;` is an atomic join: it never consumes just one input.
+- `valid(x)`, `ready(x)`, and `accepts(destination, source)` expose the
+  handshake when control logic needs to see it.
+- `if (destination <= source)` is a compact test-and-transfer: it enters the
+  branch and performs the transfer on the same accepted cycle.
+- `invalidate(x);` drops one offered item and `flush(x);` clears buffered
+  storage.
+
+The result is intentionally boring RTL: explicit ready/valid nets, simple
+storage instances, and ordinary sequential logic. What disappears is the
+repetitive wiring and the chance to accidentally make a partial join or lose
+backpressure.
 
 ## Make pipelines feel like plumbing
 
@@ -74,6 +96,11 @@ begin
 end
 ```
 
+Pigen also protects the shape of the flow: buffered values have one consumer,
+and writes to the same transport destination must be provably on disjoint
+control paths. Those restrictions make the generated routes unambiguous and
+keep ownership visible in the source.
+
 Guards simply decide when a route is live; the source stays put until that
 route can actually accept it.
 
@@ -91,13 +118,15 @@ end
 FIFO declarations always spell payload before depth: `fifo[7:0][4] queue;`.
 The earlier depth-before-payload spelling is rejected.
 
+## Interfaces stay SystemVerilog-shaped
+
 At a module boundary, a transport declaration expands to the payload plus
 ordinary `name_valid` and `name_ready` ports.  The compiler's `__pigen_*`
 names are private implementation details and never part of the public module
 interface.
 
-Run `make waveform` for the first ready/valid pipeline proof of concept.  It
-checks ordered delivery through three `pigen_buf` instances and writes
+Run `make waveform` for a ready/valid pipeline proof of concept. It checks
+ordered delivery through three `pigen_buf` instances and writes
 `examples/buf_pipeline.vcd`, viewable with `gtkwave examples/buf_pipeline.vcd`.
 
 `make compiler-waveform` elaborates and simulates
@@ -150,5 +179,5 @@ under a disabled guard, then transferring ordered values when enabled.
 | [guarded pipeline](examples/guarded_pipeline.pigen) | `if (enable)` gates an elastic transfer | [VCD](examples/guarded_pipeline.vcd) |
 | [output port pipeline](examples/output_pipeline.pigen) | Buffered module-boundary transfer under backpressure | [VCD](examples/output_pipeline.vcd) |
 
-Run every compiler and simulation check with `make verify`.  View a VCD with
+View a VCD with
 `gtkwave examples/fifo_pipeline.vcd`, substituting any listed waveform.
