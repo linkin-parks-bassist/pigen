@@ -170,6 +170,5 @@ state machines are never inlined.  Reset clears primitive occupancy.  Payload
 is stable under valid backpressure, FIFO order is preserved, simultaneous
 push/pop sustains one item per cycle, and skid capacity is exactly two.
 
-Ordinary SystemVerilog outside parsed Pigen syntax is preserved.  All compiler
-diagnostics identify original source file, line, and column.  Implementation
-architecture and milestones are maintained in `PLAN.md`.
+Ordinary SystemVerilog outside parsed Pigen syntax is preserved. All compiler
+diagnostics identify original source file, line, and column.

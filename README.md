@@ -13,6 +13,9 @@ RTL uses the deliberately simple primitives in
 `pigen_fifo`, and `pigen_skid`. You can inspect, lint, and synthesize the
 result without needing a special runtime.
 
+For a practical first-day walkthrough—pipelines, joins, hierarchy, ports,
+BRAMs, FSMs, and workflow—start with the [user guide](USER_GUIDE.md).
+
 ## Quick start
 
 Build and run Pigen with:
