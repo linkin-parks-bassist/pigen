@@ -23,6 +23,10 @@ The generated module is ordinary synthesizable SV. Compile it with
 [`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv), which contains the small
 storage primitives Pigen instantiates.
 
+The same file can also declare stage-oriented `pipeline` units and routed
+`fabric` units. They are language constructs handled by this executable, with
+no secondary source formats or frontend scripts.
+
 ## The central idea
 
 Pigen transport values carry a payload plus a ready/valid contract. Inside an
@@ -45,6 +49,51 @@ sum <= left + right;
 ```
 
 There is no cycle where `left` is consumed but `right` is not.
+
+## Declare a pipeline block
+
+Use a `pipeline` when the whole unit is naturally a sequence of tuple
+transforms:
+
+```systemverilog
+pipeline add_then_clip begin
+    option skid_step = 0;
+    stage add {logic [7:0] a, logic [7:0] b} yields {logic [8:0] sum} begin
+        sum = a + b;
+        skid;
+    endstage
+    stage clip {sum} yields {logic [7:0] result} begin
+        result = sum[8] ? 8'hff : sum[7:0];
+    endstage
+endpipeline
+```
+
+This produces one `add_then_clip` module with packed ready/valid input and
+output packets. Carried tuple types flow positionally between stages. Use
+`skid;`, `no_skid;`, or the per-pipeline `skid_step` option to choose timing
+boundaries.
+
+## Declare a fabric block
+
+Use a `fabric` to connect several named producers and consumers without
+hand-writing a routing network:
+
+```systemverilog
+fabric command_network #(
+    parameter integer PAYLOAD_W = 32
+) begin
+    boot.tx.command > controller.rx;
+    cpu.tx.command -> controller.rx.cpu;
+    debugger.tx.command --> controller.rx.debugger;
+endfabric
+```
+
+The direct `>` connection is exclusive and receives its own two-entry endpoint
+queue. Routed arrows use a generated tree of buffered three-port routers. The
+compiler emits route constants and recognized-source constants into the fabric
+module, while the boundary remains ordinary flattened ready/valid
+SystemVerilog. Pipelines, fabrics, and ordinary modules can all be present in
+one source and are emitted together.
 
 ## Your first pipeline
 
@@ -148,8 +197,22 @@ Pigen construct one unambiguous ready route. If you need to send one item to
 two places, choose the behavior intentionally: duplicate the payload into two
 destinations, add a fork protocol, or make one consumer own the decision.
 
-Storage also belongs to the module that declares it. `invalidate(x);` drops
-one offered item and `flush(x);` empties local buffered storage:
+Storage also belongs to the module that declares it. `validate(x);` and
+`invalidate(x);` explicitly set a local transport valid or invalid on the next
+clock edge.  They compose in source order with transfers, just like normal
+non-blocking assignments.  This is the normal way to seed elastic feedback
+state, including during reset:
+
+```systemverilog
+if (reset) begin
+    x1 <= '0; validate(x1);
+    x2 <= '0; validate(x2);
+end
+```
+
+`x1` and `x2` are now zero-valued valid buffer tokens after reset, so downstream
+joins do not stall waiting for history.  `invalidate(x);` forces a transport
+invalid and `flush(x);` empties local buffered storage:
 
 ```systemverilog
 if (cancel_one)
@@ -158,10 +221,18 @@ if (restart)
     flush(requests);
 ```
 
-These are deliberately local-only operations. An input transport is an
-upstream-owned channel, so a child cannot invalidate or flush the parent’s
-buffer. Normal acceptance still propagates through the ready chain; reaching
-across the boundary to destroy someone else’s storage is rejected.
+These are deliberately local-only operations. Normal acceptance still
+propagates through ready chains; use validity actions on storage your module
+owns rather than reaching into an upstream buffer.
+
+`_` is an explicit discard destination. It consumes a token without creating
+storage, and is particularly useful in co-sliced transfers:
+
+```systemverilog
+{acc_3, _} <= {acc_2 + x2 * B2, x2};
+```
+
+Here `acc_3` advances and the old `x2` token is retired atomically.
 
 ## Module boundaries
 
@@ -270,6 +341,46 @@ its enclosing guard; it does not implicitly wait for a transfer, so use
 5. Run `make verify` before relying on a change. The examples and VCD targets
    are useful concrete references for buffer, FIFO, skid, port, guarded,
    join, output, BRAM, and FSM behavior.
+
+## Fixed-point and native state: two current edges
+
+Pigen transports accept packed SystemVerilog signedness modifiers.  Write
+`buf signed [23:0] sample` (or `fifo signed [23:0][4] samples`) when the
+payload is signed; the generated payload signal and primitive type parameter
+remain signed.  Use `$signed(...)` only when deliberately reinterpreting an
+otherwise unsigned expression.
+
+The single-consumer rule applies even when the second use looks like an
+ordinary state update.  In particular, this is two consumers of `sample` and
+is rejected:
+
+```systemverilog
+packet <= sample;
+sample_history <= sample;
+```
+
+Pack every value that needs to travel together into one transport item, or use
+the explicit co-sliced transfer described below.  Do not depend on generated
+`__pigen_*` signal names: they are implementation details, not a module
+interface.
+
+## Copy a token deliberately; inspect it with `peek`
+
+Use a co-sliced transfer when one accepted token must update several related
+destinations atomically.  Every destination must be ready; each distinct RHS
+transport is valid and consumed once, even if it appears in more than one RHS
+expression:
+
+```systemverilog
+if ({packet, history} <= {{sample, history}, peek(sample)})
+    previous_history <= history;
+```
+
+The top-level braces have matching arity.  Nested braces are ordinary packing,
+so the example stores an assembled packet and the raw sample on the same edge.
+`peek(sample)` is a raw, non-consuming payload read: it adds neither valid nor
+ready logic.  Use it under `valid(...)`, `accepts(...)`, or a grouped transfer
+when the sampled value must correspond to a real token.
 
 ## Where to look next
 

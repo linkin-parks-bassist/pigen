@@ -15,6 +15,9 @@ module pigen_buf #(
 		input  logic		reset,
 		input  logic		clear,
 		input  logic		discard,
+		input  logic		force_valid,
+		input  logic		force_invalid,
+		input  logic		force_after_transfer,
 
 		input  logic		in_valid,
 		output logic		in_ready,
@@ -36,11 +39,17 @@ module pigen_buf #(
 	begin
 		if (reset)
 		begin
-			packet_valid <= 1'b0;
-			packet <= '0;
+			packet_valid <= force_valid && !force_invalid;
+			packet <= force_valid && in_valid ? packet_in : '0;
 		end
 		else if (clear || discard)
 			packet_valid <= 1'b0;
+		else if (force_after_transfer && (force_valid || force_invalid))
+		begin
+			packet_valid <= force_valid;
+			if (force_valid && in_valid && in_ready)
+				packet <= packet_in;
+		end
 		else if (in_valid && in_ready)
 		begin
 			packet_valid <= 1'b1;
@@ -48,6 +57,8 @@ module pigen_buf #(
 		end
 		else if (out_valid && out_ready)
 			packet_valid <= 1'b0;
+		else if (force_valid || force_invalid)
+			packet_valid <= force_valid;
 	end
 
 endmodule
@@ -63,6 +74,9 @@ module pigen_fifo #(
 		input  logic		reset,
 		input  logic		clear,
 		input  logic		discard,
+		input  logic		force_valid,
+		input  logic		force_invalid,
+		input  logic		force_after_transfer,
 
 		input  logic		in_valid,
 		output logic		in_ready,
@@ -95,10 +109,12 @@ module pigen_fifo #(
 		if (reset)
 		begin
 			read_pointer <= '0;
-			write_pointer <= '0;
-			count <= '0;
+			write_pointer <= force_valid && !force_invalid && DEPTH > 1 ? POINTER_WIDTH'(1) : '0;
+			count <= force_valid && !force_invalid ? 1 : '0;
+			if (force_valid && in_valid)
+				packets[0] <= packet_in;
 		end
-		else if (clear)
+		else if (clear || (force_after_transfer && force_invalid))
 		begin
 			read_pointer <= '0;
 			write_pointer <= '0;
@@ -137,6 +153,10 @@ module pigen_fifo #(
 				2'b01: count <= count - 1'b1;
 				default: count <= count;
 			endcase
+			if (force_valid && count == 0)
+				count <= 1;
+			else if (force_invalid)
+				count <= '0;
 		end
 	end
 
@@ -150,6 +170,9 @@ module pigen_skid #(
 		input  logic		reset,
 		input  logic		clear,
 		input  logic		discard,
+		input  logic		force_valid,
+		input  logic		force_invalid,
+		input  logic		force_after_transfer,
 
 		input  logic		in_valid,
 		output logic		in_ready,
@@ -180,10 +203,12 @@ module pigen_skid #(
 		if (reset)
 		begin
 			read_pointer <= 1'b0;
-			write_pointer <= 1'b0;
-			count <= '0;
+			write_pointer <= force_valid && !force_invalid;
+			count <= force_valid && !force_invalid ? 1 : '0;
+			if (force_valid && in_valid)
+				packets[0] <= packet_in;
 		end
-		else if (clear || discard)
+		else if (clear || discard || (force_after_transfer && force_invalid))
 		begin
 			read_pointer <= 1'b0;
 			write_pointer <= 1'b0;
@@ -205,6 +230,10 @@ module pigen_skid #(
 				2'b01: count <= count - 1'b1;
 				default: count <= count;
 			endcase
+			if (force_valid && count == 0)
+				count <= 1;
+			else if (force_invalid)
+				count <= '0;
 		end
 	end
 
@@ -218,6 +247,9 @@ module pigen_port #(
 		input  logic		reset,
 		input  logic		clear,
 		input  logic		discard,
+		input  logic		force_valid,
+		input  logic		force_invalid,
+		input  logic		force_after_transfer,
 
 		input  logic		in_valid,
 		output logic		in_ready,
@@ -234,14 +266,21 @@ module pigen_port #(
 	begin
 		if (reset)
 		begin
-			out_valid <= 1'b0;
-			packet_out <= '0;
+			out_valid <= force_valid && !force_invalid;
+			packet_out <= force_valid && in_valid ? packet_in : '0;
 		end
 		else if (clear || discard)
 			out_valid <= 1'b0;
+		else if (force_after_transfer && (force_valid || force_invalid))
+			out_valid <= force_valid;
 		else
 		begin
-			out_valid <= in_valid;
+			if (in_valid)
+				out_valid <= 1'b1;
+			else if (force_valid || force_invalid)
+				out_valid <= force_valid;
+			else
+				out_valid <= 1'b0;
 
 			if (in_valid)
 				packet_out <= packet_in;

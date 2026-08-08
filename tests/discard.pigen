@@ -1,0 +1,13 @@
+module discard_example
+    (
+        input logic clk,
+        input logic reset,
+        input buf [7:0] source
+    );
+    buf [7:0] middle;
+    always_ff @(posedge clk)
+    begin
+        {middle, _} <= {source + 1'b1, source};
+        _ <= middle;
+    end
+endmodule

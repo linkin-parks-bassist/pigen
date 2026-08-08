@@ -1,0 +1,27 @@
+// One Pigen source may define ordinary modules, pipelines, and fabrics.
+
+pipeline scale_and_bias #(
+    parameter integer W = 16
+) begin
+    option skid_step = 0;
+
+    stage multiply {sample, scale, bias} yields {product, bias} begin
+        logic signed [W-1:0] sample;
+        logic signed [W-1:0] scale;
+        logic signed [W-1:0] bias;
+        logic signed [2*W-1:0] product = sample * scale;
+        skid;
+    endstage
+
+    stage add {product, bias} yields {logic signed [W-1:0] result} begin
+        result = product[W-1:0] + bias;
+    endstage
+endpipeline
+
+fabric sample_network #(
+    parameter integer PAYLOAD_W = 16
+) begin
+    calibration.tx.coefficient > filter.coefficient;
+    adc_left.tx.samples -> mixer.samples.left;
+    adc_right.tx.samples --> mixer.samples.right;
+endfabric

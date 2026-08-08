@@ -1,0 +1,32 @@
+module df1_biquad_bandpass (
+		input logic clk,
+		input logic reset,
+
+		input  buf  signed [23:0] data_in,
+		output port signed [23:0] data_out
+	);
+
+	localparam logic signed [23:0] c0 = 3;
+	localparam logic signed [23:0] c1 = 12;
+
+	buf signed [23:0] hold;
+	buf signed [23:0] x1;
+
+	buf signed [50:0] acc_1;
+	buf signed [50:0] acc_2;
+
+	always_ff @(posedge clk) begin
+		if (reset) begin
+			hold <= 0; validate(hold);
+		end else begin
+			{hold, acc_1} <= {data_in, data_in * c0};
+
+			x1 <= hold;
+
+			{_, acc_2} <= {x1, acc_1 + x1 * c1};
+
+			data_out <= acc_2;
+		end
+	end
+
+endmodule

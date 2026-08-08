@@ -1,0 +1,6 @@
+fabric bad_depth #(
+    parameter integer PAYLOAD_W = 8
+) begin
+    option router_buffer_depth = 1;
+    a.tx.b -> b.rx.a;
+endfabric

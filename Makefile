@@ -1,17 +1,35 @@
 CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 
-.PHONY: all clean test verify waveform compiler-waveform mac-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test block-test verify coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
-pigen: src/pigen.c src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
-	$(CC) $(CFLAGS) -o $@ src/pigen.c src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c
+pigen: src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
+	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c
 
-test: pigen
+test: pigen block-test
 	./tests/smoke.sh ./pigen
 
-verify: test waveform compiler-waveform mac-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
+block-test: pigen
+	./tests/blocks_smoke.sh ./pigen
+
+verify: test coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
+
+coslice-test: pigen
+	./pigen tests/coslice.pigen -o /tmp/pigen-coslice.sv
+	iverilog -g2012 -o /tmp/pigen-coslice-vvp rtl/pigen_primitives.sv /tmp/pigen-coslice.sv tests/coslice_tb.sv
+	vvp /tmp/pigen-coslice-vvp
+
+validate-test: pigen
+	./pigen tests/validate.pigen -o /tmp/pigen-validate.sv
+	iverilog -g2012 -o /tmp/pigen-validate-vvp rtl/pigen_primitives.sv /tmp/pigen-validate.sv tests/validate_tb.sv
+	vvp /tmp/pigen-validate-vvp
+
+signed-widen-test: pigen
+	./pigen tests/signed_widen.pigen -o /tmp/pigen-signed-widen.sv
+	iverilog -g2012 -o /tmp/pigen-signed-widen-vvp rtl/pigen_primitives.sv /tmp/pigen-signed-widen.sv tests/signed_widen_tb.sv
+	vvp /tmp/pigen-signed-widen-vvp
 
 clear-test:
 	verilator --binary --top-module fifo_discard_tb --Mdir /tmp/pigen-clear-verilator rtl/pigen_primitives.sv tests/fifo_discard_tb.sv
@@ -46,6 +64,24 @@ mac-waveform: pigen
 	verilator --binary --trace --top-module fixed_point_mac_tb --Mdir /tmp/pigen-mac-verilator rtl/pigen_primitives.sv examples/fixed_point_mac.sv examples/fixed_point_mac_tb.sv
 	/tmp/pigen-mac-verilator/Vfixed_point_mac_tb
 	verilator --lint-only -Wno-fatal --top-module fixed_point_mac_vanilla examples/fixed_point_mac_vanilla.sv
+
+biquad-waveform: pigen
+	truncate -s 0 examples/df1_biquad_bandpass.vcd
+	./pigen examples/df1_biquad_bandpass.pigen -o examples/df1_biquad_bandpass.sv
+	iverilog -g2012 -o /tmp/pigen-biquad-vvp rtl/pigen_primitives.sv examples/df1_biquad_bandpass.sv examples/df1_biquad_bandpass_tb.sv
+	vvp /tmp/pigen-biquad-vvp
+
+intended-biquad-waveform: pigen
+	truncate -s 0 examples/df1_biquad_bandpass.vcd
+	./pigen examples/intended_biquad.pigen -o examples/intended_biquad.sv
+	iverilog -g2012 -s df1_biquad_bandpass_tb -o /tmp/pigen-intended-biquad-vvp rtl/pigen_primitives.sv examples/intended_biquad.sv examples/df1_biquad_bandpass_tb.sv
+	vvp /tmp/pigen-intended-biquad-vvp
+
+text-waveform: pigen
+	truncate -s 0 examples/text.vcd
+	./pigen examples/text.pigen -o examples/text.sv
+	iverilog -g2012 -s text_tb -o /tmp/pigen-text-vvp rtl/pigen_primitives.sv examples/text.sv examples/text_tb.sv
+	vvp /tmp/pigen-text-vvp
 
 join-waveform: pigen
 	truncate -s 0 examples/join_pipeline.vcd

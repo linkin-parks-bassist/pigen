@@ -1,0 +1,90 @@
+// Elastic, fixed-point Direct Form I biquad.
+//
+// Samples and output are signed Q1.23.  The RBJ-style band-pass coefficients
+// below are signed Q4.20 (centre = Fs/16, Q = 4).  `acc` is Q5.43, so the
+// final stage shifts right by 20 and saturates back to Q1.23.
+//
+// The multiplier order is deliberate.  The a2 feedback product is made one
+// cycle before the final a1 product.  At the a2 stage y1 still holds that
+// token's y[n-2]; one cycle later at the a1 stage it holds y[n-1].
+// Consequently the elastic chain has an initiation interval
+// of one sample/clock (assuming the output is ready), despite being a DF1 IIR.
+module df1_biquad_bandpass
+	(
+		input logic clk,
+		input logic reset,
+		input buf signed [23:0] sample,
+		output buf signed [23:0] filtered
+	);
+
+	localparam logic signed [23:0] B0 = 24'sd191477;
+	localparam logic signed [23:0] B1 = 24'sd0;
+	localparam logic signed [23:0] B2 = -24'sd191477;
+	localparam logic signed [23:0] A1 = -24'sd1849065;
+	localparam logic signed [23:0] A2 = 24'sd952838;
+
+	// [123:72] accumulator, [71:48] x[n], [47:24] x[n-1], [23:0] x[n-2]
+	buf [123:0] b0_stage;
+	buf [123:0] b1_stage;
+	buf [123:0] b2_stage;
+	buf [123:0] feedback_align;
+	buf [123:0] feedback_delay;
+	buf [123:0] a2_stage;
+
+	// Elastic history lanes.  Reset seeds valid zero tokens so the feedback
+	// pipeline starts immediately rather than waiting for history to arrive.
+	// Two slots break the ready loop created by consume-and-replace state
+	// updates: the reset seed occupies one slot and the next token can enter.
+	fifo signed [23:0][2] x1;
+	fifo signed [23:0][2] x2;
+	fifo signed [23:0][2] y1;
+	// A plain SV wire mirrors y1 without consuming its buffer token.  The final
+	// co-sliced transfer below consumes and replaces y1 on every output sample.
+	wire signed [23:0] y1_view;
+	assign y1_view = y1;
+
+	function automatic logic signed [23:0] saturate_q1_23
+		(input logic signed [51:0] value);
+		logic signed [51:0] shifted;
+		begin
+			shifted = value >>> 20;
+			if (shifted > 52'sd8388607)
+				saturate_q1_23 = 24'sd8388607;
+			else if (shifted < -52'sd8388608)
+				saturate_q1_23 = -24'sd8388608;
+			else
+				saturate_q1_23 = shifted[23:0];
+		end
+	endfunction
+
+	always_ff @(posedge clk)
+	begin
+		if (reset)
+		begin
+			x1 <= '0; validate(x1);
+			x2 <= '0; validate(x2);
+			y1 <= '0; validate(y1);
+		end
+		else
+		begin
+			// Consume and replace both x-history tokens atomically while carrying
+			// their old values in the data packet.
+			{b0_stage, x1, x2} <= {{52'sd0, sample, x1, x2}, sample, x1};
+
+			// One coefficient multiply and one accumulator add per datapath stage.
+			b1_stage <= {$signed(b0_stage[123:72]) + ($signed(b0_stage[71:48]) * B0), b0_stage[71:0]};
+			b2_stage <= {$signed(b1_stage[123:72]) + ($signed(b1_stage[47:24]) * B1), b1_stage[71:0]};
+			feedback_align <= {$signed(b2_stage[123:72]) + ($signed(b2_stage[23:0]) * B2), b2_stage[71:0]};
+
+			// These delays put y[n-2] in y1 before its token gets here.
+			feedback_delay <= feedback_align;
+			a2_stage <= {$signed(feedback_delay[123:72]) - ($signed(y1_view) * A2), feedback_delay[71:0]};
+			// Coupled output/state update: a2_stage is consumed once and the same
+			// saturated y[n] is copied to the stream and the feedback register.
+			{filtered, y1} <=
+				{saturate_q1_23($signed(a2_stage[123:72]) - ($signed(y1) * A1)),
+				 saturate_q1_23($signed(a2_stage[123:72]) - ($signed(y1) * A1))};
+		end
+	end
+
+endmodule

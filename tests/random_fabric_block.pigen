@@ -1,0 +1,6 @@
+fabric random_fabric #(
+    parameter integer PAYLOAD_W = 8
+) begin
+    a.tx.sink -> sink.rx.a;
+    d.tx.sink -> sink.rx.d;
+endfabric

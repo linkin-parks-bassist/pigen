@@ -1,0 +1,5 @@
+fabric direct_only #(
+    parameter integer PAYLOAD_W = 8
+) begin
+    left.tx.right > right.rx;
+endfabric

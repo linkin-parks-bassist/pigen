@@ -1,0 +1,29 @@
+module validate_example
+    (
+        input logic clk,
+        input logic reset,
+        input logic seed,
+        input logic kill,
+        output buf [7:0] value,
+        output buf [7:0] later
+    );
+
+    always_ff @(posedge clk)
+    begin
+        if (reset)
+        begin
+            value <= '0;
+            validate(value);
+        end
+        else if (seed)
+        begin
+            value <= 8'h5a;
+            validate(value);
+            invalidate(later);
+            later <= 8'ha5;
+        end
+        if (kill)
+            invalidate(value);
+    end
+
+endmodule

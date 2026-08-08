@@ -1,0 +1,5 @@
+pipeline missing_declaration begin
+    stage first {value} yields {logic [7:0] result} begin
+        result = value;
+    endstage
+endpipeline

@@ -1,0 +1,98 @@
+// Elastic, fixed-point Direct Form I biquad.
+//
+// Samples and output are signed Q1.23.  The RBJ-style band-pass coefficients
+// below are signed Q4.20 (centre = Fs/16, Q = 4).  `acc` is Q5.43, so the
+// final stage shifts right by 20 and saturates back to Q1.23.
+//
+// The feed-forward products occupy one elastic stage each.  Two alignment
+// stages place the feedback token one cycle before its final a1 product: at
+// the a2 stage y1 is y[n-2], and at the output stage it is y[n-1].  This keeps
+// the recursive filter at one accepted sample per clock when the sink is ready.
+module df1_biquad_bandpass (
+		input logic clk,
+		input logic reset,
+
+		input  buf  signed [23:0] sample,
+		output buf  signed [23:0] filtered
+	);
+
+	localparam logic signed [23:0] B0 =  24'sd191477;
+	localparam logic signed [23:0] B1 =  24'sd0;
+	localparam logic signed [23:0] B2 = -24'sd191477;
+	localparam logic signed [23:0] A1 =  24'sd1849065;
+	localparam logic signed [23:0] A2 = -24'sd952838;
+
+	typedef struct packed {
+		logic signed [51:0] acc;
+		logic signed [23:0] x0;
+		logic signed [23:0] x1;
+		logic signed [23:0] x2;
+	} sample_state_t;
+
+	// A skid provides the spare slot needed to consume and replace x1 without
+	// a combinational ready loop.  The tail moves atomically as an ordinary reg.
+	skid signed [23:0] x1_history;
+	reg  signed [23:0] x2_history;
+	skid signed [23:0] y1_history;
+
+	buf sample_state_t b0_stage;
+	buf sample_state_t b1_stage;
+	buf sample_state_t b2_stage;
+	buf sample_state_t feedback_align;
+	buf sample_state_t feedback_delay;
+	buf sample_state_t a2_stage;
+
+	function automatic logic signed [23:0] saturate_q1_23
+		(input logic signed [51:0] value);
+		logic signed [51:0] shifted;
+		begin
+			shifted = value >>> 20;
+
+			if (shifted > 52'sd8388607)
+				saturate_q1_23 = 24'sd8388607;
+			else if (shifted < -52'sd8388608)
+				saturate_q1_23 = -24'sd8388608;
+			else
+				saturate_q1_23 = shifted[23:0];
+		end
+	endfunction
+
+	always_ff @(posedge clk) begin
+		if (reset) begin
+			x1_history <= '0; validate(x1_history);
+			x2_history <= '0;
+			y1_history <= '0; validate(y1_history);
+		end else begin
+			{b0_stage, x1_history, x2_history} <= {
+				{52'sd0, sample, x1_history, x2_history},
+				sample,
+				x1_history
+			};
+
+			b1_stage <= {
+				b0_stage.acc + b0_stage.x0 * B0,
+				b0_stage.x0, b0_stage.x1, b0_stage.x2
+			};
+			b2_stage <= {
+				b1_stage.acc + b1_stage.x1 * B1,
+				b1_stage.x0, b1_stage.x1, b1_stage.x2
+			};
+			feedback_align <= {
+				b2_stage.acc + b2_stage.x2 * B2,
+				b2_stage.x0, b2_stage.x1, b2_stage.x2
+			};
+
+			feedback_delay <= feedback_align;
+			a2_stage <= {
+				feedback_delay.acc + $signed(peek(y1_history)) * A2,
+				feedback_delay.x0, feedback_delay.x1, feedback_delay.x2
+			};
+
+			{filtered, y1_history} <= {
+				saturate_q1_23(a2_stage.acc + y1_history * A1),
+				saturate_q1_23(a2_stage.acc + y1_history * A1)
+			};
+		end
+	end
+
+endmodule

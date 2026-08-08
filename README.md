@@ -1,11 +1,14 @@
 # Pigen
 
-Pigen is a small, synthesizable extension of SystemVerilog for writing
-synchronous ready/valid datapaths as direct connections between named pieces
-of storage. Declare where values may wait, connect them with `<=`, and let
-Pigen elaborate the handshake, backpressure, atomic joins, and storage
-plumbing into ordinary readable SystemVerilog. It is designed to sit naturally
-inside an `always_ff` block while leaving the rest of your SV alone.
+Pigen is one C17 compiler for a synthesizable hardware language built on
+SystemVerilog. A `.pigen` source can freely mix ordinary SystemVerilog modules
+with Pigen's transport syntax and its native `pipeline` and `fabric` design
+units. One invocation parses the complete source and emits one readable,
+synthesizable SystemVerilog file.
+
+There is no separate pipeline compiler, fabric generator, dispatch layer, or
+secondary pipeline/fabric file format. Pipelines and fabrics are language
+features of the same compiler and the same `.pigen` source format.
 
 The complete language contract lives in [`SPEC.md`](SPEC.md). Pigen's emitted
 RTL uses the deliberately simple primitives in
@@ -26,11 +29,37 @@ make
 ./pigen example.pigen -o out.sv    # explicit destination
 ```
 
+A stage-oriented pipeline is written as `pipeline NAME ... endpipeline`; a
+blind source-routed interconnect is written as `fabric NAME ... endfabric`.
+Both lower into separately instantiable SystemVerilog modules in the same
+output file. See [the combined language example](examples/native_blocks.pigen)
+and the focused [pipeline](tests/pipeline_block.pigen) and
+[fabric](tests/fabric_block.pigen) regression sources.
+
 To run the compiler checks and all simulations:
 
 ```sh
 make verify
 ```
+
+## One language, three design units
+
+| Design unit | Purpose | What the compiler emits |
+| --- | --- | --- |
+| `module ... endmodule` | SystemVerilog plus Pigen transport declarations and actions | The module with explicit ready/valid plumbing and primitive instances |
+| `pipeline ... endpipeline` | A typed sequence of elastic transform stages | A public pipeline module and its private stage/skid modules |
+| `fabric ... endfabric` | Direct and blind source-routed endpoint connections | A public fabric module and, when needed, its private router/queue modules |
+
+All three may occur in any top-level order in one source. The words `pipeline`
+and `fabric` retain their ordinary identifier meaning inside SystemVerilog
+design units; only top-level blocks introduce the new constructs.
+
+Pipeline stages use packed tuples and a conventional `clk`, `reset`, `enable`
+ready/valid interface. Fabrics currently use one `PAYLOAD_W` for all links,
+fixed two-entry endpoint/router queues, and a deterministic balanced routed
+topology. Arrow dash counts are retained as tiers, and `objective` is accepted,
+but v0 does not yet optimize topology from those hints. These are compiler
+limitations, not alternate workflows or external generators.
 
 ## The model in one minute
 

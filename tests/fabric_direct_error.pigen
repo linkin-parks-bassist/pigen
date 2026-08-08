@@ -1,0 +1,6 @@
+fabric bad_direct #(
+    parameter integer PAYLOAD_W = 8
+) begin
+    a.tx.direct > sink.rx;
+    b.tx.routed -> sink.rx.b;
+endfabric

@@ -1,0 +1,20 @@
+module signed_transport
+    (
+        input logic clk,
+        input logic reset,
+        input  buf  signed [23:0] input_sample,
+        output buf  signed [23:0] output_sample
+    );
+
+    buf  signed [23:0] stage;
+    fifo signed [23:0][2] history;
+    skid signed [23:0] elastic;
+
+    always_ff @(posedge clk)
+    begin
+        stage <= input_sample;
+        history <= stage;
+        elastic <= history;
+        output_sample <= elastic;
+    end
+endmodule

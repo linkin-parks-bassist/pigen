@@ -102,6 +102,7 @@ void pigen_emit_transport_condition(pigen_string *output, pigen_primitive *primi
 
 static const char *fifo_payload_start(const char *start, const char *end, const char **depth, size_t *depth_length, const char **payload_end)
 {
+	const char *original_start;
 	const char *close;
 	const char *after_first;
 	const char *second_close;
@@ -111,6 +112,17 @@ static const char *fifo_payload_start(const char *start, const char *end, const 
 	const char *cursor;
 
 	start = pigen_skip_spaces(start, end);
+	original_start = start;
+	/* A packed payload may carry a SystemVerilog signedness modifier. */
+	if (((size_t)(end - start) >= 6 && !memcmp(start, "signed", 6) &&
+		(start + 6 == end || !pigen_is_identifier_char(start[6]))) ||
+		((size_t)(end - start) >= 8 && !memcmp(start, "unsigned", 8) &&
+		(start + 8 == end || !pigen_is_identifier_char(start[8]))))
+	{
+		start = pigen_skip_spaces(start + (start[0] == 's' ? 6 : 8), end);
+		if (start == end || *start != '[')
+			pigen_fail("signed fifo payload requires a packed range, such as `fifo signed [7:0][4] queue`");
+	}
 	/* A FIFO payload may be a packed range or a named SV type. */
 	if (start != end && *start != '[')
 	{
@@ -128,7 +140,7 @@ static const char *fifo_payload_start(const char *start, const char *end, const 
 		*depth_length = (size_t)(pigen_trim_end(*depth, second_close) - *depth);
 		if (!*depth_length) pigen_fail("fifo depth must not be empty");
 		*payload_end = type_end;
-		return start;
+		return original_start;
 	}
 	if (start == end)
 		pigen_fail("fifo requires payload then depth, such as `fifo[7:0][4] queue`");
@@ -178,7 +190,7 @@ static const char *fifo_payload_start(const char *start, const char *end, const 
 		pigen_fail("fifo depth must not be empty");
 
 	*payload_end = close + 1;
-	return start;
+	return original_start;
 }
 
 static const char *payload_start(const char *start, const char *end)
@@ -209,7 +221,13 @@ static void append_port_control_name(pigen_string *output, const char *name, siz
 
 static void append_payload_type(pigen_string *output, const char *start, const char *end)
 {
-	if (start < end && *start == '[')
+	const char *trimmed = pigen_skip_spaces(start, end);
+	if (trimmed < end && *trimmed == '[')
+		pigen_append(output, "logic ");
+	else if (((size_t)(end - trimmed) >= 6 && !memcmp(trimmed, "signed", 6) &&
+		(trimmed + 6 == end || !pigen_is_identifier_char(trimmed[6]))) ||
+		((size_t)(end - trimmed) >= 8 && !memcmp(trimmed, "unsigned", 8) &&
+		(trimmed + 8 == end || !pigen_is_identifier_char(trimmed[8]))))
 		pigen_append(output, "logic ");
 	pigen_append_range(output, start, (size_t)(end - start));
 }
@@ -219,6 +237,11 @@ static int is_unpacked_reg_array(char kind, const char *after_keyword, const cha
 	const char *cursor;
 	if (kind != 'r' && kind != 'l') return 0;
 	cursor = pigen_skip_spaces(after_keyword, end);
+	if (((size_t)(end - cursor) >= 6 && !memcmp(cursor, "signed", 6) &&
+		(cursor + 6 == end || !pigen_is_identifier_char(cursor[6]))) ||
+		((size_t)(end - cursor) >= 8 && !memcmp(cursor, "unsigned", 8) &&
+		(cursor + 8 == end || !pigen_is_identifier_char(cursor[8]))))
+		cursor = pigen_skip_spaces(cursor + (cursor[0] == 's' ? 6 : 8), end);
 	if (cursor < end && *cursor == '[')
 	{
 		for (cursor++; cursor < end && *cursor != ']'; cursor++) ;
@@ -295,14 +318,27 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 			pigen_append_control_name(output, name, name_length, "clear");
 			pigen_append(output, ";\n\tlogic ");
 			pigen_append_control_name(output, name, name_length, "discard");
+			pigen_append(output, ";\n\tlogic ");
+			pigen_append_control_name(output, name, name_length, "force_valid");
+			pigen_append(output, ";\n\tlogic ");
+			pigen_append_control_name(output, name, name_length, "force_invalid");
+			pigen_append(output, ";\n\tlogic ");
+			pigen_append_control_name(output, name, name_length, "force_after_transfer");
 			pigen_append(output, ";\n\tassign ");
 			pigen_append_control_name(output, name, name_length, "ready");
 			pigen_append(output, " = 1'b1;\n\n");
 			pigen_add_primitive(primitives, name, name_length, kind, 1);
+			pigen_set_port_metadata(primitives, name, name_length, after_keyword,
+				(size_t)(payload_end - after_keyword), NULL, 0, 0);
 			return;
 		}
 		descriptor = pigen_type_descriptor_for_kind(kind);
 		primitive_module = descriptor->primitive_module;
+		pigen_append(output, "\ttypedef ");
+		append_payload_type(output, after_keyword, payload_end);
+		pigen_append(output, " ");
+		pigen_append_control_name(output, name, name_length, "payload_t");
+		pigen_append(output, ";\n");
 		pigen_append(output, "\tlogic ");
 		pigen_append_control_name(output, name, name_length, "in_valid");
 		pigen_append(output, ";\n\tlogic ");
@@ -319,6 +355,12 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append_control_name(output, name, name_length, "clear");
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, name, name_length, "discard");
+		pigen_append(output, ";\n\tlogic ");
+		pigen_append_control_name(output, name, name_length, "force_valid");
+		pigen_append(output, ";\n\tlogic ");
+		pigen_append_control_name(output, name, name_length, "force_invalid");
+		pigen_append(output, ";\n\tlogic ");
+		pigen_append_control_name(output, name, name_length, "force_after_transfer");
 		pigen_append(output, ";\n\n\t");
 		pigen_append(output, primitive_module);
 		pigen_append(output, " #(\n\t\t.PAYLOAD_T(");
@@ -340,6 +382,12 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append_control_name(output, name, name_length, "clear");
 		pigen_append(output, "),\n\t\t.discard(");
 		pigen_append_control_name(output, name, name_length, "discard");
+		pigen_append(output, "),\n\t\t.force_valid(");
+		pigen_append_control_name(output, name, name_length, "force_valid");
+		pigen_append(output, "),\n\t\t.force_invalid(");
+		pigen_append_control_name(output, name, name_length, "force_invalid");
+		pigen_append(output, "),\n\t\t.force_after_transfer(");
+		pigen_append_control_name(output, name, name_length, "force_after_transfer");
 		pigen_append(output, "),\n\t\t.in_valid(");
 		pigen_append_control_name(output, name, name_length, "in_valid");
 		pigen_append(output, "),\n\t\t.in_ready(");
@@ -355,10 +403,15 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append(output, ")\n\t);\n\n");
 
 		pigen_add_primitive(primitives, name, name_length, kind, 1);
+		pigen_set_port_metadata(primitives, name, name_length, after_keyword,
+			(size_t)(payload_end - after_keyword), kind == 'f' ? fifo_depth : NULL,
+			kind == 'f' ? fifo_depth_length : 0, 0);
 		return;
 	}
 
 	pigen_add_primitive(primitives, name, name_length, kind, 1);
+	pigen_set_port_metadata(primitives, name, name_length, after_keyword,
+		(size_t)(payload_end - after_keyword), NULL, 0, 0);
 }
 
 static int is_port_direction(const char *start, const char *end, const char *direction)
@@ -516,6 +569,11 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 		descriptor = pigen_type_descriptor_for_kind(primitive->kind);
 		module_name = descriptor->primitive_module;
 
+		pigen_append(output, "\ttypedef ");
+		append_payload_type(output, primitive->payload_type, primitive->payload_type + strlen(primitive->payload_type));
+		pigen_append(output, " ");
+		pigen_append_control_name(output, primitive->name, name_length, "payload_t");
+		pigen_append(output, ";\n");
 		pigen_append(output, "\tlogic ");
 		pigen_append_control_name(output, primitive->name, name_length, "in_valid");
 		pigen_append(output, ";\n\tlogic ");
@@ -528,6 +586,12 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 		pigen_append_control_name(output, primitive->name, name_length, "clear");
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, primitive->name, name_length, "discard");
+		pigen_append(output, ";\n\tlogic ");
+		pigen_append_control_name(output, primitive->name, name_length, "force_valid");
+		pigen_append(output, ";\n\tlogic ");
+		pigen_append_control_name(output, primitive->name, name_length, "force_invalid");
+		pigen_append(output, ";\n\tlogic ");
+		pigen_append_control_name(output, primitive->name, name_length, "force_after_transfer");
 		pigen_append(output, ";\n\t");
 		append_payload_type(output, primitive->payload_type, primitive->payload_type + strlen(primitive->payload_type));
 		pigen_append(output, " ");
@@ -553,6 +617,12 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 		pigen_append_control_name(output, primitive->name, name_length, "clear");
 		pigen_append(output, "),\n\t\t.discard(");
 		pigen_append_control_name(output, primitive->name, name_length, "discard");
+		pigen_append(output, "),\n\t\t.force_valid(");
+		pigen_append_control_name(output, primitive->name, name_length, "force_valid");
+		pigen_append(output, "),\n\t\t.force_invalid(");
+		pigen_append_control_name(output, primitive->name, name_length, "force_invalid");
+		pigen_append(output, "),\n\t\t.force_after_transfer(");
+		pigen_append_control_name(output, primitive->name, name_length, "force_after_transfer");
 		pigen_append(output, "),\n\t\t.in_valid(");
 		pigen_append_control_name(output, primitive->name, name_length, "in_valid");
 		pigen_append(output, "),\n\t\t.in_ready(");

@@ -1,0 +1,20 @@
+module output_port_reset
+	(
+		input logic clk,
+		input logic reset,
+		input logic [7:0] next_value,
+		output port [7:0] value
+	);
+
+	always_ff @(posedge clk)
+	begin
+		if (reset)
+		begin
+			value <= '0;
+			validate(value);
+		end
+		else
+			value <= next_value;
+	end
+
+endmodule

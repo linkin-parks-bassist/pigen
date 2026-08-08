@@ -11,6 +11,7 @@
 
 #include "pigen/model.h"
 #include "pigen/assignments.h"
+#include "pigen/blocks.h"
 #include "pigen/declarations.h"
 #include "pigen/fsm.h"
 #include "pigen/lexer.h"
@@ -18,8 +19,6 @@
 #include "pigen/util.h"
 
 #define fail pigen_fail
-
-
 
 static char *read_file(const char *path, size_t *length)
 {
@@ -113,6 +112,7 @@ int main(int argc, char **argv)
 	size_t statement_start;
 	int previous_statement_was_generated = 0;
 	pigen_string output = {0};
+	pigen_string block_output = {0};
 	pigen_primitives primitives = {0};
 	pigen_assignments assignments = {0};
 	pigen_clears clears = {0};
@@ -138,6 +138,12 @@ int main(int argc, char **argv)
 
 	source = read_file(input_path, &source_length);
 	pigen_set_diagnostic_context(input_path, source);
+	{
+		char *lowered_source = pigen_lower_blocks(source, source_length, &block_output);
+		free(source);
+		source = lowered_source;
+		pigen_set_diagnostic_context(input_path, source);
+	}
 	{
 		char *lowered_source = pigen_lower_fsms(source, source_length, &source_length);
 		free(source);
@@ -173,12 +179,12 @@ int main(int argc, char **argv)
 			const char *prefix_end;
 			const char *destination;
 			const char *expression;
+			pigen_transfer transfer;
 			const char *guard;
 			size_t destination_length;
 			size_t expression_length;
 			size_t guard_length;
-			char destination_kind;
-			int clear_is_flush;
+			int clear_action_kind;
 			char kind = pigen_declaration_kind(head, pigen_trim_end(head, end), &keyword, &after_keyword);
 
 			if (kind)
@@ -224,7 +230,7 @@ int main(int argc, char **argv)
 				pigen_emit_port_adapters(&output, &primitives);
 				previous_statement_was_generated = 0;
 			}
-			else if (pigen_extract_clear_action(start, end, &primitives, &prefix_end, &destination, &destination_length, &clear_is_flush))
+			else if (pigen_extract_clear_action(start, end, &primitives, &prefix_end, &destination, &destination_length, &clear_action_kind))
 			{
 				if (!pigen_procedural_statement_for(&procedural_ast, prefix_end))
 					fail("transport clear actions are allowed only in always_ff blocks");
@@ -237,18 +243,21 @@ int main(int argc, char **argv)
 				pigen_append(&output, ";");
 				pigen_add_clear(&clears, destination, destination_length,
 					rewritten_guard.data ? rewritten_guard.data : "",
-					rewritten_guard.data ? strlen(rewritten_guard.data) : 0, domain, strlen(domain), clear_is_flush);
+					rewritten_guard.data ? strlen(rewritten_guard.data) : 0, domain, strlen(domain), clear_action_kind, (size_t)(prefix_end - source));
 				free(rewritten_guard.data);
 				previous_statement_was_generated = 0;
 			}
-			else if (pigen_extract_transport_assignment(start, end, &primitives, &prefix_end, &destination, &destination_length, &expression, &expression_length, &destination_kind))
+			else if (pigen_extract_transport_transfer(start, end, &primitives, &transfer))
 			{
+				size_t group = assignments.next_group++;
+				prefix_end = transfer.prefix_end;
 				if (!pigen_procedural_statement_for(&procedural_ast, prefix_end))
 					fail("transport assignments are allowed only in always_ff blocks");
 				const char *parsed_guard = pigen_procedural_guard_for(&procedural_ast, prefix_end);
 				const char *domain = pigen_procedural_domain_for(&procedural_ast, prefix_end);
 				pigen_string rewritten_guard = {0};
 				int has_guard;
+				int emitted_register_member = 0;
 
 				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard, parsed_guard + strlen(parsed_guard), &primitives);
 				guard = rewritten_guard.data ? rewritten_guard.data : "";
@@ -257,24 +266,29 @@ int main(int argc, char **argv)
 
 				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives);
 
-				if (destination_kind != 'r' && has_guard)
+				if (transfer.count == 1 && transfer.items[0].destination_kind != 'r' && transfer.items[0].destination_kind != 'l' && has_guard)
 					pigen_append(&output, ";");
 
-				if (destination_kind == 'r' || destination_kind == 'l')
+				for (size_t transfer_index = 0; transfer_index < transfer.count; transfer_index++)
 				{
-					char *expression_copy = pigen_copy_range(expression, expression_length);
-
-					pigen_append(&output, "if (");
-					pigen_emit_expression_validity(&output, expression_copy, &primitives);
-					pigen_append(&output, ")\n\t\tbegin\n\t\t\t");
-					pigen_append_range(&output, destination, destination_length);
-					pigen_append(&output, " <= ");
-					pigen_append_range(&output, expression, expression_length);
-					pigen_append(&output, ";\n\t\tend");
-					free(expression_copy);
+					pigen_transfer_item *item = &transfer.items[transfer_index];
+					if (item->destination_kind == 'r' || item->destination_kind == 'l')
+					{
+						if (emitted_register_member)
+							pigen_append(&output, "\n\t\t");
+						pigen_append(&output, "if (");
+						pigen_emit_transfer_accept_condition(&output, &transfer, guard, &primitives);
+						pigen_append(&output, ")\n\t\tbegin\n\t\t\t");
+						pigen_append_range(&output, item->destination, item->destination_length);
+						pigen_append(&output, " <= ");
+						pigen_emit_rewritten_expression(&output, item->expression, item->expression + item->expression_length, &primitives);
+						pigen_append(&output, ";\n\t\tend");
+						emitted_register_member = 1;
+					}
+					pigen_add_assignment_in_group(&assignments, item->destination, item->destination_length,
+						item->expression, item->expression_length, guard, guard_length, domain, strlen(domain), item->destination_kind, group, (size_t)(prefix_end - source));
 				}
-
-				pigen_add_assignment(&assignments, destination, destination_length, expression, expression_length, guard, guard_length, domain, strlen(domain), destination_kind);
+				pigen_free_transfer(&transfer);
 				free(rewritten_guard.data);
 				previous_statement_was_generated = 0;
 			}
@@ -301,7 +315,7 @@ int main(int argc, char **argv)
 				pigen_add_assignment(&assignments, destination, destination_length, expression, expression_length,
 					rewritten_guard.data ? rewritten_guard.data : "",
 					rewritten_guard.data ? strlen(rewritten_guard.data) : 0,
-					domain, strlen(domain), 'm');
+					domain, strlen(domain), 'm', (size_t)(prefix_end - source));
 				free(rewritten_guard.data);
 				previous_statement_was_generated = 0;
 			}
@@ -318,32 +332,31 @@ int main(int argc, char **argv)
 					for (conditional_index = 0; conditional_index < procedural_ast.conditional_transfer_count; conditional_index++)
 					{
 						pigen_conditional_transfer *transfer = &procedural_ast.conditional_transfers[conditional_index];
-						const char *condition_prefix;
-						const char *condition_destination;
-						const char *condition_expression;
-						size_t condition_destination_length;
-						size_t condition_expression_length;
-						char condition_destination_kind;
+						pigen_transfer conditional;
 						pigen_string rewritten_transfer_guard = {0};
-						if (!pigen_extract_transport_assignment(transfer->start, transfer->end, &primitives,
-							&condition_prefix, &condition_destination, &condition_destination_length,
-							&condition_expression, &condition_expression_length, &condition_destination_kind) ||
-							pigen_skip_spaces(transfer->start, transfer->end) != condition_prefix)
+						if (!pigen_extract_transport_transfer(transfer->start, transfer->end, &primitives, &conditional) ||
+							pigen_skip_spaces(transfer->start, transfer->end) != conditional.prefix_end)
 							fail("conditional transfer requires declared transport values");
 						pigen_emit_rewritten_expression(&rewritten_transfer_guard, transfer->guard,
 							transfer->guard + strlen(transfer->guard), &primitives);
-						pigen_add_assignment(&assignments, condition_destination, condition_destination_length,
-							condition_expression, condition_expression_length,
-							rewritten_transfer_guard.data ? rewritten_transfer_guard.data : "",
-							rewritten_transfer_guard.data ? strlen(rewritten_transfer_guard.data) : 0,
-							transfer->domain, strlen(transfer->domain), condition_destination_kind);
+						{
+							size_t group = assignments.next_group++;
+							for (size_t member = 0; member < conditional.count; member++)
+								pigen_add_assignment_in_group(&assignments, conditional.items[member].destination, conditional.items[member].destination_length,
+									conditional.items[member].expression, conditional.items[member].expression_length,
+									rewritten_transfer_guard.data ? rewritten_transfer_guard.data : "",
+									rewritten_transfer_guard.data ? strlen(rewritten_transfer_guard.data) : 0,
+									transfer->domain, strlen(transfer->domain),
+									conditional.items[member].destination_kind == 'r' ? 'R' : conditional.items[member].destination_kind == 'l' ? 'L' : conditional.items[member].destination_kind, group, (size_t)(transfer->start - source));
+						}
+						pigen_free_transfer(&conditional);
 						free(rewritten_transfer_guard.data);
 					}
 					pigen_append_range(&output, start, (size_t)(endmodule - start));
 					pigen_validate_assignments(&assignments, &primitives);
 					pigen_validate_clears(&clears, &assignments, &primitives);
 					pigen_emit_assignment_routes(&output, &assignments, &primitives);
-					pigen_emit_clear_routes(&output, &clears, &primitives);
+					pigen_emit_clear_routes(&output, &clears, &assignments, &primitives);
 					pigen_append_range(&output, endmodule, (size_t)(end - endmodule));
 				}
 				else
@@ -362,6 +375,7 @@ int main(int argc, char **argv)
 
 		cursor++;
 	}
+	pigen_append(&output, block_output.data ? block_output.data : "");
 
 	file = fopen(output_path, "wb");
 
@@ -381,5 +395,8 @@ int main(int argc, char **argv)
 	pigen_free_procedural_ast(&procedural_ast);
 	pigen_free_tokens(&tokens);
 	free(owned_output_path);
+	free(block_output.data);
+	free(source);
+	free(output.data);
 	return 0;
 }

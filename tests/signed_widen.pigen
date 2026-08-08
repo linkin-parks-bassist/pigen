@@ -1,0 +1,15 @@
+module signed_widen
+    (
+        input logic clk,
+        input logic reset,
+        input buf signed [23:0] lhs,
+        input buf signed [23:0] rhs,
+        output buf signed [49:0] product
+    );
+
+    always_ff @(posedge clk)
+    begin
+        product <= lhs * rhs;
+    end
+
+endmodule

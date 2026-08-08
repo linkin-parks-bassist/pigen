@@ -1,5 +1,6 @@
 /* Shared allocation, lexical, and transport-model utilities. */
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,6 +85,28 @@ void pigen_append_range(pigen_string *string, const char *src, size_t length)
 void pigen_append(pigen_string *string, const char *src)
 {
 	pigen_append_range(string, src, strlen(src));
+}
+
+void pigen_append_format(pigen_string *string, const char *format, ...)
+{
+	va_list arguments;
+	va_list copy;
+	int length;
+	char *buffer;
+
+	if (!format)
+		pigen_fail("cannot format generated output with a null format");
+	va_start(arguments, format);
+	va_copy(copy, arguments);
+	length = vsnprintf(NULL, 0, format, copy);
+	va_end(copy);
+	if (length < 0)
+		pigen_fail("cannot format generated output");
+	buffer = pigen_resize(NULL, (size_t)length + 1);
+	vsnprintf(buffer, (size_t)length + 1, format, arguments);
+	va_end(arguments);
+	pigen_append_range(string, buffer, (size_t)length);
+	free(buffer);
 }
 
 char *pigen_copy_range(const char *src, size_t length)
@@ -268,7 +291,7 @@ void pigen_set_port_metadata(pigen_primitives *primitives, const char *name, siz
 		primitive->fifo_depth = pigen_copy_range(fifo_depth, fifo_depth_length);
 }
 
-void pigen_add_assignment(pigen_assignments *assignments, const char *destination, size_t destination_length, const char *expression, size_t expression_length, const char *guard, size_t guard_length, const char *domain, size_t domain_length, char destination_kind)
+void pigen_add_assignment_in_group(pigen_assignments *assignments, const char *destination, size_t destination_length, const char *expression, size_t expression_length, const char *guard, size_t guard_length, const char *domain, size_t domain_length, char destination_kind, size_t group, size_t order)
 {
 	if (assignments->count == assignments->capacity)
 	{
@@ -283,11 +306,19 @@ void pigen_add_assignment(pigen_assignments *assignments, const char *destinatio
 	assignments->items[assignments->count].guard = pigen_copy_range(guard, guard_length);
 	assignments->items[assignments->count].domain = pigen_copy_range(domain, domain_length);
 	assignments->items[assignments->count].destination_kind = destination_kind;
+	assignments->items[assignments->count].group = group;
+	assignments->items[assignments->count].order = order;
 	assignments->count++;
 }
 
+void pigen_add_assignment(pigen_assignments *assignments, const char *destination, size_t destination_length, const char *expression, size_t expression_length, const char *guard, size_t guard_length, const char *domain, size_t domain_length, char destination_kind, size_t order)
+{
+	pigen_add_assignment_in_group(assignments, destination, destination_length, expression, expression_length,
+		guard, guard_length, domain, domain_length, destination_kind, assignments->next_group++, order);
+}
+
 void pigen_add_clear(pigen_clears *clears, const char *target, size_t target_length,
-			     const char *guard, size_t guard_length, const char *domain, size_t domain_length, int is_flush)
+			     const char *guard, size_t guard_length, const char *domain, size_t domain_length, int action_kind, size_t order)
 {
 	if (clears->count == clears->capacity)
 	{
@@ -298,6 +329,7 @@ void pigen_add_clear(pigen_clears *clears, const char *target, size_t target_len
 	clears->items[clears->count].target = pigen_copy_range(target, target_length);
 	clears->items[clears->count].guard = pigen_copy_range(guard, guard_length);
 	clears->items[clears->count].domain = pigen_copy_range(domain, domain_length);
-	clears->items[clears->count].is_flush = is_flush;
+	clears->items[clears->count].is_flush = action_kind;
+	clears->items[clears->count].order = order;
 	clears->count++;
 }

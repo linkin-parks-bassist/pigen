@@ -146,21 +146,19 @@ static void add_statement(pigen_procedural_ast *ast, const char *source, const c
 	ast->items[ast->count++] = (pigen_procedural_statement){ span_for(source, start, end), start, end, copy_range(guard ? guard : "", strlen(guard ? guard : "")), copy_range(domain ? domain : "", strlen(domain ? domain : "")) };
 }
 
-static int conditional_transfer_parts(const char *start, const char *end,
-				      const char **destination, const char **destination_end,
-				      const char **source, const char **source_end)
+static int conditional_transfer_parts(const char *start, const char *end)
 {
 	const char *cursor = skip_spaces(start, end);
-	*destination = cursor;
-	while (cursor < end && identifier_char((unsigned char)*cursor)) cursor++;
-	*destination_end = cursor;
-	cursor = skip_spaces(cursor, end);
-	if (*destination == *destination_end || cursor + 1 >= end || cursor[0] != '<' || cursor[1] != '=') return 0;
-	cursor = skip_spaces(cursor + 2, end);
-	*source = cursor;
-	while (cursor < end && identifier_char((unsigned char)*cursor)) cursor++;
-	*source_end = cursor;
-	return *source != *source_end && skip_spaces(cursor, end) == end;
+	int depth = 0;
+	for (; cursor + 1 < end; cursor++)
+	{
+		const char *opaque = skip_opaque(cursor, end);
+		if (opaque) { cursor = opaque - 1; continue; }
+		if (*cursor == '(' || *cursor == '[' || *cursor == '{') depth++;
+		else if (*cursor == ')' || *cursor == ']' || *cursor == '}') depth--;
+		else if (!depth && cursor[0] == '<' && cursor[1] == '=') return 1;
+	}
+	return 0;
 }
 
 static void add_conditional_transfer(pigen_procedural_ast *ast, const char *start, const char *end,
@@ -341,21 +339,8 @@ static const char *parse_statement(const char *source, const char *cursor, const
 		char *else_guard;
 		cursor = parse_parenthesized(skip_trivia(cursor + 2, end), end, &contents, &close);
 		condition = copy_range(skip_spaces(contents, close), (size_t)(trim_end(contents, close) - skip_spaces(contents, close)));
-		{
-			const char *destination, *destination_end, *source, *source_end;
-			if (conditional_transfer_parts(contents, close, &destination, &destination_end, &source, &source_end))
-			{
-				pigen_string accepts = {0};
-				add_conditional_transfer(ast, destination, source_end, guard, domain);
-				pigen_append(&accepts, "accepts(");
-				pigen_append_range(&accepts, destination, (size_t)(destination_end - destination));
-				pigen_append(&accepts, ", ");
-				pigen_append_range(&accepts, source, (size_t)(source_end - source));
-				pigen_append(&accepts, ")");
-				free(condition);
-				condition = accepts.data;
-			}
-		}
+		if (conditional_transfer_parts(contents, close))
+			add_conditional_transfer(ast, contents, close, guard, domain);
 		then_guard = combine_guards(guard, condition);
 		cursor = parse_statement(source, cursor, end, then_guard, domain, ast);
 		free(then_guard);

@@ -1,0 +1,21 @@
+module coslice
+	(
+		input logic clk,
+		input logic reset,
+		input buf [7:0] source,
+		output buf [7:0] left,
+		output buf [7:0] right,
+		output logic [7:0] history,
+		output logic [7:0] previous
+	);
+
+	reg [7:0] state;
+	reg [7:0] state_delay;
+
+	always_ff @(posedge clk)
+	begin
+		if ({left, right, state, state_delay} <= {source + 8'd1, source + 8'd2, peek(source), state})
+			previous <= state;
+		history <= state;
+	end
+endmodule
