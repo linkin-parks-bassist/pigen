@@ -161,8 +161,7 @@ read, linted, simulated, and synthesized with normal HDL tools.
 
 ## Build and try it
 
-Pigen requires a C17 compiler. The test suite also uses Icarus Verilog
-and Verilator.
+Build Pigen with `make`. The test suite also uses Icarus Verilog and Verilator.
 
 ```sh
 make

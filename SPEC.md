@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Pigen is a single C17 source-to-source compiler. Its input language extends
+Pigen is a source-to-source compiler. Its input language extends
 SystemVerilog with ready/valid transport values and native `pipeline` and
 `fabric` top-level design units. A compiler invocation consumes `.pigen`
 source and writes one readable, synthesizable SystemVerilog output, using the
