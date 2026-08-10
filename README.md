@@ -1,8 +1,9 @@
 # Pigen
 
-Pigen is an extension of SystemVerilog for describing synchronous hardware the
-way people tend to think about it: values move through stages, wait in queues,
-meet at joins, and travel between named endpoints.
+Pigen (short for **pi**peline **gen**erator) is an extension of SystemVerilog
+for describing synchronous hardware the way people tend to think about it:
+values move through stages, wait in queues, meet at joins, and travel between
+named endpoints.
 
 It is an ennicening of Verilog: a Pythonisation of the language without turning
 it into HLS. Clocks, widths, registers, backpressure, and cycle behavior remain
