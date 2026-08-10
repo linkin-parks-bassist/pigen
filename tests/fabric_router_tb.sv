@@ -12,7 +12,7 @@ module fabric_router_tb;
     logic [5:0] p2_in_packet = 0;
     logic p2_out_valid, p2_out_ready = 1;
     logic [5:0] p2_out_packet;
-    native_fabric__fabric_router #(.PAYLOAD_W(4), .PATH_W(2)) dut (.*);
+    routed_fabric__fabric_router #(.PAYLOAD_W(4), .PATH_W(2)) dut (.*);
     always #5 clk = ~clk;
     initial begin
         repeat (2) @(posedge clk); reset = 0;
@@ -25,7 +25,7 @@ module fabric_router_tb;
         @(posedge clk); #1;
         if (!p1_out_valid || p1_out_packet !== {2'b10, 4'hb})
             $fatal(1, "round-robin router result incorrect");
-        $display("PASS: native fabric router arbitration");
+        $display("PASS: fabric router arbitration");
         $finish;
     end
 endmodule

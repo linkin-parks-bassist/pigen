@@ -5,7 +5,7 @@ module fabric_skid_tb;
     logic out_valid, out_ready = 1;
     logic [7:0] packet_out;
     integer received = 0;
-    native_fabric__fabric_skid #(.PACKET_W(8)) dut (.*);
+    routed_fabric__fabric_skid #(.PACKET_W(8)) dut (.*);
     always #5 clk = ~clk;
     always @(posedge clk) begin
         if (!reset && out_valid && out_ready) begin
@@ -23,7 +23,7 @@ module fabric_skid_tb;
         end
         @(negedge clk); in_valid = 0;
         wait (received == 8);
-        $display("PASS: native fabric endpoint queue full throughput");
+        $display("PASS: fabric endpoint queue full throughput");
         $finish;
     end
 endmodule

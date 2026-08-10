@@ -95,11 +95,11 @@ verilator --lint-only -Wno-fatal --top-module fifo_named_type rtl/pigen_primitiv
 "$tool" tests/fifo_named_port.pigen -o "$tmp/fifo_named_port.sv"
 grep -q 'input  packet_t incoming' "$tmp/fifo_named_port.sv"
 verilator --lint-only -Wno-fatal --top-module fifo_named_port rtl/pigen_primitives.sv "$tmp/fifo_named_port.sv"
-if "$tool" tests/fifo_legacy_error.pigen -o "$tmp/fifo_legacy_error.sv" 2>"$tmp/fifo_legacy_error.log"; then
-    echo "expected legacy fifo spelling rejection" >&2
+if "$tool" tests/fifo_reversed_error.pigen -o "$tmp/fifo_reversed_error.sv" 2>"$tmp/fifo_reversed_error.log"; then
+    echo "expected reversed fifo spelling rejection" >&2
     exit 1
 fi
-grep -q 'payload before depth' "$tmp/fifo_legacy_error.log"
+grep -q 'payload before depth' "$tmp/fifo_reversed_error.log"
 "$tool" tests/output_buf.pigen -o "$tmp/output_buf.sv"
 grep -q 'out_packet__pigen_buffer' "$tmp/output_buf.sv"
 grep -q 'assign out_packet__pigen_in_valid = in_packet__pigen_valid;' "$tmp/output_buf.sv"

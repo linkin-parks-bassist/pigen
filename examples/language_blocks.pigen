@@ -1,5 +1,3 @@
-// One Pigen source may define ordinary modules, pipelines, and fabrics.
-
 pipeline scale_and_bias #(
     parameter integer W = 16
 ) begin

@@ -42,7 +42,7 @@ module random_fabric_block_tb;
             @(posedge clk);
             if (received == 32) begin
                 if (seen !== 32'hffff_ffff) $fatal(1, "missing payloads");
-                $display("PASS: randomized native fabric backpressure");
+                $display("PASS: randomized fabric backpressure");
                 $finish;
             end
         end

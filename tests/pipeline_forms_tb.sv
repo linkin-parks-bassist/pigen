@@ -13,7 +13,7 @@ module pipeline_forms_tb;
         wait (out_valid);
         if ($signed(packet_out) !== -9'sd7)
             $fatal(1, "expected signed pipeline result -7, got %0d", $signed(packet_out));
-        $display("PASS: native typed, signed, inherited pipeline tuples");
+        $display("PASS: typed, signed, inherited pipeline tuples");
         $finish;
     end
 endmodule

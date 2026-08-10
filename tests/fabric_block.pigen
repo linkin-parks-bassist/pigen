@@ -1,5 +1,4 @@
-// Fabrics are ordinary top-level Pigen language blocks.
-fabric native_fabric #(
+fabric routed_fabric #(
     parameter integer PAYLOAD_W = 8
 ) begin
     direct_src.tx.direct > direct_dst.rx;

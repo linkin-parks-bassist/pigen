@@ -1,5 +1,4 @@
-// Pipelines are ordinary top-level Pigen language blocks.
-pipeline native_mac #(
+pipeline pipeline_mac #(
     parameter integer W = 16
 ) begin
     stage multiply {m, x, b} yields {mx, b} begin

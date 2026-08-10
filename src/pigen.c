@@ -71,7 +71,7 @@ static void usage(void)
 
 /* An ordinary sequential storage write whose RHS is a transport value.  This
  * is the escape hatch for inferred memories: Pigen owns the source handshake,
- * while the user retains the native SystemVerilog array destination. */
+ * while the user retains the original SystemVerilog array destination. */
 static int extract_manual_transport_write(const char *start, const char *end, pigen_primitives *primitives,
 	const char **prefix_end, const char **destination, size_t *destination_length,
 	const char **source, size_t *source_length)

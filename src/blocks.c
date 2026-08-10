@@ -1,4 +1,4 @@
-/* Native lowering for top-level pipeline and fabric language blocks. */
+/* Lowering for top-level pipeline and fabric language blocks. */
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -978,7 +978,7 @@ static void route_connection(fabric_topology *topology, fabric_connection *conne
 		if (out_port == (in_port + 1) % 3) bit = 0;
 		else if (out_port == (in_port + 2) % 3) bit = 1;
 		else pigen_fail("fabric route attempted a U-turn");
-		if (connection->hops >= 64) pigen_fail("fabric route exceeds the native 64-bit path limit");
+		if (connection->hops >= 64) pigen_fail("fabric route exceeds the 64-bit path limit");
 		connection->path_word |= (unsigned long long)bit << connection->hops++;
 	}
 	free(previous); free(queue); free(path);
@@ -1184,7 +1184,7 @@ static void render_fabric_router(pigen_string *output, const fabric_block *fabri
 static void render_fabric(pigen_string *output, fabric_block *fabric)
 {
 	fabric_topology topology = build_fabric_topology(fabric);
-	pigen_append_format(output, "\n// Native Pigen fabric block `%s`.\n", fabric->name);
+	pigen_append_format(output, "\n// Pigen fabric block `%s`.\n", fabric->name);
 	pigen_append_format(output, "// route manifest: payload=PAYLOAD_W path_width=%d\n", topology.path_width);
 	for (size_t index = 0; index < fabric->connection_count; index++)
 	{
@@ -1482,7 +1482,7 @@ static void render_pipeline_top(pigen_string *output, const pipeline_block *pipe
 
 static void render_pipeline(pigen_string *output, const pipeline_block *pipeline)
 {
-	pigen_append(output, "\n// Native Pigen pipeline block.\n");
+	pigen_append(output, "\n// Pigen pipeline block.\n");
 	render_pipeline_skid(output, pipeline);
 	for (size_t index = 0; index < pipeline->stage_count; index++)
 		render_pipeline_stage(output, pipeline, &pipeline->stages[index]);

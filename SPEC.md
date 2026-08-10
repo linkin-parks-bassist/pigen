@@ -3,22 +3,18 @@
 ## Purpose
 
 Pigen is a source-to-source compiler. Its input language extends
-SystemVerilog with ready/valid transport values and native `pipeline` and
-`fabric` top-level design units. A compiler invocation consumes `.pigen`
-source and writes one readable, synthesizable SystemVerilog output, using the
+SystemVerilog with ready/valid transport values and `pipeline` and `fabric`
+top-level design units. A compiler invocation consumes `.pigen` source and
+writes readable, synthesizable SystemVerilog, using the
 explicit primitives in `rtl/pigen_primitives.sv` where required. It does not
 change SystemVerilog simulation timing.
-
-There are no secondary pipeline or fabric source formats and no separate
-frontend, dispatcher, or generator. Everything in this specification is part
-of the one Pigen language and compiler.
 
 ## Top-level design units
 
 A `.pigen` source may contain ordinary SystemVerilog design units,
 `pipeline` units, and `fabric` units together and in any top-level order.
 Pipelines and fabrics lower to separately instantiable modules in the same
-output; they are not textually inlined into an enclosing module.
+output.
 
 `pipeline` and `fabric` begin new constructs only at source top level. Inside
 ordinary `module`, `interface`, `package`, `program`, `class`, and `checker`
@@ -135,7 +131,7 @@ The compiler deterministically constructs a pruned balanced tree of blind
 three-port routers, computes rotating source routes, verifies forward and
 reverse reachability and delivered-signature uniqueness, and emits the routes
 as local parameters. A readable route manifest is a comment in the same
-generated SystemVerilog file; it is not a second output format.
+generated SystemVerilog file.
 
 Routers inspect only the low route bit, rotate the path at each hop, buffer two
 packets per ingress, and arbitrate competing inputs round robin. Every endpoint
@@ -147,7 +143,7 @@ In v0, `router_buffer_depth` and `endpoint_fifo_depth` default to two and only
 the value two is accepted. `objective` accepts a nonempty expression, and
 routed-arrow tiers are preserved, but both are currently topology hints only:
 the emitted topology remains the deterministic balanced tree. All links in a
-fabric use the single `PAYLOAD_W` payload width.
+fabric share its `PAYLOAD_W` payload width.
 
 ## Transport declarations
 
@@ -168,7 +164,7 @@ Packed-range payloads may use the usual `signed` or `unsigned` modifier, as in
 is preserved in generated payload declarations and primitive type parameters.
 
 `fifo` always spells payload before depth: its final bracket group is the
-depth expression.  The reversed legacy order is invalid.  ANSI transport ports
+depth expression. The reversed order is invalid. ANSI transport ports
 use the same spelling, for example `input buf[7:0] in_packet` and
 `output fifo[15:0][4] out_queue`; they expand to payload, `_valid`, and
 `_ready` ports.
@@ -242,7 +238,7 @@ always_ff @(posedge clk)
     mem[write_address] <= data_in;
 ```
 
-Pigen preserves the native memory assignment but executes it only when
+Pigen preserves the original memory assignment but executes it only when
 `data_in` is valid, and drives `data_in_ready` when that write can accept it.
 This is intended for inferred memories and other manually declared sequential
 storage.

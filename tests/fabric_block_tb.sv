@@ -11,7 +11,7 @@ module fabric_block_tb;
     logic sink__rx__valid, sink__rx__ready = 1;
     logic [7:0] sink__rx__payload;
     logic [1:0] sink__rx__path;
-    native_fabric dut (.*);
+    routed_fabric dut (.*);
     always #5 clk = ~clk;
 
     task automatic send_direct(input logic [7:0] value);
@@ -47,7 +47,7 @@ module fabric_block_tb;
         send_d(8'hd4); wait (sink__rx__valid);
         if (sink__rx__payload !== 8'hd4 || sink__rx__path !== dut.sink__rx__SOURCE__d)
             $fatal(1, "second routed fabric delivery failed");
-        $display("PASS: native fabric language block");
+        $display("PASS: fabric language block");
         $finish;
     end
 endmodule

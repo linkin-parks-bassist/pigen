@@ -11,7 +11,7 @@ precise language contract.
 ## Start here
 
 Build the elaborator, turn a `.pigen` source file into SystemVerilog, then run
-the full regression suite:
+the full test suite:
 
 ```sh
 make
@@ -23,9 +23,8 @@ The generated module is ordinary synthesizable SV. Compile it with
 [`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv), which contains the small
 storage primitives Pigen instantiates.
 
-The same file can also declare stage-oriented `pipeline` units and routed
-`fabric` units. They are language constructs handled by this executable, with
-no secondary source formats or frontend scripts.
+A `.pigen` file can also declare stage-oriented `pipeline` units and routed
+`fabric` units.
 
 ## The central idea
 
@@ -92,8 +91,7 @@ The direct `>` connection is exclusive and receives its own two-entry endpoint
 queue. Routed arrows use a generated tree of buffered three-port routers. The
 compiler emits route constants and recognized-source constants into the fabric
 module, while the boundary remains ordinary flattened ready/valid
-SystemVerilog. Pipelines, fabrics, and ordinary modules can all be present in
-one source and are emitted together.
+SystemVerilog.
 
 ## Your first pipeline
 
@@ -261,7 +259,7 @@ and invalidate do not cross that boundary.
 
 Today, module instantiation itself remains standard SystemVerilog. Connect
 the generated public payload/valid/ready ports with explicit SV signals; do
-not rely on private `__pigen_*` implementation names. A concise Pigen-native
+not rely on private `__pigen_*` implementation names. A concise Pigen
 instance/fabric hookup syntax is intentionally not defined yet, so designs do
 not get locked into a premature composition model.
 
@@ -342,7 +340,7 @@ its enclosing guard; it does not implicitly wait for a transfer, so use
    are useful concrete references for buffer, FIFO, skid, port, guarded,
    join, output, BRAM, and FSM behavior.
 
-## Fixed-point and native state: two current edges
+## Fixed-point and ordinary state: two current edges
 
 Pigen transports accept packed SystemVerilog signedness modifiers.  Write
 `buf signed [23:0] sample` (or `fifo signed [23:0][4] samples`) when the

@@ -2,12 +2,12 @@
 set -eu
 
 pigen=${1:-./pigen}
-temporary=${TMPDIR:-/tmp}/pigen-native-blocks-$$
+temporary=${TMPDIR:-/tmp}/pigen-blocks-$$
 mkdir -p "$temporary"
 trap 'find "$temporary" -type f -delete; rmdir "$temporary"' EXIT HUP INT TERM
 
 "$pigen" tests/pipeline_block.pigen -o "$temporary/pipeline.sv"
-grep -q 'module native_mac__stage_multiply' "$temporary/pipeline.sv"
+grep -q 'module pipeline_mac__stage_multiply' "$temporary/pipeline.sv"
 grep -q 'u_skid_1' "$temporary/pipeline.sv"
 iverilog -g2012 -s pipeline_block_tb -o "$temporary/pipeline" "$temporary/pipeline.sv" tests/pipeline_block_tb.sv
 vvp "$temporary/pipeline"
@@ -24,7 +24,7 @@ iverilog -g2012 -s pipeline_forms_tb -o "$temporary/pipeline-forms" "$temporary/
 vvp "$temporary/pipeline-forms"
 
 "$pigen" tests/fabric_block.pigen -o "$temporary/fabric.sv"
-grep -q 'module native_fabric__fabric_router' "$temporary/fabric.sv"
+grep -q 'module routed_fabric__fabric_router' "$temporary/fabric.sv"
 grep -q 'ROUTE__source_a__tx__to_sink' "$temporary/fabric.sv"
 grep -q 'route manifest: payload=PAYLOAD_W path_width=2' "$temporary/fabric.sv"
 iverilog -g2012 -s fabric_block_tb -o "$temporary/fabric" "$temporary/fabric.sv" tests/fabric_block_tb.sv
@@ -58,13 +58,13 @@ grep -q 'ui__telemetry__SOURCE__analyser = 64' "$temporary/mixer.sv"
 iverilog -g2012 -s mixer_network -o "$temporary/mixer" "$temporary/mixer.sv"
 
 "$pigen" tests/mixed_blocks.pigen -o "$temporary/mixed.sv"
-grep -q 'module native_marker' "$temporary/mixed.sv"
+grep -q 'module ordinary_marker' "$temporary/mixed.sv"
 grep -q 'module embedded_pipeline' "$temporary/mixed.sv"
 grep -q 'module embedded_fabric' "$temporary/mixed.sv"
 iverilog -g2012 -o "$temporary/mixed" "$temporary/mixed.sv"
 
-"$pigen" examples/native_blocks.pigen -o "$temporary/native-blocks-example.sv"
-iverilog -g2012 -o "$temporary/native-blocks-example" "$temporary/native-blocks-example.sv"
+"$pigen" examples/language_blocks.pigen -o "$temporary/language-blocks-example.sv"
+iverilog -g2012 -o "$temporary/language-blocks-example" "$temporary/language-blocks-example.sv"
 
 if "$pigen" tests/pipeline_width_error.pigen -o "$temporary/bad-pipeline.sv" 2>"$temporary/bad-pipeline.err"; then
     echo 'pipeline width mismatch unexpectedly compiled' >&2

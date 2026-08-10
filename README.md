@@ -17,8 +17,8 @@ transport values, elastic pipelines, fabrics, and state machines.
 
 Pigen is pre-release and currently follows a clean-break development policy.
 Syntax, generated names, interfaces, and emitted RTL may change incompatibly.
-Changes replace the old behavior outright: there are no compatibility aliases,
-deprecated spellings, migration shims, or legacy code paths to preserve.
+Changes replace the old behavior outright; only the current language and
+compiler behavior are supported.
 
 ## A small example
 
@@ -172,7 +172,7 @@ make verify
 
 Good starting points are:
 
-- [`examples/native_blocks.pigen`](examples/native_blocks.pigen) for pipelines
+- [`examples/language_blocks.pigen`](examples/language_blocks.pigen) for pipelines
   and fabrics in one source
 - [`examples/fixed_point_mac.pigen`](examples/fixed_point_mac.pigen) for an
   elastic fixed-point datapath

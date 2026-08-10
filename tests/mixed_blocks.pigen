@@ -1,4 +1,4 @@
-module native_marker(input bit a, output bit y);
+module ordinary_marker(input bit a, output bit y);
     bit pipeline;
     bit fabric;
     assign pipeline = a;

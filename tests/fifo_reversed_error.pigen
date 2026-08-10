@@ -1,0 +1,3 @@
+module fifo_reversed_error(input logic clk, input logic reset);
+    fifo[4] [7:0] queue;
+endmodule

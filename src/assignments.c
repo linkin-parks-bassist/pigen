@@ -156,47 +156,6 @@ void pigen_free_transfer(pigen_transfer *transfer)
 	memset(transfer, 0, sizeof(*transfer));
 }
 
-/* Legacy single-transfer callers were replaced by pigen_transfer. */
-#if 0
-int pigen_extract_transport_assignment(const char *start, const char *end, pigen_primitives *primitives, const char **prefix_end, const char **destination, size_t *destination_length, const char **expression, size_t *expression_length, char *destination_kind)
-{
-
-	for (cursor = start; cursor + 1 < end; cursor++)
-	{
-		if (cursor[0] == '<' && cursor[1] == '=')
-			operator = cursor;
-	}
-
-	if (!operator)
-		return 0;
-
-	left_end = pigen_trim_end(start, operator);
-	left_start = left_end;
-
-	while (left_start > start && pigen_is_identifier_char((unsigned char)left_start[-1]))
-		left_start--;
-
-	primitive = pigen_find_primitive(primitives, left_start, (size_t)(left_end - left_start));
-
-	if (!primitive)
-		return 0;
-
-	if (primitive->kind == 'w')
-		pigen_fail("cannot assign to wire transport value");
-
-	if (primitive->kind != 'r' && primitive->kind != 'l' && (!pigen_is_storage_kind(primitive->kind) || !primitive->is_internal))
-		pigen_fail("draft 0 assignment lowering currently requires an internal storage or reg destination");
-
-	*prefix_end = left_start;
-	*destination = left_start;
-	*destination_length = (size_t)(left_end - left_start);
-	*expression = pigen_skip_spaces(operator + 2, end);
-	*expression_length = (size_t)(pigen_trim_end(*expression, end) - *expression);
-	*destination_kind = primitive->kind;
-	return 1;
-}
-#endif
-
 int pigen_extract_clear_action(const char *start, const char *end, pigen_primitives *primitives,
 			       const char **prefix_end, const char **target, size_t *target_length, int *action_kind)
 {
