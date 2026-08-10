@@ -8,7 +8,7 @@ module skid_pipeline_tb;
 
 	skid_pipeline dut (.*);
 
-	assign dut.queue__pigen_ready = out_ready;
+	assign dut.queue__pigen_out_ready = out_ready;
 
 	always #5 clk = ~clk;
 

@@ -694,7 +694,7 @@ void pigen_emit_assignment_routes(pigen_string *output, pigen_assignments *assig
 			if (!mentioned) continue;
 			for (size_t k = 0; k < j; k++) if (assignments->items[k].group == assignment->group) { mentioned = 0; break; }
 			if (!mentioned) continue;
-			if (!emitted) { pigen_append(output, "\tassign "); pigen_append_control_name(output, primitive->name, strlen(primitive->name), "ready"); pigen_append(output, " = "); }
+			if (!emitted) { pigen_append(output, "\tassign "); pigen_append_control_name(output, primitive->name, strlen(primitive->name), "out_ready"); pigen_append(output, " = "); }
 			else pigen_append(output, " || ");
 			if (assignment->guard[0]) { pigen_append(output, "("); pigen_append(output, assignment->guard); pigen_append(output, ") && "); }
 			if (group_size(assignments, assignment->group) > 1)

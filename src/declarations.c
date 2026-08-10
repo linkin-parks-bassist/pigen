@@ -97,7 +97,8 @@ void pigen_emit_transport_condition(pigen_string *output, pigen_primitive *primi
 			pigen_append(output, "1'b0");
 	}
 	else
-		pigen_append_control_name(output, primitive->name, strlen(primitive->name), suffix);
+		pigen_append_control_name(output, primitive->name, strlen(primitive->name),
+			!strcmp(suffix, "ready") ? "out_ready" : suffix);
 }
 
 static const char *fifo_payload_start(const char *start, const char *end, const char **depth, size_t *depth_length, const char **payload_end)
@@ -313,7 +314,7 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 			pigen_append(output, "\tlogic ");
 			pigen_append_control_name(output, name, name_length, "valid");
 			pigen_append(output, ";\n\tlogic ");
-			pigen_append_control_name(output, name, name_length, "ready");
+			pigen_append_control_name(output, name, name_length, "out_ready");
 			pigen_append(output, ";\n\tlogic ");
 			pigen_append_control_name(output, name, name_length, "clear");
 			pigen_append(output, ";\n\tlogic ");
@@ -325,7 +326,7 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 			pigen_append(output, ";\n\tlogic ");
 			pigen_append_control_name(output, name, name_length, "force_after_transfer");
 			pigen_append(output, ";\n\tassign ");
-			pigen_append_control_name(output, name, name_length, "ready");
+			pigen_append_control_name(output, name, name_length, "out_ready");
 			pigen_append(output, " = 1'b1;\n\n");
 			pigen_add_primitive(primitives, name, name_length, kind, 1);
 			pigen_set_port_metadata(primitives, name, name_length, after_keyword,
@@ -350,7 +351,7 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, name, name_length, "valid");
 		pigen_append(output, ";\n\tlogic ");
-		pigen_append_control_name(output, name, name_length, "ready");
+		pigen_append_control_name(output, name, name_length, "out_ready");
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, name, name_length, "clear");
 		pigen_append(output, ";\n\tlogic ");
@@ -397,7 +398,7 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append(output, "),\n\t\t.out_valid(");
 		pigen_append_control_name(output, name, name_length, "valid");
 		pigen_append(output, "),\n\t\t.out_ready(");
-		pigen_append_control_name(output, name, name_length, "ready");
+		pigen_append_control_name(output, name, name_length, "out_ready");
 		pigen_append(output, "),\n\t\t.packet_out(");
 		pigen_append_range(output, name, name_length);
 		pigen_append(output, ")\n\t);\n\n");
@@ -553,7 +554,7 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 			pigen_append(output, "\tlogic ");
 			pigen_append_control_name(output, primitive->name, name_length, "valid");
 			pigen_append(output, ";\n\tlogic ");
-			pigen_append_control_name(output, primitive->name, name_length, "ready");
+			pigen_append_control_name(output, primitive->name, name_length, "out_ready");
 			pigen_append(output, ";\n\n\tassign ");
 			pigen_append_control_name(output, primitive->name, name_length, "valid");
 			pigen_append(output, " = ");
@@ -561,7 +562,7 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 			pigen_append(output, ";\n\tassign ");
 			append_port_control_name(output, primitive->name, name_length, "ready");
 			pigen_append(output, " = ");
-			pigen_append_control_name(output, primitive->name, name_length, "ready");
+			pigen_append_control_name(output, primitive->name, name_length, "out_ready");
 			pigen_append(output, ";\n\n");
 			continue;
 		}
@@ -581,7 +582,7 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, primitive->name, name_length, "valid");
 		pigen_append(output, ";\n\tlogic ");
-		pigen_append_control_name(output, primitive->name, name_length, "ready");
+		pigen_append_control_name(output, primitive->name, name_length, "out_ready");
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, primitive->name, name_length, "clear");
 		pigen_append(output, ";\n\tlogic ");
@@ -632,7 +633,7 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 		pigen_append(output, "),\n\t\t.out_valid(");
 		pigen_append_control_name(output, primitive->name, name_length, "valid");
 		pigen_append(output, "),\n\t\t.out_ready(");
-		pigen_append_control_name(output, primitive->name, name_length, "ready");
+		pigen_append_control_name(output, primitive->name, name_length, "out_ready");
 		pigen_append(output, "),\n\t\t.packet_out(");
 		pigen_append(output, primitive->name);
 		pigen_append(output, ")\n\t);\n\n");
@@ -641,7 +642,7 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 		pigen_append(output, " = ");
 		pigen_append_control_name(output, primitive->name, name_length, "valid");
 		pigen_append(output, ";\n\tassign ");
-		pigen_append_control_name(output, primitive->name, name_length, "ready");
+		pigen_append_control_name(output, primitive->name, name_length, "out_ready");
 		pigen_append(output, " = ");
 		append_port_control_name(output, primitive->name, name_length, "ready");
 		pigen_append(output, ";\n\n");

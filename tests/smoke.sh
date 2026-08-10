@@ -7,6 +7,11 @@ trap 'rm -rf "$tmp"' EXIT
 grep -Eq 'logic[[:space:]]+\[7:0\] combinatorial;' "$tmp/out.sv"
 grep -q 'pigen_buf #(' "$tmp/out.sv"
 grep -q '.in_ready(stage__pigen_in_ready)' "$tmp/out.sv"
+grep -q '.out_ready(stage__pigen_out_ready)' "$tmp/out.sv"
+if grep -q '__pigen_ready' "$tmp/out.sv"; then
+	echo "generated transport readiness must use in_ready/out_ready symmetrically" >&2
+	exit 1
+fi
 "$tool" tests/no_reset.pigen -o "$tmp/no_reset.sv"
 grep -q '.reset(1'"'"'b0)' "$tmp/no_reset.sv"
 verilator --lint-only -Wno-fatal --top-module no_reset rtl/pigen_primitives.sv "$tmp/no_reset.sv"
@@ -26,20 +31,20 @@ grep -q '.DEPTH(4)' "$tmp/fifo.sv"
 grep -q 'assign queue__pigen_in_valid = 1'"'"'b1;' "$tmp/fifo.sv"
 "$tool" tests/accessors.pigen -o "$tmp/accessors.sv"
 grep -q 'observed_valid = item__pigen_valid;' "$tmp/accessors.sv"
-grep -q 'observed_ready = item__pigen_ready;' "$tmp/accessors.sv"
+grep -q 'observed_ready = item__pigen_out_ready;' "$tmp/accessors.sv"
 "$tool" tests/reg_assignment.pigen -o "$tmp/reg_assignment.sv"
 grep -q 'if (source__pigen_valid)' "$tmp/reg_assignment.sv"
 "$tool" tests/skid_port.pigen -o "$tmp/skid_port.sv"
 grep -q 'pigen_skid #(' "$tmp/skid_port.sv"
-grep -q 'assign pulse__pigen_ready = 1'"'"'b1;' "$tmp/skid_port.sv"
-grep -q 'assign skid_queue__pigen_ready = 1'"'"'b1;' "$tmp/skid_port.sv"
+grep -q 'assign pulse__pigen_out_ready = 1'"'"'b1;' "$tmp/skid_port.sv"
+grep -q 'assign skid_queue__pigen_out_ready = 1'"'"'b1;' "$tmp/skid_port.sv"
 "$tool" tests/signed_transport.pigen -o "$tmp/signed_transport.sv"
 grep -q 'input  logic signed \[23:0\] input_sample' "$tmp/signed_transport.sv"
 grep -q 'output logic signed \[23:0\] output_sample' "$tmp/signed_transport.sv"
 grep -q '.PAYLOAD_T(logic signed \[23:0\])' "$tmp/signed_transport.sv"
 verilator --lint-only -Wno-fatal --top-module signed_transport rtl/pigen_primitives.sv "$tmp/signed_transport.sv"
 "$tool" tests/discard.pigen -o "$tmp/discard.sv"
-grep -q 'assign source__pigen_ready =' "$tmp/discard.sv"
+grep -q 'assign source__pigen_out_ready =' "$tmp/discard.sv"
 verilator --lint-only -Wno-fatal --top-module discard_example rtl/pigen_primitives.sv "$tmp/discard.sv"
 "$tool" tests/guarded_assignment.pigen -o "$tmp/guarded_assignment.sv"
 grep -q 'assign stage__pigen_in_valid = ((enable)) && 1'"'"'b1;' "$tmp/guarded_assignment.sv"
@@ -60,7 +65,7 @@ grep -q 'assign first_stage__pigen_in_valid = ((first_select)) && 1'"'"'b1;' "$t
 grep -q 'assign second_stage__pigen_in_valid = (((!(first_select))) && (second_select)) && 1'"'"'b1;' "$tmp/else_if_guard.sv"
 verilator --lint-only -Wno-fatal --top-module else_if_guard rtl/pigen_primitives.sv "$tmp/else_if_guard.sv"
 "$tool" tests/repeated_operand.pigen -o "$tmp/repeated_operand.sv"
-test "$(grep -c 'assign source__pigen_ready =' "$tmp/repeated_operand.sv")" = 1
+test "$(grep -c 'assign source__pigen_out_ready =' "$tmp/repeated_operand.sv")" = 1
 test "$(grep -c 'source__pigen_valid' "$tmp/repeated_operand.sv")" -ge 2
 verilator --lint-only -Wno-fatal --top-module repeated_operand rtl/pigen_primitives.sv "$tmp/repeated_operand.sv"
 "$tool" tests/accessor_guard.pigen -o "$tmp/accessor_guard.sv"
@@ -74,7 +79,7 @@ verilator --lint-only -Wno-fatal --top-module lexical rtl/pigen_primitives.sv "$
 "$tool" tests/degenerate_ports.pigen -o "$tmp/degenerate_ports.sv"
 grep -q 'assign source_ready = 1'"'"'b0;' "$tmp/degenerate_ports.sv"
 grep -q 'assign state_valid = 1'"'"'b1;' "$tmp/degenerate_ports.sv"
-if grep -q '__pigen_\(valid\|ready\)' "$tmp/degenerate_ports.sv"; then
+if grep -q '__pigen_\(valid\|in_ready\|out_ready\)' "$tmp/degenerate_ports.sv"; then
     echo "degenerate ports must not emit private control nets" >&2
     exit 1
 fi
@@ -105,10 +110,10 @@ verilator --lint-only -Wno-fatal --top-module output_port_reset rtl/pigen_primit
 grep -q 'out_packet__pigen_buffer' "$tmp/output_fifo.sv"
 grep -q '.DEPTH(4)' "$tmp/output_fifo.sv"
 "$tool" tests/accepts.pigen -o "$tmp/accepts.sv"
-grep -q 'destination__pigen_in_valid = ((destination__pigen_ready && source__pigen_valid)) && source__pigen_valid;' "$tmp/accepts.sv"
+grep -q 'destination__pigen_in_valid = ((destination__pigen_out_ready && source__pigen_valid)) && source__pigen_valid;' "$tmp/accepts.sv"
 verilator --lint-only -Wno-fatal --top-module accepts_example rtl/pigen_primitives.sv "$tmp/accepts.sv"
 "$tool" tests/conditional_transfer.pigen -o "$tmp/conditional_transfer.sv"
-grep -q 'if (destination__pigen_ready && source__pigen_valid)' "$tmp/conditional_transfer.sv"
+grep -q 'if (destination__pigen_out_ready && source__pigen_valid)' "$tmp/conditional_transfer.sv"
 grep -q 'assign destination__pigen_in_valid = source__pigen_valid;' "$tmp/conditional_transfer.sv"
 verilator --lint-only -Wno-fatal --top-module conditional_transfer rtl/pigen_primitives.sv "$tmp/conditional_transfer.sv"
 "$tool" tests/coslice.pigen -o "$tmp/coslice.sv"
@@ -135,7 +140,7 @@ grep -q 'assign stage__pigen_force_invalid = ((discard)) ? 1'"'"'b1 : 1'"'"'b0;'
 grep -q 'assign queue__pigen_clear = ((!(discard)));' "$tmp/clear_actions.sv"
 verilator --lint-only -Wno-fatal --top-module clear_actions rtl/pigen_primitives.sv "$tmp/clear_actions.sv"
 "$tool" tests/exclusive_routes.pigen -o "$tmp/exclusive_routes.sv"
-test "$(grep -c 'assign source__pigen_ready =' "$tmp/exclusive_routes.sv")" = 1
+test "$(grep -c 'assign source__pigen_out_ready =' "$tmp/exclusive_routes.sv")" = 1
 test "$(grep -c 'assign merged__pigen_in_valid =' "$tmp/exclusive_routes.sv")" = 1
 verilator --lint-only -Wno-fatal --top-module exclusive_routes rtl/pigen_primitives.sv "$tmp/exclusive_routes.sv"
 "$tool" tests/exclusive_clear.pigen -o "$tmp/exclusive_clear.sv"

@@ -15,7 +15,7 @@ module join_pipeline_tb;
 
 	join_pipeline dut (.*);
 
-	assign dut.sum__pigen_ready = 1'b1;
+	assign dut.sum__pigen_out_ready = 1'b1;
 
 	always #5 clk = ~clk;
 
