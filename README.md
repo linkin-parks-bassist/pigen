@@ -15,6 +15,11 @@ Pigen compiles `.pigen` source to readable, synthesizable SystemVerilog. Most
 SystemVerilog remains exactly as it is; Pigen adds a small set of constructs for
 transport values, elastic pipelines, fabrics, and state machines.
 
+Pigen is pre-release and currently follows a clean-break development policy.
+Syntax, generated names, interfaces, and emitted RTL may change incompatibly.
+Changes replace the old behavior outright: there are no compatibility aliases,
+deprecated spellings, migration shims, or legacy code paths to preserve.
+
 ## A small example
 
 ```systemverilog
@@ -156,7 +161,7 @@ read, linted, simulated, and synthesized with normal HDL tools.
 
 ## Build and try it
 
-Pigen requires a C17 compiler. The regression suite also uses Icarus Verilog
+Pigen requires a C17 compiler. The test suite also uses Icarus Verilog
 and Verilator.
 
 ```sh
