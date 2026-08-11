@@ -145,7 +145,12 @@ The compiler also renders the elaborated topology directly from the topology
 model used for RTL emission. The SVG identifies every module instance,
 transport endpoint, generated router, router port, routed physical link, direct
 link, and declared connection. Output is deterministic for identical source
-and compiler options. With one fabric block, its default path is the SV output
+and compiler options. Layout is seeded from the generated router tree, relaxed
+with the topology-aware spring and angular forces, separated with
+footprint-aware collision passes, and refined to reduce crossings while
+protecting direct links. Ports are placed on each unit toward their actual
+peers, with deterministic fan-out and label-collision adjustment. With one
+fabric block, its default path is the SV output
 path plus `.svg`. With several fabric blocks, each path is the SV output path
 plus `.` followed by the fabric name and `.svg`. `--diagram PATH` selects an
 explicit path when the source has exactly one fabric; `--no-diagram` suppresses

@@ -10,7 +10,10 @@ function attribute(line, name,    pieces, tail) {
     count++
     x[count] = attribute($0, "cx") + 0
     y[count] = attribute($0, "cy") + 0
-    radius[count] = attribute($0, "r") + 0
+    if (attribute($0, "data-unit") != "")
+        radius[count] = attribute($0, "r") + 14
+    else
+        radius[count] = 52
     label[count] = attribute($0, "data-unit")
     if (label[count] == "")
         label[count] = attribute($0, "data-router")
@@ -25,7 +28,7 @@ END {
         for (right = left + 1; right <= count; right++) {
             dx = x[left] - x[right]
             dy = y[left] - y[right]
-            minimum = radius[left] + radius[right] + 8
+            minimum = radius[left] + radius[right]
             if (dx * dx + dy * dy < minimum * minimum) {
                 print "fabric SVG nodes overlap: " label[left] " and " label[right] > "/dev/stderr"
                 exit 1

@@ -28,7 +28,8 @@ grep -q 'module routed_fabric__fabric_router' "$temporary/fabric.sv"
 grep -q 'ROUTE__source_a__tx__to_sink' "$temporary/fabric.sv"
 grep -q 'route manifest: payload=PAYLOAD_W path_width=2' "$temporary/fabric.sv"
 grep -q '^<?xml version="1.0" encoding="UTF-8"?>' "$temporary/fabric.sv.svg"
-grep -q 'data-layout="deterministic-grid"' "$temporary/fabric.sv.svg"
+grep -q 'data-layout="tree-spring"' "$temporary/fabric.sv.svg"
+grep -Eq 'data-crossings-before="[0-9]+" data-crossings="[0-9]+" data-direct-crossings="[0-9]+"' "$temporary/fabric.sv.svg"
 grep -q 'data-kind="unit" data-unit="source_a"' "$temporary/fabric.sv.svg"
 grep -q 'data-kind="router" data-router="r0"' "$temporary/fabric.sv.svg"
 grep -q 'data-endpoint="source:source_a.tx.to_sink"' "$temporary/fabric.sv.svg"
@@ -38,6 +39,7 @@ grep -q 'data-kind="router-link"' "$temporary/fabric.sv.svg"
 grep -q 'marker-end="url(#arrow)"' "$temporary/fabric.sv.svg"
 grep -q '>r0.p' "$temporary/fabric.sv.svg"
 awk -f tests/check_fabric_svg.awk "$temporary/fabric.sv.svg"
+awk -f tests/check_fabric_svg_labels.awk "$temporary/fabric.sv.svg"
 if command -v xmlwf >/dev/null 2>&1; then
     xmlwf "$temporary/fabric.sv.svg"
 fi
@@ -98,6 +100,12 @@ grep -q 'parameter integer PATH_W = 7' "$temporary/mixer.sv"
 grep -q 'ROUTE__input_left__samples__main = 110' "$temporary/mixer.sv"
 grep -q 'ui__telemetry__SOURCE__analyser = 64' "$temporary/mixer.sv"
 awk -f tests/check_fabric_svg.awk "$temporary/mixer.sv.svg"
+awk -f tests/check_fabric_svg_labels.awk "$temporary/mixer.sv.svg"
+grep -q '<svg xmlns="http://www.w3.org/2000/svg" width="2185" height="3104" viewBox="0 0 2185 3104" role="img" aria-labelledby="title desc" data-layout="tree-spring" data-crossings-before="6" data-crossings="2" data-direct-crossings="0">' "$temporary/mixer.sv.svg"
+if grep 'data-kind="direct-link"' "$temporary/mixer.sv.svg" | grep -q 'marker-end'; then
+    echo 'reciprocal direct links unexpectedly rendered arrowheads' >&2
+    exit 1
+fi
 if command -v xmlwf >/dev/null 2>&1; then
     xmlwf "$temporary/mixer.sv.svg"
 fi

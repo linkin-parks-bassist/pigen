@@ -1,12 +1,13 @@
 CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
+LDLIBS		= -lm
 
 .PHONY: all clean test block-test verify coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
-pigen: src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
-	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c
+pigen: src/pigen.c src/blocks.c src/fabric_svg.inc src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
+	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c $(LDLIBS)
 
 test: pigen block-test
 	./tests/smoke.sh ./pigen

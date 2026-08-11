@@ -96,7 +96,9 @@ SystemVerilog.
 Compiling a source containing one fabric writes an inspectable topology diagram
 next to the SV output, for example `command_network.sv.svg`. The SVG labels the
 units, transport endpoints, generated router and port IDs, physical router
-links, direct links, and declared connections. Use `--diagram PATH` to choose
+links, direct links, and declared connections. Its topology-aware layout places
+ports toward their peers, separates node and label footprints, and reduces
+wire crossings, with direct links weighted most heavily. Use `--diagram PATH` to choose
 the path or `--no-diagram` to suppress it. Sources containing several fabrics
 write one `OUTPUT.sv.FABRIC.svg` file per fabric.
 
