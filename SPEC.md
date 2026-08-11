@@ -141,6 +141,16 @@ three-port routers, computes the fixed route from each output endpoint to its
 connected input endpoint, and verifies forward and reverse reachability. A
 readable route manifest is a comment in the same generated SystemVerilog file.
 
+The compiler also renders the elaborated topology directly from the topology
+model used for RTL emission. The SVG identifies every module instance,
+transport endpoint, generated router, router port, routed physical link, direct
+link, and declared connection. Output is deterministic for identical source
+and compiler options. With one fabric block, its default path is the SV output
+path plus `.svg`. With several fabric blocks, each path is the SV output path
+plus `.` followed by the fabric name and `.svg`. `--diagram PATH` selects an
+explicit path when the source has exactly one fabric; `--no-diagram` suppresses
+SVG generation.
+
 Routers inspect only the low route bit, rotate the path at each hop, buffer two
 packets per ingress, and arbitrate competing inputs round robin. Every endpoint
 has a two-entry queue, breaking ready timing paths while sustaining one
@@ -197,6 +207,15 @@ compiler emits the degenerate valid/ready constants for `wire` and
 `logic` remains ordinary SystemVerilog syntax but has degenerate transport
 semantics whenever it participates in a Pigen action.  Generated RTL uses
 constants rather than private valid/ready nets for degenerate types.
+
+An output `port` is set-and-forget: it does not hold `valid` while downstream
+`ready` is low. If its one-cycle valid pulse ends without a cycle in which
+`ready` is high, that token was not transferred and is lost. Use `port` only on
+direct or otherwise predictably low-contention paths where this is acceptable.
+When delivery must survive backpressure, the user must select an output `buf`,
+`skid`, or `fifo` with sufficient capacity. Fabric topology optimization may
+prefer low-contention routes for `port` outputs, but such a preference cannot
+replace storage and is not a delivery guarantee.
 
 ## Transport actions
 

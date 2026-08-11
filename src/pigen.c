@@ -65,8 +65,41 @@ static char *default_output_path(const char *input)
 
 static void usage(void)
 {
-	fputs("usage: pigen INPUT.pigen [-o OUTPUT.sv]\n", stderr);
+	fputs("usage: pigen INPUT.pigen [-o OUTPUT.sv] [--diagram PATH | --no-diagram]\n", stderr);
 	exit(2);
+}
+
+static char *diagram_output_path(const char *output_path, const char *fabric_name,
+	size_t diagram_count)
+{
+	pigen_string path = {0};
+	pigen_append(&path, output_path);
+	if (diagram_count > 1)
+	{
+		pigen_append(&path, ".");
+		pigen_append(&path, fabric_name);
+	}
+	pigen_append(&path, ".svg");
+	return path.data;
+}
+
+static int write_file(const char *path, const char *data, size_t length)
+{
+	FILE *file = fopen(path, "wb");
+	int failed;
+	if (!file)
+	{
+		perror(path);
+		return 0;
+	}
+	failed = fwrite(data, 1, length, file) != length;
+	if (fclose(file)) failed = 1;
+	if (failed)
+	{
+		perror(path);
+		return 0;
+	}
+	return 1;
 }
 
 /* An ordinary sequential storage write whose RHS is a transport value.  This
@@ -103,8 +136,10 @@ static int extract_manual_transport_write(const char *start, const char *end, pi
 
 int main(int argc, char **argv)
 {
-	const char *input_path;
+	const char *input_path = NULL;
 	const char *output_path = NULL;
+	const char *requested_diagram_path = NULL;
+	int no_diagram = 0;
 	char *owned_output_path = NULL;
 	char *source;
 	size_t source_length;
@@ -113,22 +148,41 @@ int main(int argc, char **argv)
 	int previous_statement_was_generated = 0;
 	pigen_string output = {0};
 	pigen_string block_output = {0};
+	pigen_fabric_diagrams diagrams = {0};
 	pigen_primitives primitives = {0};
 	pigen_assignments assignments = {0};
 	pigen_clears clears = {0};
 	pigen_procedural_ast procedural_ast = {0};
 	pigen_tokens tokens = {0};
-	FILE *file;
-
-	if (argc < 2)
-		usage();
-
-	input_path = argv[1];
-
-	if (argc == 4 && !strcmp(argv[2], "-o"))
-		output_path = argv[3];
-	else if (argc != 2)
-		usage();
+	if (argc < 2) usage();
+	for (int argument = 1; argument < argc; argument++)
+	{
+		if (!strcmp(argv[argument], "-o") || !strcmp(argv[argument], "--output"))
+		{
+			if (output_path || ++argument == argc) usage();
+			output_path = argv[argument];
+		}
+		else if (!strcmp(argv[argument], "--diagram"))
+		{
+			if (requested_diagram_path || no_diagram || ++argument == argc) usage();
+			requested_diagram_path = argv[argument];
+		}
+		else if (!strncmp(argv[argument], "--diagram=", 10))
+		{
+			if (requested_diagram_path || no_diagram || !argv[argument][10]) usage();
+			requested_diagram_path = argv[argument] + 10;
+		}
+		else if (!strcmp(argv[argument], "--no-diagram"))
+		{
+			if (requested_diagram_path || no_diagram) usage();
+			no_diagram = 1;
+		}
+		else if (argv[argument][0] == '-' || input_path)
+			usage();
+		else
+			input_path = argv[argument];
+	}
+	if (!input_path) usage();
 
 	if (!output_path)
 	{
@@ -139,11 +193,15 @@ int main(int argc, char **argv)
 	source = read_file(input_path, &source_length);
 	pigen_set_diagnostic_context(input_path, source);
 	{
-		char *lowered_source = pigen_lower_blocks(source, source_length, &block_output);
+		char *lowered_source = pigen_lower_blocks(source, source_length, &block_output, &diagrams);
 		free(source);
 		source = lowered_source;
 		pigen_set_diagnostic_context(input_path, source);
 	}
+	if ((requested_diagram_path || no_diagram) && !diagrams.count)
+		fail("diagram options require at least one fabric block");
+	if (requested_diagram_path && diagrams.count != 1)
+		fail("--diagram requires exactly one fabric block; default paths support multiple fabrics");
 	{
 		char *lowered_source = pigen_lower_fsms(source, source_length, &source_length);
 		free(source);
@@ -377,23 +435,28 @@ int main(int argc, char **argv)
 	}
 	pigen_append(&output, block_output.data ? block_output.data : "");
 
-	file = fopen(output_path, "wb");
-
-	if (!file)
-	{
-		perror(output_path);
-		return 1;
-	}
-
-	if (fwrite(output.data, 1, output.length, file) != output.length || fclose(file))
-	{
-		perror(output_path);
-		return 1;
-	}
+	if (!write_file(output_path, output.data, output.length)) return 1;
 
 	fprintf(stderr, "pigen: wrote %s\n", output_path);
+	if (!no_diagram)
+		for (size_t index = 0; index < diagrams.count; index++)
+		{
+			char *owned_diagram_path = NULL;
+			const char *path = requested_diagram_path;
+			if (!path)
+			{
+				owned_diagram_path = diagram_output_path(output_path,
+					diagrams.items[index].name, diagrams.count);
+				path = owned_diagram_path;
+			}
+			if (!write_file(path, diagrams.items[index].svg,
+				strlen(diagrams.items[index].svg))) return 1;
+			fprintf(stderr, "pigen: wrote %s\n", path);
+			free(owned_diagram_path);
+		}
 	pigen_free_procedural_ast(&procedural_ast);
 	pigen_free_tokens(&tokens);
+	pigen_free_fabric_diagrams(&diagrams);
 	free(owned_output_path);
 	free(block_output.data);
 	free(source);

@@ -125,7 +125,11 @@ endfabric
 
 `>` is a direct exclusive connection. Dashed arrows use the routed fabric.
 Pigen builds the endpoint queues and blind source-routed network, computes and
-checks the routes, and emits an ordinary ready/valid SystemVerilog module.
+checks the routes, and emits an ordinary ready/valid SystemVerilog module plus
+an SVG of the elaborated units, ports, routers, and physical links. For one
+fabric the default diagram path is `OUTPUT.sv.svg`; use `--diagram PATH` to
+choose it or `--no-diagram` to suppress it. A source containing several fabric
+blocks writes `OUTPUT.sv.FABRIC.svg` for each block.
 
 ### State machines
 
@@ -167,6 +171,7 @@ Build Pigen with `make`. The test suite also uses Icarus Verilog and Verilator.
 make
 ./pigen design.pigen
 ./pigen design.pigen -o generated.sv
+./pigen network.pigen -o network.sv --diagram network.svg
 make verify
 ```
 

@@ -27,8 +27,50 @@ vvp "$temporary/pipeline-forms"
 grep -q 'module routed_fabric__fabric_router' "$temporary/fabric.sv"
 grep -q 'ROUTE__source_a__tx__to_sink' "$temporary/fabric.sv"
 grep -q 'route manifest: payload=PAYLOAD_W path_width=2' "$temporary/fabric.sv"
+grep -q '^<?xml version="1.0" encoding="UTF-8"?>' "$temporary/fabric.sv.svg"
+grep -q 'data-layout="deterministic-grid"' "$temporary/fabric.sv.svg"
+grep -q 'data-kind="unit" data-unit="source_a"' "$temporary/fabric.sv.svg"
+grep -q 'data-kind="router" data-router="r0"' "$temporary/fabric.sv.svg"
+grep -q 'data-endpoint="source:source_a.tx.to_sink"' "$temporary/fabric.sv.svg"
+grep -q 'data-endpoint="destination:sink.rx"' "$temporary/fabric.sv.svg"
+grep -q 'data-kind="direct-link"' "$temporary/fabric.sv.svg"
+grep -q 'data-kind="router-link"' "$temporary/fabric.sv.svg"
+grep -q 'marker-end="url(#arrow)"' "$temporary/fabric.sv.svg"
+grep -q '>r0.p' "$temporary/fabric.sv.svg"
+awk -f tests/check_fabric_svg.awk "$temporary/fabric.sv.svg"
+if command -v xmlwf >/dev/null 2>&1; then
+    xmlwf "$temporary/fabric.sv.svg"
+fi
 iverilog -g2012 -s fabric_block_tb -o "$temporary/fabric" "$temporary/fabric.sv" tests/fabric_block_tb.sv
 vvp "$temporary/fabric"
+
+"$pigen" tests/fabric_block.pigen -o "$temporary/fabric-repeat.sv"
+cmp "$temporary/fabric.sv.svg" "$temporary/fabric-repeat.sv.svg"
+
+"$pigen" tests/fabric_block.pigen -o "$temporary/fabric-custom.sv" --diagram "$temporary/network.svg"
+test -f "$temporary/network.svg"
+test ! -e "$temporary/fabric-custom.sv.svg"
+
+"$pigen" tests/fabric_block.pigen -o "$temporary/fabric-suppressed.sv" --no-diagram
+test ! -e "$temporary/fabric-suppressed.sv.svg"
+
+"$pigen" tests/multiple_fabrics.pigen -o "$temporary/multiple.sv"
+test -f "$temporary/multiple.sv.first_diagram.svg"
+test -f "$temporary/multiple.sv.second_diagram.svg"
+grep -q 'Pigen routing network: first_diagram' "$temporary/multiple.sv.first_diagram.svg"
+grep -q 'Pigen routing network: second_diagram' "$temporary/multiple.sv.second_diagram.svg"
+
+if "$pigen" tests/multiple_fabrics.pigen -o "$temporary/multiple-custom.sv" --diagram "$temporary/ambiguous.svg" 2>"$temporary/multiple-custom.err"; then
+    echo 'custom diagram path unexpectedly accepted for multiple fabrics' >&2
+    exit 1
+fi
+grep -q 'requires exactly one fabric block' "$temporary/multiple-custom.err"
+
+if "$pigen" tests/pipeline_block.pigen -o "$temporary/pipeline-diagram.sv" --diagram "$temporary/not-a-fabric.svg" 2>"$temporary/pipeline-diagram.err"; then
+    echo 'diagram option unexpectedly accepted without a fabric' >&2
+    exit 1
+fi
+grep -q 'require at least one fabric block' "$temporary/pipeline-diagram.err"
 
 iverilog -g2012 -s fabric_skid_tb -o "$temporary/fabric-skid" "$temporary/fabric.sv" tests/fabric_skid_tb.sv
 vvp "$temporary/fabric-skid"
@@ -55,6 +97,10 @@ iverilog -g2012 -s direct_only -o "$temporary/direct" "$temporary/direct.sv"
 grep -q 'parameter integer PATH_W = 7' "$temporary/mixer.sv"
 grep -q 'ROUTE__input_left__samples__main = 110' "$temporary/mixer.sv"
 grep -q 'ui__telemetry__SOURCE__analyser = 64' "$temporary/mixer.sv"
+awk -f tests/check_fabric_svg.awk "$temporary/mixer.sv.svg"
+if command -v xmlwf >/dev/null 2>&1; then
+    xmlwf "$temporary/mixer.sv.svg"
+fi
 iverilog -g2012 -s mixer_network -o "$temporary/mixer" "$temporary/mixer.sv"
 
 "$pigen" tests/mixed_blocks.pigen -o "$temporary/mixed.sv"

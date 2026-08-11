@@ -1,5 +1,6 @@
 /* Lowering for top-level pipeline and fabric language blocks. */
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1050,6 +1051,395 @@ static fabric_topology build_fabric_topology(fabric_block *fabric)
 	return topology;
 }
 
+typedef struct {
+	const char *name;
+	int source_count;
+	int destination_count;
+	int x;
+	int y;
+	int radius;
+	int side;
+} diagram_unit;
+
+typedef struct {
+	fabric_endpoint endpoint;
+	int unit;
+	int x;
+	int y;
+} diagram_endpoint;
+
+typedef struct { int x; int y; } diagram_point;
+
+static void append_svg_text(pigen_string *output, const char *text)
+{
+	for (; *text; text++)
+	{
+		switch (*text)
+		{
+			case '&': pigen_append(output, "&amp;"); break;
+			case '<': pigen_append(output, "&lt;"); break;
+			case '>': pigen_append(output, "&gt;"); break;
+			case '\"': pigen_append(output, "&quot;"); break;
+			case '\'': pigen_append(output, "&apos;"); break;
+			default: pigen_append_range(output, text, 1); break;
+		}
+	}
+}
+
+static const char *fabric_endpoint_instance(const fabric_endpoint *endpoint)
+{
+	return endpoint->direction ? endpoint->source.instance : endpoint->destination.instance;
+}
+
+static void append_fabric_endpoint_name(pigen_string *output, const fabric_endpoint *endpoint)
+{
+	if (endpoint->direction)
+		pigen_append_format(output, "%s.%s.%s", endpoint->source.instance,
+			endpoint->source.port, endpoint->source.handle);
+	else
+		pigen_append_format(output, "%s.%s", endpoint->destination.instance,
+			endpoint->destination.port);
+}
+
+static void append_fabric_endpoint_label(pigen_string *output, const fabric_endpoint *endpoint)
+{
+	if (endpoint->direction)
+		pigen_append_format(output, "%s.%s", endpoint->source.port, endpoint->source.handle);
+	else
+		pigen_append(output, endpoint->destination.port);
+}
+
+static void add_diagram_endpoint(diagram_endpoint **items, size_t *count,
+	fabric_endpoint endpoint)
+{
+	for (size_t index = 0; index < *count; index++)
+		if (endpoint_equal(&(*items)[index].endpoint, &endpoint)) return;
+	*items = pigen_resize(*items, (*count + 1) * sizeof(**items));
+	(*items)[*count] = (diagram_endpoint){.endpoint = endpoint, .unit = -1};
+	(*count)++;
+}
+
+static int diagram_endpoint_compare(const void *left_, const void *right_)
+{
+	const diagram_endpoint *left = left_;
+	const diagram_endpoint *right = right_;
+	return endpoint_compare(&left->endpoint, &right->endpoint);
+}
+
+static int diagram_unit_compare(const void *left_, const void *right_)
+{
+	const diagram_unit *left = left_;
+	const diagram_unit *right = right_;
+	return strcmp(left->name, right->name);
+}
+
+static int find_diagram_unit(const diagram_unit *units, size_t count, const char *name)
+{
+	for (size_t index = 0; index < count; index++)
+		if (!strcmp(units[index].name, name)) return (int)index;
+	pigen_fail("internal fabric diagram unit lookup failed");
+	return -1;
+}
+
+static int find_diagram_endpoint(const diagram_endpoint *endpoints, size_t count,
+	const fabric_endpoint *endpoint)
+{
+	for (size_t index = 0; index < count; index++)
+		if (endpoint_equal(&endpoints[index].endpoint, endpoint)) return (int)index;
+	pigen_fail("internal fabric diagram endpoint lookup failed");
+	return -1;
+}
+
+static void append_endpoint_data_name(pigen_string *output, const fabric_endpoint *endpoint)
+{
+	pigen_append(output, endpoint->direction ? "source:" : "destination:");
+	append_fabric_endpoint_name(output, endpoint);
+}
+
+static void append_svg_line(pigen_string *output, int x1, int y1, int x2, int y2,
+	const char *kind, const char *detail, int arrow)
+{
+	pigen_append_format(output,
+		"  <line class=\"link %s\" data-kind=\"%s\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"",
+		kind, kind, x1, y1, x2, y2);
+	if (arrow) pigen_append(output, " marker-end=\"url(#arrow)\"");
+	if (detail)
+	{
+		pigen_append(output, " data-link=\"");
+		append_svg_text(output, detail);
+		pigen_append(output, "\"");
+	}
+	pigen_append(output, "/>\n");
+	if (detail)
+	{
+		pigen_append_format(output,
+			"  <text class=\"port link-label\" x=\"%d\" y=\"%d\" text-anchor=\"middle\">",
+			(x1 + x2) / 2, (y1 + y2) / 2 - 6);
+		append_svg_text(output, detail);
+		pigen_append(output, "</text>\n");
+	}
+}
+
+static void render_fabric_diagram(pigen_string *output, const fabric_block *fabric,
+	const fabric_topology *topology)
+{
+	diagram_endpoint *endpoints = NULL;
+	diagram_unit *units = NULL;
+	diagram_point *router_positions = NULL;
+	size_t endpoint_count = 0;
+	size_t unit_count = 0;
+	size_t left_count = 0, right_count = 0;
+	int left_required = 0, right_required = 0;
+	int router_columns = 1;
+	int router_rows;
+	int network_height;
+	int legend_y;
+	int height;
+	int width = 1600;
+	int max_unit_radius = 55;
+	int router_left;
+	int router_right;
+
+	for (size_t index = 0; index < fabric->connection_count; index++)
+	{
+		add_diagram_endpoint(&endpoints, &endpoint_count,
+			(fabric_endpoint){.direction = 1, .source = fabric->connections[index].source});
+		add_diagram_endpoint(&endpoints, &endpoint_count,
+			(fabric_endpoint){.direction = 0, .destination = fabric->connections[index].destination});
+	}
+	qsort(endpoints, endpoint_count, sizeof(*endpoints), diagram_endpoint_compare);
+	for (size_t index = 0; index < endpoint_count; index++)
+	{
+		const char *name = fabric_endpoint_instance(&endpoints[index].endpoint);
+		int found = -1;
+		for (size_t unit = 0; unit < unit_count; unit++)
+			if (!strcmp(units[unit].name, name)) { found = (int)unit; break; }
+		if (found < 0)
+		{
+			units = pigen_resize(units, (unit_count + 1) * sizeof(*units));
+			units[unit_count++] = (diagram_unit){.name = name};
+		}
+	}
+	qsort(units, unit_count, sizeof(*units), diagram_unit_compare);
+	for (size_t index = 0; index < endpoint_count; index++)
+	{
+		int unit = find_diagram_unit(units, unit_count,
+			fabric_endpoint_instance(&endpoints[index].endpoint));
+		endpoints[index].unit = unit;
+		if (endpoints[index].endpoint.direction) units[unit].source_count++;
+		else units[unit].destination_count++;
+	}
+	for (size_t index = 0; index < unit_count; index++)
+	{
+		int ports = units[index].source_count + units[index].destination_count;
+		units[index].radius = ports > 3 ? ports * 14 : 55;
+		if (units[index].radius > max_unit_radius) max_unit_radius = units[index].radius;
+		units[index].side = units[index].source_count > units[index].destination_count ? 0 : 1;
+		if (units[index].source_count == units[index].destination_count)
+			units[index].side = (int)(index & 1U);
+		if (units[index].side)
+		{
+			right_count++;
+			right_required += 2 * units[index].radius + 36;
+		}
+		else
+		{
+			left_count++;
+			left_required += 2 * units[index].radius + 36;
+		}
+	}
+	while ((size_t)(router_columns * router_columns) < topology->router_count) router_columns++;
+	router_left = 2 * max_unit_radius + 390;
+	if (2 * router_left + (router_columns - 1) * 90 > width)
+		width = 2 * router_left + (router_columns - 1) * 90;
+	router_right = width - router_left;
+	router_rows = topology->router_count ? ((int)topology->router_count + router_columns - 1) / router_columns : 0;
+	network_height = 700;
+	if (left_required + 100 > network_height) network_height = left_required + 100;
+	if (right_required + 100 > network_height) network_height = right_required + 100;
+	if (router_rows * 140 + 160 > network_height) network_height = router_rows * 140 + 160;
+	{
+		int left_y = 50;
+		int right_y = 50;
+		int left_gap = left_count ? (network_height - left_required - 64) / ((int)left_count + 1) : 0;
+		int right_gap = right_count ? (network_height - right_required - 64) / ((int)right_count + 1) : 0;
+		for (size_t index = 0; index < unit_count; index++)
+		{
+			units[index].x = units[index].side ? width - max_unit_radius - 60 : max_unit_radius + 60;
+			if (units[index].side)
+			{
+				right_y += right_gap + units[index].radius;
+				units[index].y = right_y;
+				right_y += units[index].radius + 36;
+			}
+			else
+			{
+				left_y += left_gap + units[index].radius;
+				units[index].y = left_y;
+				left_y += units[index].radius + 36;
+			}
+		}
+	}
+	for (size_t unit = 0; unit < unit_count; unit++)
+	{
+		int position = 0;
+		int total = units[unit].source_count + units[unit].destination_count;
+		for (size_t endpoint = 0; endpoint < endpoint_count; endpoint++) if (endpoints[endpoint].unit == (int)unit)
+		{
+			int toward_center = units[unit].side ? -1 : 1;
+			endpoints[endpoint].x = units[unit].x + toward_center * units[unit].radius;
+			endpoints[endpoint].y = units[unit].y + (2 * position - total + 1) * 12;
+			position++;
+		}
+	}
+	if (topology->router_count)
+	{
+		router_positions = pigen_resize(NULL, topology->router_count * sizeof(*router_positions));
+		for (size_t index = 0; index < topology->router_count; index++)
+		{
+			int column = (int)index % router_columns;
+			int row = (int)index / router_columns;
+			router_positions[index].x = router_columns == 1 ? width / 2 :
+				router_left + column * (router_right - router_left) / (router_columns - 1);
+			router_positions[index].y = 90 + (row + 1) * (network_height - 180) / (router_rows + 1);
+		}
+	}
+	legend_y = network_height + 35;
+	height = legend_y + 55 + (int)fabric->connection_count * 22;
+	pigen_append(output, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+	pigen_append_format(output,
+		"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"%d\" viewBox=\"0 0 %d %d\" role=\"img\" aria-labelledby=\"title desc\" data-layout=\"deterministic-grid\">\n",
+		width, height, width, height);
+	pigen_append(output, "  <title id=\"title\">Pigen routing network: "); append_svg_text(output, fabric->name); pigen_append(output, "</title>\n");
+	pigen_append(output, "  <desc id=\"desc\">Elaborated units, transport endpoints, direct links, routers, and routed physical links.</desc>\n");
+	pigen_append(output,
+		"  <defs><marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\"><path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"#52606d\"/></marker></defs>\n");
+	pigen_append(output,
+		"  <style>text{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:#172033}"
+		".link{stroke:#64748b;stroke-width:2}.router-link{stroke:#475569}.endpoint-link{stroke:#2563eb}"
+		".direct-link{stroke:#059669;stroke-width:3}.unit{fill:#e0f2fe;stroke:#0369a1;stroke-width:2}"
+		".router{fill:#fef3c7;stroke:#b45309;stroke-width:2}.port-dot{fill:#1d4ed8}"
+		".label{font-size:13px;font-weight:600}.port{font-size:11px}.link-label{paint-order:stroke;stroke:#fff;stroke-width:3px}"
+		".legend{font-size:12px}</style>\n");
+	pigen_append(output, "  <text x=\"24\" y=\"30\" font-size=\"18\">fabric ");
+	append_svg_text(output, fabric->name); pigen_append(output, " — elaborated routing network</text>\n");
+
+	/* Draw physical links before nodes so nodes remain legible. */
+	for (size_t router = 0; router < topology->router_count; router++)
+		for (int port = 0; port < 3; port++)
+		{
+			fabric_attachment attachment = topology->routers[router].ports[port];
+			if (attachment.kind == 1 && (int)router < attachment.target)
+			{
+				char detail[96];
+				snprintf(detail, sizeof(detail), "r%zu.p%d <-> r%d.p%d",
+					router, port, attachment.target, attachment.port);
+				append_svg_line(output, router_positions[router].x, router_positions[router].y,
+					router_positions[attachment.target].x, router_positions[attachment.target].y,
+					"router-link", detail, 0);
+			}
+			else if (attachment.kind == 2)
+			{
+				fabric_endpoint *endpoint = &topology->endpoints[attachment.target];
+				int diagram_index = find_diagram_endpoint(endpoints, endpoint_count, endpoint);
+				char detail[96];
+				snprintf(detail, sizeof(detail), "r%zu.p%d", router, port);
+				if (endpoint->direction)
+					append_svg_line(output, endpoints[diagram_index].x, endpoints[diagram_index].y,
+						router_positions[router].x, router_positions[router].y,
+						"endpoint-link", detail, 1);
+				else
+					append_svg_line(output, router_positions[router].x, router_positions[router].y,
+						endpoints[diagram_index].x, endpoints[diagram_index].y,
+						"endpoint-link", detail, 1);
+			}
+		}
+	for (size_t index = 0; index < fabric->connection_count; index++) if (fabric->connections[index].direct)
+	{
+		fabric_endpoint source = {.direction = 1, .source = fabric->connections[index].source};
+		fabric_endpoint destination = {.direction = 0, .destination = fabric->connections[index].destination};
+		int source_index = find_diagram_endpoint(endpoints, endpoint_count, &source);
+		int destination_index_ = find_diagram_endpoint(endpoints, endpoint_count, &destination);
+		append_svg_line(output, endpoints[source_index].x, endpoints[source_index].y,
+			endpoints[destination_index_].x, endpoints[destination_index_].y,
+			"direct-link", "direct >", 1);
+	}
+
+	for (size_t index = 0; index < unit_count; index++)
+	{
+		pigen_append(output,
+			"  <circle class=\"unit\" data-kind=\"unit\" data-unit=\"");
+		append_svg_text(output, units[index].name);
+		pigen_append_format(output, "\" cx=\"%d\" cy=\"%d\" r=\"%d\"/>\n",
+			units[index].x, units[index].y, units[index].radius);
+		pigen_append_format(output, "  <text class=\"label\" x=\"%d\" y=\"%d\" text-anchor=\"middle\">",
+			units[index].x, units[index].y + 5);
+		append_svg_text(output, units[index].name); pigen_append(output, "</text>\n");
+	}
+	for (size_t index = 0; index < endpoint_count; index++)
+	{
+		int right = endpoints[index].x > units[endpoints[index].unit].x;
+		pigen_append_format(output, "  <circle class=\"port-dot\" data-kind=\"%s-port\" data-endpoint=\"",
+			endpoints[index].endpoint.direction ? "source" : "destination");
+		append_endpoint_data_name(output, &endpoints[index].endpoint);
+		pigen_append_format(output, "\" cx=\"%d\" cy=\"%d\" r=\"4\"/>\n",
+			endpoints[index].x, endpoints[index].y);
+		pigen_append_format(output, "  <text class=\"port\" data-endpoint=\"%s:",
+			endpoints[index].endpoint.direction ? "source" : "destination");
+		append_fabric_endpoint_name(output, &endpoints[index].endpoint);
+		pigen_append_format(output, "\" x=\"%d\" y=\"%d\" text-anchor=\"%s\">",
+			endpoints[index].x + (right ? 8 : -8), endpoints[index].y - 7,
+			right ? "start" : "end");
+		append_fabric_endpoint_label(output, &endpoints[index].endpoint);
+		pigen_append(output, "</text>\n");
+	}
+	for (size_t index = 0; index < topology->router_count; index++)
+	{
+		pigen_append_format(output,
+			"  <circle class=\"router\" data-kind=\"router\" data-router=\"r%zu\" cx=\"%d\" cy=\"%d\" r=\"25\"/>\n",
+			index, router_positions[index].x, router_positions[index].y);
+		pigen_append_format(output,
+			"  <text class=\"label\" x=\"%d\" y=\"%d\" text-anchor=\"middle\">r%zu</text>\n",
+			router_positions[index].x, router_positions[index].y + 5, index);
+	}
+	pigen_append_format(output, "  <line x1=\"24\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#cbd5e1\"/>\n",
+		legend_y - 20, width - 24, legend_y - 20);
+	pigen_append_format(output, "  <text class=\"label\" x=\"24\" y=\"%d\">Connections</text>\n", legend_y);
+	for (size_t index = 0; index < fabric->connection_count; index++)
+	{
+		fabric_connection *connection = &fabric->connections[index];
+		pigen_append_format(output, "  <text class=\"legend\" x=\"45\" y=\"%d\">", legend_y + 22 + (int)index * 22);
+		append_fabric_endpoint_name(output, &(fabric_endpoint){.direction = 1, .source = connection->source});
+		pigen_append(output, connection->direct ? " &gt; " : " ");
+		if (!connection->direct)
+		{
+			for (int dash = 0; dash < connection->tier; dash++) pigen_append(output, "-");
+			pigen_append(output, "&gt; ");
+		}
+		append_fabric_endpoint_name(output, &(fabric_endpoint){.direction = 0, .destination = connection->destination});
+		if (connection->direct) pigen_append(output, " (direct)");
+		else pigen_append_format(output, " (hops=%d path=%llu)", connection->hops, connection->path_word);
+		pigen_append(output, "</text>\n");
+	}
+	pigen_append(output, "</svg>\n");
+	free(router_positions);
+	free(units);
+	free(endpoints);
+}
+
+static void append_fabric_diagram(pigen_fabric_diagrams *diagrams,
+	const fabric_block *fabric, const fabric_topology *topology)
+{
+	pigen_string svg = {0};
+	if (!diagrams) return;
+	render_fabric_diagram(&svg, fabric, topology);
+	diagrams->items = pigen_resize(diagrams->items,
+		(diagrams->count + 1) * sizeof(*diagrams->items));
+	diagrams->items[diagrams->count].name = pigen_copy_range(fabric->name, strlen(fabric->name));
+	diagrams->items[diagrams->count].svg = svg.data;
+	diagrams->count++;
+}
+
 static void append_source_text(pigen_string *output, const fabric_source *source, const char *suffix)
 {
 	pigen_append_format(output, "%s__%s__%s__%s", source->instance, source->port, source->handle, suffix);
@@ -1181,9 +1571,11 @@ static void render_fabric_router(pigen_string *output, const fabric_block *fabri
 	pigen_append(output, "\t\tend\n\tend\nendmodule\n\n");
 }
 
-static void render_fabric(pigen_string *output, fabric_block *fabric)
+static void render_fabric(pigen_string *output, fabric_block *fabric,
+	pigen_fabric_diagrams *diagrams)
 {
 	fabric_topology topology = build_fabric_topology(fabric);
+	append_fabric_diagram(diagrams, fabric, &topology);
 	pigen_append_format(output, "\n// Pigen fabric block `%s`.\n", fabric->name);
 	pigen_append_format(output, "// route manifest: payload=PAYLOAD_W path_width=%d\n", topology.path_width);
 	for (size_t index = 0; index < fabric->connection_count; index++)
@@ -1307,6 +1699,10 @@ static void render_fabric(pigen_string *output, fabric_block *fabric)
 		pigen_append(output, "\tassign "); append_destination_text(output, &connection->destination, "packet_valid"); pigen_append(output, " = "); append_source_text(output, &connection->source, "packet_valid"); pigen_append(output, "; assign "); append_destination_text(output, &connection->destination, "packet"); pigen_append(output, " = "); append_source_text(output, &connection->source, "packet"); pigen_append(output, "; assign "); append_source_text(output, &connection->source, "packet_ready"); pigen_append(output, " = "); append_destination_text(output, &connection->destination, "packet_ready"); pigen_append(output, ";\n");
 	}
 	pigen_append(output, "endmodule\n\n");
+	free(topology.routers);
+	free(topology.endpoints);
+	free(topology.endpoint_router);
+	free(topology.endpoint_port);
 }
 
 static void append_parameter_block(pigen_string *output, const pipeline_block *pipeline)
@@ -1505,7 +1901,8 @@ static int ordinary_unit_end(block_parser *parser, const char **closing)
 	return 0;
 }
 
-char *pigen_lower_blocks(const char *source, size_t length, pigen_string *generated)
+char *pigen_lower_blocks(const char *source, size_t length, pigen_string *generated,
+	pigen_fabric_diagrams *diagrams)
 {
 	block_parser parser = {source, {0}, 0};
 	char *cleaned = pigen_copy_range(source, length);
@@ -1537,11 +1934,23 @@ char *pigen_lower_blocks(const char *source, size_t length, pigen_string *genera
 			size_t end;
 			fabric_block fabric = parse_fabric(&parser, &end);
 			for (size_t index = start; index < end; index++) if (cleaned[index] != '\n') cleaned[index] = ' ';
-			render_fabric(generated, &fabric);
+			render_fabric(generated, &fabric, diagrams);
 			continue;
 		}
 		parser.at++;
 	}
 	pigen_free_tokens(&parser.tokens);
 	return cleaned;
+}
+
+void pigen_free_fabric_diagrams(pigen_fabric_diagrams *diagrams)
+{
+	if (!diagrams) return;
+	for (size_t index = 0; index < diagrams->count; index++)
+	{
+		free(diagrams->items[index].name);
+		free(diagrams->items[index].svg);
+	}
+	free(diagrams->items);
+	*diagrams = (pigen_fabric_diagrams){0};
 }
