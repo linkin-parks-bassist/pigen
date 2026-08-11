@@ -20,7 +20,7 @@ Syntax, generated names, interfaces, and emitted RTL may change incompatibly.
 Changes replace the old behavior outright; only the current language and
 compiler behavior are supported.
 
-![A Pigen fabric topology with named units, ports, routers, and links](svg-review/current-mixer.svg)
+<img src="docs/fabric.svg" alt="A small Pigen fabric with direct and routed connections" width="720">
 
 ## A small example
 

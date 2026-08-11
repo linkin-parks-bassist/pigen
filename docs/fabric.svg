@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2060" height="1055" viewBox="0 0 2060 1055" role="img" aria-labelledby="title desc" data-layout="tree-spring" data-crossings-before="0" data-crossings="0" data-direct-crossings="0">
+  <title id="title">Pigen routing network: routed_fabric</title>
+  <desc id="desc">Elaborated source-routed fabric topology, seeded from its router tree and refined with angular snap springs, unit out-pull, and padded collision resolution. Blue links are hard direct connections.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#52606d"/></marker></defs>
+  <style>text{font-family:ui-monospace,monospace;font-size:13px;fill:#172033}.edge{stroke:#52606d;stroke-width:2.2;fill:none}.direct{stroke:#1479c9;stroke-width:3.4}.port{font-size:11px;fill:#52606d;paint-order:stroke;stroke:#fff;stroke-width:3px}.router{fill:#fff4d6;stroke:#a05a00;stroke-width:2}.unit{fill:#dbeafe;stroke:#1d4ed8;stroke-width:2.5}.label{font-size:12px}.legend{font-size:12px}</style>
+  <text x="24" y="30" font-size="18">fabric routed_fabric — elaborated routing network</text>
+  <line class="edge " data-kind="router-link" data-from="r0" data-to="r1" x1="1445.341" y1="465.612" x2="1618.101" y2="546.438"/>
+  <text class="port" x="1531.721" y="501.025" text-anchor="middle">r0.p0 ↔ r1.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="r0" data-to="sink" marker-end="url(#arrow)" x1="1404.117" y1="471.745" x2="1254.711" y2="606.259"/>
+  <text class="port" x="1329.414" y="534.002" text-anchor="middle">r0.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="source_a" data-to="r0" marker-end="url(#arrow)" x1="1387.875" y1="254.148" x2="1418.427" y2="430.385"/>
+  <text class="port" x="1403.151" y="337.266" text-anchor="middle">r0.p2</text>
+  <line class="edge " data-kind="endpoint-link" data-from="source_d" data-to="r1" marker-end="url(#arrow)" x1="1815.540" y1="685.972" x2="1660.864" y2="571.873"/>
+  <text class="port" x="1738.202" y="623.923" text-anchor="middle">r1.p2</text>
+  <line class="edge direct" data-kind="direct-link" data-from="direct_src" data-to="direct_dst" data-source="direct_src.tx.direct" data-destination="direct_dst.rx" marker-end="url(#arrow)" x1="237.990" y1="393.793" x2="393.579" y2="238.034"/>
+  <text class="port" x="315.784" y="310.914" text-anchor="middle">direct &gt;</text>
+  <circle class="unit" data-kind="unit" data-unit="direct_dst" cx="434.569" cy="197.000" r="58.000"/>
+  <text class="label" x="434.569" y="202.000" text-anchor="middle">direct_dst</text>
+  <circle data-kind="destination-port" data-endpoint="destination:direct_dst.rx" cx="393.579" cy="238.034" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="destination:direct_dst.rx" x="383.685" y="251.939" text-anchor="end">in rx</text>
+  <circle class="unit" data-kind="unit" data-unit="direct_src" cx="197.000" cy="434.828" r="58.000"/>
+  <text class="label" x="197.000" y="439.828" text-anchor="middle">direct_src</text>
+  <circle data-kind="source-port" data-endpoint="source:direct_src.tx.direct" cx="237.990" cy="393.793" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:direct_src.tx.direct" x="247.884" y="387.888" text-anchor="start">out tx.direct</text>
+  <circle class="unit" data-kind="unit" data-unit="sink" cx="1211.607" cy="645.066" r="58.000"/>
+  <text class="label" x="1211.607" y="650.066" text-anchor="middle">sink</text>
+  <circle data-kind="destination-port" data-endpoint="destination:sink.rx" cx="1254.711" cy="606.259" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="destination:sink.rx" x="1265.116" y="600.891" text-anchor="start">in rx</text>
+  <circle class="unit" data-kind="unit" data-unit="source_a" cx="1377.969" cy="197.000" r="58.000"/>
+  <text class="label" x="1377.969" y="202.000" text-anchor="middle">source_a</text>
+  <circle data-kind="source-port" data-endpoint="source:source_a.tx.to_sink" cx="1387.875" cy="254.148" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:source_a.tx.to_sink" x="1390.267" y="271.942" text-anchor="middle">out tx.to_sink</text>
+  <circle class="unit" data-kind="unit" data-unit="source_d" cx="1862.215" cy="720.402" r="58.000"/>
+  <text class="label" x="1862.215" y="725.402" text-anchor="middle">source_d</text>
+  <circle data-kind="source-port" data-endpoint="source:source_d.tx.to_sink" cx="1815.540" cy="685.972" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:source_d.tx.to_sink" x="1804.273" y="681.661" text-anchor="end">out tx.to_sink</text>
+  <circle class="router" data-kind="router" data-router="r0" cx="1422.697" cy="455.017" r="25"/>
+  <text x="1422.697" y="460.017" text-anchor="middle">r0</text>
+  <circle class="router" data-kind="router" data-router="r1" cx="1640.746" cy="557.032" r="25"/>
+  <text x="1640.746" y="562.032" text-anchor="middle">r1</text>
+  <text class="legend" x="24" y="963">connections:</text>
+  <text class="legend" x="45" y="983">direct_src.tx.direct &gt; direct_dst.rx (direct)</text>
+  <text class="legend" x="45" y="1003">source_a.tx.to_sink -&gt; sink.rx (hops=1 path=0b01)</text>
+  <text class="legend" x="45" y="1023">source_d.tx.to_sink --&gt; sink.rx (hops=2 path=0b01)</text>
+</svg>
