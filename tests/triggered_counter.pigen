@@ -1,0 +1,32 @@
+module triggered_counter
+    (
+        input logic clk,
+        input logic reset,
+        input logic count,
+        output logic [7:0] value,
+        output logic active
+    );
+
+    buf [7:0] ctr;
+
+    assign value = ctr;
+    assign active = valid(ctr);
+
+    always_ff @(posedge clk)
+    begin
+        if (reset)
+        begin
+            ctr <= '0;
+            invalidate(ctr);
+        end
+        else
+        begin
+            ctr <= ctr + 1'b1;
+            if (count)
+                validate(ctr);
+            else
+                invalidate(ctr);
+        end
+    end
+
+endmodule

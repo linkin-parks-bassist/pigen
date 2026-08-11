@@ -225,7 +225,20 @@ int pigen_extract_clear_action(const char *start, const char *end, pigen_primiti
 	if (kind == 1 && (!pigen_is_storage_kind(primitive->kind) || !primitive->is_internal))
 		pigen_fail("flush requires locally stored transport value");
 	if (kind != 1 && (!pigen_is_storage_kind(primitive->kind) || !primitive->is_internal))
-		pigen_fail("validate/invalidate requires locally stored transport value");
+	{
+		pigen_set_diagnostic_position(action);
+		if (kind == 2 && (primitive->kind == 'w' || primitive->kind == 'r' ||
+			primitive->kind == 'l'))
+		{
+			pigen_warn("validate on an always-valid wire, reg, or logic transport has no effect");
+			kind = 3;
+		}
+		else if (kind == 0 && (primitive->kind == 'w' || primitive->kind == 'r' ||
+			primitive->kind == 'l'))
+			pigen_fail("invalidate cannot make an always-valid wire, reg, or logic transport invalid");
+		else
+			pigen_fail("validate/invalidate requires locally stored transport value");
+	}
 
 	*target = name;
 	*target_length = (size_t)(name_end - name);

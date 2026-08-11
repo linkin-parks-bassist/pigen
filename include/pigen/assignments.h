@@ -7,7 +7,7 @@ typedef struct { const char *destination; size_t destination_length; const char 
 typedef struct { const char *prefix_end; pigen_transfer_item *items; size_t count; } pigen_transfer;
 int pigen_extract_transport_transfer(const char *start, const char *end, pigen_primitives *primitives, pigen_transfer *transfer);
 void pigen_free_transfer(pigen_transfer *transfer);
-/* action_kind: 0 = invalidate, 1 = flush, 2 = validate. */
+/* action_kind: 0 = invalidate, 1 = flush, 2 = validate, 3 = warned no-op. */
 int pigen_extract_clear_action(const char *start, const char *end, pigen_primitives *primitives, const char **prefix_end, const char **target, size_t *target_length, int *action_kind);
 void pigen_emit_expression_validity(pigen_string *output, const char *expression, pigen_primitives *primitives);
 void pigen_emit_transfer_accept_condition(pigen_string *output, const pigen_transfer *transfer, const char *guard, pigen_primitives *primitives);

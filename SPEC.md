@@ -213,6 +213,12 @@ compiler emits the degenerate valid/ready constants for `wire` and
 semantics whenever it participates in a Pigen action.  Generated RTL uses
 constants rather than private valid/ready nets for degenerate types.
 
+`wire`, `reg`, and `logic` are always valid. `validate(x)` on one of these
+types is accepted as a no-op and produces a compiler warning; no validity
+hardware is emitted. `invalidate(x)` is an error because an always-valid
+transport cannot be made invalid. `flush(x)` is also invalid because these
+types have no transport occupancy to empty.
+
 An output `port` is set-and-forget: it does not hold `valid` while downstream
 `ready` is low. If its one-cycle valid pulse ends without a cycle in which
 `ready` is high, that token was not transferred and is lost. Use `port` only on
@@ -289,11 +295,13 @@ and performs the transfer on the same accepted cycle.  Both sides must be
 transport identifiers.
 
 `validate(x)` and `invalidate(x)` are synchronous next-state writes to a local
-transport's valid bit.  They force `x` valid or invalid, respectively, on the
-next cycle without waiting for downstream readiness.  Like non-blocking
-assignments, source order matters: a later accepted transfer to `x` overrides
-an earlier validity action, and a later validity action overrides an earlier
-transfer.  This makes reset seeding ordinary Pigen code:
+stored transport's valid bit. They force `x` valid or invalid, respectively,
+on the next cycle without waiting for downstream readiness. Like non-blocking
+assignments, source order determines the next validity when a transfer and a
+validity action target the same value. For a one-entry `buf`, an accepted
+transfer still updates the payload when a later `invalidate` determines that
+the resulting item is invalid. A later `validate` can therefore expose that
+intentional payload. This makes reset seeding ordinary Pigen code:
 
 ```systemverilog
 if (reset) begin
@@ -308,8 +316,9 @@ use it only when that payload is intentional.  For a FIFO or skid, validation
 forces nonempty state (one head item when previously empty); invalidation
 forces its output invalid.  `flush(x)` empties all buffered contents.  These
 actions apply to local `buf`, `fifo`, `skid`, and `port` values; applying one
-to an input-owned port is accepted but has no useful local effect.  They are
-invalid on `wire`, `reg`, or `logic`.
+to an input-owned port is accepted but has no useful local effect. On an
+always-valid `wire`, `reg`, or `logic`, `validate` warns and does nothing,
+while `invalidate` and `flush` are errors.
 
 Buffered values have one consumer.  Multiple writes to one destination are
 allowed only when semantic control analysis proves their paths mutually

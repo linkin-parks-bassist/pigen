@@ -1,0 +1,11 @@
+module reg_invalidate_error
+    (
+        input logic clk
+    );
+
+    reg [7:0] saved;
+
+    always_ff @(posedge clk)
+        invalidate(saved);
+
+endmodule

@@ -1,0 +1,11 @@
+module logic_invalidate_error
+    (
+        input logic clk
+    );
+
+    logic [7:0] state;
+
+    always_ff @(posedge clk)
+        invalidate(state);
+
+endmodule

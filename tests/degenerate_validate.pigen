@@ -1,0 +1,17 @@
+module degenerate_validate
+    (
+        input logic clk
+    );
+
+    reg [7:0] saved;
+    logic [7:0] state;
+    wire [7:0] offered;
+
+    always_ff @(posedge clk)
+    begin
+        validate(saved);
+        validate(state);
+        validate(offered);
+    end
+
+endmodule

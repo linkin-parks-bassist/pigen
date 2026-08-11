@@ -4,6 +4,7 @@
 #include "pigen/model.h"
 
 void pigen_fail(const char *message);
+void pigen_warn(const char *message);
 void pigen_set_diagnostic_context(const char *path, const char *source);
 void pigen_set_diagnostic_position(const char *position);
 void *pigen_resize(void *ptr, size_t size);

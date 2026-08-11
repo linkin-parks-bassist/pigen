@@ -1,0 +1,11 @@
+module wire_invalidate_error
+    (
+        input logic clk
+    );
+
+    wire [7:0] offered;
+
+    always_ff @(posedge clk)
+        invalidate(offered);
+
+endmodule

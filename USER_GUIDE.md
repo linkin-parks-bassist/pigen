@@ -228,6 +228,11 @@ if (restart)
     flush(requests);
 ```
 
+`wire`, `reg`, and `logic` are always valid, so validating one is a warned
+no-op. Invalidating or flushing one is an error. For a `buf`, payload and
+validity updates remain distinct: an accepted payload transfer still lands if
+a later `invalidate` makes the resulting item invalid.
+
 These are deliberately local-only operations. Normal acceptance still
 propagates through ready chains; use validity actions on storage your module
 owns rather than reaching into an upstream buffer.

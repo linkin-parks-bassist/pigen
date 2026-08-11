@@ -120,6 +120,32 @@ iverilog -g2012 -o "$temporary/mixed" "$temporary/mixed.sv"
 "$pigen" examples/language_blocks.pigen -o "$temporary/language-blocks-example.sv"
 iverilog -g2012 -o "$temporary/language-blocks-example" "$temporary/language-blocks-example.sv"
 
+"$pigen" tests/degenerate_validate.pigen -o "$temporary/degenerate-validate.sv" 2>"$temporary/degenerate-validate.err"
+test "$(grep -c 'warning: validate on an always-valid wire, reg, or logic transport has no effect' "$temporary/degenerate-validate.err")" -eq 3
+if grep -q '__pigen_force_valid' "$temporary/degenerate-validate.sv"; then
+    echo 'degenerate validate unexpectedly emitted validity hardware' >&2
+    exit 1
+fi
+iverilog -g2012 -s degenerate_validate -o "$temporary/degenerate-validate" "$temporary/degenerate-validate.sv"
+
+if "$pigen" tests/reg_invalidate_error.pigen -o "$temporary/reg-invalidate.sv" 2>"$temporary/reg-invalidate.err"; then
+    echo 'invalidate(reg) unexpectedly compiled' >&2
+    exit 1
+fi
+grep -q 'invalidate cannot make an always-valid wire, reg, or logic transport invalid' "$temporary/reg-invalidate.err"
+
+if "$pigen" tests/wire_invalidate_error.pigen -o "$temporary/wire-invalidate.sv" 2>"$temporary/wire-invalidate.err"; then
+    echo 'invalidate(wire) unexpectedly compiled' >&2
+    exit 1
+fi
+grep -q 'invalidate cannot make an always-valid wire, reg, or logic transport invalid' "$temporary/wire-invalidate.err"
+
+if "$pigen" tests/logic_invalidate_error.pigen -o "$temporary/logic-invalidate.sv" 2>"$temporary/logic-invalidate.err"; then
+    echo 'invalidate(logic) unexpectedly compiled' >&2
+    exit 1
+fi
+grep -q 'invalidate cannot make an always-valid wire, reg, or logic transport invalid' "$temporary/logic-invalidate.err"
+
 if "$pigen" tests/pipeline_width_error.pigen -o "$temporary/bad-pipeline.sv" 2>"$temporary/bad-pipeline.err"; then
     echo 'pipeline width mismatch unexpectedly compiled' >&2
     exit 1

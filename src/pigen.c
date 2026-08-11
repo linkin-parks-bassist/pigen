@@ -299,9 +299,11 @@ int main(int argc, char **argv)
 				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard, parsed_guard + strlen(parsed_guard), &primitives);
 				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives);
 				pigen_append(&output, ";");
-				pigen_add_clear(&clears, destination, destination_length,
-					rewritten_guard.data ? rewritten_guard.data : "",
-					rewritten_guard.data ? strlen(rewritten_guard.data) : 0, domain, strlen(domain), clear_action_kind, (size_t)(prefix_end - source));
+				if (clear_action_kind != 3)
+					pigen_add_clear(&clears, destination, destination_length,
+						rewritten_guard.data ? rewritten_guard.data : "",
+						rewritten_guard.data ? strlen(rewritten_guard.data) : 0, domain,
+						strlen(domain), clear_action_kind, (size_t)(prefix_end - source));
 				free(rewritten_guard.data);
 				previous_statement_was_generated = 0;
 			}

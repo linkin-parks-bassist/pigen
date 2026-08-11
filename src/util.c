@@ -54,6 +54,25 @@ void pigen_fail(const char *message)
 	exit(1);
 }
 
+void pigen_warn(const char *message)
+{
+	if (diagnostic_path && diagnostic_source && diagnostic_position)
+	{
+		size_t line = 1;
+		size_t column = 1;
+		const char *cursor;
+		for (cursor = diagnostic_source; cursor < diagnostic_position; cursor++)
+		{
+			if (*cursor == '\n') { line++; column = 1; }
+			else column++;
+		}
+		fprintf(stderr, "%s:%zu:%zu: warning: %s\n", diagnostic_path, line, column,
+			message);
+	}
+	else
+		fprintf(stderr, "pigen: warning: %s\n", message);
+}
+
 void *pigen_resize(void *ptr, size_t size)
 {
 	ptr = realloc(ptr, size);
