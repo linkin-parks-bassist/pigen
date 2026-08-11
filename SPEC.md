@@ -96,8 +96,8 @@ fabric-option  ::= "option" ("router_buffer_depth" |
                               "endpoint_fifo_depth" |
                               "objective") "=" expression ";"
 connection     ::= source (">" | routed-arrow) destination ";"
-source         ::= identifier "." identifier "." identifier
-destination    ::= identifier "." identifier ("." identifier)?
+source         ::= identifier "." identifier
+destination    ::= identifier "." identifier
 routed-arrow   ::= "->" | "-->" | "--->" | ...
 ```
 
@@ -105,39 +105,46 @@ routed-arrow   ::= "->" | "-->" | "--->" | ...
 fabric system_bus #(
     parameter integer PAYLOAD_W = 32
 ) begin
-    dma.tx.memory > memory.rx;
-    cpu.tx.memory -> memory.rx.cpu;
-    debug.tx.memory --> memory.rx.debug;
+    dma.tx > memory.dma_rx;
+    cpu.tx -> memory.rx;
+    debug.tx --> memory.rx;
 endfabric
 ```
 
-A source is `instance.output_port.destination_handle`. A destination is
-`instance.input_port` with an optional third component naming the source that
-the receiver recognizes. `>` creates an exclusive direct link. One or more
-dashes before `>` create a routed connection; the dash count is retained as
-the connection's tier. A fabric requires at least one connection. A source
-handle is bound exactly once. A direct destination cannot appear in another
-connection, and recognized names at one destination are unique.
+A source is one module output transport, `instance.output_port`. A destination
+is one module input transport, `instance.input_port`. Ports carry no fabric
+source name, destination name, route selector, address, or origin metadata.
+Each output transport occurs in exactly one fabric connection and therefore
+has exactly one destination. Several routed outputs may target the same input;
+the fabric arbitrates them and the input remains source-blind. `>` creates an
+exclusive direct link, so its destination cannot appear in another
+connection. One or more dashes before `>` create a routed connection; the dash
+count is retained as the connection's tier. A fabric requires at least one
+connection.
+
+One-to-many routing is represented by an explicit splitter component. The
+splitter has one input transport and several distinct output transports, reads
+any address or selection field from the payload, and drives exactly one output
+for a unicast token. Each splitter output is then connected once by the fabric.
+The fabric itself does not interpret payload addresses. Protocol-specific
+addressing, including a future AXI fabric, is outside this fabric contract.
 
 Every fabric parameter list must define `parameter integer PAYLOAD_W = ...`.
 Its generated module has `clk`, `reset`, and `enable`, plus flattened
-ready/valid/payload ports named by joining source or destination components
+ready/valid/payload ports named by joining each endpoint's instance and port
 with `__`. Each source exposes input payload/valid and output ready. Each
-destination exposes output payload/valid and input ready. Routed destinations
-also expose a `path` output and recognized-source local parameters named
-`INSTANCE__PORT__SOURCE__NAME`.
+destination exposes output payload/valid and input ready. Route bits are
+internal fabric state and are not part of either endpoint interface.
 
 The compiler deterministically constructs a pruned balanced tree of blind
-three-port routers, computes rotating source routes, verifies forward and
-reverse reachability and delivered-signature uniqueness, and emits the routes
-as local parameters. A readable route manifest is a comment in the same
-generated SystemVerilog file.
+three-port routers, computes the fixed route from each output endpoint to its
+connected input endpoint, and verifies forward and reverse reachability. A
+readable route manifest is a comment in the same generated SystemVerilog file.
 
 Routers inspect only the low route bit, rotate the path at each hop, buffer two
 packets per ingress, and arbitrate competing inputs round robin. Every endpoint
 has a two-entry queue, breaking ready timing paths while sustaining one
-accepted replacement per cycle. Direct-only fabrics emit no router or path
-field.
+accepted replacement per cycle. Direct-only fabrics emit no router state.
 
 In v0, `router_buffer_depth` and `endpoint_fifo_depth` default to two and only
 the value two is accepted. `objective` accepts a nonempty expression, and
@@ -168,6 +175,15 @@ depth expression. The reversed order is invalid. ANSI transport ports
 use the same spelling, for example `input buf[7:0] in_packet` and
 `output fifo[15:0][4] out_queue`; they expand to payload, `_valid`, and
 `_ready` ports.
+
+A module input transport is source-blind and a module output transport is
+destination-blind. The receiving module sees only its declared payload and the
+transport's ready/valid behavior. The sending module sees only its payload and
+whether its output was accepted. A port does not receive the peer's transport
+kind: `wire`, `logic`/`reg`, `buf`, `skid`, `fifo`, and `port` affect the local
+handshake implementation, not fabric addressing or endpoint identity. The
+compiler emits the degenerate valid/ready constants for `wire` and
+`logic`/`reg`; a fabric connection still obeys the resulting handshake.
 
 | Kind | valid / ready | Semantics |
 | --- | --- | --- |
