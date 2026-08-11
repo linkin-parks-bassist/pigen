@@ -29,16 +29,18 @@ module skid_compare_tb;
 			plain_out_ready = cycles >= 3;
 			skid_out_ready = cycles >= 3;
 			cycles++;
-			if ((plain_in_ready || cycles == 3) && plain_sent < 8)
-			begin plain_in = plain_sent[7:0]; plain_sent++; end
-			if ((skid_in_ready || cycles == 3) && skid_sent < 8)
-			begin skid_in = skid_sent[7:0]; skid_sent++; end
+			if (plain_sent < 8) plain_in = plain_sent[7:0];
+			else plain_in_valid = 1'b0;
+			if (skid_sent < 8) skid_in = skid_sent[7:0];
+			else skid_in_valid = 1'b0;
 		end
 	end
 
 	always @(posedge clk)
 	begin
 		if ($time == 15) reset <= 1'b0;
+		if (!reset && plain_in_valid && plain_in_ready) plain_sent++;
+		if (!reset && skid_in_valid && skid_in_ready) skid_sent++;
 		if (!reset && plain_out_valid && plain_out_ready)
 		begin if (plain_out !== plain_received[7:0]) $fatal(1, "plain ordering"); plain_received++; end
 		if (!reset && skid_out_valid && skid_out_ready)

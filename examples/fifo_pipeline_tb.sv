@@ -16,6 +16,8 @@ module fifo_pipeline_tb;
 	begin
 		if ($time == 15)
 			reset <= 1'b0;
+		if (!reset && dut.queue__pigen_in_ready && offered < 8)
+			offered <= offered + 1;
 
 		/* The first pushed item is observable before downstream is ready. */
 		if (!reset && $time == 35 && !dut.queue__pigen_valid)
@@ -38,12 +40,9 @@ module fifo_pipeline_tb;
 
 	always @(negedge clk)
 	begin
-		/* Preload item 4 while full; it is accepted on the first pop/push cycle. */
-		if (!reset && (dut.queue__pigen_in_ready || offered == 4) && offered < 8)
-		begin
+		/* Hold the current item until the FIFO reports an accepted slot. */
+		if (!reset && offered < 8)
 			in_packet = offered[7:0];
-			offered++;
-		end
 
 		if (!reset && $time >= 75)
 			out_ready = 1'b1;

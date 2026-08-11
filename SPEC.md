@@ -205,8 +205,8 @@ compiler emits the degenerate valid/ready constants for `wire` and
 | `logic`, `reg` | `1` / `1` | Persistent, always-available values; reads do not consume. |
 | `wire` | `1` / `0` | Always offered combinational value; not a transport destination. |
 | `buf` | occupancy / elastic readiness | One-entry elastic storage. |
-| `fifo` | nonempty / nonfull-or-pop | Ordered depth-N elastic storage. |
-| `skid` | nonempty / nonfull-or-pop | Exact two-entry FIFO. |
+| `fifo` | nonempty / nonfull | Ordered depth-N storage and a combinational ready-chain break. |
+| `skid` | nonempty / nonfull | Exact two-entry skid buffer with registered backpressure. |
 | `port` | one-cycle pulse / `1` | A directly written payload register with a one-cycle Pigen-valid pulse. |
 
 `logic` remains ordinary SystemVerilog syntax but has degenerate transport
@@ -402,9 +402,12 @@ transport transfer; use `accepts` when it must.
 ## Lowering requirements
 
 Every buffered declaration lowers to a dedicated primitive instance; storage
-state machines are never inlined.  Reset clears primitive occupancy.  Payload
-is stable under valid backpressure, FIFO order is preserved, simultaneous
-push/pop sustains one item per cycle, and skid capacity is exactly two.
+state machines are never inlined. Reset clears primitive occupancy. Payload
+is stable under valid backpressure, FIFO order is preserved, and skid capacity
+is exactly two. FIFO and skid input readiness depend only on their registered
+occupancy, never combinationally on downstream readiness. They sustain
+simultaneous push/pop while nonfull; after a full queue pops, input readiness
+returns from the new occupancy on the following cycle.
 
 Ordinary SystemVerilog outside parsed Pigen syntax is preserved. All compiler
 diagnostics identify original source file, line, and column.

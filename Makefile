@@ -2,7 +2,7 @@ CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
 
-.PHONY: all clean test block-test verify coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test block-test verify coslice-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
@@ -15,7 +15,7 @@ test: pigen block-test
 block-test: pigen
 	./tests/blocks_smoke.sh ./pigen
 
-verify: test coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
+verify: test coslice-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
 
 coslice-test: pigen
 	./pigen tests/coslice.pigen -o /tmp/pigen-coslice.sv
@@ -31,6 +31,10 @@ signed-widen-test: pigen
 	./pigen tests/signed_widen.pigen -o /tmp/pigen-signed-widen.sv
 	iverilog -g2012 -o /tmp/pigen-signed-widen-vvp rtl/pigen_primitives.sv /tmp/pigen-signed-widen.sv tests/signed_widen_tb.sv
 	vvp /tmp/pigen-signed-widen-vvp
+
+ready-break-test:
+	iverilog -g2012 -s ready_break_tb -o /tmp/pigen-ready-break-vvp rtl/pigen_primitives.sv tests/ready_break_tb.sv
+	vvp /tmp/pigen-ready-break-vvp
 
 clear-test:
 	verilator --binary --top-module fifo_discard_tb --Mdir /tmp/pigen-clear-verilator rtl/pigen_primitives.sv tests/fifo_discard_tb.sv

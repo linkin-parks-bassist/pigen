@@ -98,7 +98,9 @@ module pigen_fifo #(
 	logic pop;
 
 	assign out_valid = count != 0;
-	assign in_ready = count != DEPTH_COUNT || (out_valid && out_ready);
+	/* FIFO occupancy, not downstream combinational readiness, controls input
+	 * readiness. This makes every FIFO an explicit ready-chain break. */
+	assign in_ready = count != DEPTH_COUNT;
 	assign packet_out = packets[read_pointer];
 
 	assign push = in_valid && in_ready;
@@ -192,7 +194,9 @@ module pigen_skid #(
 	logic pop;
 
 	assign out_valid = count != 0;
-	assign in_ready = count != 2 || (out_valid && out_ready);
+	/* A skid buffer must register backpressure. Its second slot absorbs the
+	 * item already in flight when the registered occupancy reaches full. */
+	assign in_ready = count != 2;
 	assign packet_out = packets[read_pointer];
 
 	assign push = in_valid && in_ready;

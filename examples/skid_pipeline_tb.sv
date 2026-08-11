@@ -16,6 +16,8 @@ module skid_pipeline_tb;
 	begin
 		if ($time == 15)
 			reset <= 1'b0;
+		if (!reset && dut.queue__pigen_in_ready && offered < 6)
+			offered <= offered + 1;
 
 		if (!reset && dut.queue__pigen_valid && out_ready)
 		begin
@@ -36,11 +38,8 @@ module skid_pipeline_tb;
 	begin
 		if (!reset)
 		begin
-			if ((dut.queue__pigen_in_ready || offered == 2) && offered < 6)
-			begin
+			if (offered < 6)
 				in_packet = offered[7:0];
-				offered++;
-			end
 
 			if ($time >= 55)
 				out_ready = 1'b1;

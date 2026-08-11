@@ -132,8 +132,8 @@ them, not by rebuilding handshake logic.
 | Declaration | Use it when | Important property |
 | --- | --- | --- |
 | `buf [W:0] x;` | One elastic pipeline stage is enough | Holds one item; supports throughput of one item per cycle. |
-| `fifo [W:0][DEPTH] x;` | You need ordered queueing or burst absorption | Holds `DEPTH` items. Payload comes before depth. |
-| `skid [W:0] x;` | You need exactly two elastic slots | A precise two-entry FIFO. |
+| `fifo [W:0][DEPTH] x;` | You need ordered queueing or burst absorption | Holds `DEPTH` items and breaks combinational ready propagation. Payload comes before depth. |
+| `skid [W:0] x;` | You need delayed backpressure absorbed | A two-entry, ready-registered skid buffer. |
 | `port [W:0] x;` | You need a sampled one-cycle result | Valid pulses for one cycle; it does not retain an unaccepted item. |
 | `wire`, `reg`, `logic` | The value is always available or is ordinary control/state | They have degenerate transport semantics when used in a Pigen action. |
 
@@ -211,9 +211,9 @@ buf [7:0] count;
 count <= count + 1'b1; // error: circular ready dependency
 ```
 
-Use ordinary register state or a distinct ready-chain-breaking stage for
-feedback. A FIFO or skid counts as that break only when its implementation
-does not propagate readiness combinationally around the cycle.
+Use ordinary register state or a distinct FIFO or skid stage for feedback.
+Pigen defines both FIFO and skid input readiness from registered occupancy;
+neither propagates output readiness combinationally to its input.
 
 Storage also belongs to the module that declares it. `validate(x);` and
 `invalidate(x);` explicitly set a local transport valid or invalid on the next
