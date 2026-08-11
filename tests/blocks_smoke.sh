@@ -128,6 +128,12 @@ if grep -q '__pigen_force_valid' "$temporary/degenerate-validate.sv"; then
 fi
 iverilog -g2012 -s degenerate_validate -o "$temporary/degenerate-validate" "$temporary/degenerate-validate.sv"
 
+if "$pigen" tests/self_feedback_error.pigen -o "$temporary/self-feedback.sv" 2>"$temporary/self-feedback.err"; then
+    echo 'direct transport self-feedback unexpectedly compiled' >&2
+    exit 1
+fi
+grep -q 'a transport transfer cannot consume its own destination' "$temporary/self-feedback.err"
+
 if "$pigen" tests/reg_invalidate_error.pigen -o "$temporary/reg-invalidate.sv" 2>"$temporary/reg-invalidate.err"; then
     echo 'invalidate(reg) unexpectedly compiled' >&2
     exit 1

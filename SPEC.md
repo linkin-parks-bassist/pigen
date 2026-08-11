@@ -297,11 +297,9 @@ transport identifiers.
 `validate(x)` and `invalidate(x)` are synchronous next-state writes to a local
 stored transport's valid bit. They force `x` valid or invalid, respectively,
 on the next cycle without waiting for downstream readiness. Like non-blocking
-assignments, source order determines the next validity when a transfer and a
-validity action target the same value. For a one-entry `buf`, an accepted
-transfer still updates the payload when a later `invalidate` determines that
-the resulting item is invalid. A later `validate` can therefore expose that
-intentional payload. This makes reset seeding ordinary Pigen code:
+assignments, source order matters: a later accepted transfer to `x` overrides
+an earlier validity action, and a later validity action overrides an earlier
+transfer. This makes reset seeding ordinary Pigen code:
 
 ```systemverilog
 if (reset) begin
@@ -323,6 +321,16 @@ while `invalidate` and `flush` are errors.
 Buffered values have one consumer.  Multiple writes to one destination are
 allowed only when semantic control analysis proves their paths mutually
 exclusive; all other fanout or producer ambiguity is an error.
+
+A consuming transfer group may not read one of its own buffered destinations.
+For example, `x <= x + 1;` is an error: lowering it as an ordinary transport
+transfer would connect `x`'s output-ready route to its own input-ready route.
+The same rule applies when the self-consumption crosses members of a co-sliced
+group. Feedback must instead pass through a distinct element that breaks the
+combinational ready dependency, such as ordinary register state or a storage
+stage specifically implemented as a ready-chain break. More generally, a
+combinational ready-dependency cycle is invalid even when it spans several
+connections.
 
 A co-sliced assignment is one consuming transfer group.  Its top-level LHS
 and RHS concatenations must have the same arity; every LHS item is a distinct

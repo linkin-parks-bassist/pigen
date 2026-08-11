@@ -31,15 +31,12 @@ module df1_biquad_bandpass
 	buf [123:0] feedback_delay;
 	buf [123:0] a2_stage;
 
-	// Elastic history lanes.  Reset seeds valid zero tokens so the feedback
-	// pipeline starts immediately rather than waiting for history to arrive.
-	// Two slots break the ready loop created by consume-and-replace state
-	// updates: the reset seed occupies one slot and the next token can enter.
-	fifo signed [23:0][2] x1;
-	fifo signed [23:0][2] x2;
-	fifo signed [23:0][2] y1;
-	// A plain SV wire mirrors y1 without consuming its buffer token.  The final
-	// co-sliced transfer below consumes and replaces y1 on every output sample.
+	// Ordinary register history breaks the feedback ready chain. The registers
+	// update only as members of accepted co-sliced transfers below.
+	reg signed [23:0] x1;
+	reg signed [23:0] x2;
+	reg signed [23:0] y1;
+	// A plain SV wire mirrors y1 for the earlier feedback stage.
 	wire signed [23:0] y1_view;
 	assign y1_view = y1;
 
@@ -61,14 +58,14 @@ module df1_biquad_bandpass
 	begin
 		if (reset)
 		begin
-			x1 <= '0; validate(x1);
-			x2 <= '0; validate(x2);
-			y1 <= '0; validate(y1);
+			x1 <= '0;
+			x2 <= '0;
+			y1 <= '0;
 		end
 		else
 		begin
-			// Consume and replace both x-history tokens atomically while carrying
-			// their old values in the data packet.
+			// Update both history registers atomically with the accepted sample
+			// while carrying their old values in the data packet.
 			{b0_stage, x1, x2} <= {{52'sd0, sample, x1, x2}, sample, x1};
 
 			// One coefficient multiply and one accumulator add per datapath stage.
@@ -80,7 +77,7 @@ module df1_biquad_bandpass
 			feedback_delay <= feedback_align;
 			a2_stage <= {$signed(feedback_delay[123:72]) - ($signed(y1_view) * A2), feedback_delay[71:0]};
 			// Coupled output/state update: a2_stage is consumed once and the same
-			// saturated y[n] is copied to the stream and the feedback register.
+			// saturated y[n] is copied to the stream and feedback state.
 			{filtered, y1} <=
 				{saturate_q1_23($signed(a2_stage[123:72]) - ($signed(y1) * A1)),
 				 saturate_q1_23($signed(a2_stage[123:72]) - ($signed(y1) * A1))};

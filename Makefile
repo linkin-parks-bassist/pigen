@@ -2,7 +2,7 @@ CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
 
-.PHONY: all clean test block-test verify coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test triggered-counter-waveform clear-test fsm-test
+.PHONY: all clean test block-test verify coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
@@ -15,7 +15,7 @@ test: pigen block-test
 block-test: pigen
 	./tests/blocks_smoke.sh ./pigen
 
-verify: test coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform triggered-counter-waveform clear-test fsm-test
+verify: test coslice-test validate-test signed-widen-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
 
 coslice-test: pigen
 	./pigen tests/coslice.pigen -o /tmp/pigen-coslice.sv
@@ -130,12 +130,6 @@ output-waveform: pigen
 	./pigen examples/output_pipeline.pigen -o examples/output_pipeline.sv
 	verilator --binary --trace --top-module output_pipeline_tb --Mdir /tmp/pigen-output-verilator rtl/pigen_primitives.sv examples/output_pipeline.sv examples/output_pipeline_tb.sv
 	/tmp/pigen-output-verilator/Voutput_pipeline_tb
-
-triggered-counter-waveform: pigen
-	truncate -s 0 tests/triggered_counter.vcd
-	./pigen tests/triggered_counter.pigen -o tests/triggered_counter.sv
-	iverilog -g2012 -s triggered_counter_tb -o /tmp/pigen-triggered-counter-vvp rtl/pigen_primitives.sv tests/triggered_counter.sv tests/triggered_counter_tb.sv
-	vvp /tmp/pigen-triggered-counter-vvp
 
 clean:
 	rm -f pigen

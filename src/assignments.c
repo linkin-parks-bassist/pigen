@@ -7,6 +7,38 @@
 #include "pigen/declarations.h"
 #include "pigen/util.h"
 
+static int expression_mentions(const char *expression, const char *name);
+
+static void reject_direct_transport_feedback(const pigen_transfer *transfer)
+{
+	size_t destination_index;
+	size_t expression_index;
+
+	for (destination_index = 0; destination_index < transfer->count; destination_index++)
+	{
+		const pigen_transfer_item *destination = &transfer->items[destination_index];
+
+		if (!pigen_is_storage_kind(destination->destination_kind))
+			continue;
+		for (expression_index = 0; expression_index < transfer->count; expression_index++)
+		{
+			const pigen_transfer_item *source = &transfer->items[expression_index];
+			char *expression = pigen_copy_range(source->expression, source->expression_length);
+			char *name = pigen_copy_range(destination->destination,
+				destination->destination_length);
+			int mentions_destination = expression_mentions(expression, name);
+
+			free(expression);
+			free(name);
+			if (mentions_destination)
+			{
+				pigen_set_diagnostic_position(destination->destination);
+				pigen_fail("a transport transfer cannot consume its own destination");
+			}
+		}
+	}
+}
+
 static const char *find_top_level_operator(const char *start, const char *end)
 {
 	const char *cursor;
@@ -125,6 +157,7 @@ int pigen_extract_transport_transfer(const char *start, const char *end, pigen_p
 			transfer->items[i] = (pigen_transfer_item){ left_parts[i], left_lengths[i], right_parts[i], right_lengths[i], primitive->kind };
 		}
 		free(left_parts); free(right_parts); free(left_lengths); free(right_lengths);
+		reject_direct_transport_feedback(transfer);
 		return 1;
 	}
 
@@ -147,6 +180,7 @@ int pigen_extract_transport_transfer(const char *start, const char *end, pigen_p
 	transfer->count = 1;
 	transfer->prefix_end = left_start;
 	transfer->items[0] = (pigen_transfer_item){ left_start, (size_t)(left_end - left_start), expression, (size_t)(end - expression), primitive->kind };
+	reject_direct_transport_feedback(transfer);
 	return 1;
 }
 
@@ -246,8 +280,6 @@ int pigen_extract_clear_action(const char *start, const char *end, pigen_primiti
 	*prefix_end = action;
 	return 1;
 }
-
-static int expression_mentions(const char *expression, const char *name);
 
 static int expression_peeks(const char *expression, const char *name)
 {

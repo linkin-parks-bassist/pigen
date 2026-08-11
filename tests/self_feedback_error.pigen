@@ -1,0 +1,11 @@
+module self_feedback_error
+    (
+        input logic clk
+    );
+
+    buf [7:0] count;
+
+    always_ff @(posedge clk)
+        count <= count + 1'b1;
+
+endmodule

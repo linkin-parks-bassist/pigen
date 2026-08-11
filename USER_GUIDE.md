@@ -204,6 +204,17 @@ Pigen construct one unambiguous ready route. If you need to send one item to
 two places, choose the behavior intentionally: duplicate the payload into two
 destinations, add a fork protocol, or make one consumer own the decision.
 
+A transport cannot consume itself in the transfer that writes it:
+
+```systemverilog
+buf [7:0] count;
+count <= count + 1'b1; // error: circular ready dependency
+```
+
+Use ordinary register state or a distinct ready-chain-breaking stage for
+feedback. A FIFO or skid counts as that break only when its implementation
+does not propagate readiness combinationally around the cycle.
+
 Storage also belongs to the module that declares it. `validate(x);` and
 `invalidate(x);` explicitly set a local transport valid or invalid on the next
 clock edge.  They compose in source order with transfers, just like normal
@@ -229,9 +240,7 @@ if (restart)
 ```
 
 `wire`, `reg`, and `logic` are always valid, so validating one is a warned
-no-op. Invalidating or flushing one is an error. For a `buf`, payload and
-validity updates remain distinct: an accepted payload transfer still lands if
-a later `invalidate` makes the resulting item invalid.
+no-op. Invalidating or flushing one is an error.
 
 These are deliberately local-only operations. Normal acceptance still
 propagates through ready chains; use validity actions on storage your module

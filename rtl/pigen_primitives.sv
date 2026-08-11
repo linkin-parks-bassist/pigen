@@ -47,7 +47,7 @@ module pigen_buf #(
 		else if (force_after_transfer && (force_valid || force_invalid))
 		begin
 			packet_valid <= force_valid;
-			if (in_valid && in_ready)
+			if (force_valid && in_valid && in_ready)
 				packet <= packet_in;
 		end
 		else if (in_valid && in_ready)

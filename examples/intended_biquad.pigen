@@ -29,11 +29,11 @@ module df1_biquad_bandpass (
 		logic signed [23:0] x2;
 	} sample_state_t;
 
-	// A skid provides the spare slot needed to consume and replace x1 without
-	// a combinational ready loop.  The tail moves atomically as an ordinary reg.
-	skid signed [23:0] x1_history;
+	// Ordinary register history breaks the feedback ready chain. These values
+	// update only as members of accepted co-sliced transfers below.
+	reg  signed [23:0] x1_history;
 	reg  signed [23:0] x2_history;
-	skid signed [23:0] y1_history;
+	reg  signed [23:0] y1_history;
 
 	buf sample_state_t b0_stage;
 	buf sample_state_t b1_stage;
@@ -59,9 +59,9 @@ module df1_biquad_bandpass (
 
 	always_ff @(posedge clk) begin
 		if (reset) begin
-			x1_history <= '0; validate(x1_history);
+			x1_history <= '0;
 			x2_history <= '0;
-			y1_history <= '0; validate(y1_history);
+			y1_history <= '0;
 		end else begin
 			{b0_stage, x1_history, x2_history} <= {
 				{52'sd0, sample, x1_history, x2_history},
