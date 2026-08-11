@@ -1,46 +1,100 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="2060" height="1055" viewBox="0 0 2060 1055" role="img" aria-labelledby="title desc" data-layout="tree-spring" data-crossings-before="0" data-crossings="0" data-direct-crossings="0">
-  <title id="title">Pigen routing network: routed_fabric</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="2183" height="1300" viewBox="0 0 2183 1300" role="img" aria-labelledby="title desc" data-layout="tree-spring" data-crossings-before="4" data-crossings="1" data-direct-crossings="0">
+  <title id="title">Pigen routing network: readme_fabric</title>
   <desc id="desc">Elaborated source-routed fabric topology, seeded from its router tree and refined with angular snap springs, unit out-pull, and padded collision resolution. Blue links are hard direct connections.</desc>
   <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#52606d"/></marker></defs>
-  <style>text{font-family:ui-monospace,monospace;font-size:13px;fill:#172033}.edge{stroke:#52606d;stroke-width:2.2;fill:none}.direct{stroke:#1479c9;stroke-width:3.4}.port{font-size:11px;fill:#52606d;paint-order:stroke;stroke:#fff;stroke-width:3px}.router{fill:#fff4d6;stroke:#a05a00;stroke-width:2}.unit{fill:#dbeafe;stroke:#1d4ed8;stroke-width:2.5}.label{font-size:12px}.legend{font-size:12px}</style>
-  <text x="24" y="30" font-size="18">fabric routed_fabric — elaborated routing network</text>
-  <line class="edge " data-kind="router-link" data-from="r0" data-to="r1" x1="1445.341" y1="465.612" x2="1618.101" y2="546.438"/>
-  <text class="port" x="1531.721" y="501.025" text-anchor="middle">r0.p0 ↔ r1.p1</text>
-  <line class="edge " data-kind="endpoint-link" data-from="r0" data-to="sink" marker-end="url(#arrow)" x1="1404.117" y1="471.745" x2="1254.711" y2="606.259"/>
-  <text class="port" x="1329.414" y="534.002" text-anchor="middle">r0.p1</text>
-  <line class="edge " data-kind="endpoint-link" data-from="source_a" data-to="r0" marker-end="url(#arrow)" x1="1387.875" y1="254.148" x2="1418.427" y2="430.385"/>
-  <text class="port" x="1403.151" y="337.266" text-anchor="middle">r0.p2</text>
-  <line class="edge " data-kind="endpoint-link" data-from="source_d" data-to="r1" marker-end="url(#arrow)" x1="1815.540" y1="685.972" x2="1660.864" y2="571.873"/>
-  <text class="port" x="1738.202" y="623.923" text-anchor="middle">r1.p2</text>
-  <line class="edge direct" data-kind="direct-link" data-from="direct_src" data-to="direct_dst" data-source="direct_src.tx.direct" data-destination="direct_dst.rx" marker-end="url(#arrow)" x1="237.990" y1="393.793" x2="393.579" y2="238.034"/>
-  <text class="port" x="315.784" y="310.914" text-anchor="middle">direct &gt;</text>
-  <circle class="unit" data-kind="unit" data-unit="direct_dst" cx="434.569" cy="197.000" r="58.000"/>
-  <text class="label" x="434.569" y="202.000" text-anchor="middle">direct_dst</text>
-  <circle data-kind="destination-port" data-endpoint="destination:direct_dst.rx" cx="393.579" cy="238.034" r="4" fill="#1d4ed8"/>
-  <text class="port" data-endpoint="destination:direct_dst.rx" x="383.685" y="251.939" text-anchor="end">in rx</text>
-  <circle class="unit" data-kind="unit" data-unit="direct_src" cx="197.000" cy="434.828" r="58.000"/>
-  <text class="label" x="197.000" y="439.828" text-anchor="middle">direct_src</text>
-  <circle data-kind="source-port" data-endpoint="source:direct_src.tx.direct" cx="237.990" cy="393.793" r="4" fill="#1d4ed8"/>
-  <text class="port" data-endpoint="source:direct_src.tx.direct" x="247.884" y="387.888" text-anchor="start">out tx.direct</text>
-  <circle class="unit" data-kind="unit" data-unit="sink" cx="1211.607" cy="645.066" r="58.000"/>
-  <text class="label" x="1211.607" y="650.066" text-anchor="middle">sink</text>
-  <circle data-kind="destination-port" data-endpoint="destination:sink.rx" cx="1254.711" cy="606.259" r="4" fill="#1d4ed8"/>
-  <text class="port" data-endpoint="destination:sink.rx" x="1265.116" y="600.891" text-anchor="start">in rx</text>
-  <circle class="unit" data-kind="unit" data-unit="source_a" cx="1377.969" cy="197.000" r="58.000"/>
-  <text class="label" x="1377.969" y="202.000" text-anchor="middle">source_a</text>
-  <circle data-kind="source-port" data-endpoint="source:source_a.tx.to_sink" cx="1387.875" cy="254.148" r="4" fill="#1d4ed8"/>
-  <text class="port" data-endpoint="source:source_a.tx.to_sink" x="1390.267" y="271.942" text-anchor="middle">out tx.to_sink</text>
-  <circle class="unit" data-kind="unit" data-unit="source_d" cx="1862.215" cy="720.402" r="58.000"/>
-  <text class="label" x="1862.215" y="725.402" text-anchor="middle">source_d</text>
-  <circle data-kind="source-port" data-endpoint="source:source_d.tx.to_sink" cx="1815.540" cy="685.972" r="4" fill="#1d4ed8"/>
-  <text class="port" data-endpoint="source:source_d.tx.to_sink" x="1804.273" y="681.661" text-anchor="end">out tx.to_sink</text>
-  <circle class="router" data-kind="router" data-router="r0" cx="1422.697" cy="455.017" r="25"/>
-  <text x="1422.697" y="460.017" text-anchor="middle">r0</text>
-  <circle class="router" data-kind="router" data-router="r1" cx="1640.746" cy="557.032" r="25"/>
-  <text x="1640.746" y="562.032" text-anchor="middle">r1</text>
-  <text class="legend" x="24" y="963">connections:</text>
-  <text class="legend" x="45" y="983">direct_src.tx.direct &gt; direct_dst.rx (direct)</text>
-  <text class="legend" x="45" y="1003">source_a.tx.to_sink -&gt; sink.rx (hops=1 path=0b01)</text>
-  <text class="legend" x="45" y="1023">source_d.tx.to_sink --&gt; sink.rx (hops=2 path=0b01)</text>
+  <style>text{font-family:ui-monospace,monospace;font-size:24px;fill:#172033}.edge{stroke:#52606d;stroke-width:2.2;fill:none}.direct{stroke:#1479c9;stroke-width:3.4}.port{font-size:22px;fill:#52606d;paint-order:stroke;stroke:#fff;stroke-width:3px}.router{fill:#fff4d6;stroke:#a05a00;stroke-width:2}.unit{fill:#dbeafe;stroke:#1d4ed8;stroke-width:2.5}.label{font-size:24px}.legend{font-size:12px}</style>
+  <text x="24" y="30" font-size="30">fabric readme_fabric — elaborated routing network</text>
+  <line class="edge " data-kind="router-link" data-from="r0" data-to="r5" x1="489.789" y1="787.318" x2="740.244" y2="530.237"/>
+  <text class="port" x="615.017" y="653.778" text-anchor="middle">r0.p0 ↔ r5.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="r0" data-to="display" marker-end="url(#arrow)" x1="452.814" y1="820.832" x2="242.309" y2="989.058"/>
+  <text class="port" x="347.561" y="899.945" text-anchor="middle">r0.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="r0" data-to="logger" marker-end="url(#arrow)" x1="481.993" y1="828.288" x2="599.920" y2="1110.122"/>
+  <text class="port" x="540.956" y="964.205" text-anchor="middle">r0.p2</text>
+  <line class="edge " data-kind="router-link" data-from="r1" data-to="r5" x1="1001.009" y1="813.796" x2="773.392" y2="531.784"/>
+  <text class="port" x="887.200" y="667.790" text-anchor="middle">r1.p0 ↔ r5.p2</text>
+  <line class="edge " data-kind="endpoint-link" data-from="r1" data-to="monitor" marker-end="url(#arrow)" x1="1012.410" y1="857.877" x2="959.259" y2="1162.243"/>
+  <text class="port" x="985.834" y="1005.060" text-anchor="middle">r1.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="r1" data-to="processor" marker-end="url(#arrow)" x1="1041.665" y1="831.736" x2="1351.694" y2="812.926"/>
+  <text class="port" x="1196.679" y="817.331" text-anchor="middle">r1.p2</text>
+  <line class="edge " data-kind="router-link" data-from="r2" data-to="r6" x1="1705.820" y1="439.295" x2="1482.169" y2="195.425"/>
+  <text class="port" x="1593.994" y="312.360" text-anchor="middle">r2.p0 ↔ r6.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="r2" data-to="processor" marker-end="url(#arrow)" x1="1706.234" y1="476.516" x2="1456.115" y2="761.744"/>
+  <text class="port" x="1581.175" y="614.130" text-anchor="middle">r2.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="capture" data-to="r2" marker-end="url(#arrow)" x1="1943.606" y1="664.703" x2="1740.960" y2="474.814"/>
+  <text class="port" x="1842.283" y="564.758" text-anchor="middle">r2.p2</text>
+  <line class="edge " data-kind="router-link" data-from="r3" data-to="r6" x1="1466.392" y1="383.471" x2="1465.407" y2="202.000"/>
+  <text class="port" x="1465.900" y="287.735" text-anchor="middle">r3.p0 ↔ r6.p2</text>
+  <line class="edge " data-kind="endpoint-link" data-from="control" data-to="r3" marker-end="url(#arrow)" x1="1676.618" y1="767.432" x2="1479.156" y2="430.047"/>
+  <text class="port" x="1577.887" y="593.739" text-anchor="middle">r3.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="processor" data-to="r3" marker-end="url(#arrow)" x1="1429.284" y1="747.852" x2="1463.313" y2="433.263"/>
+  <text class="port" x="1446.299" y="585.557" text-anchor="middle">r3.p2</text>
+  <line class="edge " data-kind="router-link" data-from="r4" data-to="r8" x1="1428.969" y1="550.218" x2="1375.932" y2="387.813"/>
+  <text class="port" x="1402.451" y="464.015" text-anchor="middle">r4.p0 ↔ r8.p2</text>
+  <line class="edge " data-kind="endpoint-link" data-from="processor" data-to="r4" marker-end="url(#arrow)" x1="1413.041" y1="746.130" x2="1434.385" y2="598.873"/>
+  <text class="port" x="1423.713" y="667.501" text-anchor="middle">r4.p1</text>
+  <line class="edge " data-kind="endpoint-link" data-from="processor" data-to="r4" marker-end="url(#arrow)" x1="1421.219" y1="746.462" x2="1434.385" y2="598.873"/>
+  <text class="port" x="1427.802" y="667.668" text-anchor="middle">r4.p2</text>
+  <line class="edge " data-kind="router-link" data-from="r5" data-to="r7" x1="775.312" y1="494.597" x2="1070.159" y2="197.898"/>
+  <text class="port" x="922.736" y="341.248" text-anchor="middle">r5.p0 ↔ r7.p1</text>
+  <line class="edge " data-kind="router-link" data-from="r6" data-to="r7" x1="1440.272" y1="177.210" x2="1112.781" y2="179.956"/>
+  <text class="port" x="1276.527" y="173.583" text-anchor="middle">r6.p0 ↔ r7.p2</text>
+  <line class="edge " data-kind="router-link" data-from="r7" data-to="r8" x1="1108.687" y1="193.875" x2="1347.266" y2="350.338"/>
+  <text class="port" x="1227.976" y="267.107" text-anchor="middle">r7.p0 ↔ r8.p1</text>
+  <line class="edge direct" data-kind="direct-link" data-from="monitor" data-to="logger" data-source="monitor.alert.logger" data-destination="logger.alert" marker-end="url(#arrow)" x1="892.106" y1="1209.630" x2="679.482" y2="1173.376"/>
+  <text class="port" x="785.794" y="1186.503" text-anchor="middle">direct &gt;</text>
+  <circle class="unit" data-kind="unit" data-unit="capture" cx="1985.929" cy="704.361" r="58.000"/>
+  <text class="label" x="1985.929" y="709.361" text-anchor="middle">capture</text>
+  <circle data-kind="source-port" data-endpoint="source:capture.samples.main" cx="1943.606" cy="664.703" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:capture.samples.main" x="1933.390" y="659.130" text-anchor="end">out samples.main</text>
+  <circle class="unit" data-kind="unit" data-unit="control" cx="1705.914" cy="817.489" r="58.000"/>
+  <text class="label" x="1705.914" y="822.489" text-anchor="middle">control</text>
+  <circle data-kind="source-port" data-endpoint="source:control.settings.main" cx="1676.618" cy="767.432" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:control.settings.main" x="1669.546" y="759.349" text-anchor="end">out settings.main</text>
+  <circle class="unit" data-kind="unit" data-unit="display" cx="197.000" cy="1025.267" r="58.000"/>
+  <text class="label" x="197.000" y="1030.267" text-anchor="middle">display</text>
+  <circle data-kind="destination-port" data-endpoint="destination:display.pixels" cx="242.309" cy="989.058" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="destination:display.pixels" x="253.246" y="984.318" text-anchor="start">in pixels</text>
+  <circle class="unit" data-kind="unit" data-unit="logger" cx="622.308" cy="1163.627" r="58.000"/>
+  <text class="label" x="622.308" y="1168.627" text-anchor="middle">logger</text>
+  <circle data-kind="destination-port" data-endpoint="destination:logger.alert" cx="679.482" cy="1173.376" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="destination:logger.alert" x="693.283" y="1179.729" text-anchor="start">in alert</text>
+  <circle data-kind="destination-port" data-endpoint="destination:logger.events" cx="599.920" cy="1110.122" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="destination:logger.events" x="594.516" y="1101.207" text-anchor="end">in events</text>
+  <circle class="unit" data-kind="unit" data-unit="monitor" cx="949.281" cy="1219.378" r="58.000"/>
+  <text class="label" x="949.281" y="1224.378" text-anchor="middle">monitor</text>
+  <circle data-kind="destination-port" data-endpoint="destination:monitor.metrics" cx="959.259" cy="1162.243" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="destination:monitor.metrics" x="961.667" y="1152.452" text-anchor="middle">in metrics</text>
+  <circle data-kind="source-port" data-endpoint="source:monitor.alert.logger" cx="892.106" cy="1209.630" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:monitor.alert.logger" x="878.305" y="1211.277" text-anchor="end">out alert.logger</text>
+  <circle class="unit" data-kind="unit" data-unit="processor" cx="1414.578" cy="809.111" r="63.000"/>
+  <text class="label" x="1414.578" y="814.111" text-anchor="middle">processor</text>
+  <circle data-kind="destination-port" data-endpoint="destination:processor.samples" cx="1351.694" cy="812.926" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="destination:processor.samples" x="1337.719" y="817.774" text-anchor="end">in samples</text>
+  <circle data-kind="destination-port" data-endpoint="destination:processor.settings" cx="1456.115" cy="761.744" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="destination:processor.settings" x="1465.346" y="755.218" text-anchor="start">in settings</text>
+  <circle data-kind="source-port" data-endpoint="source:processor.events.logger" cx="1429.284" cy="747.852" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:processor.events.logger" x="1441.889" y="699.344" text-anchor="middle">out events.logger</text>
+  <circle data-kind="source-port" data-endpoint="source:processor.metrics.monitor" cx="1413.041" cy="746.130" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:processor.metrics.monitor" x="1412.700" y="736.134" text-anchor="middle">out metrics.monitor</text>
+  <circle data-kind="source-port" data-endpoint="source:processor.preview.display" cx="1421.219" cy="746.462" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:processor.preview.display" x="1424.803" y="716.652" text-anchor="middle">out preview.display</text>
+  <circle class="router" data-kind="router" data-router="r0" cx="472.343" cy="805.225" r="25"/>
+  <text x="472.343" y="810.225" text-anchor="middle">r0</text>
+  <circle class="router" data-kind="router" data-router="r1" cx="1016.711" cy="833.250" r="25"/>
+  <text x="1016.711" y="838.250" text-anchor="middle">r1</text>
+  <circle class="router" data-kind="router" data-router="r2" cx="1722.717" cy="457.720" r="25"/>
+  <text x="1722.717" y="462.720" text-anchor="middle">r2</text>
+  <circle class="router" data-kind="router" data-router="r3" cx="1466.528" cy="408.470" r="25"/>
+  <text x="1466.528" y="413.470" text-anchor="middle">r3</text>
+  <circle class="router" data-kind="router" data-router="r4" cx="1436.730" cy="573.983" r="25"/>
+  <text x="1436.730" y="578.983" text-anchor="middle">r4</text>
+  <circle class="router" data-kind="router" data-router="r5" cx="757.690" cy="512.330" r="25"/>
+  <text x="757.690" y="517.330" text-anchor="middle">r5</text>
+  <circle class="router" data-kind="router" data-router="r6" cx="1465.272" cy="177.000" r="25"/>
+  <text x="1465.272" y="182.000" text-anchor="middle">r6</text>
+  <circle class="router" data-kind="router" data-router="r7" cx="1087.782" cy="180.165" r="25"/>
+  <text x="1087.782" y="185.165" text-anchor="middle">r7</text>
+  <circle class="router" data-kind="router" data-router="r8" cx="1368.171" cy="364.048" r="25"/>
+  <text x="1368.171" y="369.048" text-anchor="middle">r8</text>
 </svg>

@@ -20,7 +20,7 @@ Syntax, generated names, interfaces, and emitted RTL may change incompatibly.
 Changes replace the old behavior outright; only the current language and
 compiler behavior are supported.
 
-<img src="docs/fabric.svg" alt="A small Pigen fabric with direct and routed connections" width="720">
+<img src="docs/fabric.svg" alt="A branching Pigen fabric with direct and routed connections" width="900">
 
 ## A small example
 

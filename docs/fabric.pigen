@@ -1,0 +1,12 @@
+fabric readme_fabric #(
+    parameter integer PAYLOAD_W = 32
+) begin
+    capture.samples.main -> processor.samples;
+    control.settings.main --> processor.settings;
+
+    processor.preview.display -> display.pixels;
+    processor.events.logger --> logger.events;
+    processor.metrics.monitor -> monitor.metrics;
+
+    monitor.alert.logger > logger.alert;
+endfabric
