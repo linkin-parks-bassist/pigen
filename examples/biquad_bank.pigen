@@ -84,76 +84,32 @@ module biquad_pipeline
 				coefs_valid[coef_write_port.handle] <= 1'b1;
 			end
 
-			pipeline bqd_pipeline {handle_in_, coef_read, sample_in_, state_read}
-					yields {handle_out, acc_out, state_out} begin
+			pipeline bqd_pipeline {handle_in_, coef_read, sample_in_, state_read} yields {handle_out, acc_out, state_out} begin
+				sample_t x0, x1, x2, y1, y2, acc_out;
 				handle_t handle, handle_out;
 				coef_t b0, b1, b2, a1, a2;
-				sample_t x0, x1, x2, y1, y2, acc_out;
 				state_t state_out;
 				acc_t acc;
 
-				stage {
-					handle,
-					b0, b1, b2,
-					a1, a2,
-					x0, x1, x2,
-					y1, y2,
-					} yields {
-						handle,
-						acc,
-						a1, a2,
-						x0, x1,
-						y1, y2,
-					} begin
-						acc = b0 * x0 + b1 * x1 + b2 * x2;
-					end
+				stage {handle, b0, b1, b2, a1, a2, x0, x1, x2, y1, y2} yields {handle, acc, a1, a2, x0, x1, y1, y2} begin
+					acc = b0 * x0 + b1 * x1 + b2 * x2;
+				end
 
-				stage {
-					handle,
-					acc,
-					a1, a2,
-					x0, x1,
-					y1, y2,
-					} yields {
-						handle,
-						acc,
-						x0, x1,
-						y1, y2,
-					} begin
-						acc = acc + a1 * y1 + a2 * y2;
-					end
+				stage {handle, acc, a1, a2, x0, x1, y1, y2} yields {handle, acc, x0, x1, y1, y2} begin
+					acc = acc + a1 * y1 + a2 * y2;
+				end
 
-				stage {
-					handle,
-					acc,
-						x0,
-						x1, y1, y2,
-				} yields {
-						handle,
-						acc,
-						x0, x1, y1,
-					y2,
-				};
+				stage {handle, acc, x0, x1, y1, y2} yields {handle, acc, x0, x1, y1, y2};
 
-				stage {
-						handle,
-						acc,
-						x0, x1,
-						y1, y2,
-					} yields {
-						handle_out,
-						sample_t acc_out,
-						state_out
-					} begin
-						handle_out = handle;
-						acc_out = (acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1)) > SAT_MAX ? SAT_MAX :
-							((acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1)) < SAT_MIN ? SAT_MIN :
-							(acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1)));
-						state_out = {x0, x1, acc_out, y1};
+				stage {handle, acc, x0, x1, y1, y2} yields {handle_out, sample_t acc_out, state_out} begin
+					acc_t acc_sh;
+					handle_out = handle;
+					acc_sh = acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1);
+					acc_out = acc_sh > SAT_MAX ? SAT_MAX : (acc_sh < SAT_MIN ? SAT_MIN : acc_sh);
+					state_out = {x0, x1, acc_out, y1};
 				end
 			endpipeline
 
-			// Equivalent to {bqd_out, state_mem[handle_out]} <= {acc_out, state_out};
 			transfer begin
 				bqd_out <= acc_out;
 				state_mem[handle_out] <= state_out;

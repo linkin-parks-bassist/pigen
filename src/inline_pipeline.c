@@ -597,10 +597,17 @@ static void append_pipeline_rtl(pigen_string *out, inline_pipeline *pipe,
 			}
 		if (i) { char name[128]; snprintf(name, sizeof(name), "%s__s%zu_packet", pipe->name, i - 1); append_local_unpack(out, name, stage->inputs, stage->input_count); }
 		else append_local_unpack(out, packet, stage->inputs, stage->input_count);
-		if (stage->body) pigen_append(out, stage->body);
-		pigen_append(out, "\n\t\t"); pigen_append_format(out, "%s__s%zu_comb = {", pipe->name, i);
+		/* A stage body has its own lexical scope. Besides matching the language
+		 * model, this permits ordinary local declarations after the generated
+		 * unpack assignments without violating SV's declaration-before-statement
+		 * rule in the enclosing always_comb block. */
+		if (stage->body) { pigen_append(out, "\t\tbegin\n"); pigen_append(out, stage->body); pigen_append(out, "\n\t\t"); }
+		else pigen_append(out, "\n\t\t");
+		pigen_append_format(out, "%s__s%zu_comb = {", pipe->name, i);
 		for (size_t j = 0; j < stage->output_count; j++) { if (j) pigen_append(out, ", "); pigen_append(out, stage->outputs[j].text); }
-		pigen_append(out, "};\n\tend\n");
+		pigen_append(out, "};\n");
+		if (stage->body) pigen_append(out, "\t\tend\n");
+		pigen_append(out, "\tend\n");
 		pigen_append(out, "\talways_ff @("); pigen_append(out, domain); pigen_append(out, ") begin\n\t\tif (");
 		pigen_append(out, reset);
 		pigen_append_format(out, ") begin %s__s%zu_valid <= 1'b0; %s__s%zu_packet <= '0; end\n", pipe->name, i, pipe->name, i);
