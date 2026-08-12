@@ -107,6 +107,12 @@ from the parser or lowering.
   that destination requires. This needs parsed typed expression nodes rather
   than the current token-level lowering, and should eliminate source-level
   width casts such as `acc_t'(a1)` in ordinary pipeline code.
+- [ ] Add packet-field liveness pruning to inline pipeline elaboration. Source
+  code should be free to carry one readable aggregate packet/struct across
+  stages and modify the fields it cares about; after type and dependency
+  analysis, emitted stage packets should retain only fields needed by a later
+  expression or exported output. Preserve all fields when analysis is unsure,
+  and make the optimisation visible/auditable in generated RTL.
 - [x] Validate the fixed-point arithmetic model in `examples/biquad_bank.pigen`
   against a reference model. The regression loads eight independent coefficient
   sets, captures external per-filter traces, proves an initial full-rate burst,
