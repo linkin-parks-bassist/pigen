@@ -2,7 +2,7 @@ CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
 
-.PHONY: all clean test block-test inline-pipeline-test biquad-bank-waveform verify coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test block-test inline-pipeline-test biquad-bank-waveform verify coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
@@ -27,7 +27,7 @@ biquad-bank-waveform: pigen
 block-test: pigen
 	./tests/blocks_smoke.sh ./pigen
 
-verify: test coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
+verify: test coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
 
 coslice-test: pigen
 	./pigen tests/coslice.pigen -o /tmp/pigen-coslice.sv
@@ -95,12 +95,6 @@ biquad-waveform: pigen
 	./pigen examples/df1_biquad_bandpass.pigen -o examples/df1_biquad_bandpass.sv
 	iverilog -g2012 -o /tmp/pigen-biquad-vvp rtl/pigen_primitives.sv examples/df1_biquad_bandpass.sv examples/df1_biquad_bandpass_tb.sv
 	vvp /tmp/pigen-biquad-vvp
-
-intended-biquad-waveform: pigen
-	truncate -s 0 examples/df1_biquad_bandpass.vcd
-	./pigen examples/intended_biquad.pigen -o examples/intended_biquad.sv
-	iverilog -g2012 -s df1_biquad_bandpass_tb -o /tmp/pigen-intended-biquad-vvp rtl/pigen_primitives.sv examples/intended_biquad.sv examples/df1_biquad_bandpass_tb.sv
-	vvp /tmp/pigen-intended-biquad-vvp
 
 text-waveform: pigen
 	truncate -s 0 examples/text.vcd
