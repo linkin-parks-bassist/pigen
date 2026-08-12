@@ -122,6 +122,14 @@ emits an elaboration-time `$bits` check. A yielded expression can inherit its
 type from a same-position next-stage item only across equal arity; when a stage
 repartitions, give the computed value an explicit typed name first.
 
+This is a deliberately temporary limitation. The intended eventual rule is
+contextual expression typing: where flattened packet layout uniquely determines
+the receiving bit range, an in-place yielded expression inherits that range's
+width and signedness. Arithmetic then follows the ordinary destination context
+for extension, truncation, and signedness, without requiring user-facing casts.
+Implementing that correctly requires parsed typed expression nodes, not just
+the current token-level lowering.
+
 Pipeline-local declarations establish the types of names once for the entire
 pipeline. A bare name at any stage boundary uses that established type. The
 same type association may instead be introduced or restated inline in either

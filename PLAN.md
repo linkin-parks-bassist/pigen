@@ -100,6 +100,13 @@ from the parser or lowering.
   whose pending handshake stalls that stage, plus an explicit `stall();`
   directive. Do not add an implicit pipeline `busy` mechanism; independent
   packets must remain dispatchable every cycle when ready/valid permits.
+- [ ] Add contextual expression typing for packed transport and inline-pipeline
+  outputs. A yielded expression should inherit the uniquely determined
+  destination bit range's width and signedness, including across a stage
+  repartition; arithmetic should then extend, truncate, and sign-propagate as
+  that destination requires. This needs parsed typed expression nodes rather
+  than the current token-level lowering, and should eliminate source-level
+  width casts such as `acc_t'(a1)` in ordinary pipeline code.
 - [x] Validate the fixed-point arithmetic model in `examples/biquad_bank.pigen`
   against a reference model. The regression loads eight independent coefficient
   sets, captures external per-filter traces, proves an initial full-rate burst,
