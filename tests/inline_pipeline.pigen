@@ -1,0 +1,27 @@
+module inline_pipeline(
+    input logic clk,
+    input logic reset,
+    input logic enable,
+    input buf [7:0] source,
+    output buf [7:0] destination
+);
+    typedef logic [7:0] octet;
+
+    always @(posedge clk) begin
+        if (reset) begin
+            pipeline_reset(pipe);
+        end else if (enable) begin
+            pipeline pipe {source} yields {result} begin
+                octet value, rejoined, result;
+                stage {octet value} yields {logic [3:0] upper, logic [3:0] lower} begin
+                    upper = value[7:4];
+                    lower = value[3:0];
+                end
+                stage {octet rejoined} yields {octet result} begin
+                    result = rejoined + 8'd1;
+                end
+            endpipeline
+            destination <= result;
+        end
+    end
+endmodule

@@ -336,6 +336,21 @@ void pigen_add_assignment(pigen_assignments *assignments, const char *destinatio
 		guard, guard_length, domain, domain_length, destination_kind, assignments->next_group++, order);
 }
 
+void pigen_add_width_check(pigen_width_checks *checks, const char *lhs, size_t lhs_length,
+	const char *rhs, size_t rhs_length, size_t group)
+{
+	if (checks->count == checks->capacity)
+	{
+		checks->capacity = checks->capacity ? checks->capacity * 2 : 16;
+		checks->items = pigen_resize(checks->items,
+			checks->capacity * sizeof(*checks->items));
+	}
+	checks->items[checks->count].lhs = pigen_copy_range(lhs, lhs_length);
+	checks->items[checks->count].rhs = pigen_copy_range(rhs, rhs_length);
+	checks->items[checks->count].group = group;
+	checks->count++;
+}
+
 void pigen_add_clear(pigen_clears *clears, const char *target, size_t target_length,
 			     const char *guard, size_t guard_length, const char *domain, size_t domain_length, int action_kind, size_t order)
 {

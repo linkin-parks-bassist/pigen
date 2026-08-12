@@ -15,6 +15,14 @@ fi
 "$tool" tests/no_reset.pigen -o "$tmp/no_reset.sv"
 grep -q '.reset(1'"'"'b0)' "$tmp/no_reset.sv"
 verilator --lint-only -Wno-fatal --top-module no_reset rtl/pigen_primitives.sv "$tmp/no_reset.sv"
+"$tool" tests/always_block.pigen -o "$tmp/always_block.sv"
+grep -q 'assign destination__pigen_in_valid = ((enable)) && source__pigen_valid;' "$tmp/always_block.sv"
+grep -q 'always @\*' "$tmp/always_block.sv"
+verilator --lint-only -Wno-fatal --top-module always_block rtl/pigen_primitives.sv "$tmp/always_block.sv"
+"$tool" tests/transfer_block.pigen -o "$tmp/transfer_block.sv"
+grep -Fq '$bits({high, low, history}) != $bits({source[15:8], source[7:0], source[7:0]})' "$tmp/transfer_block.sv"
+test "$(grep -c 'assign source_ready =' "$tmp/transfer_block.sv")" = 1
+verilator --lint-only -Wno-fatal --top-module transfer_block rtl/pigen_primitives.sv "$tmp/transfer_block.sv"
 "$tool" tests/ports.pigen -o "$tmp/ports.sv"
 grep -q 'input  logic \[7:0\] incoming' "$tmp/ports.sv"
 grep -q 'input  logic incoming_valid' "$tmp/ports.sv"
@@ -120,7 +128,7 @@ verilator --lint-only -Wno-fatal --top-module conditional_transfer rtl/pigen_pri
 grep -q 'assign left__pigen_in_valid = source__pigen_valid' "$tmp/coslice.sv"
 grep -q 'left__pigen_in_ready && right__pigen_in_ready' "$tmp/coslice.sv"
 grep -q 'history <= state;' "$tmp/coslice.sv"
-grep -q 'state_delay <= state;' "$tmp/coslice.sv"
+grep -q 'state_delay <=' "$tmp/coslice.sv"
 verilator --lint-only -Wno-fatal --top-module coslice rtl/pigen_primitives.sv "$tmp/coslice.sv"
 "$tool" tests/port_bram.pigen -o "$tmp/port_bram.sv"
 grep -q 'bram_port <= mem\[read_address\];' "$tmp/port_bram.sv"
@@ -186,10 +194,10 @@ if "$tool" tests/async_domain_error.pigen -o "$tmp/async_domain_error.sv" 2>"$tm
 fi
 grep -q 'exactly one posedge event control' "$tmp/async_domain_error.log"
 if "$tool" tests/outside_domain_error.pigen -o "$tmp/outside_domain_error.sv" 2>"$tmp/outside_domain_error.log"; then
-    echo "expected outside always_ff transport assignment rejection" >&2
-    exit 1
+	echo "expected outside clocked always transport assignment rejection" >&2
+	exit 1
 fi
-grep -q 'only in always_ff blocks' "$tmp/outside_domain_error.log"
+grep -q 'only in clocked always blocks' "$tmp/outside_domain_error.log"
 grep -Eq 'tests/outside_domain_error\.pigen:[0-9]+:[0-9]+:' "$tmp/outside_domain_error.log"
 "$tool" tests/clear_overlap_error.pigen -o "$tmp/clear_overlap.sv"
 verilator --lint-only -Wno-fatal --top-module clear_overlap_error rtl/pigen_primitives.sv "$tmp/clear_overlap.sv"

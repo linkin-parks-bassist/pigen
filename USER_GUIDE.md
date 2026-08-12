@@ -29,7 +29,7 @@ A `.pigen` file can also declare stage-oriented `pipeline` units and routed
 ## The central idea
 
 Pigen transport values carry a payload plus a ready/valid contract. Inside an
-`always_ff @(posedge ...)` block, this:
+clocked `always @(posedge ...)` block (`always_ff` is also accepted), this:
 
 ```systemverilog
 next_stage <= current_stage;
@@ -115,7 +115,7 @@ module increment_pipe
 
     buf [15:0] work;
 
-    always_ff @(posedge clk)
+    always @(posedge clk)
     begin
         work <= incoming + 16'd1;
         outgoing <= work;
@@ -154,7 +154,7 @@ Use normal SV controls around transfers. A guarded route stays inactive until
 its guard is true; meanwhile the source retains its item.
 
 ```systemverilog
-always_ff @(posedge clk)
+always @(posedge clk)
 begin
     if (issue_request)
         requests <= request;
@@ -296,7 +296,7 @@ That is useful for timing-friendly synchronous memory reads.
 reg [31:0] mem [0:255];
 port [31:0] read_data;
 
-always_ff @(posedge clk)
+always @(posedge clk)
 begin
     if (read_enable)
         read_data <= mem[read_address];
@@ -314,7 +314,7 @@ You can consume an input transport directly in a conventional memory write:
 input port [31:0] write_data;
 reg [31:0] mem [0:255];
 
-always_ff @(posedge clk)
+always @(posedge clk)
     mem[write_address] <= write_data;
 ```
 
@@ -352,7 +352,8 @@ its enclosing guard; it does not implicitly wait for a transfer, so use
 1. Start with named `buf` stages. Add a `fifo` only where you need deliberate
    queue depth, and a `skid` where two slots are exactly what the timing path
    needs.
-2. Keep Pigen actions inside one `always_ff @(posedge clock)` domain. A
+2. Keep Pigen actions inside one `always @(posedge clock)` domain. `always_ff`
+   is also accepted. A
    transport binds to the first domain that uses it; crossing domains is an
    error rather than an accidental CDC.
 3. Treat `valid`, `ready`, and `accepts` as control observations. Prefer a
@@ -397,11 +398,39 @@ if ({packet, history} <= {{sample, history}, peek(sample)})
     previous_history <= history;
 ```
 
-The top-level braces have matching arity.  Nested braces are ordinary packing,
-so the example stores an assembled packet and the raw sample on the same edge.
+The braces describe ordinary packed bit streams. Only the total LHS and RHS
+widths must match; item counts and individual widths may differ. The leftmost
+destination receives the most-significant portion. Thus `{header, body} <=
+packet` splits one packet atomically, while `packet <= {header, body}` joins two
+sources atomically. Nested braces are ordinary packing, so the example stores
+an assembled packet and the raw sample on the same edge.
 `peek(sample)` is a raw, non-consuming payload read: it adds neither valid nor
 ready logic.  Use it under `valid(...)`, `accepts(...)`, or a grouped transfer
 when the sampled value must correspond to a real token.
+
+A payload slice still consumes its complete base token. For example,
+`byte <= packet[7:0]` invalidates the whole accepted `packet`, not just its low
+byte. To split one token safely, put every projection in the same transfer:
+
+```systemverilog
+{upper, lower} <= {packet[15:8], packet[7:0]};
+```
+
+Constants contribute payload bits but no handshake state; as sources they are
+always valid and are never consumed.
+
+Ordinary `reg`/`logic` state, packed members, and memory elements can be mixed
+into the destination concatenation. They are always-ready members and update
+only when the same atomic transfer fires:
+
+```systemverilog
+{packet_out, status[3:0], history[index]} <= source_packet;
+```
+
+A buffered destination must still be written whole; a partial write would give
+its one valid bit no coherent packet meaning. Pure ordinary-SV assignments are
+not subjected to transport ownership rules, so normal source-ordered
+nonblocking assignment behavior remains intact.
 
 ## Where to look next
 

@@ -2,25 +2,45 @@ CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
 
-.PHONY: all clean test block-test verify coslice-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test block-test inline-pipeline-test biquad-bank-waveform verify coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
-pigen: src/pigen.c src/blocks.c src/fabric_svg.inc src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
-	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/fsm.c src/lexer.c src/util.c $(LDLIBS)
+pigen: src/pigen.c src/blocks.c src/fabric_svg.inc src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/inline_pipeline.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/transfer.h include/pigen/inline_pipeline.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
+	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/inline_pipeline.c src/fsm.c src/lexer.c src/util.c $(LDLIBS)
 
-test: pigen block-test
+test: pigen block-test inline-pipeline-test
 	./tests/smoke.sh ./pigen
+
+inline-pipeline-test: pigen
+	./pigen tests/inline_pipeline.pigen -o /tmp/pigen-inline-pipeline.sv
+	grep -q 'if ((reset)) begin pipe__s0_valid' /tmp/pigen-inline-pipeline.sv
+	iverilog -g2012 -o /tmp/pigen-inline-pipeline-vvp rtl/pigen_primitives.sv /tmp/pigen-inline-pipeline.sv tests/inline_pipeline_tb.sv
+	vvp /tmp/pigen-inline-pipeline-vvp
+
+biquad-bank-waveform: pigen
+	truncate -s 0 examples/biquad_bank.vcd
+	./pigen examples/biquad_bank.pigen -o examples/biquad_bank.sv
+	verilator --binary --trace --trace-depth 1 --trace-max-array 0 -Wno-fatal --top-module biquad_bank_tb --Mdir /tmp/pigen-biquad-bank-verilator rtl/pigen_primitives.sv examples/biquad_bank.sv examples/biquad_bank_tb.sv
+	/tmp/pigen-biquad-bank-verilator/Vbiquad_bank_tb
 
 block-test: pigen
 	./tests/blocks_smoke.sh ./pigen
 
-verify: test coslice-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
+verify: test coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform intended-biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
 
 coslice-test: pigen
 	./pigen tests/coslice.pigen -o /tmp/pigen-coslice.sv
 	iverilog -g2012 -o /tmp/pigen-coslice-vvp rtl/pigen_primitives.sv /tmp/pigen-coslice.sv tests/coslice_tb.sv
 	vvp /tmp/pigen-coslice-vvp
+
+slicing-test: pigen
+	./pigen tests/slicing_concat.pigen -o /tmp/pigen-slicing-concat.sv
+	iverilog -g2012 -o /tmp/pigen-slicing-concat-vvp rtl/pigen_primitives.sv /tmp/pigen-slicing-concat.sv tests/slicing_concat_tb.sv
+	vvp /tmp/pigen-slicing-concat-vvp
+
+transport-syntax-test: pigen
+	./tests/transport_syntax.sh ./pigen
 
 validate-test: pigen
 	./pigen tests/validate.pigen -o /tmp/pigen-validate.sv

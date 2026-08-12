@@ -25,6 +25,7 @@ pigen_primitive *pigen_find_primitive(pigen_primitives *primitives, const char *
 void pigen_set_port_metadata(pigen_primitives *primitives, const char *name, size_t name_length, const char *payload_type, size_t payload_type_length, const char *fifo_depth, size_t fifo_depth_length, int is_output);
 void pigen_add_assignment(pigen_assignments *assignments, const char *destination, size_t destination_length, const char *expression, size_t expression_length, const char *guard, size_t guard_length, const char *domain, size_t domain_length, char destination_kind, size_t order);
 void pigen_add_assignment_in_group(pigen_assignments *assignments, const char *destination, size_t destination_length, const char *expression, size_t expression_length, const char *guard, size_t guard_length, const char *domain, size_t domain_length, char destination_kind, size_t group, size_t order);
+void pigen_add_width_check(pigen_width_checks *checks, const char *lhs, size_t lhs_length, const char *rhs, size_t rhs_length, size_t group);
 void pigen_add_clear(pigen_clears *clears, const char *target, size_t target_length, const char *guard, size_t guard_length, const char *domain, size_t domain_length, int action_kind, size_t order);
 
 #endif

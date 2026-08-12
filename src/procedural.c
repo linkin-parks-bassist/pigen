@@ -395,12 +395,27 @@ void pigen_parse_procedural_ast(const char *source, const char *end, pigen_proce
 		const char *opaque = skip_opaque(cursor, end);
 		const char *contents;
 		const char *close;
+		size_t keyword_length;
 		if (opaque) { cursor = opaque; continue; }
-		if (!starts_word(cursor, end, "always_ff")) { cursor++; continue; }
+		if (starts_word(cursor, end, "always_ff")) keyword_length = 9;
+		else if (starts_word(cursor, end, "always")) keyword_length = 6;
+		else { cursor++; continue; }
 		char *domain;
-		cursor = skip_trivia(cursor + 9, end);
-		if (cursor == end || *cursor != '@') pigen_fail("always_ff requires an event control");
-		cursor = parse_parenthesized(skip_trivia(cursor + 1, end), end, &contents, &close);
+		cursor = skip_trivia(cursor + keyword_length, end);
+		if (cursor == end || *cursor != '@')
+		{
+			if (keyword_length == 9) pigen_fail("always_ff requires an event control");
+			continue;
+		}
+		cursor = skip_trivia(cursor + 1, end);
+		/* An ordinary `always @*` remains opaque SystemVerilog. Pigen transport
+		 * actions require an explicit parenthesized clock event. */
+		if (cursor == end || *cursor != '(')
+		{
+			if (keyword_length == 9) pigen_fail("always_ff requires a parenthesized event control");
+			continue;
+		}
+		cursor = parse_parenthesized(cursor, end, &contents, &close);
 		domain = normalized_event_domain(skip_spaces(contents, close), trim_end(contents, close));
 		cursor = parse_statement(source, cursor, end, "", domain, ast);
 		free(domain);

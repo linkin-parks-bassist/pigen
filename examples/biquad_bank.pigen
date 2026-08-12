@@ -1,0 +1,165 @@
+`define DATA_WIDTH 		16
+`define DATA_INTBIT		1
+`define COEF_WIDTH 		18
+`define COEF_INTBIT		4
+`define N_SLOTS			8
+
+`define HANDLE_WIDTH $clog2(`N_SLOTS)
+
+typedef struct packed {
+	logic        [`HANDLE_WIDTH - 1 : 0] handle;
+	logic signed [`DATA_WIDTH   - 1 : 0] sample;
+} biquad_req;
+
+typedef struct packed {
+	logic signed [`DATA_WIDTH   - 1 : 0] sample;
+} biquad_out;
+
+typedef struct packed {
+	logic        [`HANDLE_WIDTH   - 1 : 0] handle;
+	logic signed [`COEF_WIDTH * 5 - 1 : 0] coefs;
+} biquad_coef_write_req;
+
+typedef logic [`HANDLE_WIDTH  - 1 : 0] handle_t;
+typedef logic signed [`COEF_WIDTH - 1 : 0] coef_t;
+typedef logic signed [`DATA_WIDTH - 1 : 0] sample_t;
+
+typedef sample_t [3:0] state_t;
+
+typedef logic signed [`DATA_WIDTH * 2 + 2 : 0] acc_t;
+
+module biquad_pipeline
+	(
+		input clk,
+		input reset,
+		input enable,
+
+		input  port biquad_req req_in,
+		output port biquad_out bqd_out,
+
+		input port biquad_coef_write_req coef_write_port
+	);
+
+	buf sample_t sample_in;
+	buf sample_t sample_in_;
+	buf handle_t handle_in;
+	buf handle_t handle_in_;
+
+	buf signed [`COEF_WIDTH * 5 - 1 : 0] coef_read;
+	buf signed [`DATA_WIDTH * 4 - 1 : 0] state_read;
+
+	reg signed [`COEF_WIDTH * 5 - 1 : 0] coef_mem  [`N_SLOTS - 1 : 0];
+	reg signed [`DATA_WIDTH * 4 - 1 : 0] state_mem [`N_SLOTS - 1 : 0];
+
+		localparam signed [`DATA_WIDTH - 1:0] SAT_MAX = (1 << (`DATA_WIDTH - 1)) - 1;
+		localparam signed [`DATA_WIDTH - 1:0] SAT_MIN = -(1 << (`DATA_WIDTH - 1));
+
+	localparam signed [`COEF_WIDTH - 1 : 0] coef_1 = (1 << (`COEF_WIDTH - `COEF_INTBIT - 1));
+	localparam signed [`COEF_WIDTH - 1 : 0] coef_0 = 0;
+	localparam trivial_coefs = {coef_1, coef_0, coef_0, coef_0, coef_0};
+
+	reg [`N_SLOTS - 1 : 0] coefs_valid;
+	reg [`N_SLOTS - 1 : 0] state_valid;
+
+	always @(posedge clk) begin
+		if (reset) begin
+			pipeline_reset(bqd_pipeline);
+			state_valid <= '0;
+			coefs_valid <= '0;
+		end else if (enable) begin
+			transfer begin
+				handle_in <= req_in.handle;
+				sample_in <= req_in.sample;
+			end
+
+			transfer begin
+				handle_in_ <= handle_in;
+				sample_in_ <= sample_in;
+				coef_read  <= coefs_valid[handle_in] ? coef_mem [handle_in] : trivial_coefs;
+				state_read <= state_valid[handle_in] ? state_mem[handle_in] : '0;
+			end
+
+			transfer begin
+				coef_mem[coef_write_port.handle] <= coef_write_port.coefs;
+				coefs_valid[coef_write_port.handle] <= 1'b1;
+			end
+
+			pipeline bqd_pipeline {handle_in_, coef_read, sample_in_, state_read}
+					yields {handle_out, acc_out, state_out} begin
+				handle_t handle, handle_out;
+				coef_t b0, b1, b2, a1, a2;
+				sample_t x0, x1, x2, y1, y2, acc_out;
+				state_t state_out;
+				acc_t acc;
+
+				stage {
+					handle,
+					b0, b1, b2,
+					a1, a2,
+					x0, x1, x2,
+					y1, y2,
+					} yields {
+						handle,
+						acc,
+						a1, a2,
+						x0, x1,
+						y1, y2,
+					} begin
+						acc = b0 * x0 + b1 * x1 + b2 * x2;
+					end
+
+				stage {
+					handle,
+					acc,
+					a1, a2,
+					x0, x1,
+					y1, y2,
+					} yields {
+						handle,
+						acc,
+						x0, x1,
+						y1, y2,
+					} begin
+						acc = acc + a1 * y1 + a2 * y2;
+					end
+
+				stage {
+					handle,
+					acc,
+						x0,
+						x1, y1, y2,
+				} yields {
+						handle,
+						acc,
+						x0, x1, y1,
+					y2,
+				};
+
+				stage {
+						handle,
+						acc,
+						x0, x1,
+						y1, y2,
+					} yields {
+						handle_out,
+						sample_t acc_out,
+						state_out
+					} begin
+						handle_out = handle;
+						acc_out = (acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1)) > SAT_MAX ? SAT_MAX :
+							((acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1)) < SAT_MIN ? SAT_MIN :
+							(acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1)));
+						state_out = {x0, x1, acc_out, y1};
+				end
+			endpipeline
+
+			// Equivalent to {bqd_out, state_mem[handle_out]} <= {acc_out, state_out};
+			transfer begin
+				bqd_out <= acc_out;
+				state_mem[handle_out] <= state_out;
+				state_valid[handle_out] <= 1'b1;
+			end
+		end
+	end
+
+endmodule

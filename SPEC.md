@@ -9,16 +9,93 @@ writes readable, synthesizable SystemVerilog, using the
 explicit primitives in `rtl/pigen_primitives.sv` where required. It does not
 change SystemVerilog simulation timing.
 
+## SystemVerilog compatibility contract
+
+Pigen is an extension layer over SystemVerilog, not a replacement language.
+An existing SystemVerilog codebase must be able to pass through Pigen and retain
+the same observable behavior, then adopt Pigen constructs incrementally. In
+particular:
+
+1. Source that does not use Pigen syntax has ordinary SystemVerilog meaning.
+   Pigen may reformat or mechanically lower it, but must preserve its ports,
+   values, widths, signedness, event scheduling, reset behavior, and externally
+   observable cycle behavior.
+2. Adding Pigen constructs in one part of a design must not reinterpret
+   unrelated SystemVerilog elsewhere. Extension syntax is recognized only in
+   its specified grammatical and semantic contexts.
+3. If Pigen cannot preserve the meaning of an accepted SystemVerilog construct,
+   it must issue a source-located diagnostic rather than silently emit different
+   behavior.
+4. The language may deliberately reject a SystemVerilog construct when the
+   project explicitly chooses a safer subset. Every such restriction is part of
+   this specification and requires a direct diagnostic; an accidental parser or
+   lowering limitation is not a language restriction.
+5. Textual identity of the generated file is not required. Behavioral
+   compatibility is required, subject only to the explicitly documented
+   restrictions above.
+
+This compatibility contract is an overarching design and release requirement.
+New Pigen features and syntax decisions are subordinate to it.
+
 ## Top-level design units
 
-A `.pigen` source may contain ordinary SystemVerilog design units,
-`pipeline` units, and `fabric` units together and in any top-level order.
-Pipelines and fabrics lower to separately instantiable modules in the same
-output.
+A `.pigen` source may contain ordinary SystemVerilog design units and `fabric`
+units together and in any top-level order. The preferred pipeline form is an
+inline declaration inside an enclosing clocked `always` block; it elaborates
+to storage and logic in the parent module, not a generated child module.
 
-`pipeline` and `fabric` begin new constructs only at source top level. Inside
-ordinary `module`, `interface`, `package`, `program`, `class`, and `checker`
-units those words remain ordinary SystemVerilog tokens and identifiers.
+The older top-level `pipeline` unit remains accepted as a compatibility form
+while existing sources migrate. New designs should use the inline form below.
+
+`fabric` begins a new construct only at source top level. Inside ordinary
+`module`, `interface`, `package`, `program`, `class`, and `checker` units those
+words remain ordinary SystemVerilog tokens and identifiers. Inside a module,
+`pipeline name {` begins an inline pipeline declaration only inside a supported
+clocked `always`/`always_ff` block; all other uses of `pipeline` retain their
+ordinary SystemVerilog meaning.
+
+### Inline pipeline blocks
+
+```text
+inline-pipeline ::= "pipeline" identifier packed-expression "yields"
+                    packed-expression "begin" pipeline-item* stage+
+                    "endpipeline"
+pipeline-item   ::= packed-type identifier-list ";"
+stage           ::= "stage" identifier? packed-list "yields" packed-list
+                    (";" | "begin" stage-body "end")
+packed-list     ::= "{" packed-item ("," packed-item)* "}"
+packed-item     ::= expression | packed-type identifier
+pipeline-reset  ::= ("pipe_reset" | "pipeline_reset") "(" identifier ");"
+```
+
+The header input packing is read from enclosing module scope. The header output
+packing is one atomic output packet; its named members are readable by later
+statements in the enclosing module. Stage names and declarations are private to
+the pipeline, and each stage has its own combinational scope. A pipeline-level
+declaration establishes a reusable type association; the same association may
+be introduced inline in either packed list.
+
+The enclosing clocked `always` supplies the clock domain. The complete guard
+around the declaration is the pipeline enable: when false, all stage storage is
+held and no input or output handshake occurs. `pipe_reset` and
+`pipeline_reset` are declarative aliases. Their full procedural guard directly
+resets every generated valid bit on that edge; repeated reset bindings combine
+with logical OR. In the absence of an explicit binding, a parent port named
+`reset` is used as the conventional synchronous reset; otherwise the inline
+pipeline is intentionally unreset.
+
+Curly braces always retain normal packed-concatenation semantics. A stage or
+transfer is atomic over its complete packing, so a source transport is consumed
+only when all non-degenerate destinations are ready. Stage bodies are currently
+combinational; nested transport operations and `stall();` are reserved future
+syntax, and no implicit `busy` mechanism exists.
+
+Adjacent stage packings may have different member counts and member widths.
+They are connected by their complete bit stream, leftmost member most
+significant, and must have equal total `$bits` width; Pigen emits a generated
+elaboration check for each boundary. An expression whose type cannot be
+inferred positionally across an equal-arity boundary must first be assigned to
+an explicitly typed pipeline name before such repartitioning.
 
 ### Pipeline blocks
 
@@ -230,9 +307,17 @@ replace storage and is not a delivery guarantee.
 
 ## Transport actions
 
+All grammar in this section is token-based. The tokenizer throws away spaces,
+tabs, comments, and newlines, so formatting shown in examples is never required
+syntax.
+
 ```systemverilog
 destination <= expression;
 {destination_a, destination_b} <= {expression_a, expression_b};
+transfer begin
+    destination_a <= expression_a;
+    destination_b <= expression_b;
+end
 _ <= expression;
 peek(x)
 valid(x)
@@ -249,6 +334,100 @@ operand is valid.  Buffered RHS operands are consumed together; their ready
 routes include all other buffered operand validities, so a join never partially
 consumes.  Repeated use of one operand consumes it once.
 
+The LHS may be one complete buffered transport destination, an ordinary
+SystemVerilog variable lvalue, or a concatenation mixing those forms. Buffered
+destinations must be written whole because their valid bit describes the whole
+packet. Degenerate `reg`/`logic` and ordinary state may use normal SV slices,
+members, array elements, indexed part-selects, and nested lvalue
+concatenations. The RHS is one ordinary SystemVerilog value expression and may
+itself be a concatenation. Assignment uses the ordinary
+concatenation bit stream: the leftmost destination receives the most
+significant portion and the rightmost destination receives the least
+significant portion.  Only the aggregate widths must match; top-level item
+counts and individual item widths need not match.  Thus all of these are the
+same kind of atomic transfer:
+
+```systemverilog
+x <= {a, b};
+{x, y} <= a;
+{x, y} <= {a, b};
+```
+
+The explicit atomic-block spelling is:
+
+```text
+atomic-transfer ::= "transfer" "begin" transfer-member+ "end"
+transfer-member ::= destination-expression "<=" source-expression ";"
+```
+
+It is exact semantic sugar for concatenating the member destinations and
+sources in source order. For example:
+
+```systemverilog
+transfer begin
+    output_packet <= result;
+    state_mem[handle] <= next_state;
+end
+```
+
+is equivalent to:
+
+```systemverilog
+{output_packet, state_mem[handle]} <= {result, next_state};
+```
+
+The block has one guard, one aggregate width check, one ready/valid decision,
+and one fire event. All members update or none do. Individual member widths
+and arities may differ; only the two flattened aggregate widths must match.
+The first version permits only transfer members directly inside the block;
+control flow belongs around the block rather than inside it.
+
+Any transport read needed to evaluate a member participates in the block's
+validity and ownership calculation, including a transport projection used in
+an lvalue address or select. Thus `state_mem[handle]` requires `handle` to be
+valid. If `handle`, `result`, and `next_state` are projections of one packet,
+the block is one deduplicated consumer of that complete packet, not three
+consumers. Constants and degenerate values retain their normal rules.
+
+`transfer` is contextual: it introduces this extension only when followed by
+the complete `transfer begin ... end` form in a clocked procedural block.
+Otherwise it remains an ordinary SystemVerilog identifier.
+
+The complete statement has one destination set and one consuming source set.
+It fires when every destination is ready and every distinct buffered base
+transport read anywhere in the RHS is valid.  Constants add no validity or
+consumption dependency: as sources they behave like always-valid wires and
+have no readiness state.
+
+A select or member access projects bits from a transport payload; it does not
+create a smaller transport.  An unpeeked read such as `x <= a[7:0]` therefore
+consumes the complete token held by `a` when it fires.  Repeating projections
+of the same base in one statement still consumes that base once:
+
+```systemverilog
+{high, low} <= {a[15:8], a[7:0]};
+```
+
+This is one consumer of `a`, and neither destination can accept a different
+token from the other.  The corresponding two separate statements are two
+consumers and are rejected unless their guards are proven mutually exclusive.
+
+If a statement contains any buffered source or destination, its ordinary
+`reg`/`logic`/memory lvalue members participate in the same atomic event. They
+are always ready, add no validity state, and update only when the complete
+transfer fires. A pure degenerate statement containing no buffered transport is
+ordinary SystemVerilog and retains normal procedural semantics, including
+source-ordered nonblocking assignments to the same variable. The transport
+single-consumer and producer-exclusivity rules apply only to non-degenerate
+storage. A procedural `wire` destination is rejected, consistently with normal
+SystemVerilog variable-assignment rules.
+
+Concatenated and projected transfers require equal aggregate LHS and RHS
+widths. Pigen emits a constant `$bits` elaboration check alongside the lowered
+assignment, allowing the SystemVerilog tool to resolve typedefs, parameters,
+members, and indexed selects with its own type rules. Plain whole-value
+assignments retain ordinary SV assignment sizing and signedness conversion.
+
 `_` is a discard destination. `_ <= x;` consumes and drops one accepted token
 from `x`. In a co-sliced transfer it is an always-ready member that consumes
 its corresponding RHS atomically with the real destinations, for example
@@ -263,7 +442,7 @@ its payload assignment is emitted unconditionally.  This supports synchronous
 RAM inference without a payload clock-enable, for example:
 
 ```systemverilog
-always_ff @(posedge clk)
+always @(posedge clk)
 begin
     if (read_enable)
         bram_port <= mem[address];
@@ -280,7 +459,7 @@ An ordinary sequential storage write can consume a transport source directly:
 input port [7:0] data_in;
 reg [7:0] mem [0:15];
 
-always_ff @(posedge clk)
+always @(posedge clk)
     mem[write_address] <= data_in;
 ```
 
@@ -289,7 +468,8 @@ Pigen preserves the original memory assignment but executes it only when
 This is intended for inferred memories and other manually declared sequential
 storage.
 
-Inside an `always_ff` block, `if (destination <= source)` is shorthand for
+Inside a clocked `always` or `always_ff` block,
+`if (destination <= source)` is shorthand for
 `if (accepts(destination, source))`: it gates the then branch on that transfer
 and performs the transfer on the same accepted cycle.  Both sides must be
 transport identifiers.
@@ -332,13 +512,15 @@ stage specifically implemented as a ready-chain break. More generally, a
 combinational ready-dependency cycle is invalid even when it spans several
 connections.
 
-A co-sliced assignment is one consuming transfer group.  Its top-level LHS
-and RHS concatenations must have the same arity; every LHS item is a distinct
-transport destination.  The group fires only when every destination is ready
-and every distinct non-`peek` transport operand across the RHS is valid.  All
-members update together and each buffered source is consumed once.  A grouped
-conditional transfer, `if ({a, b} <= {ea, eb})`, tests that same all-member
-acceptance event.
+A co-sliced assignment is one consuming transfer group. Every buffered LHS
+item is a distinct, complete transport destination; degenerate and ordinary
+lvalue items may be projected. The RHS is flattened and repartitioned by LHS
+widths using ordinary SystemVerilog concatenation order;
+the two sides need equal aggregate width, not equal arity. The group fires only
+when every destination is ready and every distinct non-`peek` base transport
+across the RHS is valid. All members update together and each buffered source
+is consumed once. A grouped conditional transfer,
+`if ({a, b} <= expression)`, tests that same all-member acceptance event.
 
 `peek(x)` takes exactly one transport identifier and lowers to its payload
 without adding validity, readiness, or ownership.  It is therefore a raw
@@ -347,10 +529,12 @@ required.  It binds `x` to the enclosing synchronous Pigen domain.
 
 ## Domains and controls
 
-Pigen actions appear only in a synchronous one-edge `always_ff` block:
+Pigen actions appear only in a synchronous one-edge `always` or `always_ff`
+block. Plain `always` is the preferred source spelling; generated sequential
+hardware may use `always_ff`:
 
 ```systemverilog
-always_ff @(posedge clk)
+always @(posedge clk)
 begin
     if (reset)
     begin
@@ -409,5 +593,6 @@ occupancy, never combinationally on downstream readiness. They sustain
 simultaneous push/pop while nonfull; after a full queue pops, input readiness
 returns from the new occupancy on the following cycle.
 
-Ordinary SystemVerilog outside parsed Pigen syntax is preserved. All compiler
-diagnostics identify original source file, line, and column.
+Ordinary SystemVerilog outside parsed Pigen syntax obeys the compatibility
+contract above. All compiler diagnostics identify original source file, line,
+and column.

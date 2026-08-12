@@ -1,0 +1,22 @@
+module always_block
+	(
+		input logic clk,
+		input logic reset,
+		input logic enable,
+		input logic [7:0] ordinary_input,
+		output logic [7:0] ordinary_output
+	);
+
+	buf [7:0] source;
+	buf [7:0] destination;
+
+	/* Non-clocked ordinary SystemVerilog always blocks remain untouched. */
+	always @*
+		ordinary_output = ordinary_input;
+
+	always @(posedge clk) begin
+		if (enable)
+			destination <= source;
+	end
+
+endmodule

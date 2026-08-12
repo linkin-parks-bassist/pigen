@@ -99,6 +99,104 @@ static int is_identifier_range(const char *start, size_t length)
 	return 1;
 }
 
+static int expression_uses_buffered_transport(const char *start, size_t length,
+	pigen_primitives *primitives)
+{
+	char *expression = pigen_copy_range(start, length);
+	int result = 0;
+	for (size_t i = 0; i < primitives->count; i++)
+		if (pigen_is_storage_kind(primitives->items[i].kind) &&
+			expression_mentions(expression, primitives->items[i].name))
+		{
+			result = 1;
+			break;
+		}
+	free(expression);
+	return result;
+}
+
+/* Return the handshake kind of an LHS item.  A complete buffered identifier
+ * is a transport destination.  Everything else is an ordinary SV lvalue and
+ * is always writable on its clock edge; this includes slices, members, array
+ * elements, and nested concatenations of degenerate/ordinary state. */
+static char classify_destination(const char *start, size_t length,
+	pigen_primitives *primitives)
+{
+	const char *end = start + length;
+	const char *name;
+	const char *name_end;
+	pigen_primitive *primitive;
+
+	start = pigen_skip_spaces(start, end);
+	end = pigen_trim_end(start, end);
+	if (is_identifier_range(start, (size_t)(end - start)))
+	{
+		primitive = pigen_find_primitive(primitives, start, (size_t)(end - start));
+		return primitive ? primitive->kind : 'm';
+	}
+	name = start;
+	if (name == end || !pigen_is_identifier_char((unsigned char)*name)) return 'm';
+	name_end = name + 1;
+	while (name_end < end && pigen_is_identifier_char((unsigned char)*name_end)) name_end++;
+	primitive = pigen_find_primitive(primitives, name, (size_t)(name_end - name));
+	if (primitive && pigen_is_storage_kind(primitive->kind))
+	{
+		pigen_set_diagnostic_position(start);
+		pigen_fail("a buffered transport destination must be written as a complete value");
+	}
+	return 'm';
+}
+
+static int is_transport_projection(const char *start, const char *end,
+	pigen_primitives *primitives)
+{
+	const char *name_end;
+	start = pigen_skip_spaces(start, end);
+	end = pigen_trim_end(start, end);
+	if (start == end || !pigen_is_identifier_char((unsigned char)*start)) return 0;
+	name_end = start + 1;
+	while (name_end < end && pigen_is_identifier_char((unsigned char)*name_end)) name_end++;
+	return name_end < end && (*name_end == '[' || *name_end == '.') &&
+		pigen_find_primitive(primitives, start, (size_t)(name_end - start));
+}
+
+/*
+ * A concatenated transport destination has ordinary SystemVerilog bit-stream
+ * assignment semantics.  Each storage input still needs its own expression,
+ * so select its portion by shifting away every destination to its right; the
+ * destination's normal assignment conversion then keeps exactly its width.
+ * `$bits(destination)` is a constant/type query and is deliberately ignored
+ * by transport dependency discovery below.
+ */
+static char *repartition_expression(const char *expression, size_t expression_length,
+	const char **destinations, const size_t *destination_lengths, size_t count,
+	const char **rhs_parts, const size_t *rhs_lengths, size_t member)
+{
+	pigen_string result = {0};
+	size_t i;
+
+	pigen_append(&result, "((");
+	pigen_append_range(&result, expression, expression_length);
+	pigen_append(&result, ")");
+	if (member + 1 < count)
+	{
+		pigen_append(&result, " >> (");
+		for (i = member + 1; i < count; i++)
+		{
+			if (i != member + 1) pigen_append(&result, " + ");
+			pigen_append(&result, "$bits(");
+			if (destination_lengths[i] == 1 && destinations[i][0] == '_')
+				pigen_append_range(&result, rhs_parts[i], rhs_lengths[i]);
+			else
+				pigen_append_range(&result, destinations[i], destination_lengths[i]);
+			pigen_append(&result, ")");
+		}
+		pigen_append(&result, ")");
+	}
+	pigen_append(&result, ")");
+	return result.data;
+}
+
 int pigen_extract_transport_transfer(const char *start, const char *end, pigen_primitives *primitives, pigen_transfer *transfer)
 {
 	const char *operator = find_top_level_operator(start, end);
@@ -133,59 +231,118 @@ int pigen_extract_transport_transfer(const char *start, const char *end, pigen_p
 
 	if (split_top_level_braces(left_start, left_end, &left_parts, &left_lengths, &left_count))
 	{
+		int has_buffered_destination = 0;
+		pigen_string width_lhs = {0};
 		if (left_count < 2) pigen_fail("co-sliced transfer requires at least two destinations");
-		if (!split_top_level_braces(expression, end, &right_parts, &right_lengths, &right_count))
-			pigen_fail("co-sliced transfer requires a matching RHS concatenation");
-		if (left_count != right_count) pigen_fail("co-sliced transfer has mismatched destination and expression counts");
-		transfer->items = pigen_resize(NULL, left_count * sizeof(*transfer->items));
-		transfer->count = left_count;
-		transfer->prefix_end = left_start;
+		/* Split the RHS only for temporary parser storage.  Pairing is by the
+		 * flattened bit stream, not by top-level item count. */
+		split_top_level_braces(expression, end, &right_parts, &right_lengths, &right_count);
+		for (i = 0; i < left_count; i++)
+			if (left_lengths[i] == 1 && left_parts[i][0] == '_' && right_count != left_count)
+				pigen_fail("a discard in a flattened transfer requires a positionally corresponding RHS item to determine its width");
+		pigen_append(&width_lhs, "{");
 		for (i = 0; i < left_count; i++)
 		{
-			if (!is_identifier_range(left_parts[i], left_lengths[i])) pigen_fail("co-sliced transfer destinations must be transport identifiers");
+			if (i) pigen_append(&width_lhs, ", ");
+			if (left_lengths[i] == 1 && left_parts[i][0] == '_')
+				pigen_append_range(&width_lhs, right_parts[i], right_lengths[i]);
+			else
+				pigen_append_range(&width_lhs, left_parts[i], left_lengths[i]);
+		}
+		pigen_append(&width_lhs, "}");
+		transfer->items = pigen_resize(NULL, left_count * sizeof(*transfer->items));
+		transfer->owned_expressions = calloc(left_count, sizeof(*transfer->owned_expressions));
+		if (!transfer->owned_expressions) pigen_fail("out of memory");
+		transfer->count = left_count;
+		transfer->prefix_end = left_start;
+		transfer->width_lhs = width_lhs.data;
+		transfer->width_rhs = expression;
+		transfer->width_rhs_length = (size_t)(end - expression);
+		transfer->requires_exact_width = 1;
+		for (i = 0; i < left_count; i++)
+		{
 			if (left_lengths[i] == 1 && left_parts[i][0] == '_')
 			{
-				transfer->items[i] = (pigen_transfer_item){ left_parts[i], left_lengths[i], right_parts[i], right_lengths[i], 'd' };
+				transfer->owned_expressions[i] = repartition_expression(expression,
+					(size_t)(end - expression), left_parts, left_lengths, left_count,
+					right_parts, right_lengths, i);
+				transfer->items[i] = (pigen_transfer_item){ left_parts[i], left_lengths[i],
+					transfer->owned_expressions[i], strlen(transfer->owned_expressions[i]), 'd' };
 				continue;
 			}
-			primitive = pigen_find_primitive(primitives, left_parts[i], left_lengths[i]);
-			if (!primitive) pigen_fail("co-sliced transfer destinations must be declared transports");
-			if (primitive->kind != 'r' && primitive->kind != 'l' && (!pigen_is_storage_kind(primitive->kind) || !primitive->is_internal))
+			char destination_kind = classify_destination(left_parts[i], left_lengths[i], primitives);
+			if (destination_kind == 'w')
+				pigen_fail("a wire cannot be a procedural transport destination");
+			primitive = is_identifier_range(left_parts[i], left_lengths[i]) ?
+				pigen_find_primitive(primitives, left_parts[i], left_lengths[i]) : NULL;
+			if (pigen_is_storage_kind(destination_kind) &&
+				(!primitive || !primitive->is_internal))
 				pigen_fail("draft 0 assignment lowering currently requires an internal storage or reg destination");
+			if (pigen_is_storage_kind(destination_kind)) has_buffered_destination = 1;
 			for (size_t j = 0; j < i; j++)
 				if (left_lengths[j] == left_lengths[i] && !memcmp(left_parts[j], left_parts[i], left_lengths[i])) pigen_fail("co-sliced transfer repeats a destination");
-			transfer->items[i] = (pigen_transfer_item){ left_parts[i], left_lengths[i], right_parts[i], right_lengths[i], primitive->kind };
+			transfer->owned_expressions[i] = repartition_expression(expression,
+				(size_t)(end - expression), left_parts, left_lengths, left_count,
+				right_parts, right_lengths, i);
+			transfer->items[i] = (pigen_transfer_item){ left_parts[i], left_lengths[i],
+				transfer->owned_expressions[i], strlen(transfer->owned_expressions[i]), destination_kind };
 		}
 		free(left_parts); free(right_parts); free(left_lengths); free(right_lengths);
+		if (!has_buffered_destination &&
+			!expression_uses_buffered_transport(expression, (size_t)(end - expression), primitives))
+		{
+			pigen_free_transfer(transfer);
+			return 0;
+		}
 		reject_direct_transport_feedback(transfer);
 		return 1;
 	}
 
-	left_end = pigen_trim_end(start, operator);
-	left_start = left_end;
-	while (left_start > start && pigen_is_identifier_char((unsigned char)left_start[-1])) left_start--;
+	left_start = pigen_skip_spaces(start, left_end);
 	if (left_end - left_start == 1 && left_start[0] == '_')
 	{
 		transfer->items = pigen_resize(NULL, sizeof(*transfer->items));
 		transfer->count = 1;
 		transfer->prefix_end = left_start;
 		transfer->items[0] = (pigen_transfer_item){ left_start, 1, expression, (size_t)(end - expression), 'd' };
+		transfer->width_lhs = pigen_copy_range(expression, (size_t)(end - expression));
+		transfer->width_rhs = expression;
+		transfer->width_rhs_length = (size_t)(end - expression);
+		transfer->requires_exact_width = 0;
 		return 1;
 	}
-	primitive = pigen_find_primitive(primitives, left_start, (size_t)(left_end - left_start));
-	if (!primitive) return 0;
-	if (primitive->kind != 'r' && primitive->kind != 'l' && (!pigen_is_storage_kind(primitive->kind) || !primitive->is_internal))
+	char destination_kind = classify_destination(left_start, (size_t)(left_end - left_start), primitives);
+	if (destination_kind == 'w')
+		pigen_fail("a wire cannot be a procedural transport destination");
+	primitive = is_identifier_range(left_start, (size_t)(left_end - left_start)) ?
+		pigen_find_primitive(primitives, left_start, (size_t)(left_end - left_start)) : NULL;
+	if (!pigen_is_storage_kind(destination_kind) &&
+		!expression_uses_buffered_transport(expression, (size_t)(end - expression), primitives))
+		return 0;
+	if (pigen_is_storage_kind(destination_kind) && (!primitive || !primitive->is_internal))
 		pigen_fail("draft 0 assignment lowering currently requires an internal storage or reg destination");
 	transfer->items = pigen_resize(NULL, sizeof(*transfer->items));
 	transfer->count = 1;
 	transfer->prefix_end = left_start;
-	transfer->items[0] = (pigen_transfer_item){ left_start, (size_t)(left_end - left_start), expression, (size_t)(end - expression), primitive->kind };
+	transfer->items[0] = (pigen_transfer_item){ left_start, (size_t)(left_end - left_start), expression, (size_t)(end - expression), destination_kind };
+	transfer->width_lhs = destination_kind == 'd' ?
+		pigen_copy_range(expression, (size_t)(end - expression)) :
+		pigen_copy_range(left_start, (size_t)(left_end - left_start));
+	transfer->width_rhs = expression;
+	transfer->width_rhs_length = (size_t)(end - expression);
+	transfer->requires_exact_width =
+		!is_identifier_range(left_start, (size_t)(left_end - left_start)) ||
+		(*expression == '{' && end > expression && end[-1] == '}') ||
+		is_transport_projection(expression, end, primitives);
 	reject_direct_transport_feedback(transfer);
 	return 1;
 }
 
 void pigen_free_transfer(pigen_transfer *transfer)
 {
+	for (size_t i = 0; i < transfer->count; i++) free(transfer->owned_expressions ? transfer->owned_expressions[i] : NULL);
+	free(transfer->owned_expressions);
+	free(transfer->width_lhs);
 	free(transfer->items);
 	memset(transfer, 0, sizeof(*transfer));
 }
@@ -545,7 +702,7 @@ static void emit_group_ready(pigen_string *output, pigen_assignments *assignment
 		if (a->destination_kind == 'w') pigen_append(output, "1'b0");
 		else if (a->destination_kind == 'h' && destination && destination->is_output)
 			pigen_append_control_name(output, a->destination, strlen(a->destination), "in_ready");
-		else if (a->destination_kind == 'd' || a->destination_kind == 'h' || a->destination_kind == 'r' || a->destination_kind == 'l' || a->destination_kind == 'R' || a->destination_kind == 'L') pigen_append(output, "1'b1");
+		else if (a->destination_kind == 'd' || a->destination_kind == 'h' || a->destination_kind == 'r' || a->destination_kind == 'l' || a->destination_kind == 'm' || a->destination_kind == 'R' || a->destination_kind == 'L' || a->destination_kind == 'M') pigen_append(output, "1'b1");
 		else pigen_append_control_name(output, a->destination, strlen(a->destination), "in_ready");
 		emitted = 1;
 	}
@@ -574,7 +731,7 @@ void pigen_emit_transfer_accept_condition(pigen_string *output, const pigen_tran
 				emitted = 1;
 			}
 		}
-		else if (transfer->items[i].destination_kind != 'd' && transfer->items[i].destination_kind != 'r' && transfer->items[i].destination_kind != 'l')
+		else if (transfer->items[i].destination_kind != 'd' && transfer->items[i].destination_kind != 'r' && transfer->items[i].destination_kind != 'l' && transfer->items[i].destination_kind != 'm')
 		{
 			if (emitted) pigen_append(output, " && ");
 			pigen_append_control_name(output, transfer->items[i].destination, transfer->items[i].destination_length, "in_ready"); emitted = 1;
@@ -595,6 +752,24 @@ void pigen_emit_transfer_accept_condition(pigen_string *output, const pigen_tran
 		if (p + 1 == primitives->count && !any) pigen_append(output, "1'b1");
 	}
 	if (!primitives->count) pigen_append(output, "1'b1");
+}
+
+void pigen_emit_width_checks(pigen_string *output, pigen_width_checks *checks,
+	pigen_primitives *primitives)
+{
+	for (size_t i = 0; i < checks->count; i++)
+	{
+		pigen_width_check *check = &checks->items[i];
+		pigen_append(output, "\tgenerate\n\t\tif ($bits(");
+		pigen_append(output, check->lhs);
+		pigen_append(output, ") != $bits(");
+		pigen_emit_rewritten_expression(output, check->rhs,
+			check->rhs + strlen(check->rhs), primitives);
+		pigen_append(output, ")) begin : __pigen_transfer_width_mismatch_");
+		pigen_append_format(output, "%zu", check->group);
+		pigen_append(output, "\n\t\t\tinitial $fatal(1, \"Pigen transfer aggregate width mismatch\");\n");
+		pigen_append(output, "\t\tend\n\tendgenerate\n\n");
+	}
 }
 
 void pigen_emit_assignment_routes(pigen_string *output, pigen_assignments *assignments, pigen_primitives *primitives)
@@ -767,7 +942,7 @@ void pigen_emit_assignment_routes(pigen_string *output, pigen_assignments *assig
 	for (i = 0; i < assignments->count; i++)
 	{
 		pigen_assignment *assignment = &assignments->items[i];
-		if (assignment->destination_kind != 'R' && assignment->destination_kind != 'L') continue;
+		if (assignment->destination_kind != 'R' && assignment->destination_kind != 'L' && assignment->destination_kind != 'M') continue;
 		pigen_append(output, "\talways_ff @("); pigen_append(output, assignment->domain); pigen_append(output, ")\n\tbegin\n\t\tif (");
 		if (assignment->guard[0]) { pigen_append(output, "("); pigen_append(output, assignment->guard); pigen_append(output, ") && "); }
 		emit_group_validity(output, assignments, assignment->group, primitives, NULL);
@@ -787,6 +962,26 @@ static int expression_mentions(const char *expression, const char *name)
 	while (cursor < end)
 	{
 		const char *opaque = pigen_skip_opaque(cursor, end);
+		if ((size_t)(end - cursor) >= 5 && !memcmp(cursor, "$bits", 5) &&
+			(cursor == expression || !pigen_is_identifier_char((unsigned char)cursor[-1])) &&
+			(cursor + 5 == end || !pigen_is_identifier_char((unsigned char)cursor[5])))
+		{
+			const char *open = pigen_skip_spaces(cursor + 5, end);
+			if (open < end && *open == '(')
+			{
+				int depth = 1;
+				cursor = open + 1;
+				while (cursor < end && depth)
+				{
+					const char *nested_opaque = pigen_skip_opaque(cursor, end);
+					if (nested_opaque) { cursor = nested_opaque; continue; }
+					if (*cursor == '(') depth++;
+					else if (*cursor == ')') depth--;
+					cursor++;
+				}
+				continue;
+			}
+		}
 		if ((size_t)(end - cursor) >= 4 && !memcmp(cursor, "peek", 4) &&
 			(cursor == expression || !pigen_is_identifier_char((unsigned char)cursor[-1])) &&
 			(cursor + 4 == end || !pigen_is_identifier_char((unsigned char)cursor[4])))
@@ -812,6 +1007,28 @@ static int expression_mentions(const char *expression, const char *name)
 			}
 
 			cursor++;
+		}
+
+		/* The punctuation scan can also land on a constant/type query. */
+		if ((size_t)(end - cursor) >= 5 && !memcmp(cursor, "$bits", 5) &&
+			(cursor == expression || !pigen_is_identifier_char((unsigned char)cursor[-1])) &&
+			(cursor + 5 == end || !pigen_is_identifier_char((unsigned char)cursor[5])))
+		{
+			const char *open = pigen_skip_spaces(cursor + 5, end);
+			if (open < end && *open == '(')
+			{
+				int depth = 1;
+				cursor = open + 1;
+				while (cursor < end && depth)
+				{
+					const char *nested_opaque = pigen_skip_opaque(cursor, end);
+					if (nested_opaque) { cursor = nested_opaque; continue; }
+					if (*cursor == '(') depth++;
+					else if (*cursor == ')') depth--;
+					cursor++;
+				}
+				continue;
+			}
 		}
 
 		/* The punctuation scan can land directly on `peek`.  Skip the complete
@@ -868,6 +1085,11 @@ void pigen_validate_assignments(pigen_assignments *assignments, pigen_primitives
 
 			if (assignments->items[i].group == assignments->items[j].group) continue;
 			if (assignments->items[i].destination_kind == 'd' || assignments->items[j].destination_kind == 'd') continue;
+			/* Ordinary reg/logic/memory lvalues retain normal nonblocking
+			 * assignment ordering. Producer exclusivity is a transport-storage
+			 * rule, not a restriction on degenerate SystemVerilog state. */
+			if (!pigen_is_storage_kind(assignments->items[i].destination_kind) ||
+				!pigen_is_storage_kind(assignments->items[j].destination_kind)) continue;
 			destination = pigen_find_primitive(primitives, assignments->items[i].destination,
 				strlen(assignments->items[i].destination));
 			if (!strcmp(assignments->items[i].destination, assignments->items[j].destination) &&
