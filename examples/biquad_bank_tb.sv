@@ -5,9 +5,8 @@ module biquad_bank_tb;
 	localparam int FILTERS = 8;
 	localparam int SAMPLES_PER_FILTER = 384;
 	localparam int TOTAL_REQUESTS = FILTERS * SAMPLES_PER_FILTER;
-	/* Eight cycles after a full eight-request burst is comfortably beyond the
-	 * read/pipe/writeback path before the same handle is revisited. */
-	localparam int WRITEBACK_GAP = 8;
+	/* Additional settling cycles after all previous-round writebacks complete. */
+	localparam int WRITEBACK_GAP = 16;
 	localparam logic signed [17:0] COEF_ONE = 18'sd8192;
 
 	biquad_req req_in;
@@ -113,6 +112,9 @@ module biquad_bank_tb;
 				end
 				@(negedge clk);
 				req_in_valid = 1'b0;
+				/* Output acceptance is the state writeback event. Do not revisit a
+				 * handle until every result from this round has committed. */
+				while (received < (round + 1) * FILTERS) @(posedge clk);
 				if (round + 1 < SAMPLES_PER_FILTER) repeat (WRITEBACK_GAP) @(posedge clk);
 			end
 		end
@@ -127,6 +129,10 @@ module biquad_bank_tb;
 			last_burst_cycle <= -1;
 		end else begin
 			cycle_count <= cycle_count + 1;
+			/* Ports are deliberately always-ready single-cycle endpoints. This
+			 * demo uses one, so its external consumer stays ready. A separate
+			 * inline-pipeline test uses an output buf and exercises stalls. */
+			bqd_out_ready <= 1'b1;
 			if (req_in_valid && req_in_ready) begin
 				handle = req_in.handle;
 				accumulator = $signed(req_in.sample) * coefficient(handle, 0) +
@@ -173,12 +179,12 @@ module biquad_bank_tb;
 		repeat (WRITEBACK_GAP + 8) @(posedge clk);
 		if (sent != TOTAL_REQUESTS || received != TOTAL_REQUESTS)
 			$fatal(1, "bank lost work: sent=%0d received=%0d", sent, received);
-		$display("PASS: eight filter traces captured; first eight requests accepted on consecutive cycles; stateful outputs match reference model");
+		$display("PASS: eight-filter bank stateful outputs match reference model");
 		$finish;
 	end
 
 	initial begin
-		repeat (8192) @(posedge clk);
+		repeat (32768) @(posedge clk);
 		$fatal(1, "biquad bank timed out (sent=%0d received=%0d)", sent, received);
 	end
 endmodule

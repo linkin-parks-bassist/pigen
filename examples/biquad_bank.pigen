@@ -102,9 +102,8 @@ module biquad_pipeline
 				stage {handle, acc, x0, x1, y1, y2} yields {handle, acc, x0, x1, y1, y2};
 
 				stage {handle, acc, x0, x1, y1, y2} yields {handle_out, sample_t acc_out, state_out} begin
-					acc_t acc_sh;
 					handle_out = handle;
-					acc_sh = acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1);
+					acc_t acc_sh = acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1);
 					acc_out = acc_sh > SAT_MAX ? SAT_MAX : (acc_sh < SAT_MIN ? SAT_MIN : acc_sh);
 					state_out = {x0, x1, acc_out, y1};
 				end

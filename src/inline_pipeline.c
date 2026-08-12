@@ -523,6 +523,57 @@ static int body_declares(const char *body, const char *type, const char *name)
 	return 0;
 }
 
+/* Pigen permits a simple typed local declaration anywhere in a stage body.
+ * Lower it to an SV declaration at the start of the generated nested scope,
+ * while leaving an initializer as an assignment at its original program point. */
+static void append_stage_body(pigen_string *out, const inline_pipeline *pipe,
+	const char *body, pigen_string *declarations)
+{
+	pigen_tokens tokens = {0};
+	size_t copied = 0, statement = 0;
+	int parens = 0, brackets = 0, braces = 0, blocks = 0;
+	pigen_lex_source(body, strlen(body), &tokens);
+	for (size_t at = 0; at < tokens.count && tokens.items[at].kind != PIGEN_TOKEN_EOF; at++)
+	{
+		if (pigen_token_is(body, &tokens.items[at], "(")) parens++;
+		else if (pigen_token_is(body, &tokens.items[at], ")")) parens--;
+		else if (pigen_token_is(body, &tokens.items[at], "[")) brackets++;
+		else if (pigen_token_is(body, &tokens.items[at], "]")) brackets--;
+		else if (pigen_token_is(body, &tokens.items[at], "{")) braces++;
+		else if (pigen_token_is(body, &tokens.items[at], "}")) braces--;
+		else if (pigen_token_is(body, &tokens.items[at], "begin")) blocks++;
+		else if (pigen_token_is(body, &tokens.items[at], "end")) blocks--;
+		if (!pigen_token_is(body, &tokens.items[at], ";") || parens || brackets || braces || blocks)
+			continue;
+		if (statement + 2 < at && tokens.items[statement].kind == PIGEN_TOKEN_IDENTIFIER &&
+			tokens.items[statement + 1].kind == PIGEN_TOKEN_IDENTIFIER)
+		{
+			char *type = range_copy((parser *)&(parser){body, tokens, statement}, statement, statement + 1);
+			char *name = range_copy((parser *)&(parser){body, tokens, statement + 1}, statement + 1, statement + 2);
+			int has_equals = 0;
+			if (type_starts((inline_pipeline *)pipe, type))
+				for (size_t item = statement + 2; item < at; item++)
+					if (pigen_token_is(body, &tokens.items[item], "=")) { has_equals = 1; break; }
+			if (has_equals)
+			{
+				size_t equals = statement + 2;
+				while (!pigen_token_is(body, &tokens.items[equals], "=")) equals++;
+				pigen_append_range(out, body + copied, tokens.items[statement].span.start - copied);
+				pigen_append(declarations, "\t\t\t"); pigen_append(declarations, type); pigen_append(declarations, " "); pigen_append(declarations, name); pigen_append(declarations, ";\n");
+				pigen_append(out, name); pigen_append(out, " = ");
+				pigen_append_range(out, body + tokens.items[equals].span.end,
+					tokens.items[at].span.start - tokens.items[equals].span.end);
+				pigen_append(out, ";");
+				copied = tokens.items[at].span.end;
+			}
+			free(type); free(name);
+		}
+		statement = at + 1;
+	}
+	pigen_append_range(out, body + copied, strlen(body) - copied);
+	pigen_free_tokens(&tokens);
+}
+
 static int header_has_reset(const char *source, size_t module_start, size_t header_end)
 {
 	const char *at = source + module_start;
@@ -601,7 +652,13 @@ static void append_pipeline_rtl(pigen_string *out, inline_pipeline *pipe,
 		 * model, this permits ordinary local declarations after the generated
 		 * unpack assignments without violating SV's declaration-before-statement
 		 * rule in the enclosing always_comb block. */
-		if (stage->body) { pigen_append(out, "\t\tbegin\n"); pigen_append(out, stage->body); pigen_append(out, "\n\t\t"); }
+		if (stage->body) {
+			pigen_string body = {0}, declarations = {0};
+			append_stage_body(&body, pipe, stage->body, &declarations);
+			pigen_append(out, "\t\tbegin\n"); pigen_append(out, declarations.data ? declarations.data : "");
+			pigen_append(out, body.data ? body.data : ""); pigen_append(out, "\n\t\t");
+			free(body.data); free(declarations.data);
+		}
 		else pigen_append(out, "\n\t\t");
 		pigen_append_format(out, "%s__s%zu_comb = {", pipe->name, i);
 		for (size_t j = 0; j < stage->output_count; j++) { if (j) pigen_append(out, ", "); pigen_append(out, stage->outputs[j].text); }

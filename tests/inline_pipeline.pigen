@@ -18,7 +18,9 @@ module inline_pipeline(
                     lower = value[3:0];
                 end
                 stage {octet rejoined} yields {octet result} begin
-                    result = rejoined + 8'd1;
+                    result = rejoined;
+                    octet increment = rejoined + 8'd1;
+                    result = increment;
                 end
             endpipeline
             destination <= result;
