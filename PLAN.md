@@ -113,6 +113,15 @@ from the parser or lowering.
   analysis, emitted stage packets should retain only fields needed by a later
   expression or exported output. Preserve all fields when analysis is unsure,
   and make the optimisation visible/auditable in generated RTL.
+- [ ] Redesign the preferred inline-pipeline surface syntax around procedural
+  stages. A pipeline should capture the enclosing module scope rather than
+  spell an input packing or `yields` packing; declared pipeline variables are
+  the mutable packet state, and a stage can simply be `stage begin x <= x + 1;
+  end`. Variables may be declared in a stage. A final explicit export syntax
+  still needs design, but dependency analysis should infer each stage packet's
+  live fields and widths, widening/narrowing its generated storage only as
+  required by later stages or exports. This replaces the current tuple/header
+  pipeline syntax rather than retaining it as a compatibility form.
 - [x] Validate the fixed-point arithmetic model in `examples/biquad_bank.pigen`
   against a reference model. The regression loads eight independent coefficient
   sets, captures external per-filter traces, proves an initial full-rate burst,
