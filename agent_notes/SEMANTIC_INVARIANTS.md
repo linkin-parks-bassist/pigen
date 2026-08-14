@@ -1,8 +1,11 @@
 # Semantic invariants for the replacement compiler middle
 
 This document fixes the meaning that the new compiler architecture must
-represent directly. It does not propose new language behavior. `SPEC.md` is the
-language authority and the current test suite is the compatibility oracle.
+represent directly. `SPEC.md` is the current language authority and the test
+suite is executable coverage of that language. Pigen is pre-release: a language
+change updates the specification, implementation, examples, and tests together.
+No prior Pigen form or implementation path has compatibility status. Ordinary
+SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 
 ## Cross-cutting invariants
 
@@ -129,12 +132,13 @@ language authority and the current test suite is the compatibility oracle.
   combinational equations, and procedural updates with provenance.
 - The SystemVerilog backend renders RTL IR and allocates collision-safe names.
   It performs no scope lookup, type inference, ownership analysis, or parsing.
-- Migration is complete for a feature only when its legacy textual path and
-  fallback are deleted.
+- A structured replacement becomes authoritative only when the corresponding
+  textual path is deleted in the same change. Dual paths and fallbacks are not
+  representable repository states.
 
-## Review gate for each migration patch
+## Review gate for each replacement patch
 
 Every patch must identify the invariant and owning node, resolution/type
 boundary, provenance path, consumers, and newly unrepresentable invalid states.
-It must also name both behavioral compatibility tests and structural tests that
-show no textual semantic side channel was introduced.
+It must also name the behavioral tests for the current design and structural
+tests showing that no textual semantic side channel was introduced.

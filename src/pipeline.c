@@ -18,7 +18,6 @@ typedef struct {
 	pipe_name *locals; size_t local_count;
 	char *ingress_name;
 	char *body;
-	char *yield_text;
 } pipe_stage;
 typedef struct {
 	char *name;
@@ -365,22 +364,15 @@ static pipe_stage parse_stage(parser *p, pipeline_model *pipe)
 	close = matching(p, p->at - 1, "begin", "end");
 	body_end = p->tokens.items[close].span.start;
 	stage.body = pigen_copy_range(p->source + body_start, body_end - body_start);
-	/* `yield` is pipeline-level syntax.  Detect the former stage-local spelling
-	 * here solely to reject it explicitly; it is not a compatibility form. */
+	/* A stage owns declarations and transforms; `yield` belongs to the enclosing
+	 * pipeline grammar and is invalid in this scope. */
 	{
 		parser body = {p->source + body_start, {0}, 0};
 		pigen_lex_source(body.source, body_end - body_start, &body.tokens);
 		collect_stage_scope(&body, pipe, &stage);
 		for (; body.tokens.items[body.at].kind != PIGEN_TOKEN_EOF; body.at++)
 			if (tok(&body, body.at, "yield"))
-			{
-				size_t first = ++body.at, semi = first;
-				while (semi < body.tokens.count && !tok(&body, semi, ";")) semi++;
-				if (semi == first || semi == body.tokens.count)
-					fail_at(&body, first, "`yield` requires an expression followed by `;`");
-				stage.yield_text = range_copy(&body, first, semi);
-				body.at = semi;
-			}
+				fail_at(&body, body.at, "`yield` is permitted only after the final stage");
 		pigen_free_tokens(&body.tokens);
 	}
 	p->at = close + 1;
@@ -445,9 +437,6 @@ static void resolve_pipeline(pipeline_model *pipe)
 			add_part(&pipe->stages[stage].outputs, &pipe->stages[stage].output_count,
 				pipe->names[i].name, pipe->names[i].name, pipe->names[i].type, 0);
 		}
-	for (size_t stage = 0; stage < pipe->stage_count; stage++)
-		if (pipe->stages[stage].yield_text)
-			pigen_fail("`yield` belongs after the final stage, not inside a stage");
 	if (!pipe->yield_text)
 		pigen_fail("pipeline requires a final `yield expression;`");
 	{
@@ -579,12 +568,6 @@ char *pigen_prepare_pipeline_models(const char *source, size_t length,
 	pigen_lex_source(source, length, &p.tokens);
 	while (p.tokens.items[p.at].kind != PIGEN_TOKEN_EOF)
 	{
-		/* The only pipeline extension form is the procedural declaration.
-		 * There is deliberately no legacy top-level/header compatibility path. */
-		if (tok(&p, p.at, "pipeline") && p.at + 2 < p.tokens.count &&
-			p.tokens.items[p.at + 1].kind == PIGEN_TOKEN_IDENTIFIER &&
-			tok(&p, p.at + 2, "{"))
-			fail_at(&p, p.at, "pipeline header packing is not supported");
 		if (!tok(&p, p.at, "pipeline") || p.at + 2 >= p.tokens.count ||
 			p.tokens.items[p.at + 1].kind != PIGEN_TOKEN_IDENTIFIER || !tok(&p, p.at + 2, "begin"))
 		{ p.at++; continue; }
@@ -1201,7 +1184,7 @@ void pigen_free_pipeline_models(pigen_pipelines *pipes)
 		free(p->transports);
 		for (size_t j = 0; j < p->stage_count; j++)
 		{
-			pipe_stage *s = &p->stages[j]; free(s->label); free(s->body); free(s->yield_text); free(s->ingress_name);
+			pipe_stage *s = &p->stages[j]; free(s->label); free(s->body); free(s->ingress_name);
 			for (size_t k = 0; k < s->input_count; k++) { free(s->inputs[k].text); free(s->inputs[k].name); free(s->inputs[k].type); }
 			for (size_t k = 0; k < s->output_count; k++) { free(s->outputs[k].text); free(s->outputs[k].name); free(s->outputs[k].type); }
 			for (size_t k = 0; k < s->ingress_count; k++) { free(s->ingress[k].text); free(s->ingress[k].name); free(s->ingress[k].type); }

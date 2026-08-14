@@ -4,8 +4,10 @@ This is a local working plan and is intentionally excluded from commits.
 
 ## Development policy
 
-Pigen is pre-release. New decisions may replace earlier Pigen extension syntax
-and generated interfaces. Ordinary SystemVerilog compatibility is a permanent
+Pigen is pre-release. New decisions replace earlier Pigen extension syntax and
+generated interfaces outright. There is no legacy Pigen compatibility: syntax,
+implementation paths, examples, and tests move together, with no fallbacks or
+deprecated forms. Ordinary SystemVerilog compatibility is a separate permanent
 constraint: accepted SV must retain its observable behavior, and any deliberate
 restriction must be specified and diagnosed rather than emerging accidentally
 from the parser or lowering.
@@ -118,8 +120,8 @@ from the parser or lowering.
   final stage, exposes that stage's outgoing packet as a module-scope `buf`
   named for the pipeline, so
   ordinary statements consume it as `destination <= pipeline_name;` (including
-  ordinary slices and co-slices). Do not retain the former header/tuple syntax
-  in any compatibility mode or fallback. Each stage has private local scope;
+  ordinary slices and co-slices). This procedural form is the entire pipeline
+  language. Each stage has private local scope;
   lookup is stage-local, then pipeline-local, then module-local, with a warning
   for every shadowing declaration. First-stage inputs must be module-scope
   values or stage-local combinational wires defined with `=`. A non-degenerate
@@ -148,7 +150,7 @@ from the parser or lowering.
 4. Define and test an explicit payload-directed splitter component using one
    input transport and several separately connected output transports.
 5. Make arrow tiers and `objective` drive deterministic topology optimization;
-   retain the current balanced topology as the stable baseline and fallback.
+   the current balanced topology remains the implementation until replaced.
 6. Generalize router and endpoint depths after defining their throughput,
    latency, and generated-interface guarantees.
 7. Replace remaining text-oriented block lowering with shared compiler model

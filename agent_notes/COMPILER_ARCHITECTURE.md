@@ -394,15 +394,17 @@ be rejected.
 
 ## Rewrite strategy
 
-A roughly full rewrite of the compiler middle is warranted. A single enormous
-replacement is unnecessary and risky; a strangler-style migration is possible
-provided the new architecture is designed first and old textual mechanisms do
-not leak into it.
+A roughly full rewrite of the compiler middle is warranted. It may be built in
+small, independently tested slices, but there is no compatibility architecture:
+when a slice becomes authoritative, it replaces and deletes the corresponding
+textual mechanism in the same change. No dual path, feature flag, deprecated
+form, or fallback remains in the compiler.
 
 Suggested order:
 
-1. Freeze new language features temporarily and treat current tests as the
-   compatibility suite.
+1. Freeze new language features temporarily and treat current tests as an
+   executable description of current semantics. Deliberate language changes
+   update those tests rather than preserving prior Pigen behavior.
 2. Write down the semantic invariants for scopes, types, expressions,
    transports, transfers, pipelines, FSMs, and fabrics.
 3. Introduce source management, arenas/stable IDs, syntax nodes, scopes,
@@ -417,14 +419,11 @@ Suggested order:
 9. Move FSMs and fabrics onto the common frontend and semantic services while
    retaining their specialized algorithms.
 10. Introduce a structured RTL IR and make SystemVerilog emission terminal.
-11. Delete each old textual pass when its final consumer migrates. Do not leave
-    fallback or compatibility paths.
+11. Delete each textual pass in the same change that makes its structured
+    replacement authoritative.
 
-During migration, compile selected test cases through both implementations and
-compare simulation behavior rather than demanding textual RTL identity.
-
-The new compiler should not import old implementation boundaries merely to make
-migration convenient. In particular, do not create a new `pipeline` subsystem
+The new compiler should not import current implementation boundaries merely to
+stage the rewrite conveniently. In particular, do not create a new `pipeline` subsystem
 which once again privately parses types, scopes, and expressions. Build the
 shared frontend first.
 

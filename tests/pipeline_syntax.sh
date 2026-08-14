@@ -5,19 +5,12 @@ tool=${1:-./pigen}
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 
-if "$tool" tests/pipeline_old_syntax_error.pigen -o "$temporary/old.sv" \
-	2>"$temporary/old.err"; then
+if "$tool" tests/pipeline_misplaced_yield_error.pigen \
+	-o "$temporary/misplaced-yield.sv" 2>"$temporary/misplaced-yield.err"; then
 	echo "expected stage-local yield to fail" >&2
 	exit 1
 fi
-grep -q 'yield.*after the final stage' "$temporary/old.err"
-
-if "$tool" tests/pipeline_header_error.pigen -o "$temporary/header.sv" \
-	2>"$temporary/header.err"; then
-	echo 'pipeline header packing unexpectedly compiled' >&2
-	exit 1
-fi
-grep -q 'pipeline header packing is not supported' "$temporary/header.err"
+grep -q 'yield.*only after the final stage' "$temporary/misplaced-yield.err"
 
 "$tool" tests/pipeline_shadow.pigen -o "$temporary/shadow.sv" \
 	2>"$temporary/shadow.err"
@@ -48,4 +41,4 @@ fi
 grep -q 'first-stage expression cannot read a pipeline-local value' \
 	"$temporary/first-stage.err"
 
-echo "PASS: former syntax is rejected and lexical shadowing is diagnosed"
+echo "PASS: pipeline grammar and lexical shadowing are diagnosed"

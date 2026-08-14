@@ -146,7 +146,8 @@ skid [31:0] response_stage;
 port [31:0] bram_result;
 ```
 
-`fifo[7:0][4] queue;` is correct. The older reversed spelling is not.
+`fifo[7:0][4] queue;` is the grammar: payload first, then depth. Reversing them
+is invalid.
 
 ## Control flow and transfer flow
 
