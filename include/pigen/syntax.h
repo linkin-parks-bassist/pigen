@@ -8,6 +8,7 @@
 typedef enum {
 	PIGEN_SYNTAX_COMPILATION_UNIT,
 	PIGEN_SYNTAX_MODULE,
+	PIGEN_SYNTAX_TYPEDEF,
 	PIGEN_SYNTAX_TRANSPORT,
 	PIGEN_SYNTAX_OPAQUE
 } pigen_syntax_kind;
@@ -63,6 +64,10 @@ typedef struct {
 	pigen_syntax_id next_sibling;
 	union {
 		struct { pigen_source_span name; } module;
+		struct {
+			pigen_source_span name;
+			pigen_syntax_type type;
+		} type_definition;
 		struct {
 			pigen_syntax_transport_kind kind;
 			pigen_syntax_direction direction;

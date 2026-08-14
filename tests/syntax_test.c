@@ -16,7 +16,9 @@ int main(void)
 {
 	const char text[] =
 		"package prefix; localparam module = 1; endpackage\n"
+		"typedef logic [31:0] global_word_t;\n"
 		"module transports(input logic clk);\n"
+		"  typedef bit [3:0] nibble_t;\n"
 		"  buf signed [7:0] left, right;\n"
 		"  fifo packet_t[DEPTH] queue;\n"
 		"  port logic unsigned [15:0] pulse;\n"
@@ -38,15 +40,23 @@ int main(void)
 	const pigen_syntax_node *module;
 	const pigen_syntax_node *node;
 	pigen_syntax_id at;
+	pigen_syntax_id module_id;
 	size_t transports = 0;
 	size_t opaques = 0;
+	size_t typedefs = 0;
 
 	assert(pigen_parse_syntax(&sources, source, &tree, &error));
 	root = pigen_syntax_get(&tree, (pigen_syntax_id){0});
 	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
 	at = root->first_child;
 	assert(pigen_syntax_get(&tree, at)->kind == PIGEN_SYNTAX_OPAQUE);
-	at = pigen_syntax_get(&tree, at)->next_sibling;
+	while (pigen_syntax_get(&tree, at)->kind != PIGEN_SYNTAX_MODULE)
+	{
+		if (pigen_syntax_get(&tree, at)->kind == PIGEN_SYNTAX_TYPEDEF)
+			typedefs++;
+		at = pigen_syntax_get(&tree, at)->next_sibling;
+	}
+	module_id = at;
 	module = pigen_syntax_get(&tree, at);
 	assert(module && module->kind == PIGEN_SYNTAX_MODULE);
 	assert(span_is(&sources, module->as.module.name, "transports"));
@@ -55,10 +65,16 @@ int main(void)
 		at = node->next_sibling)
 	{
 		node = pigen_syntax_get(&tree, at);
-		assert(node && node->parent.index == 2);
+		assert(node && node->parent.index == module_id.index);
 		if (node->kind == PIGEN_SYNTAX_OPAQUE)
 		{
 			opaques++;
+			continue;
+		}
+		if (node->kind == PIGEN_SYNTAX_TYPEDEF)
+		{
+			typedefs++;
+			assert(span_is(&sources, node->as.type_definition.name, "nibble_t"));
 			continue;
 		}
 		assert(node->kind == PIGEN_SYNTAX_TRANSPORT);
@@ -87,6 +103,7 @@ int main(void)
 		}
 	}
 	assert(transports == 4);
+	assert(typedefs == 2);
 	assert(opaques >= 2);
 
 	assert(!pigen_parse_syntax(&sources, bad_source, &bad_tree, &error));
@@ -94,6 +111,6 @@ int main(void)
 	pigen_free_syntax_tree(&bad_tree);
 	pigen_free_syntax_tree(&tree);
 	pigen_free_sources(&sources);
-	puts("PASS: modules and transport declarations have structured syntax");
+	puts("PASS: modules, typedefs, and transports have structured syntax");
 	return 0;
 }

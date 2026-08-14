@@ -58,11 +58,12 @@ static pigen_expr_id resolve_constant(resolver *resolver,
 		resolver->integer_type, span);
 }
 
-static pigen_type_id resolve_payload_type(resolver *resolver,
+static pigen_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 	const pigen_syntax_type *syntax_type)
 {
 	pigen_semantic_type_kind kind;
 	pigen_signedness signedness;
+	pigen_symbol_id named_symbol = INVALID_ID(pigen_symbol_id);
 	pigen_packed_dimension *dimensions = NULL;
 	const pigen_syntax_dimension *syntax_dimensions;
 	pigen_type_id result;
@@ -70,12 +71,20 @@ static pigen_type_id resolve_payload_type(resolver *resolver,
 
 	if (syntax_type->base == PIGEN_SYNTAX_TYPE_NAMED)
 	{
-		fail(resolver, syntax_type->base_name,
-			"named payload types require typedef resolution");
-		return INVALID_ID(pigen_type_id);
+		const pigen_symbol *symbol;
+		named_symbol = pigen_symbol_lookup(resolver->model, scope,
+			syntax_type->base_name);
+		symbol = pigen_symbol_get(resolver->model, named_symbol);
+		if (!symbol || symbol->kind != PIGEN_SYMBOL_TYPEDEF)
+		{
+			fail(resolver, syntax_type->base_name, "unknown type name");
+			return INVALID_ID(pigen_type_id);
+		}
+		kind = PIGEN_TYPE_NAMED;
 	}
-	kind = syntax_type->base == PIGEN_SYNTAX_TYPE_BIT ?
-		PIGEN_TYPE_BIT : PIGEN_TYPE_LOGIC;
+	else
+		kind = syntax_type->base == PIGEN_SYNTAX_TYPE_BIT ?
+			PIGEN_TYPE_BIT : PIGEN_TYPE_LOGIC;
 	if (syntax_type->signedness == PIGEN_SYNTAX_SIGN_SIGNED)
 		signedness = PIGEN_SIGN_SIGNED;
 	else if (syntax_type->signedness == PIGEN_SYNTAX_SIGN_UNSIGNED)
@@ -109,7 +118,7 @@ static pigen_type_id resolve_payload_type(resolver *resolver,
 		}
 	}
 	result = pigen_type_intern(resolver->model, kind, signedness,
-		INVALID_ID(pigen_symbol_id), dimensions, syntax_type->dimension_count,
+		named_symbol, dimensions, syntax_type->dimension_count,
 		syntax_type->span);
 	free(dimensions);
 	return result;
@@ -155,7 +164,7 @@ static int add_transport(resolver *resolver, pigen_module_id module_id,
 	if (syntax_node->as.transport.direction == PIGEN_DIRECTION_INOUT)
 		return fail(resolver, syntax_node->span,
 			"transport ports must be input or output, not inout");
-	payload_type = resolve_payload_type(resolver,
+	payload_type = resolve_type(resolver, module->scope,
 		&syntax_node->as.transport.payload);
 	if (payload_type.index == PIGEN_INVALID_ID) return 0;
 	if (syntax_node->as.transport.kind == PIGEN_TRANSPORT_FIFO)
@@ -186,6 +195,26 @@ static int add_transport(resolver *resolver, pigen_module_id module_id,
 		syntax_id, module_id, symbol, payload_type, depth,
 		semantic_transport_kind(syntax_node->as.transport.kind),
 		semantic_direction(syntax_node->as.transport.direction), syntax_node->span};
+	return 1;
+}
+
+static int add_typedef(resolver *resolver, pigen_scope_id scope,
+	const pigen_syntax_node *syntax_node)
+{
+	pigen_type_id underlying = resolve_type(resolver, scope,
+		&syntax_node->as.type_definition.type);
+	pigen_symbol_id symbol;
+	pigen_declare_result declared;
+
+	if (underlying.index == PIGEN_INVALID_ID) return 0;
+	declared = pigen_symbol_declare(resolver->model, scope, PIGEN_SYMBOL_TYPEDEF,
+		underlying, syntax_node->as.type_definition.name, syntax_node->span,
+		&symbol, NULL);
+	if (declared == PIGEN_DECLARE_DUPLICATE)
+		return fail(resolver, syntax_node->as.type_definition.name,
+			"duplicate typedef name");
+	if (declared != PIGEN_DECLARE_OK)
+		return fail(resolver, syntax_node->span, "invalid typedef declaration");
 	return 1;
 }
 
@@ -223,6 +252,8 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);
+		if (node->kind == PIGEN_SYNTAX_TYPEDEF &&
+			!add_typedef(resolver, scope, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_TRANSPORT &&
 			!add_transport(resolver, module_id, node, child)) return 0;
 		child = node->next_sibling;
@@ -256,6 +287,8 @@ int pigen_resolve_declarations(const pigen_source_manager *sources,
 	for (child = root->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pigen_syntax_get(syntax, child);
+		if (node->kind == PIGEN_SYNTAX_TYPEDEF &&
+			!add_typedef(&resolver, model->compilation_scope, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_MODULE &&
 			!add_module(&resolver, node, child)) return 0;
 		child = node->next_sibling;

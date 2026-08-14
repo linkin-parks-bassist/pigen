@@ -29,17 +29,19 @@ static const pigen_semantic_transport *find_transport(
 int main(void)
 {
 	const char text[] =
+		"typedef logic [31:0] word_t;\n"
 		"module first;\n"
-		"  buf unsigned [7:0] left, right;\n"
-		"  fifo logic signed [15:0][4] queue;\n"
+		"  typedef logic unsigned [7:0] byte_t;\n"
+		"  buf byte_t left, right;\n"
+		"  fifo word_t[4] queue;\n"
 		"endmodule\n"
 		"module second;\n"
 		"  port bit [0:0] pulse;\n"
 		"endmodule\n";
 	const char duplicate[] =
 		"module same; endmodule module same; endmodule\n";
-	const char named[] =
-		"module named; buf packet_t value; endmodule\n";
+	const char unknown[] =
+		"module unknown; buf missing_t value; endmodule\n";
 	const char inout[] =
 		"module bidirectional; inout buf [7:0] value; endmodule\n";
 	pigen_source_manager sources = {0};
@@ -47,18 +49,18 @@ int main(void)
 		strlen(text));
 	pigen_source_id duplicate_source = pigen_source_add(&sources, "duplicate.pigen",
 		duplicate, strlen(duplicate));
-	pigen_source_id named_source = pigen_source_add(&sources, "named.pigen", named,
-		strlen(named));
+	pigen_source_id unknown_source = pigen_source_add(&sources, "unknown.pigen",
+		unknown, strlen(unknown));
 	pigen_source_id inout_source = pigen_source_add(&sources, "inout.pigen", inout,
 		strlen(inout));
 	pigen_syntax_tree syntax = {0};
 	pigen_syntax_tree duplicate_syntax = {0};
-	pigen_syntax_tree named_syntax = {0};
+	pigen_syntax_tree unknown_syntax = {0};
 	pigen_syntax_tree inout_syntax = {0};
 	pigen_syntax_error syntax_error = {0};
 	pigen_semantic_model model;
 	pigen_semantic_model duplicate_model;
-	pigen_semantic_model named_model;
+	pigen_semantic_model unknown_model;
 	pigen_semantic_model inout_model;
 	pigen_resolve_error error = {0};
 	const pigen_semantic_transport *left;
@@ -86,12 +88,16 @@ int main(void)
 	assert(queue->fifo_depth.index != PIGEN_INVALID_ID);
 	assert(pigen_expr_get(&model, queue->fifo_depth)->integer == 4);
 	queue_type = pigen_type_get(&model, queue->payload_type);
+	assert(queue_type && queue_type->kind == PIGEN_TYPE_NAMED);
+	queue_type = pigen_type_get(&model,
+		pigen_symbol_get(&model, queue_type->named_symbol)->type);
 	assert(queue_type && queue_type->kind == PIGEN_TYPE_LOGIC);
-	assert(queue_type->signedness == PIGEN_SIGN_SIGNED);
-	queue_dimension = pigen_type_dimensions(&model, queue->payload_type);
+	queue_dimension = pigen_type_dimensions(&model,
+		pigen_symbol_get(&model,
+			pigen_type_get(&model, queue->payload_type)->named_symbol)->type);
 	assert(queue_dimension);
 	bound = pigen_expr_get(&model, queue_dimension->left);
-	assert(bound && bound->integer == 15);
+	assert(bound && bound->integer == 31);
 
 	assert(pigen_parse_syntax(&sources, duplicate_source, &duplicate_syntax,
 		&syntax_error));
@@ -100,23 +106,25 @@ int main(void)
 	assert(error.message && strstr(error.message, "duplicate module"));
 	assert(span_is(&sources, error.span, "same"));
 
-	assert(pigen_parse_syntax(&sources, named_source, &named_syntax, &syntax_error));
-	assert(!pigen_resolve_declarations(&sources, &named_syntax, &named_model, &error));
-	assert(error.message && strstr(error.message, "typedef"));
-	assert(span_is(&sources, error.span, "packet_t"));
+	assert(pigen_parse_syntax(&sources, unknown_source, &unknown_syntax,
+		&syntax_error));
+	assert(!pigen_resolve_declarations(&sources, &unknown_syntax,
+		&unknown_model, &error));
+	assert(error.message && strstr(error.message, "unknown type"));
+	assert(span_is(&sources, error.span, "missing_t"));
 	assert(pigen_parse_syntax(&sources, inout_source, &inout_syntax, &syntax_error));
 	assert(!pigen_resolve_declarations(&sources, &inout_syntax, &inout_model, &error));
 	assert(error.message && strstr(error.message, "not inout"));
 
 	pigen_free_semantic_model(&inout_model);
-	pigen_free_semantic_model(&named_model);
+	pigen_free_semantic_model(&unknown_model);
 	pigen_free_semantic_model(&duplicate_model);
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_tree(&inout_syntax);
-	pigen_free_syntax_tree(&named_syntax);
+	pigen_free_syntax_tree(&unknown_syntax);
 	pigen_free_syntax_tree(&duplicate_syntax);
 	pigen_free_syntax_tree(&syntax);
 	pigen_free_sources(&sources);
-	puts("PASS: transport syntax resolves to scopes, symbols, types, and constants");
+	puts("PASS: typedef and transport syntax resolves by scope and identity");
 	return 0;
 }
