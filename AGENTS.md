@@ -1,0 +1,1 @@
+This repo is me taking my frustration with Verilog out by trying to make it better. Consult the README.md and SPEC.md files. You will also likely find *PLAN*.md files, which I will likely want you to follow

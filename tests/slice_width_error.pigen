@@ -1,0 +1,10 @@
+module slice_width_error
+	(
+		input logic clk,
+		input logic reset
+	);
+	buf [15:0] source;
+	buf [7:0] destination;
+	always_ff @(posedge clk)
+		destination <= source[11:0];
+endmodule

@@ -1,0 +1,16 @@
+module pipeline_old_syntax_error(
+	input logic clk,
+	input buf [7:0] source,
+	output buf [7:0] destination
+);
+	always @(posedge clk) begin
+		pipeline obsolete begin
+			logic [7:0] value;
+			stage begin
+				value <= source;
+				yield value;
+			end
+		endpipeline
+		destination <= obsolete;
+	end
+endmodule

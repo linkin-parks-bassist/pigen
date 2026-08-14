@@ -12,6 +12,32 @@ typedef struct {
 	size_t right_length;
 } transfer_member;
 
+/* Transfer blocks are atomic groups.  A member may itself use a co-slice;
+ * flatten that destination into the group's outer co-slice so the ordinary
+ * transfer parser still sees each transport independently. */
+static void append_flattened_destination(pigen_string *output, const char *text, size_t length)
+{
+	const char *start = pigen_skip_spaces(text, text + length);
+	const char *end = pigen_trim_end(start, text + length);
+	const char *cursor;
+	int depth = 0;
+
+	if (start < end && *start == '{' && end[-1] == '}')
+	{
+		for (cursor = start; cursor < end; cursor++)
+		{
+			if (*cursor == '{') depth++;
+			else if (*cursor == '}' && --depth == 0) break;
+		}
+		if (cursor == end - 1)
+		{
+			pigen_append_range(output, start + 1, (size_t)(end - start - 2));
+			return;
+		}
+	}
+	pigen_append_range(output, text, length);
+}
+
 static int token_is(const char *source, const pigen_tokens *tokens, size_t at,
 	const char *text)
 {
@@ -127,7 +153,7 @@ static size_t lower_one(pigen_string *output, const char *source,
 	for (size_t i = 0; i < member_count; i++)
 	{
 		if (i) pigen_append(output, ", ");
-		pigen_append_range(output, members[i].left, members[i].left_length);
+		append_flattened_destination(output, members[i].left, members[i].left_length);
 	}
 	pigen_append(output, "} <= {");
 	for (size_t i = 0; i < member_count; i++)

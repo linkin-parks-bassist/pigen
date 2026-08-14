@@ -1,9 +1,9 @@
-module inline_pipeline_tb;
+module pipeline_tb;
     logic clk = 1'b0, reset = 1'b1, enable = 1'b1;
     logic [7:0] source, destination;
     logic source_valid = 1'b0, source_ready, destination_valid, destination_ready = 1'b1;
 
-    inline_pipeline dut (.*);
+    pipeline dut (.*);
     always #5 clk = ~clk;
 
     int sent, received, cycles;
@@ -12,6 +12,7 @@ module inline_pipeline_tb;
     always @(posedge clk) begin
         if (reset) begin
             destination_ready <= 1'b1;
+			cycles <= 0;
         end else begin
             /* Deliberately stop the downstream consumer while the pipeline is
              * full.  A correctly-elaborated pipeline must retain every token. */
@@ -20,7 +21,7 @@ module inline_pipeline_tb;
             if (source_valid && source_ready) sent <= sent + 1;
             if (destination_valid && destination_ready) begin
                 if (destination !== expected[received])
-                    $fatal(1, "inline pipeline reordered/lost payload %0d", received);
+					$fatal(1, "pipeline reordered/lost payload %0d", received);
                 received <= received + 1;
             end
         end
@@ -37,12 +38,12 @@ module inline_pipeline_tb;
         end
         @(negedge clk) source_valid = 1'b0;
         while (received < 16) @(posedge clk);
-        $display("PASS: inline pipeline is elastic through downstream stalls");
+        $display("PASS: pipeline is elastic through downstream stalls");
         $finish;
     end
 
     initial begin
         repeat (200) @(posedge clk);
-        $fatal(1, "inline pipeline elastic test timed out: sent=%0d received=%0d", sent, received);
+        $fatal(1, "pipeline elastic test timed out: sent=%0d received=%0d", sent, received);
     end
 endmodule

@@ -16,6 +16,9 @@ const pigen_type_descriptor pigen_types[] =
 	{ "fifo", 'f', 1, "pigen_fifo" },
 	{ "skid", 's', 1, "pigen_skid" },
 	{ "port", 'h', 1, "pigen_port" },
+	/* Compiler-internal, combinational endpoint used to join first-stage
+	 * pipeline inputs directly into their stage register. */
+	{ "ingress", 'i', 1, NULL },
 };
 
 static const char *diagnostic_path;

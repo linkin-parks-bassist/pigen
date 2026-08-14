@@ -1,0 +1,69 @@
+typedef struct packed {
+	logic [3:0] tag;
+	logic [11:0] payload;
+} syntax_packet_t;
+
+module transport_syntax
+	(
+		input logic clk,
+		input logic reset,
+		input logic route_left,
+		input buf [23:0] source_wide,
+		input buf [7:0] source_tail,
+		input buf [15:0] source_nested,
+		input buf [7:0] source_indexed,
+		input buf [7:0] source_branch,
+		input buf syntax_packet_t source_struct,
+		input buf [15:0] source_variable,
+		input logic [3:0] variable_base,
+		input buf [7:0] source_scalar_lvalue,
+		output buf [12:0] held_high,
+		output buf [3:0] branch_left,
+		output buf [3:0] branch_right,
+		output logic [10:0] state_middle,
+		output logic [7:0] nested_state,
+		output logic [3:0] nibble_state,
+		output logic [7:0] memory_two,
+		output logic [7:0] memory_one,
+		output logic [7:0] ordered_state,
+		output logic [3:0] struct_tag,
+		output logic [11:0] struct_payload,
+		output logic [7:0] variable_byte,
+		output logic [15:0] scalar_lvalue
+	);
+
+	logic [7:0] memory [0:3];
+	assign memory_two = memory[2];
+	assign memory_one = memory[1];
+
+	always_ff @(posedge clk)
+	begin
+		/* 32 bits on each side, with unrelated item widths.  The selected
+		 * source_wide bits still consume its complete 24-bit token. */
+		{held_high, state_middle, memory[2]} <=
+			{source_wide[15:0], source_tail, 8'hc3};
+
+		/* A nested ordinary-SV concatenation is one always-ready member. */
+		{{nested_state[7:4], nested_state[3:0]}, memory[0]} <= source_nested;
+
+		/* Ordinary memory slices compose with another degenerate lvalue. */
+		{memory[1][7:4], nibble_state} <= source_indexed;
+
+		/* Packed members and indexed part-selects preserve SV value syntax;
+		 * each projected read still consumes its complete base transport. */
+		{struct_tag, struct_payload} <=
+			{source_struct.tag, source_struct.payload};
+		variable_byte <= source_variable[variable_base +: 8];
+		scalar_lvalue [7:0] <= source_scalar_lvalue;
+
+		/* Pure degenerate SV remains ordinary source-ordered NBA behavior. */
+		ordered_state <= 8'h11;
+		ordered_state <= 8'h22;
+
+		/* These are mutually exclusive consumers of one buffered source. */
+		if (route_left)
+			branch_left <= source_branch[7:4];
+		else
+			branch_right <= source_branch[3:0];
+	end
+endmodule

@@ -14,7 +14,7 @@
 #include "pigen/blocks.h"
 #include "pigen/declarations.h"
 #include "pigen/fsm.h"
-#include "pigen/inline_pipeline.h"
+#include "pigen/pipeline.h"
 #include "pigen/lexer.h"
 #include "pigen/procedural.h"
 #include "pigen/transfer.h"
@@ -156,7 +156,7 @@ int main(int argc, char **argv)
 	pigen_width_checks width_checks = {0};
 	pigen_clears clears = {0};
 	pigen_procedural_ast procedural_ast = {0};
-	pigen_inline_pipelines *inline_pipelines = NULL;
+	pigen_pipelines *pipeline_models = NULL;
 	pigen_tokens tokens = {0};
 	if (argc < 2) usage();
 	for (int argument = 1; argument < argc; argument++)
@@ -220,15 +220,15 @@ int main(int argc, char **argv)
 		pigen_set_diagnostic_context(input_path, source);
 	}
 	{
-		char *prepared_source = pigen_prepare_inline_pipelines(source, source_length,
-			&source_length, &inline_pipelines);
+		char *prepared_source = pigen_prepare_pipeline_models(source, source_length,
+			&source_length, &pipeline_models);
 		free(source);
 		source = prepared_source;
 		pigen_set_diagnostic_context(input_path, source);
 		pigen_parse_procedural_ast(source, source + source_length, &procedural_ast);
 		{
-			char *finished_source = pigen_finish_inline_pipelines(source, source_length,
-				&procedural_ast, inline_pipelines, &source_length);
+			char *finished_source = pigen_finish_pipeline_models(source, source_length,
+				&procedural_ast, pipeline_models, &source_length);
 			free(source);
 			source = finished_source;
 			pigen_set_diagnostic_context(input_path, source);
@@ -246,13 +246,13 @@ int main(int argc, char **argv)
 	 */
 	for (cursor = 0; cursor <= source_length; )
 	{
-		if (cursor + 26 <= source_length && !memcmp(source + cursor, "/*__PIGEN_INLINE_BEGIN__*/", 26))
+		if (cursor + 28 <= source_length && !memcmp(source + cursor, "/*__PIGEN_PIPELINE_BEGIN__*/", 28))
 		{
-			const char *marker_end = strstr(source + cursor + 26, "/*__PIGEN_INLINE_END__*/");
-			if (!marker_end) fail("unterminated internal inline-pipeline fragment");
+			const char *marker_end = strstr(source + cursor + 28, "/*__PIGEN_PIPELINE_END__*/");
+			if (!marker_end) fail("unterminated internal pipeline fragment");
 			pigen_append_range(&output, source + statement_start,
 				(size_t)(marker_end - (source + statement_start)));
-			cursor = (size_t)(marker_end - source) + 24;
+			cursor = (size_t)(marker_end - source) + 26;
 			statement_start = cursor;
 			continue;
 		}
@@ -529,7 +529,7 @@ int main(int argc, char **argv)
 		}
 	pigen_free_procedural_ast(&procedural_ast);
 	pigen_free_tokens(&tokens);
-	pigen_free_inline_pipelines(inline_pipelines);
+	pigen_free_pipeline_models(pipeline_models);
 	pigen_free_fabric_diagrams(&diagrams);
 	free(owned_output_path);
 	free(block_output.data);

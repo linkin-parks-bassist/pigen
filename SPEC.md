@@ -40,40 +40,53 @@ New Pigen features and syntax decisions are subordinate to it.
 ## Top-level design units
 
 A `.pigen` source may contain ordinary SystemVerilog design units and `fabric`
-units together and in any top-level order. The preferred pipeline form is an
-inline declaration inside an enclosing clocked `always` block; it elaborates
-to storage and logic in the parent module, not a generated child module.
-
-The older top-level `pipeline` unit remains accepted as a compatibility form
-while existing sources migrate. New designs should use the inline form below.
+units together and in any top-level order. A pipeline is a declaration inside
+an enclosing clocked `always` block; it elaborates to storage and logic in the
+parent module, never to a generated child module.
 
 `fabric` begins a new construct only at source top level. Inside ordinary
 `module`, `interface`, `package`, `program`, `class`, and `checker` units those
 words remain ordinary SystemVerilog tokens and identifiers. Inside a module,
-`pipeline name {` begins an inline pipeline declaration only inside a supported
+`pipeline name begin` begins a pipeline declaration only inside a supported
 clocked `always`/`always_ff` block; all other uses of `pipeline` retain their
 ordinary SystemVerilog meaning.
 
-### Inline pipeline blocks
+### Pipelines
 
 ```text
-inline-pipeline ::= "pipeline" identifier packed-expression "yields"
-                    packed-expression "begin" pipeline-item* stage+
+pipeline       ::= "pipeline" identifier "begin"
+                      pipeline-declaration* stage+ "yield" expression ";"
                     "endpipeline"
-pipeline-item   ::= packed-type identifier-list ";"
-stage           ::= "stage" identifier? packed-list "yields" packed-list
-                    (";" | "begin" stage-body "end")
-packed-list     ::= "{" packed-item ("," packed-item)* "}"
-packed-item     ::= expression | packed-type identifier
+pipeline-declaration ::= packed-type identifier-list ";"
+stage           ::= "stage" identifier? "begin" stage-item* "end"
+stage-item      ::= declaration | assignment
 pipeline-reset  ::= ("pipe_reset" | "pipeline_reset") "(" identifier ");"
 ```
 
-The header input packing is read from enclosing module scope. The header output
-packing is one atomic output packet; its named members are readable by later
-statements in the enclosing module. Stage names and declarations are private to
-the pipeline, and each stage has its own combinational scope. A pipeline-level
-declaration establishes a reusable type association; the same association may
-be introduced inline in either packed list.
+This is procedural surface syntax for an elaborated elastic pipeline, not an
+untimed sequential program. Pipeline-local declarations create mutable
+travelling packet fields. A stage's `field <= expression;` computes its next
+packet field, while every pipeline-field read observes that stage's immutable
+incoming packet. A transfer becomes observable only in the following stage; it
+does not introduce a cycle beyond the elastic stage boundary.
+Each stage has a private local scope. Lookup is stage-local, then
+pipeline-local, then enclosing module scope; a shadowing declaration is warned.
+The first stage takes only enclosing module values and stage-local
+combinational values. Every non-degenerate enclosing transport it reads is an
+atomic stage input: the stage waits for all such inputs and consumes them on its
+advance, under the complete enclosing procedural guard of the pipeline.
+
+`yield expression;` appears exactly once after the final stage. It evaluates
+from that stage's outgoing packet, so all transfers in the final stage are
+visible in the yielded value. It makes the pipeline identifier itself the final
+module-scope buffered output
+packet. It is consumed by ordinary Pigen transfers, for example `out <= pipe;`
+or `{hi, lo} <= {pipe[15:8], pipe[7:0]};`. It has the ordinary sole-consumer,
+valid, ready, and same-cycle replenishment semantics of `buf`.
+
+`export` is reserved but deliberately not accepted. Its intended purpose is a
+one-cycle module-scope `port` pulse from an earlier stage; its scope, type, and
+collision semantics remain to be specified.
 
 The enclosing clocked `always` supplies the clock domain. The complete guard
 around the declaration is the pipeline enable: when false, all stage storage is
@@ -81,14 +94,15 @@ held and no input or output handshake occurs. `pipe_reset` and
 `pipeline_reset` are declarative aliases. Their full procedural guard directly
 resets every generated valid bit on that edge; repeated reset bindings combine
 with logical OR. In the absence of an explicit binding, a parent port named
-`reset` is used as the conventional synchronous reset; otherwise the inline
-pipeline is intentionally unreset.
+`reset` is used as the conventional synchronous reset; otherwise the pipeline
+is intentionally unreset.
 
-Curly braces always retain normal packed-concatenation semantics. A stage or
-transfer is atomic over its complete packing, so a source transport is consumed
-only when all non-degenerate destinations are ready. Stage bodies are currently
-combinational; nested transport operations and `stall();` are reserved future
-syntax, and no implicit `busy` mechanism exists.
+Curly braces retain normal packed-concatenation semantics. A stage advances
+atomically over its inferred packet and source transports. Stage-local wires
+use ordinary combinational `=` definitions. `wire <= expression` is a fatal
+error: Pigen `<=` is a transfer and a wire is never ready. Nested transport
+operations and `stall();` are reserved future syntax, and no implicit `busy`
+mechanism exists.
 
 Adjacent stage packings may have different member counts and member widths.
 They are connected by their complete bit stream, leftmost member most
@@ -96,70 +110,6 @@ significant, and must have equal total `$bits` width; Pigen emits a generated
 elaboration check for each boundary. An expression whose type cannot be
 inferred positionally across an equal-arity boundary must first be assigned to
 an explicitly typed pipeline name before such repartitioning.
-
-### Pipeline blocks
-
-The pipeline grammar is:
-
-```text
-pipeline       ::= "pipeline" identifier parameters? "begin"
-                     pipeline-option* stage+
-                   "endpipeline"
-parameters     ::= "#" "(" parameter ("," parameter)* ")"
-parameter      ::= "parameter" "integer" identifier "=" expression
-pipeline-option ::= "option" "skid_step" "=" nonnegative-integer ";"
-stage          ::= "stage" identifier tuple "yields" tuple "begin"
-                     stage-body
-                   "endstage"
-tuple          ::= "{" tuple-item ("," tuple-item)* "}"
-tuple-item     ::= identifier | packed-type identifier
-packed-type    ::= ("logic" | "wire") signedness? packed-range
-signedness     ::= "signed" | "unsigned"
-```
-
-```systemverilog
-pipeline mac #(
-    parameter integer W = 16
-) begin
-    option skid_step = 4;
-
-    stage multiply {m, x, b} yields {mx, b} begin
-        logic [W-1:0] m;
-        logic [W-1:0] x;
-        logic [W-1:0] b;
-        logic [2*W-1:0] mx = m * x;
-    endstage
-
-    stage accumulate {mx, b} yields {result} begin
-        logic [2*W-1:0] sum = mx + b;
-        logic [W-1:0] result = sum[W-1:0];
-    endstage
-endpipeline
-```
-
-Each stage is a one-entry elastic ready/valid transform. A pipeline requires
-at least one stage, and stage names are unique within it. The first stage must
-type every input either in its tuple or with a top-level declaration in its
-body. Later bare stage inputs inherit the preceding yielded tuple's types by
-position. A bare yielded value takes the type of a same-named input or body
-declaration. Adjacent tuples must have equal arity and equal packed widths at
-each position.
-
-Stage signal types are packed `logic` or `wire` ranges with optional signedness.
-A typed header value must not be redeclared in the body. A stage input body
-declaration cannot have an initializer. Other declaration initializers and
-stage statements are evaluated as combinational SystemVerilog to form the
-yielded packet.
-
-The generated pipeline interface is `clk`, `reset`, `enable`, `in_valid`,
-`in_ready`, `out_valid`, `out_ready`, `packet_in`, and `packet_out`. Tuple
-members are packed left to right. Parameters are forwarded to every generated
-stage.
-
-`option skid_step = N;` inserts a two-entry skid after every Nth stage and
-defaults to four; zero disables periodic insertion. The option may appear at
-most once. A standalone top-level `skid;` or `no_skid;` inside a stage forces
-or suppresses a skid at that boundary. A stage may not contain both.
 
 ### Fabric blocks
 

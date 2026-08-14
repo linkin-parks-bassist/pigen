@@ -1,0 +1,19 @@
+module pipeline_wire_transfer_error(
+	input logic clk,
+	input logic [7:0] source,
+	output buf [7:0] destination
+);
+	typedef logic [7:0] octet;
+	always @(posedge clk) begin
+		pipeline invalid begin
+			octet value;
+			stage begin
+				wire octet local_value = source;
+				local_value <= source;
+				value <= local_value;
+			end
+			yield value;
+		endpipeline
+		destination <= invalid;
+	end
+endmodule

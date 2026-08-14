@@ -1,0 +1,15 @@
+module pipeline_first_stage_field_error(
+	input logic clk,
+	output buf [7:0] destination
+);
+	always @(posedge clk) begin
+		pipeline invalid begin
+			logic [7:0] value;
+			stage begin
+				value <= value + 8'd1;
+			end
+			yield value;
+		endpipeline
+		destination <= invalid;
+	end
+endmodule

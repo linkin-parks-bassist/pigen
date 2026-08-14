@@ -23,7 +23,7 @@ The generated module is ordinary synthesizable SV. Compile it with
 [`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv), which contains the small
 storage primitives Pigen instantiates.
 
-A `.pigen` file can also declare stage-oriented `pipeline` units and routed
+A `.pigen` file can also declare stage-oriented `pipeline` declarations and routed
 `fabric` units.
 
 ## The central idea
@@ -49,28 +49,28 @@ sum <= left + right;
 
 There is no cycle where `left` is consumed but `right` is not.
 
-## Declare a pipeline block
+## Pipelines
 
-Use a `pipeline` when the whole unit is naturally a sequence of tuple
-transforms:
+A pipeline is declared inside a clocked module process. Its stages are elastic packet transforms; the procedural surface never creates a sequential multi-cycle operation.
 
 ```systemverilog
-pipeline add_then_clip begin
-    option skid_step = 0;
-    stage add {logic [7:0] a, logic [7:0] b} yields {logic [8:0] sum} begin
-        sum = a + b;
-        skid;
-    endstage
-    stage clip {sum} yields {logic [7:0] result} begin
-        result = sum[8] ? 8'hff : sum[7:0];
-    endstage
-endpipeline
-```
+always @(posedge clk) begin
+    pipeline add_then_clip begin
+        logic [8:0] sum;
+        logic [7:0] result;
 
-This produces one `add_then_clip` module with packed ready/valid input and
-output packets. Carried tuple types flow positionally between stages. Use
-`skid;`, `no_skid;`, or the per-pipeline `skid_step` option to choose timing
-boundaries.
+        stage begin
+            sum <= left + right;
+        end
+		stage begin
+			result <= sum[8] ? 8'hff : sum[7:0];
+		end
+		yield result;
+	endpipeline
+
+    out <= add_then_clip;
+end
+```
 
 ## Declare a fabric block
 

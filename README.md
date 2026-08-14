@@ -135,7 +135,7 @@ With several fabrics, each gets its own diagram.
 
 ## Convenience syntax
 
-`pipeline` and `fsm` blocks are higher-level conveniences built on the same
+`pipeline` declarations and `fsm` blocks are higher-level conveniences built on the same
 transport semantics. Pipelines package a sequence of typed elastic transforms;
 FSMs keep state-oriented control next to the transfers it controls. They can
 save source code, but they are not required to obtain Pigen's central benefit:
@@ -179,6 +179,8 @@ Good starting points are:
   timing and queueing choices
 - [`examples/port_pipeline.pigen`](examples/port_pipeline.pigen) for pulse-like
   `port` behavior
+- [`examples/biquad_bank.pigen`](examples/biquad_bank.pigen) for an eight-slot,
+  five-coefficient stateful DSP bank, including its clean unconfigured-slot path
 - [`USER_GUIDE.md`](USER_GUIDE.md) for a practical walkthrough
 - [`SPEC.md`](SPEC.md) for the complete language and compatibility contract
 

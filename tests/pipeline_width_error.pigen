@@ -1,8 +1,0 @@
-pipeline bad_width begin
-    stage first {logic [7:0] value} yields {logic [7:0] middle} begin
-        middle = value;
-    endstage
-    stage second {logic [6:0] middle} yields {logic [6:0] result} begin
-        result = middle;
-    endstage
-endpipeline

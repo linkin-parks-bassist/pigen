@@ -1,0 +1,10 @@
+module pipeline_header_error(
+	input logic clk,
+	input buf [7:0] source,
+	output buf [7:0] destination
+);
+	always @(posedge clk) begin
+		pipeline obsolete {source} yields {destination} begin
+		endpipeline
+	end
+endmodule

@@ -1,0 +1,30 @@
+module pipeline(
+    input logic clk,
+    input logic reset,
+    input logic enable,
+    input buf [7:0] source,
+    output buf [7:0] destination
+);
+    typedef logic [7:0] octet;
+
+    always @(posedge clk) begin
+        if (reset) begin
+            pipeline_reset(pipe);
+        end else if (enable) begin
+            pipeline pipe begin
+                octet value, rejoined, result;
+                stage begin
+                    value <= source;
+                end
+                stage begin
+                    rejoined <= value;
+                end
+                stage begin
+                    result <= rejoined + 8'd1;
+                end
+                yield result;
+            endpipeline
+            destination <= pipe;
+        end
+    end
+endmodule

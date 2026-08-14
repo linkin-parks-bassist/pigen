@@ -45,10 +45,6 @@ from the parser or lowering.
 
 - [x] Parse and lower SystemVerilog-shaped modules with transport
   declarations, actions, atomic joins, buffered storage, ports, and FSMs.
-- [x] Parse top-level `pipeline` units in the compiler and emit elastic stage,
-  skid, and public wrapper modules into the normal SystemVerilog output.
-- [x] Support typed/inherited packed tuples, width and arity checks, stage-local
-  combinational logic, parameters, periodic skids, and per-stage overrides.
 - [x] Parse top-level `fabric` units in the compiler and emit direct links,
   endpoint queues, blind routers, routes, and the public wrapper module into
   the normal SystemVerilog output.
@@ -61,8 +57,8 @@ from the parser or lowering.
   crossing minimization, peer-directed ports, label adjustment, SVG structure,
   and connection legend; support default, custom, suppressed, and multi-fabric
   output paths without a Python runtime.
-- [x] Parse ordinary modules, pipelines, and fabrics at top level while
-  preserving `pipeline` and `fabric` identifiers inside ordinary units.
+- [x] Parse ordinary modules and top-level fabrics while preserving `pipeline`
+  and `fabric` identifiers where they are ordinary SystemVerilog names.
 - [x] Cover positive behavior, randomized stalls, arbitration, full-throughput
   queues, mixed-unit files, direct-only fabrics, and negative diagnostics in
   the test suite.
@@ -92,40 +88,50 @@ from the parser or lowering.
   always-ready atomic destination members and may use normal SV projections;
   pure degenerate statements retain ordinary NBA ordering; buffered ownership
   rules do not apply to them. A procedural `wire` destination is diagnosed.
-- [ ] Implement `transfer begin ... end` as readable atomic-transfer syntax,
+- [x] Implement `transfer begin ... end` as readable atomic-transfer syntax,
   exactly equivalent to concatenating member LHS and RHS expressions in source
   order. Include transport reads in lvalue indices/selects in the deduplicated
   validity and single-consumer analysis.
-- [ ] After inline pipelines are stable, design stage-body transport operations
+- [ ] Design optional stage-body transport operations
   whose pending handshake stalls that stage, plus an explicit `stall();`
   directive. Do not add an implicit pipeline `busy` mechanism; independent
   packets must remain dispatchable every cycle when ready/valid permits.
-- [ ] Add contextual expression typing for packed transport and inline-pipeline
+- [ ] Add contextual expression typing for packed transport and pipeline
   outputs. A yielded expression should inherit the uniquely determined
   destination bit range's width and signedness, including across a stage
   repartition; arithmetic should then extend, truncate, and sign-propagate as
   that destination requires. This needs parsed typed expression nodes rather
   than the current token-level lowering, and should eliminate source-level
   width casts such as `acc_t'(a1)` in ordinary pipeline code.
-- [ ] Add packet-field liveness pruning to inline pipeline elaboration. Source
+- [ ] Add packet-field liveness pruning to pipeline elaboration. Source
   code should be free to carry one readable aggregate packet/struct across
   stages and modify the fields it cares about; after type and dependency
   analysis, emitted stage packets should retain only fields needed by a later
   expression or exported output. Preserve all fields when analysis is unsure,
   and make the optimisation visible/auditable in generated RTL.
-- [ ] Redesign the preferred inline-pipeline surface syntax around procedural
-  stages. A pipeline should capture the enclosing module scope rather than
-  spell an input packing or `yields` packing; declared pipeline variables are
-  the mutable packet state, and a stage can simply be `stage begin x <= x + 1;
-  end`. Variables may be declared in a stage. A final explicit export syntax
-  still needs design, but dependency analysis should infer each stage packet's
-  live fields and widths, widening/narrowing its generated storage only as
-  required by later stages or exports. This replaces the current tuple/header
-  pipeline syntax rather than retaining it as a compatibility form.
-- [x] Validate the fixed-point arithmetic model in `examples/biquad_bank.pigen`
-  against a reference model. The regression loads eight independent coefficient
-  sets, captures external per-filter traces, proves an initial full-rate burst,
-  then spaces revisits beyond writeback latency for stateful reference checks.
+- [x] Complete the procedural pipeline surface syntax. A pipeline captures
+  enclosing module scope rather than spelling an input packing. Pipeline-local declarations are
+  mutable travelling packet state; `stage begin x <= x + 1; end` computes the
+  next packet state, rather than describing a sequential algorithm. The
+  elaborated machine remains elastic, staged, and able to issue one packet per
+  cycle wherever handshakes permit. A pipeline-level `yield x;`, after the
+  final stage, exposes that stage's outgoing packet as a module-scope `buf`
+  named for the pipeline, so
+  ordinary statements consume it as `destination <= pipeline_name;` (including
+  ordinary slices and co-slices). Do not retain the former header/tuple syntax
+  in any compatibility mode or fallback. Each stage has private local scope;
+  lookup is stage-local, then pipeline-local, then module-local, with a warning
+  for every shadowing declaration. First-stage inputs must be module-scope
+  values or stage-local combinational wires defined with `=`. A non-degenerate
+  external transport read by a stage is an atomic stage input and consumer,
+  qualified by the pipeline's complete enclosing guard. `wire <= value` stays
+  a fatal transfer error. TODO: design `export x;` for exposing an earlier
+  stage as a one-cycle module-scope `port`; do not accept it before its scope,
+  type, and collision rules are decided.
+- [ ] Decide whether pipelines need explicit reset blocks rather than only
+  `pipe_reset`/`pipeline_reset` bindings. Constants and localparams are
+  wire-like transfer sources and therefore validate a transport write; reset
+  semantics must make any exception explicit rather than accidental.
 - [ ] Build whole-unit ready-dependency graphs and reject indirect
   combinational cycles that do not cross a FIFO, skid, or ordinary register.
 

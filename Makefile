@@ -2,32 +2,42 @@ CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
 
-.PHONY: all clean test block-test inline-pipeline-test biquad-bank-waveform verify coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test verify coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
-pigen: src/pigen.c src/blocks.c src/fabric_svg.inc src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/inline_pipeline.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/transfer.h include/pigen/inline_pipeline.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
-	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/inline_pipeline.c src/fsm.c src/lexer.c src/util.c $(LDLIBS)
+pigen: src/pigen.c src/blocks.c src/fabric_svg.inc src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/transfer.h include/pigen/pipeline.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
+	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/lexer.c src/util.c $(LDLIBS)
 
-test: pigen block-test inline-pipeline-test
+test: pigen fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen
 
-inline-pipeline-test: pigen
-	./pigen tests/inline_pipeline.pigen -o /tmp/pigen-inline-pipeline.sv
-	grep -q 'if ((reset)) begin pipe__s0_valid' /tmp/pigen-inline-pipeline.sv
-	iverilog -g2012 -o /tmp/pigen-inline-pipeline-vvp rtl/pigen_primitives.sv /tmp/pigen-inline-pipeline.sv tests/inline_pipeline_tb.sv
-	vvp /tmp/pigen-inline-pipeline-vvp
+fabric-test: pigen
+	./tests/fabric_smoke.sh ./pigen
 
-biquad-bank-waveform: pigen
-	truncate -s 0 examples/biquad_bank.vcd
-	./pigen examples/biquad_bank.pigen -o examples/biquad_bank.sv
-	verilator --binary --trace --trace-depth 1 --trace-max-array 0 -Wno-fatal --top-module biquad_bank_tb --Mdir /tmp/pigen-biquad-bank-verilator rtl/pigen_primitives.sv examples/biquad_bank.sv examples/biquad_bank_tb.sv
-	/tmp/pigen-biquad-bank-verilator/Vbiquad_bank_tb
+core-language-test: pigen
+	./tests/core_language.sh ./pigen
 
-block-test: pigen
-	./tests/blocks_smoke.sh ./pigen
+pipeline-test: pigen
+	./pigen tests/pipeline.pigen -o /tmp/pigen-pipeline.sv
+	grep -q 'if ((reset)) begin pipe__s0_valid' /tmp/pigen-pipeline.sv
+	iverilog -g2012 -o /tmp/pigen-pipeline-vvp rtl/pigen_primitives.sv /tmp/pigen-pipeline.sv tests/pipeline_tb.sv
+	vvp /tmp/pigen-pipeline-vvp
 
-verify: test coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
+pipeline-scope-test: pigen
+	./pigen tests/pipeline_scope.pigen -o /tmp/pigen-pipeline-scope.sv
+	iverilog -g2012 -o /tmp/pigen-pipeline-scope-vvp rtl/pigen_primitives.sv /tmp/pigen-pipeline-scope.sv tests/pipeline_scope_tb.sv
+	vvp /tmp/pigen-pipeline-scope-vvp
+
+pipeline-syntax-test: pigen
+	./tests/pipeline_syntax.sh ./pigen
+
+biquad-bank-test: pigen
+	./pigen examples/biquad_bank.pigen -o /tmp/pigen-biquad-bank.sv
+	iverilog -g2012 -o /tmp/pigen-biquad-bank-vvp rtl/pigen_primitives.sv /tmp/pigen-biquad-bank.sv examples/biquad_bank_tb.sv
+	vvp /tmp/pigen-biquad-bank-vvp
+
+verify: test pipeline-scope-test pipeline-syntax-test biquad-bank-test coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
 
 coslice-test: pigen
 	./pigen tests/coslice.pigen -o /tmp/pigen-coslice.sv

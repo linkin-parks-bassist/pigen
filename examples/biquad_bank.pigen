@@ -3,6 +3,7 @@
 `define COEF_WIDTH 		18
 `define COEF_INTBIT		4
 `define N_SLOTS			8
+`define ACC_WIDTH		(`DATA_WIDTH + `COEF_WIDTH + 3)
 
 `define HANDLE_WIDTH $clog2(`N_SLOTS)
 
@@ -26,7 +27,13 @@ typedef logic signed [`DATA_WIDTH - 1 : 0] sample_t;
 
 typedef sample_t [3:0] state_t;
 
-typedef logic signed [`DATA_WIDTH * 2 + 2 : 0] acc_t;
+typedef logic signed [`ACC_WIDTH - 1 : 0] acc_t;
+
+typedef struct packed {
+	handle_t handle;
+	biquad_out out;
+	state_t state;
+} biquad_pipeline_result;
 
 module biquad_pipeline
 	(
@@ -51,15 +58,26 @@ module biquad_pipeline
 	reg signed [`COEF_WIDTH * 5 - 1 : 0] coef_mem  [`N_SLOTS - 1 : 0];
 	reg signed [`DATA_WIDTH * 4 - 1 : 0] state_mem [`N_SLOTS - 1 : 0];
 
-		localparam signed [`DATA_WIDTH - 1:0] SAT_MAX = (1 << (`DATA_WIDTH - 1)) - 1;
-		localparam signed [`DATA_WIDTH - 1:0] SAT_MIN = -(1 << (`DATA_WIDTH - 1));
+	/* The accumulator retains the sample's fractional bits and the
+	 * coefficient's fractional bits. Its remaining high bits are headroom for
+	 * the five-term MAC. Saturation is therefore expressed directly in the
+	 * accumulator's binary point. */
+	localparam sample_fracbit = `DATA_WIDTH - `DATA_INTBIT - 1;
+	localparam coef_fracbit   = `COEF_WIDTH - `COEF_INTBIT - 1;
+	localparam acc_t SAT_MAX = {{(`ACC_WIDTH - `DATA_WIDTH - coef_fracbit){1'b0}},
+		1'b0, {(`DATA_WIDTH - 1){1'b1}}, {coef_fracbit{1'b0}}};
+	localparam acc_t SAT_MIN = {{(`ACC_WIDTH - `DATA_WIDTH - coef_fracbit){1'b1}},
+		1'b1, {(`DATA_WIDTH - 1){1'b0}}, {coef_fracbit{1'b0}}};
 
 	localparam signed [`COEF_WIDTH - 1 : 0] coef_1 = (1 << (`COEF_WIDTH - `COEF_INTBIT - 1));
 	localparam signed [`COEF_WIDTH - 1 : 0] coef_0 = 0;
 	localparam trivial_coefs = {coef_1, coef_0, coef_0, coef_0, coef_0};
 
-	reg [`N_SLOTS - 1 : 0] coefs_valid;
-	reg [`N_SLOTS - 1 : 0] state_valid;
+	reg [`N_SLOTS - 1 : 0] coefs_valid, state_valid;
+
+	buf coef_t   b0_in, b1_in, b2_in, a1_in, a2_in;
+	buf sample_t x0_in, x1_in, x2_in, y1_in, y2_in;
+	buf handle_t handle_pin;
 
 	always @(posedge clk) begin
 		if (reset) begin
@@ -80,39 +98,57 @@ module biquad_pipeline
 			end
 
 			transfer begin
+				{b0_in, b1_in, b2_in, a1_in, a2_in} <= coef_read;
+				{x1_in, x2_in, y1_in, y2_in} <= state_read;
+				handle_pin <= handle_in_;
+				x0_in <= sample_in_;
+			end
+
+			transfer begin
 				coef_mem[coef_write_port.handle] <= coef_write_port.coefs;
 				coefs_valid[coef_write_port.handle] <= 1'b1;
 			end
 
-			pipeline bqd_pipeline {handle_in_, coef_read, sample_in_, state_read} yields {handle_out, acc_out, state_out} begin
+			pipeline bqd_pipeline begin
 				sample_t x0, x1, x2, y1, y2, acc_out;
-				handle_t handle, handle_out;
 				coef_t b0, b1, b2, a1, a2;
-				state_t state_out;
+				handle_t handle;
 				acc_t acc;
 
-				stage {handle, b0, b1, b2, a1, a2, x0, x1, x2, y1, y2} yields {handle, acc, a1, a2, x0, x1, y1, y2} begin
-					acc = b0 * x0 + b1 * x1 + b2 * x2;
+				stage begin
+					{b0, b1, b2, a1, a2} <= {b0_in, b1_in, b2_in, a1_in, a2_in};
+					{x0, x1, x2, y1, y2} <= {x0_in, x1_in, x2_in, y1_in, y2_in};
+					handle <= handle_pin;
+
+					acc <= b0_in * x0_in + b1_in * x1_in + b2_in * x2_in;
 				end
 
-				stage {handle, acc, a1, a2, x0, x1, y1, y2} yields {handle, acc, x0, x1, y1, y2} begin
-					acc = acc + a1 * y1 + a2 * y2;
+
+				stage begin
+					acc <= acc + a1 * y1 + a2 * y2;
 				end
 
-				stage {handle, acc, x0, x1, y1, y2} yields {handle, acc, x0, x1, y1, y2};
-
-				stage {handle, acc, x0, x1, y1, y2} yields {handle_out, sample_t acc_out, state_out} begin
-					handle_out = handle;
-					acc_t acc_sh = acc >>> (`DATA_WIDTH - `DATA_INTBIT - `COEF_INTBIT + 1);
-					acc_out = acc_sh > SAT_MAX ? SAT_MAX : (acc_sh < SAT_MIN ? SAT_MIN : acc_sh);
-					state_out = {x0, x1, acc_out, y1};
+				stage begin
+					acc <= acc > SAT_MAX ? SAT_MAX : (acc < SAT_MIN ? SAT_MIN : acc);
 				end
+
+				stage begin
+					wire sample_t acc_final = acc >>> coef_fracbit;
+
+					acc_out <= acc_final;
+					x1 <= x0;
+					x2 <= x1;
+					y1 <= acc_final;
+					y2 <= y1;
+				end
+
+				yield {handle, acc_out, x1, x2, y1, y2};
 			endpipeline
 
 			transfer begin
-				bqd_out <= acc_out;
-				state_mem[handle_out] <= state_out;
-				state_valid[handle_out] <= 1'b1;
+				bqd_out <= bqd_pipeline[`DATA_WIDTH * 4 +: `DATA_WIDTH];
+				state_mem[bqd_pipeline[`DATA_WIDTH * 5 + `HANDLE_WIDTH - 1 : `DATA_WIDTH * 5]] <= bqd_pipeline[0 +: `DATA_WIDTH * 4];
+				state_valid[bqd_pipeline[`DATA_WIDTH * 5 + `HANDLE_WIDTH - 1 : `DATA_WIDTH * 5]] <= 1'b1;
 			end
 		end
 	end

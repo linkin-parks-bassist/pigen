@@ -1,0 +1,18 @@
+module pipeline_export_error(
+	input logic clk,
+	input logic [7:0] source,
+	output buf [7:0] destination
+);
+	typedef logic [7:0] octet;
+	always @(posedge clk) begin
+		pipeline invalid begin
+			octet value;
+			stage begin
+				value <= source;
+			end
+			export value;
+			yield value;
+		endpipeline
+		destination <= invalid;
+	end
+endmodule

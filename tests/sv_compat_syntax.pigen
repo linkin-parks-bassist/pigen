@@ -1,0 +1,17 @@
+module sv_compat_syntax
+	(
+		input logic clk,
+		input logic [15:0] source,
+		input logic [2:0] base,
+		output logic [15:0] state,
+		output logic [7:0] side
+	);
+	always_ff @(posedge clk)
+	begin
+		state <= 16'h0000;
+		side <= 8'h00;
+		{state[15:12], {state[11:8], side[3:0]}} <=
+			{source[base +: 4], source[7:0]};
+		state[7:0] <= source[15:8];
+	end
+endmodule

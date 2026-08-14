@@ -1,0 +1,20 @@
+module pipeline_shadow(
+	input logic clk,
+	input buf [7:0] source,
+	input logic [7:0] value,
+	output buf [7:0] destination
+);
+	typedef logic [7:0] octet;
+
+	always @(posedge clk) begin
+		pipeline shadow begin
+			octet value, carried;
+			stage begin
+				wire octet carried = source;
+				value <= carried;
+			end
+			yield value;
+		endpipeline
+		destination <= shadow;
+	end
+endmodule

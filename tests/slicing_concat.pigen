@@ -1,0 +1,28 @@
+module slicing_concat
+	(
+		input logic clk,
+		input logic reset,
+		input buf [3:0] join_high,
+		input buf [11:0] join_low,
+		output buf [15:0] joined,
+		input buf [15:0] whole,
+		output buf [5:0] split_high,
+		output buf [9:0] split_low,
+		input buf [15:0] single_sliced,
+		output buf [7:0] selected_byte,
+		input buf [15:0] sliced,
+		output buf [7:0] slice_high,
+		output buf [7:0] slice_low,
+		output buf [7:0] constant_high,
+		output buf [7:0] constant_low
+	);
+
+	always_ff @(posedge clk)
+	begin
+		joined <= {join_high, join_low};
+		{split_high, split_low} <= whole;
+		selected_byte <= single_sliced[7:0];
+		{slice_high, slice_low} <= {sliced[15:8], sliced[7:0]};
+		{constant_high, constant_low} <= 16'hcafe;
+	end
+endmodule

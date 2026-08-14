@@ -1,5 +1,6 @@
 /* Transport declaration parsing and primitive-instance emission. */
 #include <string.h>
+#include <stdlib.h>
 
 #include "pigen/declarations.h"
 #include "pigen/util.h"
@@ -254,6 +255,124 @@ static int is_unpacked_reg_array(char kind, const char *after_keyword, const cha
 	return cursor < end && *cursor == '[';
 }
 
+/* Ordinary SV permits a comma-separated list of scalar wire/register names.
+ * They are not transports, but Pigen must record each one so a later transfer
+ * can identify its destination. */
+static int emit_plain_declaration_list(pigen_string *output, const char *start,
+	const char *after_keyword, const char *end, pigen_primitives *primitives, char kind)
+{
+	const char *cursor;
+	const char *part_start = after_keyword;
+	int parens = 0, brackets = 0, braces = 0;
+	int has_comma = 0;
+
+	if (kind != 'w' && kind != 'r' && kind != 'l') return 0;
+	for (cursor = after_keyword; cursor < end; cursor++)
+	{
+		if (*cursor == '(') parens++;
+		else if (*cursor == ')') parens--;
+		else if (*cursor == '[') brackets++;
+		else if (*cursor == ']') brackets--;
+		else if (*cursor == '{') braces++;
+		else if (*cursor == '}') braces--;
+		else if (!parens && !brackets && !braces && *cursor == '=')
+			return 0;
+		else if (!parens && !brackets && !braces && *cursor == ',')
+			has_comma = 1;
+	}
+	if (!has_comma) return 0;
+
+	for (cursor = after_keyword; ; cursor++)
+	{
+		if (cursor == end || *cursor == ',')
+		{
+			const char *name;
+			size_t name_length;
+			if (!last_identifier(part_start, cursor, &name, &name_length))
+				pigen_fail("declaration list requires an identifier after each comma");
+			pigen_add_primitive(primitives, name, name_length, kind, 1);
+			if (cursor == end) break;
+			part_start = cursor + 1;
+		}
+	}
+	pigen_append_range(output, start, (size_t)(end - start));
+	pigen_append(output, ";");
+	return 1;
+}
+
+/* A transport list is merely concise spelling for several declarations with
+ * the same payload type.  Lower each member through the normal single-name
+ * path, so each receives its own endpoint and primitive instance. */
+static int emit_transport_declaration_list(pigen_string *output, const char *keyword,
+	const char *after_keyword, const char *end, pigen_primitives *primitives, char kind)
+{
+	const char *cursor;
+	const char *first_comma = NULL;
+	const char *part_start;
+	const char *first_name;
+	const char *payload_end;
+	size_t first_name_length;
+	size_t keyword_length = 0;
+	int parens = 0, brackets = 0, braces = 0;
+
+	if (!pigen_is_storage_kind(kind)) return 0;
+	while (pigen_is_identifier_char((unsigned char)keyword[keyword_length])) keyword_length++;
+	for (cursor = after_keyword; cursor < end; cursor++)
+	{
+		if (*cursor == '(') parens++;
+		else if (*cursor == ')') parens--;
+		else if (*cursor == '[') brackets++;
+		else if (*cursor == ']') brackets--;
+		else if (*cursor == '{') braces++;
+		else if (*cursor == '}') braces--;
+		else if (!parens && !brackets && !braces && *cursor == ',')
+		{
+			first_comma = cursor;
+			break;
+		}
+	}
+	if (!first_comma || !last_identifier(after_keyword, first_comma, &first_name, &first_name_length))
+		return 0;
+	payload_end = pigen_trim_end(after_keyword, first_name);
+
+	for (part_start = after_keyword, cursor = first_comma; ; )
+	{
+		const char *part_end = cursor;
+		const char *name;
+		size_t name_length;
+		pigen_string declaration = {0};
+		if (!last_identifier(part_start, part_end, &name, &name_length))
+			pigen_fail("transport declaration list requires an identifier after each comma");
+		pigen_append_range(&declaration, keyword, keyword_length);
+		pigen_append(&declaration, " ");
+		pigen_append_range(&declaration, after_keyword, (size_t)(payload_end - after_keyword));
+		pigen_append(&declaration, " ");
+		pigen_append_range(&declaration, name, name_length);
+		pigen_emit_internal_declaration(output, declaration.data,
+			declaration.data + declaration.length, primitives);
+		free(declaration.data);
+		if (part_end == end) break;
+		part_start = part_end + 1;
+		cursor = end;
+		parens = brackets = braces = 0;
+		for (const char *scan = part_start; scan < end; scan++)
+		{
+			if (*scan == '(') parens++;
+			else if (*scan == ')') parens--;
+			else if (*scan == '[') brackets++;
+			else if (*scan == ']') brackets--;
+			else if (*scan == '{') braces++;
+			else if (*scan == '}') braces--;
+			else if (!parens && !brackets && !braces && *scan == ',')
+			{
+				cursor = scan;
+				break;
+			}
+		}
+	}
+	return 1;
+}
+
 void pigen_emit_internal_declaration(pigen_string *output, const char *start, const char *end, pigen_primitives *primitives)
 {
 	const char *keyword;
@@ -268,6 +387,11 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 	size_t fifo_depth_length = 0;
 	size_t name_length;
 	char kind = pigen_declaration_kind(start, end, &keyword, &after_keyword);
+
+	if (emit_plain_declaration_list(output, start, after_keyword, end, primitives, kind))
+		return;
+	if (emit_transport_declaration_list(output, keyword, after_keyword, end, primitives, kind))
+		return;
 
 	/* Plain unpacked reg/logic arrays are ordinary SV memories, not transport
 	 * declarations.  Preserve them so a port write can infer a synchronous RAM. */
@@ -291,10 +415,19 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		return;
 	}
 
-	for (cursor = after_keyword; cursor < end; cursor++)
 	{
-		if (*cursor == ',' || *cursor == '=')
-			pigen_fail("draft 0 primitive declarations allow one uninitialized name");
+		int parens = 0, brackets = 0, braces = 0;
+		for (cursor = after_keyword; cursor < end; cursor++)
+		{
+			if (*cursor == '(') parens++;
+			else if (*cursor == ')') parens--;
+			else if (*cursor == '[') brackets++;
+			else if (*cursor == ']') brackets--;
+			else if (*cursor == '{') braces++;
+			else if (*cursor == '}') braces--;
+			else if (!parens && !brackets && !braces && (*cursor == ',' || *cursor == '='))
+				pigen_fail("draft 0 primitive declarations allow one uninitialized name");
+		}
 	}
 
 	payload_end = fifo_payload_end ? fifo_payload_end : pigen_trim_end(after_keyword, name);
@@ -363,6 +496,15 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, name, name_length, "force_after_transfer");
 		pigen_append(output, ";\n\n\t");
+		if (kind == 'i')
+		{
+			/* An ingress has the standard destination endpoint, but no storage:
+			 * its `in_ready` is driven by the consuming pipeline stage. */
+			pigen_add_primitive(primitives, name, name_length, kind, 1);
+			pigen_set_port_metadata(primitives, name, name_length, after_keyword,
+				(size_t)(payload_end - after_keyword), NULL, 0, 0);
+			return;
+		}
 		pigen_append(output, primitive_module);
 		pigen_append(output, " #(\n\t\t.PAYLOAD_T(");
 		append_payload_type(output, after_keyword, payload_end);

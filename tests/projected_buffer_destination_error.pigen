@@ -1,0 +1,10 @@
+module projected_buffer_destination_error
+	(
+		input logic clk,
+		input logic reset
+	);
+	buf [7:0] source;
+	buf [15:0] destination;
+	always_ff @(posedge clk)
+		destination[7:0] <= source;
+endmodule

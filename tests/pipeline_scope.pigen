@@ -1,0 +1,55 @@
+module pipeline_scope(
+	input logic clk,
+	input logic reset,
+	input logic enable,
+	input logic [7:0] degenerate_source,
+	input buf [7:0] wire_source,
+	input buf [7:0] first_source,
+	input buf [7:0] later_source,
+	output buf [7:0] wire_result,
+	output buf [7:0] later_result,
+	output buf [7:0] degenerate_result
+);
+	typedef logic [7:0] octet;
+	localparam octet DEGENERATE_BIAS = 8'd2;
+
+	always @(posedge clk) begin
+		if (reset) begin
+			pipeline_reset(via_wire);
+			pipeline_reset(with_later_input);
+		end else if (enable) begin
+			pipeline from_degenerate_scope begin
+				octet value;
+				stage begin
+					wire octet selected = degenerate_source + DEGENERATE_BIAS;
+					value <= selected;
+				end
+				yield value;
+			endpipeline
+
+			pipeline via_wire begin
+				octet value;
+				stage begin
+					wire octet selected = wire_source;
+					value <= selected + 8'd1;
+				end
+				yield value;
+			endpipeline
+
+			pipeline with_later_input begin
+				octet value;
+				stage begin
+					value <= first_source;
+				end
+				stage begin
+					value <= value + later_source;
+				end
+				yield value;
+			endpipeline
+
+			wire_result <= via_wire;
+			later_result <= with_later_input;
+			degenerate_result <= from_degenerate_scope;
+		end
+	end
+endmodule

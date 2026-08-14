@@ -8,6 +8,9 @@ module biquad_bank_tb;
 	/* Additional settling cycles after all previous-round writebacks complete. */
 	localparam int WRITEBACK_GAP = 16;
 	localparam logic signed [17:0] COEF_ONE = 18'sd8192;
+	localparam int COEF_FRACBIT = 18 - 4 - 1;
+	localparam longint signed ACC_SAT_MAX = 32767 <<< COEF_FRACBIT;
+	localparam longint signed ACC_SAT_MIN = -32768 <<< COEF_FRACBIT;
 
 	biquad_req req_in;
 	logic req_in_valid = 1'b0, req_in_ready;
@@ -34,10 +37,11 @@ module biquad_bank_tb;
 	logic signed [15:0] filter5 [0:SAMPLES_PER_FILTER-1];
 	logic signed [15:0] filter6 [0:SAMPLES_PER_FILTER-1];
 	logic signed [15:0] filter7 [0:SAMPLES_PER_FILTER-1];
-	logic signed [15:0] expected [0:TOTAL_REQUESTS-1];
+	logic signed [15:0] expected [0:TOTAL_REQUESTS];
 	longint signed model_x1 [0:FILTERS-1], model_x2 [0:FILTERS-1];
 	longint signed model_y1 [0:FILTERS-1], model_y2 [0:FILTERS-1];
-	int sent, received, cycle_count, last_burst_cycle = -1;
+	logic configured [0:FILTERS-1];
+	int sent, received, cycle_count, last_burst_cycle = -1, full_rate_sent;
 
 	biquad_pipeline dut (.*);
 	always #5 clk = ~clk;
@@ -96,6 +100,7 @@ module biquad_bank_tb;
 			do @(posedge clk); while (coef_write_port_ready !== 1'b1);
 			@(negedge clk);
 			coef_write_port_valid = 1'b0;
+			configured[handle] = 1'b1;
 		end
 	endtask
 
@@ -131,20 +136,30 @@ module biquad_bank_tb;
 			cycle_count <= cycle_count + 1;
 			/* Ports are deliberately always-ready single-cycle endpoints. This
 			 * demo uses one, so its external consumer stays ready. A separate
-			 * inline-pipeline test uses an output buf and exercises stalls. */
+			 * pipeline test uses an output buf and exercises stalls. */
 			bqd_out_ready <= 1'b1;
 			if (req_in_valid && req_in_ready) begin
 				handle = req_in.handle;
-				accumulator = $signed(req_in.sample) * coefficient(handle, 0) +
-					model_x1[handle] * coefficient(handle, 1) + model_x2[handle] * coefficient(handle, 2) +
-					model_y1[handle] * coefficient(handle, 3) + model_y2[handle] * coefficient(handle, 4);
-				shifted = accumulator >>> 12;
-				expected[sent] = saturate(shifted);
+				if (configured[handle])
+					accumulator = $signed(req_in.sample) * coefficient(handle, 0) +
+						model_x1[handle] * coefficient(handle, 1) + model_x2[handle] * coefficient(handle, 2) +
+						model_y1[handle] * coefficient(handle, 3) + model_y2[handle] * coefficient(handle, 4);
+				else
+					/* The DUT's specified misconfiguration behavior is its clean
+					 * trivial-coefficient path: b0 is COEF_ONE; every other tap is 0. */
+					accumulator = $signed(req_in.sample) * COEF_ONE;
+				if (accumulator > ACC_SAT_MAX) accumulator = ACC_SAT_MAX;
+				else if (accumulator < ACC_SAT_MIN) accumulator = ACC_SAT_MIN;
+				shifted = accumulator >>> COEF_FRACBIT;
+				expected[sent] = shifted[15:0];
 				model_x2[handle] = model_x1[handle]; model_x1[handle] = $signed(req_in.sample);
 				model_y2[handle] = model_y1[handle]; model_y1[handle] = expected[sent];
-				if (sent < FILTERS && last_burst_cycle >= 0 && cycle_count != last_burst_cycle + 1)
+				if (configured[handle] && full_rate_sent < FILTERS && last_burst_cycle >= 0 && cycle_count != last_burst_cycle + 1)
 					$fatal(1, "bank stopped during full-rate burst: cycles %0d and %0d", last_burst_cycle, cycle_count);
-				if (sent < FILTERS) last_burst_cycle <= cycle_count;
+				if (configured[handle] && full_rate_sent < FILTERS) begin
+					last_burst_cycle <= cycle_count;
+					full_rate_sent <= full_rate_sent + 1;
+				end
 				sent <= sent + 1;
 			end
 			if (bqd_out_valid && bqd_out_ready) begin
@@ -170,14 +185,27 @@ module biquad_bank_tb;
 		$dumpvars(0, clk, reset, sample_in,
 			biquad_0_out, biquad_1_out, biquad_2_out, biquad_3_out,
 			biquad_4_out, biquad_5_out, biquad_6_out, biquad_7_out);
+		for (int i = 0; i < FILTERS; i++) configured[i] = 1'b0;
 		#17 reset = 1'b0;
 		repeat (2) @(posedge clk);
+		/* Exercise an unwritten slot before any coefficient write. The reference
+		 * path above checks that the request completes using trivial_coefs, rather
+		 * than crashing, stalling, or borrowing another slot's coefficients. */
+		@(negedge clk);
+		req_in = {3'd7, 16'sd1024};
+		req_in_valid = 1'b1;
+		do @(posedge clk); while (req_in_ready !== 1'b1);
+		@(negedge clk);
+		req_in_valid = 1'b0;
+		while (received != 1) @(posedge clk);
 		for (int i = 0; i < FILTERS; i++)
 			write_filter(i[2:0], coefficient(i, 0), coefficient(i, 1), coefficient(i, 2), coefficient(i, 3), coefficient(i, 4));
 		repeat (3) @(posedge clk);
 		send_state_safe_requests();
 		repeat (WRITEBACK_GAP + 8) @(posedge clk);
-		if (sent != TOTAL_REQUESTS || received != TOTAL_REQUESTS)
+		if (full_rate_sent != FILTERS)
+			$fatal(1, "bank did not accept the configured first round at one request per cycle");
+		if (sent != TOTAL_REQUESTS + 1 || received != TOTAL_REQUESTS + 1)
 			$fatal(1, "bank lost work: sent=%0d received=%0d", sent, received);
 		$display("PASS: eight-filter bank stateful outputs match reference model");
 		$finish;
