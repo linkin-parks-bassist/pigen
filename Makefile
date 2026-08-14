@@ -2,14 +2,14 @@ CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
 
-.PHONY: all clean test source-test syntax-model-test semantic-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test verify coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test source-test syntax-model-test semantic-test resolve-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test verify coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
 pigen: src/pigen.c src/blocks.c src/fabric_svg.inc src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/transfer.h include/pigen/pipeline.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
 	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/lexer.c src/util.c $(LDLIBS)
 
-test: pigen source-test syntax-model-test semantic-test fabric-test core-language-test pipeline-test
+test: pigen source-test syntax-model-test semantic-test resolve-test fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen
 
 source-test:
@@ -23,6 +23,10 @@ syntax-model-test:
 semantic-test:
 	$(CC) $(CFLAGS) -o /tmp/pigen-semantic-test tests/semantic_test.c src/semantic.c src/source.c src/util.c
 	/tmp/pigen-semantic-test
+
+resolve-test:
+	$(CC) $(CFLAGS) -o /tmp/pigen-resolve-test tests/resolve_test.c src/resolve.c src/semantic.c src/syntax.c src/lexer.c src/source.c src/util.c
+	/tmp/pigen-resolve-test
 
 fabric-test: pigen
 	./tests/fabric_smoke.sh ./pigen

@@ -15,6 +15,7 @@ PIGEN_ID_TYPE(pigen_expr_id);
 PIGEN_ID_TYPE(pigen_transport_id);
 PIGEN_ID_TYPE(pigen_clock_domain_id);
 PIGEN_ID_TYPE(pigen_transfer_id);
+PIGEN_ID_TYPE(pigen_module_id);
 PIGEN_ID_TYPE(pigen_pipeline_id);
 PIGEN_ID_TYPE(pigen_stage_id);
 PIGEN_ID_TYPE(pigen_fsm_id);

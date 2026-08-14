@@ -61,6 +61,7 @@ void pigen_semantic_init(pigen_semantic_model *model,
 {
 	*model = (pigen_semantic_model){0};
 	model->sources = sources;
+	model->compilation_scope = INVALID_ID(pigen_scope_id);
 }
 
 pigen_type_id pigen_type_intern(pigen_semantic_model *model,
@@ -88,8 +89,8 @@ pigen_type_id pigen_type_intern(pigen_semantic_model *model,
 	for (i = 0; i < dimension_count; i++)
 		if (!pigen_source_span_valid(model->sources, dimensions[i].span) ||
 			!span_contains(span, dimensions[i].span) ||
-			dimensions[i].left.index == PIGEN_INVALID_ID ||
-			dimensions[i].right.index == PIGEN_INVALID_ID)
+			!pigen_expr_get(model, dimensions[i].left) ||
+			!pigen_expr_get(model, dimensions[i].right))
 			return INVALID_ID(pigen_type_id);
 
 	for (i = 0; i < model->type_count; i++)
@@ -143,6 +144,43 @@ const pigen_packed_dimension *pigen_type_dimensions(
 	if (!known || !known->dimension_count)
 		return NULL;
 	return model->dimensions + known->first_dimension;
+}
+
+pigen_expr_id pigen_expr_intern_integer(pigen_semantic_model *model,
+	uint64_t value, pigen_type_id type, pigen_source_span span)
+{
+	size_t i;
+	pigen_expr_id result;
+
+	if (!pigen_type_get(model, type) ||
+		!pigen_source_span_valid(model->sources, span) ||
+		!id_capacity_available(model->expression_count))
+		return INVALID_ID(pigen_expr_id);
+	for (i = 0; i < model->expression_count; i++)
+		if (model->expressions[i].kind == PIGEN_EXPR_INTEGER &&
+			model->expressions[i].type.index == type.index &&
+			model->expressions[i].integer == value)
+			return (pigen_expr_id){(uint32_t)i};
+	if (model->expression_count == model->expression_capacity)
+	{
+		model->expression_capacity = model->expression_capacity ?
+			model->expression_capacity * 2 : 16;
+		model->expressions = pigen_resize(model->expressions,
+			model->expression_capacity * sizeof(*model->expressions));
+	}
+	result = (pigen_expr_id){(uint32_t)model->expression_count};
+	model->expressions[model->expression_count++] = (pigen_semantic_expr){
+		PIGEN_EXPR_INTEGER, type, span, value};
+	return result;
+}
+
+const pigen_semantic_expr *pigen_expr_get(const pigen_semantic_model *model,
+	pigen_expr_id expression)
+{
+	if (expression.index == PIGEN_INVALID_ID ||
+		expression.index >= model->expression_count)
+		return NULL;
+	return &model->expressions[expression.index];
 }
 
 pigen_scope_id pigen_scope_add(pigen_semantic_model *model,
@@ -200,7 +238,13 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 
 	if (declared) *declared = INVALID_ID(pigen_symbol_id);
 	if (shadowed) *shadowed = INVALID_ID(pigen_symbol_id);
-	if (!pigen_scope_get(model, scope) || !pigen_type_get(model, type) ||
+	if (!pigen_scope_get(model, scope) ||
+		((kind == PIGEN_SYMBOL_VALUE || kind == PIGEN_SYMBOL_PARAMETER ||
+			kind == PIGEN_SYMBOL_TYPEDEF || kind == PIGEN_SYMBOL_TRANSPORT) &&
+			!pigen_type_get(model, type)) ||
+		((kind == PIGEN_SYMBOL_MODULE || kind == PIGEN_SYMBOL_PIPELINE ||
+			kind == PIGEN_SYMBOL_STAGE || kind == PIGEN_SYMBOL_FSM ||
+			kind == PIGEN_SYMBOL_FABRIC) && type.index != PIGEN_INVALID_ID) ||
 		kind < PIGEN_SYMBOL_VALUE || kind > PIGEN_SYMBOL_FABRIC ||
 		!pigen_source_span_valid(model->sources, name) || name.start == name.end ||
 		!pigen_source_span_valid(model->sources, declaration) ||
@@ -250,11 +294,31 @@ const pigen_symbol *pigen_symbol_get(const pigen_semantic_model *model,
 	return &model->symbols[symbol.index];
 }
 
+const pigen_semantic_module *pigen_module_get(const pigen_semantic_model *model,
+	pigen_module_id module)
+{
+	if (module.index == PIGEN_INVALID_ID || module.index >= model->module_count)
+		return NULL;
+	return &model->modules[module.index];
+}
+
+const pigen_semantic_transport *pigen_transport_get(
+	const pigen_semantic_model *model, pigen_transport_id transport)
+{
+	if (transport.index == PIGEN_INVALID_ID ||
+		transport.index >= model->transport_count)
+		return NULL;
+	return &model->transports[transport.index];
+}
+
 void pigen_free_semantic_model(pigen_semantic_model *model)
 {
 	free(model->types);
 	free(model->dimensions);
 	free(model->scopes);
 	free(model->symbols);
+	free(model->expressions);
+	free(model->modules);
+	free(model->transports);
 	*model = (pigen_semantic_model){0};
 }

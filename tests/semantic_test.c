@@ -43,7 +43,8 @@ int main(void)
 	pigen_source_span third_value = occurrence(source, text, "value", 2);
 	pigen_source_span range = occurrence(source, text, "[7:0]", 0);
 	pigen_semantic_model model;
-	pigen_packed_dimension dimension = {{0}, {1}, range};
+	pigen_packed_dimension dimension;
+	pigen_type_id integer_type;
 	pigen_type_id byte_type;
 	pigen_type_id same_byte_type;
 	pigen_scope_id module_scope;
@@ -58,6 +59,11 @@ int main(void)
 	size_t i;
 
 	pigen_semantic_init(&model, &sources);
+	integer_type = pigen_type_intern(&model, PIGEN_TYPE_INTEGER, PIGEN_SIGN_SIGNED,
+		INVALID_ID(pigen_symbol_id), NULL, 0, whole);
+	dimension = (pigen_packed_dimension){
+		pigen_expr_intern_integer(&model, 7, integer_type, range),
+		pigen_expr_intern_integer(&model, 0, integer_type, range), range};
 	byte_type = pigen_type_intern(&model, PIGEN_TYPE_LOGIC, PIGEN_SIGN_UNSIGNED,
 		INVALID_ID(pigen_symbol_id), &dimension, 1, whole);
 	same_byte_type = pigen_type_intern(&model, PIGEN_TYPE_LOGIC,
@@ -97,7 +103,9 @@ int main(void)
 	for (i = 0; i < 64; i++)
 	{
 		pigen_packed_dimension distinct_dimension = {
-			{(uint32_t)i + 2}, {(uint32_t)i + 66}, range};
+			pigen_expr_intern_integer(&model, (uint64_t)i + 2, integer_type, range),
+			pigen_expr_intern_integer(&model, (uint64_t)i + 66, integer_type, range),
+			range};
 		pigen_scope_id child = pigen_scope_add(&model, module_scope, whole);
 		pigen_type_id distinct_type = pigen_type_intern(&model, PIGEN_TYPE_LOGIC,
 			PIGEN_SIGN_UNSIGNED, INVALID_ID(pigen_symbol_id), &distinct_dimension,
