@@ -129,6 +129,46 @@ static int visit(use_analyzer *analyzer, pigen_expr_id expression,
 				visit(analyzer, known->as.conditional.when_false,
 					INVALID_ID(pigen_expr_id), when_false, context);
 		}
+		case PIGEN_EXPR_INDEX:
+			return visit(analyzer, known->as.index.base,
+				projection.index == PIGEN_INVALID_ID ? expression : projection,
+				predicate, context) &&
+				visit(analyzer, known->as.index.index,
+					INVALID_ID(pigen_expr_id), predicate,
+					PIGEN_EXPRESSION_USE_INDEX);
+	}
+	return 0;
+}
+
+static int visit_lvalue(use_analyzer *analyzer, pigen_expr_id expression,
+	pigen_expr_id projection, pigen_predicate_id predicate)
+{
+	const pigen_semantic_expr *known = pigen_expr_get(analyzer->model,
+		expression);
+
+	if (!known) return 0;
+	switch (known->kind)
+	{
+		case PIGEN_EXPR_SYMBOL:
+			return add_symbol_use(analyzer, expression, projection, predicate,
+				PIGEN_EXPRESSION_USE_LVALUE);
+		case PIGEN_EXPR_GROUP:
+			return visit_lvalue(analyzer, known->as.group.operand,
+				projection.index == PIGEN_INVALID_ID ? expression : projection,
+				predicate);
+		case PIGEN_EXPR_INDEX:
+			return visit_lvalue(analyzer, known->as.index.base,
+				projection.index == PIGEN_INVALID_ID ? expression : projection,
+				predicate) &&
+				visit(analyzer, known->as.index.index,
+					INVALID_ID(pigen_expr_id), predicate,
+					PIGEN_EXPRESSION_USE_INDEX);
+		case PIGEN_EXPR_INTEGER:
+		case PIGEN_EXPR_BITS:
+		case PIGEN_EXPR_UNARY:
+		case PIGEN_EXPR_BINARY:
+		case PIGEN_EXPR_CONDITIONAL:
+			return 0;
 	}
 	return 0;
 }
@@ -163,9 +203,8 @@ int pigen_analyze_lvalue_uses(pigen_semantic_model *model,
 	use_analyzer analyzer = {model, analysis};
 	if (!model || !analysis || !lvalue || !guard) return 0;
 	if (guard->impossible) return 1;
-	return add_resolved_use(&analyzer, lvalue->expression,
-		lvalue->base_symbol, lvalue->transport, predicate,
-		PIGEN_EXPRESSION_USE_LVALUE);
+	return visit_lvalue(&analyzer, lvalue->expression,
+		INVALID_ID(pigen_expr_id), predicate);
 }
 
 void pigen_free_expression_use_analysis(

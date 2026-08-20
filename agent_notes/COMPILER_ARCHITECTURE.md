@@ -609,19 +609,27 @@ expression identity, typed symbol identity, evaluation `PredicateId`, and
 deduplicates transports by identity while occurrence records preserve repeated
 projections and provenance.  Conditional expressions read their condition
 under the incoming predicate and traverse their alternatives under opposite
-condition polarities; false predicates prune unreachable uses.  The data model
-reserves lvalue, index, and type contexts, but those entry modes remain rejected
-until their legal semantic expression forms are represented—do not approximate
-them with read traversal.
+condition polarities; false predicates prune unreachable uses.  Packed index
+expressions traverse their base under the enclosing read or lvalue context and
+their subscript under the distinct index context.  A transport used as a
+subscript therefore remains a first-class occurrence and can later participate
+in transfer validity and ownership rather than disappearing into a projection
+string.  Type-query context remains reserved until its legal forms exist.
 
 The semantic model now also interns resolved lvalue occurrences by their
 projecting `ExprId`.  A lvalue owns its type, assignable base `SymbolId`, optional
 base `TransportId`, and provenance.  Direct ordinary values, direct transports,
-and transparent grouping are authoritative; parameters and operator trees are
-rejected.  Lvalue use analysis feeds the same occurrence and deduplicated
-transport arrays as read analysis, setting a distinct context bit.  Member,
-index, select, and concatenated destinations must extend this structural lvalue
-model before procedural transfer syntax claims them.
+transparent grouping, and recursively packed-indexed projections are
+authoritative; parameters and operator trees are rejected.  Packed indexing
+has a semantic expression node and canonical constant-expression node.  Its
+result type is derived by the shared type service, including traversal through
+typedef identity, removal of the leftmost packed dimension, unsigned select
+results, and the implicit packed element of `integer`.  Scalar logic/bit values
+cannot be indexed.  Lvalue use analysis feeds the same occurrence and
+deduplicated transport arrays as read analysis, setting distinct lvalue and
+index context bits.  General part-select, member, and concatenated destinations
+remain unrepresented; add their exact type structure before procedural transfer
+syntax claims them.
 
 ## Rewrite strategy
 

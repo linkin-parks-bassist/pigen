@@ -4,9 +4,9 @@
 #include "pigen/semantic.h"
 #include "pigen/syntax.h"
 
-/* Resolves parameter, value, and transport reads.  The resulting semantic
- * expression has a constant identity exactly when its complete tree is a
- * supported constant expression. */
+/* Resolves parameter, value, and transport expressions, including packed
+ * indexing.  The resulting semantic expression has a constant identity
+ * exactly when its complete tree is a supported constant expression. */
 pigen_expr_id pigen_resolve_expression(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression);

@@ -486,6 +486,14 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 				when_true, when_false, true_known->type,
 				syntax->location.source_span);
 		}
+		case PIGEN_SYNTAX_EXPR_INDEX:
+			left = resolve_expression(resolver, scope, syntax->as.index.base);
+			right = resolve_expression(resolver, scope, syntax->as.index.index);
+			if (!pigen_expr_get(resolver->model, left) ||
+				!pigen_expr_get(resolver->model, right))
+				return INVALID_ID(pigen_expr_id);
+			return pigen_expr_add_index(resolver->model, left, right,
+				syntax->location.source_span);
 		default:
 			return INVALID_ID(pigen_expr_id);
 	}

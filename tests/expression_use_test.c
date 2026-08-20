@@ -28,7 +28,10 @@ int main(void)
 		"  buf [7:0] left, right;\n"
 		"endmodule\n"
 		"left ? right : left\n"
-		"(right)\n";
+		"(right)\n"
+		"right[left]\n"
+		"(right[left])\n"
+		"right[left][left]\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "uses.pigen", text,
 		strlen(text));
@@ -40,12 +43,23 @@ int main(void)
 	pigen_semantic_model model;
 	pigen_syntax_expr_id syntax_expression = INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_expr_id syntax_lvalue = INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_index = INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_index_lvalue =
+		INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_invalid_index =
+		INVALID_ID(pigen_syntax_expr_id);
 	pigen_expr_id expression;
 	pigen_expr_id lvalue_expression;
+	pigen_expr_id index_expression;
+	pigen_expr_id index_lvalue_expression;
 	pigen_lvalue_id lvalue;
+	pigen_lvalue_id index_lvalue;
 	pigen_predicate_id always;
 	pigen_expression_use_analysis analysis = {0};
 	const pigen_semantic_expr *conditional;
+	const pigen_semantic_expr *indexed;
+	const pigen_semantic_expr *indexed_base;
+	const pigen_semantic_expr *indexed_subscript;
 	const pigen_predicate_atom *true_atoms;
 	const pigen_predicate_atom *false_atoms;
 	size_t first;
@@ -58,19 +72,40 @@ int main(void)
 		if (token_is(&preprocessed.expanded, first, "endmodule")) break;
 	assert(first + 1 < preprocessed.expanded.token_count);
 	first++;
-	assert(preprocessed.expanded.token_count - 1 == first + 8);
+	assert(preprocessed.expanded.token_count - 1 == first + 25);
 	assert(pigen_parse_expression(&preprocessed.expanded, first, first + 5,
 		&syntax.expressions,
 		&syntax_expression, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 5, first + 8,
 		&syntax.expressions, &syntax_lvalue, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 8, first + 12,
+		&syntax.expressions, &syntax_index, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 12, first + 18,
+		&syntax.expressions, &syntax_index_lvalue, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 18, first + 25,
+		&syntax.expressions, &syntax_invalid_index, &syntax_error));
 	expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_expression);
 	lvalue_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_lvalue);
+	index_expression = pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_index);
+	index_lvalue_expression = pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope,
+		syntax_index_lvalue);
+	assert(pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope,
+		syntax_invalid_index).index == PIGEN_INVALID_ID);
 	conditional = pigen_expr_get(&model, expression);
+	indexed = pigen_expr_get(&model, index_expression);
 	assert(conditional && conditional->kind == PIGEN_EXPR_CONDITIONAL);
+	assert(indexed && indexed->kind == PIGEN_EXPR_INDEX);
+	indexed_base = pigen_expr_get(&model, indexed->as.index.base);
+	indexed_subscript = pigen_expr_get(&model, indexed->as.index.index);
+	assert(indexed_base && indexed_base->kind == PIGEN_EXPR_SYMBOL);
+	assert(indexed_subscript &&
+		indexed_subscript->kind == PIGEN_EXPR_SYMBOL);
 	always = pigen_predicate_true(&model);
 	assert(pigen_analyze_expression_uses(&model, expression, always,
 		PIGEN_EXPRESSION_USE_READ, &analysis));
@@ -122,6 +157,43 @@ int main(void)
 	assert(analysis.uses[3].transport.index == analysis.uses[1].transport.index);
 	assert(analysis.transports[1].contexts ==
 		(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_LVALUE));
+
+	pigen_free_expression_use_analysis(&analysis);
+	assert(indexed->type.index ==
+		pigen_semantic_boolean_result_type(&model).index);
+	assert(pigen_analyze_expression_uses(&model, index_expression, always,
+		PIGEN_EXPRESSION_USE_READ, &analysis));
+	assert(analysis.use_count == 2);
+	assert(analysis.transport_count == 2);
+	assert(analysis.uses[0].expression.index == index_expression.index);
+	assert(analysis.uses[0].symbol.index == indexed_base->as.symbol.index);
+	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.uses[1].symbol.index ==
+		indexed_subscript->as.symbol.index);
+	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.uses[0].transport.index !=
+		analysis.uses[1].transport.index);
+	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
+
+	pigen_free_expression_use_analysis(&analysis);
+	index_lvalue = pigen_lvalue_resolve(&model, index_lvalue_expression);
+	assert(index_lvalue.index != PIGEN_INVALID_ID);
+	assert(pigen_lvalue_get(&model, index_lvalue)->expression.index ==
+		index_lvalue_expression.index);
+	assert(pigen_lvalue_get(&model, index_lvalue)->type.index ==
+		pigen_semantic_boolean_result_type(&model).index);
+	assert(pigen_lvalue_get(&model, index_lvalue)->base_symbol.index ==
+		indexed_base->as.symbol.index);
+	assert(pigen_analyze_lvalue_uses(&model, index_lvalue, always, &analysis));
+	assert(analysis.use_count == 2);
+	assert(analysis.transport_count == 2);
+	assert(analysis.uses[0].expression.index ==
+		index_lvalue_expression.index);
+	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
 
 	pigen_free_expression_use_analysis(&analysis);
 	pigen_free_semantic_model(&model);

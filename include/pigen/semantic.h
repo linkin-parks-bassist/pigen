@@ -38,7 +38,8 @@ typedef enum {
 	PIGEN_EXPR_GROUP,
 	PIGEN_EXPR_UNARY,
 	PIGEN_EXPR_BINARY,
-	PIGEN_EXPR_CONDITIONAL
+	PIGEN_EXPR_CONDITIONAL,
+	PIGEN_EXPR_INDEX
 } pigen_semantic_expr_kind;
 
 typedef enum {
@@ -47,7 +48,8 @@ typedef enum {
 	PIGEN_CONST_EXPR_SYMBOL,
 	PIGEN_CONST_EXPR_UNARY,
 	PIGEN_CONST_EXPR_BINARY,
-	PIGEN_CONST_EXPR_CONDITIONAL
+	PIGEN_CONST_EXPR_CONDITIONAL,
+	PIGEN_CONST_EXPR_INDEX
 } pigen_const_expr_kind;
 
 typedef uint8_t pigen_bit_state;
@@ -176,6 +178,10 @@ typedef struct {
 			pigen_expr_id when_true;
 			pigen_expr_id when_false;
 		} conditional;
+		struct {
+			pigen_expr_id base;
+			pigen_expr_id index;
+		} index;
 	} as;
 } pigen_semantic_expr;
 
@@ -200,6 +206,10 @@ typedef struct {
 			pigen_const_expr_id when_true;
 			pigen_const_expr_id when_false;
 		} conditional;
+		struct {
+			pigen_const_expr_id base;
+			pigen_const_expr_id index;
+		} index;
 	} as;
 } pigen_const_expr;
 
@@ -313,6 +323,8 @@ const pigen_semantic_type *pigen_type_get(const pigen_semantic_model *model,
 	pigen_type_id type);
 const pigen_packed_dimension *pigen_type_dimensions(
 	const pigen_semantic_model *model, pigen_type_id type);
+pigen_type_id pigen_type_packed_element(pigen_semantic_model *model,
+	pigen_type_id type);
 pigen_type_id pigen_semantic_integer_type(pigen_semantic_model *model);
 pigen_type_id pigen_semantic_boolean_result_type(pigen_semantic_model *model);
 pigen_const_expr_id pigen_const_expr_intern_integer(
@@ -331,6 +343,9 @@ pigen_const_expr_id pigen_const_expr_intern_conditional(
 	pigen_semantic_model *model, pigen_const_expr_id condition,
 	pigen_const_expr_id when_true, pigen_const_expr_id when_false,
 	pigen_type_id type);
+pigen_const_expr_id pigen_const_expr_intern_index(
+	pigen_semantic_model *model, pigen_const_expr_id base,
+	pigen_const_expr_id index, pigen_type_id type);
 const pigen_const_expr *pigen_const_expr_get(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
 const pigen_bit_state *pigen_const_expr_bits(
@@ -353,6 +368,8 @@ pigen_expr_id pigen_expr_add_binary(pigen_semantic_model *model,
 pigen_expr_id pigen_expr_add_conditional(pigen_semantic_model *model,
 	pigen_expr_id condition, pigen_expr_id when_true, pigen_expr_id when_false,
 	pigen_type_id type, pigen_source_span span);
+pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
+	pigen_expr_id base, pigen_expr_id index, pigen_source_span span);
 const pigen_semantic_expr *pigen_expr_get(const pigen_semantic_model *model,
 	pigen_expr_id expression);
 pigen_const_expr_id pigen_expr_constant(const pigen_semantic_model *model,

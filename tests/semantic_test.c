@@ -44,6 +44,7 @@ int main(void)
 	pigen_source_span range = occurrence(source, text, "[7:0]", 0);
 	pigen_semantic_model model;
 	pigen_packed_dimension dimension;
+	pigen_packed_dimension matrix_dimensions[2];
 	pigen_expr_id left_bound;
 	pigen_expr_id right_bound;
 	pigen_expr_id conditional;
@@ -54,6 +55,9 @@ int main(void)
 	pigen_type_id boolean_type;
 	pigen_type_id byte_type;
 	pigen_type_id same_byte_type;
+	pigen_type_id matrix_type;
+	pigen_type_id row_type;
+	pigen_type_id element_type;
 	pigen_scope_id module_scope;
 	pigen_scope_id pipeline_scope;
 	pigen_scope_id first_stage;
@@ -96,6 +100,24 @@ int main(void)
 	assert(byte_type.index == same_byte_type.index);
 	assert(pigen_type_get(&model, byte_type)->dimension_count == 1);
 	assert(pigen_type_dimensions(&model, byte_type)->left.index == 0);
+	matrix_dimensions[0] = dimension;
+	matrix_dimensions[1] = dimension;
+	matrix_type = pigen_type_intern(&model, PIGEN_TYPE_LOGIC,
+		PIGEN_SIGN_SIGNED, INVALID_ID(pigen_symbol_id), matrix_dimensions, 2);
+	row_type = pigen_type_packed_element(&model, matrix_type);
+	element_type = pigen_type_packed_element(&model, row_type);
+	assert(pigen_type_get(&model, row_type)->kind == PIGEN_TYPE_LOGIC);
+	assert(pigen_type_get(&model, row_type)->signedness ==
+		PIGEN_SIGN_UNSIGNED);
+	assert(pigen_type_get(&model, row_type)->dimension_count == 1);
+	assert(pigen_type_get(&model, element_type)->kind == PIGEN_TYPE_LOGIC);
+	assert(pigen_type_get(&model, element_type)->signedness ==
+		PIGEN_SIGN_UNSIGNED);
+	assert(pigen_type_get(&model, element_type)->dimension_count == 0);
+	assert(pigen_type_packed_element(&model, element_type).index ==
+		PIGEN_INVALID_ID);
+	assert(pigen_type_packed_element(&model, integer_type).index ==
+		boolean_type.index);
 
 	module_scope = pigen_scope_add(&model, INVALID_ID(pigen_scope_id), whole);
 	pipeline_scope = pigen_scope_add(&model, module_scope, whole);

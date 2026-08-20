@@ -22,7 +22,9 @@ int main(void)
 		"width left\n"
 		"left + width\n"
 		"left == width\n"
-		"width + width\n";
+		"width + width\n"
+		"8'hA5[width]\n"
+		"left[width]\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "expressions.pigen",
 		text, strlen(text));
@@ -39,9 +41,13 @@ int main(void)
 	pigen_syntax_expr_id runtime_syntax;
 	pigen_syntax_expr_id comparison_syntax;
 	pigen_syntax_expr_id constant_syntax;
+	pigen_syntax_expr_id constant_index_syntax;
+	pigen_syntax_expr_id runtime_index_syntax;
 	pigen_expr_id runtime;
 	pigen_expr_id comparison;
 	pigen_expr_id constant;
+	pigen_expr_id constant_index;
+	pigen_expr_id runtime_index;
 	const pigen_semantic_expr *known;
 	const pigen_semantic_expr *left_read;
 	const pigen_semantic_expr *width_read;
@@ -67,6 +73,8 @@ int main(void)
 	runtime_syntax = parse(&preprocessed, &syntax, 2, 5);
 	comparison_syntax = parse(&preprocessed, &syntax, 5, 8);
 	constant_syntax = parse(&preprocessed, &syntax, 8, 11);
+	constant_index_syntax = parse(&preprocessed, &syntax, 11, 15);
+	runtime_index_syntax = parse(&preprocessed, &syntax, 15, 19);
 
 	runtime = pigen_resolve_expression(&syntax, &model, scope,
 		runtime_syntax);
@@ -103,6 +111,23 @@ int main(void)
 	assert(known->type.index == integer_type.index);
 	assert(pigen_const_expr_get(&model,
 		pigen_expr_constant(&model, constant)) != NULL);
+
+	constant_index = pigen_resolve_constant_expression(&syntax, &model, scope,
+		constant_index_syntax);
+	known = pigen_expr_get(&model, constant_index);
+	assert(known && known->kind == PIGEN_EXPR_INDEX);
+	assert(known->type.index == boolean_type.index);
+	assert(pigen_const_expr_get(&model,
+		pigen_expr_constant(&model, constant_index))->kind ==
+		PIGEN_CONST_EXPR_INDEX);
+
+	runtime_index = pigen_resolve_expression(&syntax, &model, scope,
+		runtime_index_syntax);
+	known = pigen_expr_get(&model, runtime_index);
+	assert(known && known->kind == PIGEN_EXPR_INDEX);
+	assert(known->type.index == boolean_type.index);
+	assert(pigen_expr_constant(&model, runtime_index).index ==
+		PIGEN_INVALID_ID);
 
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_expr_arena(&syntax.expressions);
