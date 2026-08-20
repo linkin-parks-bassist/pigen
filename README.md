@@ -207,9 +207,12 @@ valid and ready, not the topology on the other side.
 
 Dashed arrows use a balanced network of skid-buffered three-port routers, giving
 logarithmic routing depth, broken ready paths and a pipelined hop structure.
-Packets carry compact relative routes which advance one local turn at a time.
-Contention is currently arbitrated round-robin; priorities are planned. A plain
-`>` is a direct exclusive connection and bypasses the routed network.
+The three-port shape is deliberate: once a packet arrives on one port, it has
+exactly two possible onward ports, so each hop needs only one direction bit.
+The complete relative address is therefore a shifting bitstring, with one bit
+consumed at each router. Contention is currently arbitrated round-robin;
+priorities are planned. A plain `>` is a direct exclusive connection and
+bypasses the routed network.
 
 Pigen generates an SVG from the same topology used to generate the RTL:
 
