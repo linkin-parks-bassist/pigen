@@ -9,8 +9,28 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 
 ## Cross-cutting invariants
 
-- Every source file has a stable `SourceId`. Every syntax and semantic node has
-  a half-open source span referring to the original, immutable input.
+- Every source file has a stable `SourceId`. Syntax provenance is a half-open
+  expanded-token extent plus an origin chain and an optional contiguous
+  physical-source span. Semantic nodes retain the strongest provenance their
+  construct admits; cross-file or synthetic owners never fabricate a byte
+  range.
+- A fixed macro replacement token retains both invocation and definition-token
+  origins. A substituted macro argument additionally retains the formal
+  parameter and actual-token origins. Nested expansion must preserve these
+  edges independently: primary diagnostics follow invocation edges, while
+  spelling and explanatory diagnostics may follow actual/definition edges.
+- Conditional compilation is resolved over the source-order macro environment
+  before syntax construction. Inactive branches have no expanded tokens and no
+  preprocessing side effects; nested selection state crosses textual include
+  boundaries with the shared macro environment.
+- Physical continuation markers in a multiline macro definition never become
+  replacement tokens. The logical replacement sequence refers back to the
+  original formal and replacement token origins, and the definition retains a
+  physical span covering every continued line.
+- An include operand expands into a private token destination and must resolve
+  to exactly one quoted or angle-bracket path. Operand expansion tokens never
+  enter the syntax token stream; the written include edge retains the physical
+  directive and operand spans and the provider-selected `SourceId`.
 - Every declaration, scope, type, expression, transport, clock domain,
   transfer, pipeline, stage, FSM, and fabric object has a stable typed identity.
   Array position may implement an identity, but spelling may not.
@@ -29,6 +49,10 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 
 - Each declaration belongs to exactly one scope and introduces exactly one
   symbol identity.
+- A symbol for a semantic object has one typed binding back to that object, and
+  the object has the same symbol identity.  Recovering a `TransportId`,
+  `ParameterId`, or `ModuleId` from a resolved name is constant-time and never
+  scans an object arena or compares names again.
 - Each identifier expression is unresolved syntax or refers to exactly one
   symbol. There is no resolved-but-name-only state.
 - Lookup order is encoded by scope parentage. Pipeline stages use
@@ -40,19 +64,59 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 
 ## Types and expressions
 
+- A structured parameter has one symbol identity and one source expression
+  occurrence for its value. Parameter declarations resolve in source order;
+  later constant expressions refer to the parameter symbol rather than copying
+  or substituting its initializer.
 - A resolved type records base kind, signedness, packed dimensions, and width
   expressions. Typedef identity and canonical resolved type remain separately
   available.
-- Every resolved expression has an expression identity, type identity, source
-  span, and structural operands.
+- Every resolved expression has an expression identity, type identity,
+  provenance, and structural operands.
+- Constant identity is an optional property of a resolved expression, not a
+  precondition for its existence.  Parameter-only trees point at canonical
+  constant DAG nodes; runtime value and transport reads remain fully typed
+  semantic expressions with an invalid constant identity.
+- Every explicitly sized based literal has an exact structural logic type and
+  an exact-width four-state value.  Canonical literal identity is determined by
+  type and normalized LSB-first `0`/`1`/`x`/`z` states, not source base or host
+  integer capacity; each spelling occurrence retains its own expression
+  identity and provenance.  Context-dependent unbased literals remain
+  unresolved until their consumer establishes the required sizing semantics.
+- Relational, equality, logical, and reduction expressions have an unsigned
+  scalar-logic result type. Their operands remain typed structural expressions;
+  constant analysis does not replace parameter references with copied values.
+- A resolved conditional expression owns condition, true-alternative, and
+  false-alternative expression identities. Identically typed alternatives
+  yield that type directly; mixed alternatives remain unresolved until their
+  SystemVerilog width, signedness, and state-domain merge is represented.
 - Identifier reads, lvalues, concatenations, casts, member selections, bit
   selections, indexed selections, calls, and conditional evaluation are
   distinct expression/use forms.
+- A resolved lvalue has its own stable occurrence identity and points at the
+  expression which projects the destination, its type, assignable base symbol,
+  and optional base transport.  Direct value and transport symbols and
+  transparent grouping are supported first; parameters and operator trees are
+  never accepted as destinations.
 - Transport use analysis traverses expression nodes once and records base
   transport identity, projection, use context, and evaluation predicate.
   Repeated projections of one base transport are deduplicated by identity.
+- Use analysis retains every symbol occurrence separately, including its
+  projected `ExprId` and predicate, while a parallel transport summary contains
+  each `TransportId` once.  Ternary conditions are read under the incoming
+  predicate; true and false alternatives are traversed under conjunctions with
+  opposite polarities of that same condition identity.  An impossible path
+  contributes no uses.
+- Lvalue use analysis records the projected lvalue expression under the
+  lvalue context.  If a transport is both read and written in an analyzed set,
+  one deduplicated transport summary carries both context bits while the
+  occurrence records remain distinct.
 - Contextual sizing and signedness are established before transport or RTL
   lowering. The emitter never infers them from rendered text.
+- Builtin semantic types have model-owned stable identities. Constant-expression
+  checking is a policy on the shared typed-expression resolver used by
+  parameters, dimensions, depths, and future semantic consumers; declaration
+  features do not own private operator maps or result-typing rules.
 
 ## Transports and transfers
 
@@ -74,6 +138,13 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 
 ## Control and clock domains
 
+- Evaluation predicates are canonical conjunctions of `(ExprId, polarity)`
+  atoms, with explicit interned true and false identities.  Atom order does not
+  affect identity; repeating an atom is idempotent; adding the opposite polarity
+  yields false.  Two guards are proven mutually exclusive when they require
+  opposite polarities of the same expression identity (or either is false).
+- Predicate atoms refer to already typed integral semantic expressions.  They
+  never contain copied source text, reconstructed identifiers, or backend RTL.
 - Every procedural semantic action carries its complete normalized guard and
   one clock-domain identity.
 - Guard construction preserves SystemVerilog control nesting and dangling-else

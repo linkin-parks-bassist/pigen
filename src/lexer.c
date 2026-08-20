@@ -29,6 +29,25 @@ static void advance(const char *source, size_t *cursor, size_t *line, size_t *co
 	(*cursor)++;
 }
 
+static size_t symbol_length(const char *source, size_t remaining)
+{
+	static const char *const symbols[] = {
+		"<<<=", ">>>=", "<<=", ">>=", "===", "!==", "==?", "!=?",
+		"<<<", ">>>", "**", "<=", ">=", "==", "!=", "&&", "||",
+		"<<", ">>", "~&", "~|", "~^", "^~", "+:", "-:", "++", "--",
+		"+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "->", "::"
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(symbols) / sizeof(*symbols); i++)
+	{
+		size_t length = strlen(symbols[i]);
+		if (length <= remaining && !memcmp(source, symbols[i], length))
+			return length;
+	}
+	return 1;
+}
+
 void pigen_lex_source(const char *source, size_t length, pigen_tokens *tokens)
 {
 	size_t cursor = 0;
@@ -68,16 +87,16 @@ void pigen_lex_source(const char *source, size_t length, pigen_tokens *tokens)
 			continue;
 		}
 
-		if (pigen_is_identifier_char((unsigned char)source[cursor]))
-		{
-			kind = PIGEN_TOKEN_IDENTIFIER;
-			while (cursor < length && pigen_is_identifier_char((unsigned char)source[cursor]))
-				advance(source, &cursor, &line, &column);
-		}
-		else if (isdigit((unsigned char)source[cursor]))
+		if (isdigit((unsigned char)source[cursor]))
 		{
 			kind = PIGEN_TOKEN_NUMBER;
 			while (cursor < length && (pigen_is_identifier_char((unsigned char)source[cursor]) || source[cursor] == '\''))
+				advance(source, &cursor, &line, &column);
+		}
+		else if (pigen_is_identifier_char((unsigned char)source[cursor]))
+		{
+			kind = PIGEN_TOKEN_IDENTIFIER;
+			while (cursor < length && pigen_is_identifier_char((unsigned char)source[cursor]))
 				advance(source, &cursor, &line, &column);
 		}
 		else if (source[cursor] == '"')
@@ -96,13 +115,10 @@ void pigen_lex_source(const char *source, size_t length, pigen_tokens *tokens)
 		}
 		else
 		{
+			size_t end = cursor + symbol_length(source + cursor,
+				length - cursor);
 			kind = PIGEN_TOKEN_SYMBOL;
-			advance(source, &cursor, &line, &column);
-			if (cursor < length && ((source[start] == '<' && source[cursor] == '=') ||
-				(source[start] == '=' && source[cursor] == '=') ||
-				(source[start] == '!' && source[cursor] == '=') ||
-				(source[start] == '-' && source[cursor] == '>') ||
-				(source[start] == ':' && source[cursor] == ':')))
+			while (cursor < end)
 				advance(source, &cursor, &line, &column);
 		}
 

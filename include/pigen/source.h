@@ -20,6 +20,8 @@ typedef struct {
 	char *path;
 	char *text;
 	size_t length;
+	size_t *line_starts;
+	size_t line_count;
 } pigen_source_file;
 
 typedef struct {

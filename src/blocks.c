@@ -234,7 +234,12 @@ static fabric_connection parse_fabric_connection(block_parser *parser)
 	else
 	{
 		int dashes = 0;
-		while (token_is(parser, parser->at, "-")) { dashes++; parser->at++; }
+		while (token_is(parser, parser->at, "-") ||
+			token_is(parser, parser->at, "--"))
+		{
+			dashes += token_is(parser, parser->at, "--") ? 2 : 1;
+			parser->at++;
+		}
 		if (token_is(parser, parser->at, "->")) { dashes++; parser->at++; }
 		else if (token_is(parser, parser->at, ">")) parser->at++;
 		else pigen_fail("fabric connection requires `>` or one or more `-` before `>`");

@@ -44,7 +44,14 @@ int main(void)
 	pigen_source_span range = occurrence(source, text, "[7:0]", 0);
 	pigen_semantic_model model;
 	pigen_packed_dimension dimension;
+	pigen_expr_id left_bound;
+	pigen_expr_id right_bound;
+	pigen_expr_id conditional;
+	pigen_expr_id same_conditional;
+	pigen_expr_id module_value_expression;
+	pigen_lvalue_id module_value_lvalue;
 	pigen_type_id integer_type;
+	pigen_type_id boolean_type;
 	pigen_type_id byte_type;
 	pigen_type_id same_byte_type;
 	pigen_scope_id module_scope;
@@ -59,15 +66,32 @@ int main(void)
 	size_t i;
 
 	pigen_semantic_init(&model, &sources);
-	integer_type = pigen_type_intern(&model, PIGEN_TYPE_INTEGER, PIGEN_SIGN_SIGNED,
-		INVALID_ID(pigen_symbol_id), NULL, 0, whole);
+	integer_type = pigen_semantic_integer_type(&model);
+	boolean_type = pigen_semantic_boolean_result_type(&model);
+	assert(integer_type.index == pigen_semantic_integer_type(&model).index);
+	assert(boolean_type.index ==
+		pigen_semantic_boolean_result_type(&model).index);
+	assert(pigen_type_get(&model, integer_type)->kind == PIGEN_TYPE_INTEGER);
+	assert(pigen_type_get(&model, boolean_type)->kind == PIGEN_TYPE_LOGIC);
+	left_bound = pigen_expr_add_integer(&model, 7, integer_type, range);
+	right_bound = pigen_expr_add_integer(&model, 0, integer_type, range);
+	conditional = pigen_expr_add_conditional(&model, right_bound, left_bound,
+		right_bound, integer_type, range);
+	same_conditional = pigen_expr_add_conditional(&model, right_bound,
+		left_bound, right_bound, integer_type, range);
+	assert(conditional.index != same_conditional.index);
+	assert(pigen_expr_constant(&model, conditional).index ==
+		pigen_expr_constant(&model, same_conditional).index);
+	assert(pigen_const_expr_get(&model,
+		pigen_expr_constant(&model, conditional))->kind ==
+		PIGEN_CONST_EXPR_CONDITIONAL);
 	dimension = (pigen_packed_dimension){
-		pigen_expr_intern_integer(&model, 7, integer_type, range),
-		pigen_expr_intern_integer(&model, 0, integer_type, range), range};
+		pigen_expr_constant(&model, left_bound),
+		pigen_expr_constant(&model, right_bound)};
 	byte_type = pigen_type_intern(&model, PIGEN_TYPE_LOGIC, PIGEN_SIGN_UNSIGNED,
-		INVALID_ID(pigen_symbol_id), &dimension, 1, whole);
+		INVALID_ID(pigen_symbol_id), &dimension, 1);
 	same_byte_type = pigen_type_intern(&model, PIGEN_TYPE_LOGIC,
-		PIGEN_SIGN_UNSIGNED, INVALID_ID(pigen_symbol_id), &dimension, 1, whole);
+		PIGEN_SIGN_UNSIGNED, INVALID_ID(pigen_symbol_id), &dimension, 1);
 	assert(byte_type.index != PIGEN_INVALID_ID);
 	assert(byte_type.index == same_byte_type.index);
 	assert(pigen_type_get(&model, byte_type)->dimension_count == 1);
@@ -84,6 +108,14 @@ int main(void)
 	assert(pigen_symbol_declare(&model, module_scope, PIGEN_SYMBOL_VALUE,
 		byte_type, first_value, whole, &module_value, &shadowed) == PIGEN_DECLARE_OK);
 	assert(shadowed.index == PIGEN_INVALID_ID);
+	module_value_expression = pigen_expr_add_symbol(&model, module_value,
+		byte_type, first_value);
+	module_value_lvalue = pigen_lvalue_resolve(&model, module_value_expression);
+	assert(module_value_lvalue.index != PIGEN_INVALID_ID);
+	assert(pigen_lvalue_get(&model, module_value_lvalue)->base_symbol.index ==
+		module_value.index);
+	assert(pigen_lvalue_get(&model, module_value_lvalue)->transport.index ==
+		PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, pipeline_scope, PIGEN_SYMBOL_VALUE,
 		byte_type, second_value, whole, &pipeline_value, &shadowed) == PIGEN_DECLARE_OK);
 	assert(shadowed.index == module_value.index);
@@ -102,14 +134,17 @@ int main(void)
 
 	for (i = 0; i < 64; i++)
 	{
+		pigen_expr_id distinct_left = pigen_expr_add_integer(&model,
+			(uint64_t)i + 2, integer_type, range);
+		pigen_expr_id distinct_right = pigen_expr_add_integer(&model,
+			(uint64_t)i + 66, integer_type, range);
 		pigen_packed_dimension distinct_dimension = {
-			pigen_expr_intern_integer(&model, (uint64_t)i + 2, integer_type, range),
-			pigen_expr_intern_integer(&model, (uint64_t)i + 66, integer_type, range),
-			range};
+			pigen_expr_constant(&model, distinct_left),
+			pigen_expr_constant(&model, distinct_right)};
 		pigen_scope_id child = pigen_scope_add(&model, module_scope, whole);
 		pigen_type_id distinct_type = pigen_type_intern(&model, PIGEN_TYPE_LOGIC,
 			PIGEN_SIGN_UNSIGNED, INVALID_ID(pigen_symbol_id), &distinct_dimension,
-			1, whole);
+			1);
 		assert(child.index != PIGEN_INVALID_ID);
 		assert(distinct_type.index != PIGEN_INVALID_ID);
 		assert(pigen_symbol_declare(&model, child, PIGEN_SYMBOL_VALUE,
@@ -123,10 +158,6 @@ int main(void)
 	assert(pigen_symbol_declare(&model, module_scope, PIGEN_SYMBOL_VALUE,
 		(pigen_type_id){9999}, first_value, whole, NULL, NULL) ==
 		PIGEN_DECLARE_INVALID);
-	assert(pigen_type_intern(&model, PIGEN_TYPE_LOGIC, PIGEN_SIGN_UNSIGNED,
-		INVALID_ID(pigen_symbol_id), &dimension, 1,
-		(pigen_source_span){source, 10, 2}).index == PIGEN_INVALID_ID);
-
 	pigen_free_semantic_model(&model);
 	pigen_free_sources(&sources);
 	puts("PASS: scopes resolve stable symbols with structured types");

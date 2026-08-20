@@ -392,6 +392,237 @@ Agents should also be asked to answer these questions before implementation:
 A patch which passes tests but introduces another textual side channel should
 be rejected.
 
+## Replacement-spine status (2026-08-17)
+
+The first replacement foundations now exist in `source.c`, `syntax.c`,
+`semantic.c`, `expression_resolve.c`, and `resolve.c`: immutable source storage, typed
+IDs, source spans, a partial syntax tree, scopes, symbols, structural packed
+types, and resolved module/typedef/internal-transport declarations.  These
+files are not linked into the production compiler.  The live compiler still operates through
+the textual lowering path in `pigen.c`, `assignments.c`, and `pipeline.c`.
+
+Each immutable source file owns an ordered table of line-start byte offsets,
+including the first line and the empty line after a trailing newline.  Source
+location lookup is a binary search in that table rather than a scan from the
+beginning of the file.  Columns remain byte-based, matching lexer spans;
+changing the diagnostic column policy is a separate concern and must not alter
+the byte-offset provenance model.
+
+The frontend now has two deliberately distinct views.  The written-source view
+owns one raw tokenization per physical `SourceId`, refers back to the source
+manager's exact immutable bytes, and records written include sites and their
+resolved file edges.  The expanded view owns the token order seen by semantic
+parsing.  Its hierarchical syntax tree makes structured declarations replace
+their expanded token regions, makes declarators children of declarations, and
+keeps unparsed SystemVerilog explicit as opaque syntax.  Only the written view
+is lossless with respect to the physical input files.  The following early
+corrections are complete:
+
+- Distinct integer-literal occurrences now receive distinct semantic
+  expression IDs and retain their own provenance.
+- A declaration such as `buf [7:0] a, b;` is one transport-declaration node
+  owning two declarator nodes; declaration identity no longer overlaps.
+- ANSI transport ports, including inherited comma-list declarators, use the
+  same declaration representation as internal transports.
+
+Canonical constant expressions are a separate arena, identified by
+`pigen_const_expr_id`.  A source expression occurrence has an `ExprId`, type,
+and source span, and refers to a canonical constant expression when it is
+constant.  Interned `TypeId` dimensions refer only to canonical constant
+expressions.  Thus equal widths compare cheaply without collapsing distinct
+source occurrences or borrowing one occurrence's provenance.  The canonical
+arena represents integers, exact sized bit vectors, resolved parameter symbols,
+and typed unary, binary, and conditional operator DAG nodes.  Sized bit vectors
+are normalized to LSB-first `0`/`1`/`x`/`z` states, so equivalent base spellings
+share canonical identity without losing the separate source occurrences which
+produced them.  Their width is not limited by a host integer.  Packed bounds and
+FIFO depths now parse into a shared expression-syntax arena and resolution
+constructs distinct semantic occurrences backed by those canonical nodes.
+
+`expression.c` is the shared structural expression parser for every future
+Pigen semantic context.  Its arena represents literals, names, grouping, unary
+and binary precedence, conditionals, concatenation and replication, calls,
+member and scope access, indexing, ordinary and indexed selects, and casts.
+Operators are semantic enum values rather than spellings.  Child-reference
+ranges keep variable-arity calls and concatenations compact without imposing
+tree-specific allocations.  The lexer recognizes SystemVerilog's
+multi-character operators by longest match; the live fabric parser was adjusted
+to count the spelling of repeated hyphens in its contextual arrows.
+
+The language boundary is settled: expressions inside Pigen semantic constructs
+remain ordinary SystemVerilog expressions, not a smaller Pigen-only language.
+An expression form not yet represented is rejected explicitly at that boundary;
+ordinary SystemVerilog outside it remains opaque and unchanged.  Streaming
+concatenations, assignment patterns, and the less common primary forms are not
+yet represented.  Do not handle them with textual scanning.
+
+Preprocessing is a token stage before syntax, not a symbolic-macro exception in
+the expression model.  `preprocess.c` now provides stable macro and token-origin
+identities, retains replacement tokens and formal parameters, and recursively
+expands object-like and function-like macros.  A fixed replacement token records
+its invocation and definition-token origins.  A substituted argument token
+instead records its invocation, formal-parameter, and actual-token origins.
+Consequently nested expansion preserves three distinct questions: which user
+call caused a token to appear, which actual spelling supplied it, and through
+which formal binding it entered the replacement.  Macro arguments are split
+structurally across nested parentheses, brackets, and braces before recursive
+expansion; commas inside those groups do not become argument separators.  A
+continued `define` is first projected into one logical sequence of raw-token
+indices.  Continuation backslashes are absent from that sequence, while formal
+parameters and replacement tokens retain their exact physical source origins;
+the macro definition span still covers all participating physical lines.
+`ifdef`/`ifndef`/`elsif`/`else`/`endif` use one nested selection stack and the
+source-order macro environment.  Inactive branches are inert: they neither emit
+tokens nor execute definitions, undefinitions, includes, or macro calls.  The
+conditional directive ends after its required keyword/name tokens rather than
+owning the physical line, so selected source may follow it on that same line.
+The conditional stack and macro environment cross include boundaries just as
+the textually included token stream does.  Quoted includes are loaded recursively
+through a caller-owned source provider.  The provider, not the preprocessor,
+owns path resolution and I/O; it returns a `SourceId` already registered with
+the shared source manager.  Included files retain their own source identity and
+are checked for recursive inclusion.  Include operands expand through a private
+token destination rather than the program-token arena.  The result must be
+exactly one quoted path or one angle-bracket path; the written include edge
+retains the physical operand span even when its spelling came from a macro.
+Token concatenation/stringification and variadic/default macro arguments remain
+explicit unfinished preprocessor work.
+
+Structured syntax now consumes only the immutable preprocessed token stream;
+the raw-token parser entry point has been removed.  Every syntax location owns
+a typed half-open token extent, a diagnostic origin, and an optional contiguous
+original-source span.  Names are token identities.  Resolution compares the
+spelling reached through token provenance, while errors use the expansion
+location, so macro-generated spelling and user-facing diagnostics are no longer
+conflated.  A macro-expanded bound or FIFO depth is parsed from expanded tokens
+and retains the invocation as its expression provenance.  Never
+manufacture a contiguous source span when future includes make one unavailable.
+
+The include losslessness boundary is settled: do not attach written include
+directives to the expanded syntax tree.  `pigen_preprocess_result` contains a
+`written` source view and a separate `expanded` token view.  The syntax parser
+accepts only the latter, making the dependency unambiguous in the type system.
+The written view preserves the former include directive and edge; the expanded
+view contains the included tokens in compilation order.  Cross-file syntax
+locations retain token extents and provenance but no fabricated byte span.
+Opaque expanded syntax likewise covers token extents only; physical gaps,
+comments, directive text, and other exact bytes belong exclusively to the
+written view.  A compilation-unit semantic scope may consequently have no
+single source span.  Such a scope uses the invalid-span sentinel deliberately;
+individual declarations and diagnostic sites retain concrete provenance.
+
+The shared lexer also previously classified decimal tokens as identifiers
+because its general identifier-character branch preceded its digit branch.
+Numbers now have their actual token kind.  This matters to structured constant
+resolution and also removes accidental name treatment from the prototype
+pipeline lexer users.
+
+The following limitations therefore still prevent cutover:
+
+- Constant resolution handles unsized decimal literals, exact explicitly sized
+  `b`/`o`/`d`/`h` literals, parameter-symbol leaves, integer
+  arithmetic/bitwise trees, and boolean comparison, equality, logical, and
+  reduction trees.  Binary, octal, and hexadecimal values preserve four-state
+  digits; numeric decimal values are converted directly into the requested
+  width without a host-integer intermediate.  Literal signedness and width own
+  a structural logic type.  Boolean-producing operators share one interned
+  unsigned scalar-logic result type.  Conditional constant expressions are
+  structured when both branches already have the same resolved type; mixed
+  branch types remain unresolved until SystemVerilog's conditional merge rules
+  are represented.  Unbased, unsized based, decimal `x`/`z`, and aggregate
+  forms remain syntax only until their context and SystemVerilog result typing
+  are represented; assigning them a generic integer type would silently encode
+  false sizing semantics.  Untyped integer
+  `parameter` and `localparam` declarations are
+  now structured in module parameter lists and module bodies.  Typed and
+  aggregate parameter forms remain opaque until their types can be represented
+  without approximation.
+- Transfers, pipeline stages, and other procedural constructs do not yet point
+  at the shared expression arena.  Until one of those paths becomes authoritative
+  and its textual scanner is deleted, the production compiler remains textual.
+
+Do not integrate the partial model into the production driver merely as an
+additional validation pass; that would create a second authority without
+deleting a textual path.
+
+Parameter declarations are resolved in source order into dedicated semantic
+parameter objects.  Each object owns its syntax identity, module, symbol,
+constant value expression, locality, and provenance.  Parameter-derived packed
+bounds and FIFO depths retain canonical symbol-expression nodes rather than
+copying or evaluating the parameter's source spelling.  An initializer may
+refer to an earlier parameter in the same module; it cannot acquire its own
+symbol before its value has resolved.  Unsupported typed parameter declarations
+remain ordinary opaque SystemVerilog and do not create partial semantic facts.
+
+Relational, equality, logical, and reduction operators map from syntax operator
+enums to semantic operator enums without rendering their spelling.  Their
+result is a canonical unsigned scalar-logic type, while source-expression
+occurrences retain their own provenance and point at interned constant DAG
+nodes.  This is deliberately structural rather than an evaluator: elaboration
+values are not folded into host integers, and parameter references remain
+symbol leaves.
+
+Conditional expressions likewise have distinct occurrence and canonical DAG
+nodes.  Their condition and both alternatives are expression identities, not
+source fragments.  The current resolver accepts only integral conditions and
+identically typed alternatives, making the result type exactly the shared
+branch type.  Do not broaden this by choosing one branch or a generic integer;
+mixed widths and signedness require the proper SystemVerilog merge operation.
+
+`expression_resolve.c` owns the shared recursive resolution of expression
+syntax into typed semantic occurrences.  Constant-expression checking is a
+policy of this service, not a separate expression species: parameter-only trees
+also point at canonical constant DAG nodes, while runtime value and transport
+reads carry an invalid constant identity without losing their type, provenance,
+or structural operands.  Declaration resolution uses the constant policy for
+parameter values, packed bounds, and FIFO depths; future transfers and pipeline
+stages must use the general policy rather than adding a feature-local resolver.
+Semantic unary and binary operator enums are correspondingly shared and do not
+carry a misleading `const` prefix.  The semantic model also owns lazy stable
+identities for the ordinary unsized-integer type and the unsigned scalar-logic
+boolean result type, so callers do not privately intern competing builtin
+types.
+
+Symbols and their current semantic objects are bidirectionally linked.  Module,
+parameter, and transport arenas are grown only by semantic-model constructors;
+each constructor validates scope ownership, type agreement, required constant
+expressions, and provenance before installing the object's typed identity in
+its symbol.  Typed symbol lookup functions verify the reverse link.  Expression
+use analysis must use this binding to recover a `TransportId` from a symbol—it
+must not scan the transport arena or compare declaration names a second time.
+
+`predicate.c` owns canonical evaluation guards independently of rendered
+expressions.  A predicate is an interned conjunction of typed expression
+identities and required truth polarities; empty conjunction and contradiction
+have explicit true and false identities.  Conjunction insertion sorts by
+`ExprId`, removes repetition, and turns opposite requirements into false.
+Mutual-exclusion queries merge the sorted atom lists and therefore prove
+opposite conditional branches without comparing strings.  This deliberately
+small algebra represents nested `if`/`else` and ternary evaluation paths; a
+future need for disjunction must extend the predicate algebra rather than
+encode guards as rendered text.
+
+`expression_use.c` performs the first shared semantic-expression traversal.
+Its read analysis records every symbol occurrence with its projected
+expression identity, typed symbol identity, evaluation `PredicateId`, and
+`TransportId` when the symbol denotes a transport.  A separate summary array
+deduplicates transports by identity while occurrence records preserve repeated
+projections and provenance.  Conditional expressions read their condition
+under the incoming predicate and traverse their alternatives under opposite
+condition polarities; false predicates prune unreachable uses.  The data model
+reserves lvalue, index, and type contexts, but those entry modes remain rejected
+until their legal semantic expression forms are represented—do not approximate
+them with read traversal.
+
+The semantic model now also interns resolved lvalue occurrences by their
+projecting `ExprId`.  A lvalue owns its type, assignable base `SymbolId`, optional
+base `TransportId`, and provenance.  Direct ordinary values, direct transports,
+and transparent grouping are authoritative; parameters and operator trees are
+rejected.  Lvalue use analysis feeds the same occurrence and deduplicated
+transport arrays as read analysis, setting a distinct context bit.  Member,
+index, select, and concatenated destinations must extend this structural lvalue
+model before procedural transfer syntax claims them.
+
 ## Rewrite strategy
 
 A roughly full rewrite of the compiler middle is warranted. It may be built in

@@ -7,11 +7,19 @@
 #define PIGEN_ID_TYPE(name) typedef struct { uint32_t index; } name
 
 PIGEN_ID_TYPE(pigen_source_id);
+PIGEN_ID_TYPE(pigen_token_id);
+PIGEN_ID_TYPE(pigen_origin_id);
+PIGEN_ID_TYPE(pigen_macro_id);
 PIGEN_ID_TYPE(pigen_syntax_id);
+PIGEN_ID_TYPE(pigen_syntax_expr_id);
 PIGEN_ID_TYPE(pigen_scope_id);
 PIGEN_ID_TYPE(pigen_symbol_id);
 PIGEN_ID_TYPE(pigen_type_id);
 PIGEN_ID_TYPE(pigen_expr_id);
+PIGEN_ID_TYPE(pigen_const_expr_id);
+PIGEN_ID_TYPE(pigen_predicate_id);
+PIGEN_ID_TYPE(pigen_lvalue_id);
+PIGEN_ID_TYPE(pigen_parameter_id);
 PIGEN_ID_TYPE(pigen_transport_id);
 PIGEN_ID_TYPE(pigen_clock_domain_id);
 PIGEN_ID_TYPE(pigen_transfer_id);

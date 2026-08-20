@@ -12,19 +12,45 @@ static int span_is(const pigen_source_manager *sources, pigen_source_span span,
 	return text && length == strlen(expected) && !memcmp(text, expected, length);
 }
 
+static int token_is(const pigen_expanded_source *source,
+	pigen_token_id token, const char *expected)
+{
+	const pigen_expanded_token *known =
+		pigen_expanded_token_get(source, token);
+	const char *text;
+	size_t length;
+	if (!known) return 0;
+	text = pigen_expanded_token_text(source, known, &length);
+	return text && length == strlen(expected) && !memcmp(text, expected, length);
+}
+
+static int expression_is(const pigen_source_manager *sources,
+	const pigen_syntax_tree *tree, pigen_syntax_expr_id expression,
+	const char *expected)
+{
+	const pigen_syntax_expr *known = pigen_syntax_expr_get(
+		&tree->expressions, expression);
+	return known && span_is(sources, known->location.source_span, expected);
+}
+
 int main(void)
 {
 	const char text[] =
 		"package prefix; localparam module = 1; endpackage\n"
 		"typedef logic [31:0] global_word_t;\n"
-		"module transports(input logic clk);\n"
+		"module transports #(parameter WIDTH = 8, DEPTH = WIDTH + 1) (input logic clk);\n"
+		"  localparam PULSE_W = WIDTH * 2;\n"
 		"  typedef bit [3:0] nibble_t;\n"
-		"  buf signed [7:0] left, right;\n"
+		"  buf signed [WIDTH-1:0] left, right;\n"
 		"  fifo packet_t[DEPTH] queue;\n"
 		"  port logic unsigned [15:0] pulse;\n"
 		"  always @(posedge clk) begin\n"
 		"    right <= left;\n"
 		"  end\n"
+		"endmodule\n"
+		"module ordinary #(parameter int X = 1);\n"
+		"  localparam logic [3:0] Y = 4;\n"
+		"  logic [X-1:0] passthrough;\n"
 		"endmodule\n";
 	const char invalid[] =
 		"module bad; fifo [7:0] queue; endmodule\n";
@@ -35,6 +61,9 @@ int main(void)
 		strlen(invalid));
 	pigen_syntax_tree tree = {0};
 	pigen_syntax_tree bad_tree = {0};
+	pigen_preprocess_result preprocessed = {0};
+	pigen_preprocess_result bad_preprocessed = {0};
+	pigen_preprocess_error preprocess_error = {0};
 	pigen_syntax_error error = {0};
 	const pigen_syntax_node *root;
 	const pigen_syntax_node *module;
@@ -44,8 +73,11 @@ int main(void)
 	size_t transports = 0;
 	size_t opaques = 0;
 	size_t typedefs = 0;
+	size_t parameters = 0;
 
-	assert(pigen_parse_syntax(&sources, source, &tree, &error));
+	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
+		&preprocess_error));
+	assert(pigen_parse_syntax(&preprocessed.expanded, &tree, &error));
 	root = pigen_syntax_get(&tree, (pigen_syntax_id){0});
 	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
 	at = root->first_child;
@@ -59,7 +91,7 @@ int main(void)
 	module_id = at;
 	module = pigen_syntax_get(&tree, at);
 	assert(module && module->kind == PIGEN_SYNTAX_MODULE);
-	assert(span_is(&sources, module->as.module.name, "transports"));
+	assert(token_is(&preprocessed.expanded, module->as.module.name, "transports"));
 
 	for (at = module->first_child; at.index != PIGEN_INVALID_ID;
 		at = node->next_sibling)
@@ -74,43 +106,84 @@ int main(void)
 		if (node->kind == PIGEN_SYNTAX_TYPEDEF)
 		{
 			typedefs++;
-			assert(span_is(&sources, node->as.type_definition.name, "nibble_t"));
+			assert(token_is(&preprocessed.expanded, node->as.type_definition.name,
+				"nibble_t"));
 			continue;
 		}
-		assert(node->kind == PIGEN_SYNTAX_TRANSPORT);
-		transports++;
-		if (span_is(&sources, node->as.transport.name, "left"))
+		if (node->kind == PIGEN_SYNTAX_PARAMETER)
 		{
-			const pigen_syntax_dimension *dimension =
-				pigen_syntax_type_dimensions(&tree, &node->as.transport.payload);
-			assert(node->as.transport.kind == PIGEN_TRANSPORT_BUF);
-			assert(node->as.transport.payload.signedness == PIGEN_SYNTAX_SIGN_SIGNED);
-			assert(dimension && span_is(&sources, dimension->left, "7") &&
-				span_is(&sources, dimension->right, "0"));
+			parameters++;
+			if (token_is(&preprocessed.expanded, node->as.parameter.name,
+				"PULSE_W"))
+			{
+				assert(node->as.parameter.is_local);
+				assert(expression_is(&sources, &tree,
+					node->as.parameter.value, "WIDTH * 2"));
+			}
+			else
+				assert(!node->as.parameter.is_local);
+			continue;
 		}
-		else if (span_is(&sources, node->as.transport.name, "queue"))
+		assert(node->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATION);
+		for (pigen_syntax_id declarator_id = node->first_child;
+			declarator_id.index != PIGEN_INVALID_ID; )
 		{
-			assert(node->as.transport.kind == PIGEN_TRANSPORT_FIFO);
-			assert(node->as.transport.payload.base == PIGEN_SYNTAX_TYPE_NAMED);
-			assert(span_is(&sources, node->as.transport.payload.base_name, "packet_t"));
-			assert(span_is(&sources, node->as.transport.fifo_depth, "DEPTH"));
-		}
-		else if (span_is(&sources, node->as.transport.name, "pulse"))
-		{
-			assert(node->as.transport.kind == PIGEN_TRANSPORT_PORT);
-			assert(node->as.transport.payload.base == PIGEN_SYNTAX_TYPE_LOGIC);
-			assert(node->as.transport.payload.signedness == PIGEN_SYNTAX_SIGN_UNSIGNED);
+			const pigen_syntax_node *declarator =
+				pigen_syntax_get(&tree, declarator_id);
+			assert(declarator &&
+				declarator->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATOR);
+			assert(declarator->parent.index == at.index);
+			transports++;
+			if (token_is(&preprocessed.expanded,
+				declarator->as.transport_declarator.name, "left"))
+			{
+				const pigen_syntax_dimension *dimension =
+					pigen_syntax_type_dimensions(&tree,
+						&node->as.transport_declaration.payload);
+				assert(node->as.transport_declaration.kind == PIGEN_TRANSPORT_BUF);
+				assert(node->as.transport_declaration.payload.signedness ==
+					PIGEN_SYNTAX_SIGN_SIGNED);
+				assert(dimension && expression_is(&sources, &tree,
+					dimension->left, "WIDTH-1") && expression_is(&sources, &tree,
+						dimension->right, "0"));
+			}
+			else if (token_is(&preprocessed.expanded,
+				declarator->as.transport_declarator.name, "queue"))
+			{
+				assert(node->as.transport_declaration.kind == PIGEN_TRANSPORT_FIFO);
+				assert(node->as.transport_declaration.payload.base ==
+					PIGEN_SYNTAX_TYPE_NAMED);
+				assert(token_is(&preprocessed.expanded,
+					node->as.transport_declaration.payload.base_name, "packet_t"));
+				assert(expression_is(&sources, &tree,
+					node->as.transport_declaration.fifo_depth, "DEPTH"));
+			}
+			else if (token_is(&preprocessed.expanded,
+				declarator->as.transport_declarator.name, "pulse"))
+			{
+				assert(node->as.transport_declaration.kind == PIGEN_TRANSPORT_PORT);
+				assert(node->as.transport_declaration.payload.base ==
+					PIGEN_SYNTAX_TYPE_LOGIC);
+				assert(node->as.transport_declaration.payload.signedness ==
+					PIGEN_SYNTAX_SIGN_UNSIGNED);
+			}
+			declarator_id = declarator->next_sibling;
 		}
 	}
 	assert(transports == 4);
 	assert(typedefs == 2);
+	assert(parameters == 3);
 	assert(opaques >= 2);
 
-	assert(!pigen_parse_syntax(&sources, bad_source, &bad_tree, &error));
+	assert(pigen_preprocess(&sources, bad_source, NULL, &bad_preprocessed,
+		&preprocess_error));
+	assert(!pigen_parse_syntax(&bad_preprocessed.expanded, &bad_tree, &error));
 	assert(error.message && strstr(error.message, "depth"));
 	pigen_free_syntax_tree(&bad_tree);
 	pigen_free_syntax_tree(&tree);
+	pigen_free_preprocess_result(&bad_preprocessed);
+	pigen_free_preprocess_result(&preprocessed);
 	pigen_free_sources(&sources);
-	puts("PASS: modules, typedefs, and transports have structured syntax");
+	puts("PASS: modules, parameters, typedefs, and transports have structured syntax");
 	return 0;
 }

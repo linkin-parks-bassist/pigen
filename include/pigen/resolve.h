@@ -5,12 +5,13 @@
 #include "pigen/syntax.h"
 
 typedef struct {
+	pigen_origin_id origin;
 	pigen_source_span span;
 	const char *message;
 } pigen_resolve_error;
 
-int pigen_resolve_declarations(const pigen_source_manager *sources,
-	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
+int pigen_resolve_declarations(const pigen_syntax_tree *syntax,
+	pigen_semantic_model *model,
 	pigen_resolve_error *error);
 
 #endif
