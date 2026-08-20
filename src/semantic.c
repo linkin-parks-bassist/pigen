@@ -1807,8 +1807,118 @@ pigen_transport_id pigen_transport_add(pigen_semantic_model *model,
 	result = (pigen_transport_id){(uint32_t)model->transport_count};
 	model->transports[model->transport_count++] = (pigen_semantic_transport){
 		syntax, module_id, symbol_id, payload_type, fifo_depth, kind, direction,
-		span};
+		INVALID_ID(pigen_clock_domain_id), span};
 	symbol->object.transport = result;
+	return result;
+}
+
+int pigen_transport_bind_domain(pigen_semantic_model *model,
+	pigen_transport_id transport_id, pigen_clock_domain_id domain)
+{
+	pigen_semantic_transport *transport = transport_id.index <
+		model->transport_count ? &model->transports[transport_id.index] : NULL;
+
+	if (!transport || !pigen_clock_domain_get(model, domain)) return 0;
+	if (transport->domain.index == PIGEN_INVALID_ID)
+	{
+		transport->domain = domain;
+		return 1;
+	}
+	return transport->domain.index == domain.index;
+}
+
+pigen_clock_domain_id pigen_clock_domain_intern(
+	pigen_semantic_model *model, pigen_symbol_id clock_symbol,
+	pigen_semantic_edge edge)
+{
+	const pigen_symbol *symbol = pigen_symbol_get(model, clock_symbol);
+	size_t i;
+	pigen_clock_domain_id result;
+
+	if (!symbol || symbol->kind != PIGEN_SYMBOL_VALUE ||
+		edge < PIGEN_SEMANTIC_POSEDGE || edge > PIGEN_SEMANTIC_NEGEDGE ||
+		pigen_symbol_value(model, clock_symbol).index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_clock_domain_id);
+	for (i = 0; i < model->clock_domain_count; i++)
+		if (model->clock_domains[i].clock_symbol.index == clock_symbol.index &&
+			model->clock_domains[i].edge == edge)
+			return (pigen_clock_domain_id){(uint32_t)i};
+	if (!id_capacity_available(model->clock_domain_count))
+		return INVALID_ID(pigen_clock_domain_id);
+	if (model->clock_domain_count == model->clock_domain_capacity)
+	{
+		model->clock_domain_capacity = model->clock_domain_capacity ?
+			model->clock_domain_capacity * 2 : 8;
+		model->clock_domains = pigen_resize(model->clock_domains,
+			model->clock_domain_capacity * sizeof(*model->clock_domains));
+	}
+	result = (pigen_clock_domain_id){(uint32_t)model->clock_domain_count};
+	model->clock_domains[model->clock_domain_count++] =
+		(pigen_semantic_clock_domain){clock_symbol, edge};
+	return result;
+}
+
+pigen_process_id pigen_process_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module_id,
+	pigen_clock_domain_id domain_id, pigen_expr_id clock,
+	pigen_source_span span)
+{
+	const pigen_semantic_module *module = pigen_module_get(model, module_id);
+	const pigen_semantic_clock_domain *domain = pigen_clock_domain_get(model,
+		domain_id);
+	const pigen_semantic_expr *clock_expression = pigen_expr_get(model, clock);
+	pigen_process_id result;
+
+	if (!module || !domain || !clock_expression ||
+		clock_expression->kind != PIGEN_EXPR_SYMBOL ||
+		clock_expression->as.symbol.index != domain->clock_symbol.index ||
+		!span_contains(span, clock_expression->span) ||
+		syntax.index == PIGEN_INVALID_ID ||
+		!pigen_source_span_valid(model->sources, span) ||
+		!id_capacity_available(model->process_count))
+		return INVALID_ID(pigen_process_id);
+	if (model->process_count == model->process_capacity)
+	{
+		model->process_capacity = model->process_capacity ?
+			model->process_capacity * 2 : 16;
+		model->processes = pigen_resize(model->processes,
+			model->process_capacity * sizeof(*model->processes));
+	}
+	result = (pigen_process_id){(uint32_t)model->process_count};
+	model->processes[model->process_count++] = (pigen_semantic_process){
+		syntax, module_id, domain_id, clock, span};
+	return result;
+}
+
+pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module_id,
+	pigen_process_id process_id, pigen_lvalue_id destination,
+	pigen_expr_id value, pigen_predicate_id guard,
+	pigen_clock_domain_id domain_id, pigen_source_span span)
+{
+	const pigen_semantic_module *module = pigen_module_get(model, module_id);
+	const pigen_semantic_process *process = pigen_process_get(model, process_id);
+	pigen_transfer_id result;
+
+	if (!module || !process || process->module.index != module_id.index ||
+		process->domain.index != domain_id.index ||
+		!pigen_clock_domain_get(model, domain_id) ||
+		!pigen_lvalue_get(model, destination) || !pigen_expr_get(model, value) ||
+		guard.index == PIGEN_INVALID_ID || guard.index >= model->predicate_count ||
+		!span_contains(process->span, span) || syntax.index == PIGEN_INVALID_ID ||
+		!pigen_source_span_valid(model->sources, span) ||
+		!id_capacity_available(model->transfer_count))
+		return INVALID_ID(pigen_transfer_id);
+	if (model->transfer_count == model->transfer_capacity)
+	{
+		model->transfer_capacity = model->transfer_capacity ?
+			model->transfer_capacity * 2 : 32;
+		model->transfers = pigen_resize(model->transfers,
+			model->transfer_capacity * sizeof(*model->transfers));
+	}
+	result = (pigen_transfer_id){(uint32_t)model->transfer_count};
+	model->transfers[model->transfer_count++] = (pigen_semantic_transfer){
+		syntax, module_id, process_id, destination, value, guard, domain_id, span};
 	return result;
 }
 
@@ -1894,6 +2004,30 @@ const pigen_semantic_transport *pigen_transport_get(
 	return &model->transports[transport.index];
 }
 
+const pigen_semantic_clock_domain *pigen_clock_domain_get(
+	const pigen_semantic_model *model, pigen_clock_domain_id domain)
+{
+	if (domain.index == PIGEN_INVALID_ID ||
+		domain.index >= model->clock_domain_count) return NULL;
+	return &model->clock_domains[domain.index];
+}
+
+const pigen_semantic_process *pigen_process_get(
+	const pigen_semantic_model *model, pigen_process_id process)
+{
+	if (process.index == PIGEN_INVALID_ID || process.index >= model->process_count)
+		return NULL;
+	return &model->processes[process.index];
+}
+
+const pigen_semantic_transfer *pigen_transfer_get(
+	const pigen_semantic_model *model, pigen_transfer_id transfer)
+{
+	if (transfer.index == PIGEN_INVALID_ID ||
+		transfer.index >= model->transfer_count) return NULL;
+	return &model->transfers[transfer.index];
+}
+
 void pigen_free_semantic_model(pigen_semantic_model *model)
 {
 	free(model->types);
@@ -1913,5 +2047,8 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->parameters);
 	free(model->values);
 	free(model->transports);
+	free(model->clock_domains);
+	free(model->processes);
+	free(model->transfers);
 	*model = (pigen_semantic_model){0};
 }

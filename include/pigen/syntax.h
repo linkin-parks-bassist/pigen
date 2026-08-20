@@ -14,6 +14,9 @@ typedef enum {
 	PIGEN_SYNTAX_VALUE_DECLARATOR,
 	PIGEN_SYNTAX_TRANSPORT_DECLARATION,
 	PIGEN_SYNTAX_TRANSPORT_DECLARATOR,
+	PIGEN_SYNTAX_CLOCKED_PROCESS,
+	PIGEN_SYNTAX_PROCEDURAL_BLOCK,
+	PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT,
 	PIGEN_SYNTAX_OPAQUE
 } pigen_syntax_kind;
 
@@ -35,6 +38,11 @@ typedef enum {
 	PIGEN_VALUE_NET,
 	PIGEN_VALUE_VARIABLE
 } pigen_syntax_value_storage;
+
+typedef enum {
+	PIGEN_EDGE_POSEDGE,
+	PIGEN_EDGE_NEGEDGE
+} pigen_syntax_edge;
 
 typedef enum {
 	PIGEN_SYNTAX_SIGN_IMPLICIT,
@@ -95,6 +103,14 @@ typedef struct {
 			pigen_syntax_expr_id fifo_depth;
 		} transport_declaration;
 		struct { pigen_token_id name; } transport_declarator;
+		struct {
+			pigen_syntax_edge edge;
+			pigen_syntax_expr_id clock;
+		} clocked_process;
+		struct {
+			pigen_syntax_expr_id destination;
+			pigen_syntax_expr_id value;
+		} nonblocking_assignment;
 	} as;
 } pigen_syntax_node;
 

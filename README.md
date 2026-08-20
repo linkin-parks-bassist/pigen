@@ -169,8 +169,10 @@ structured ordinary values and transports, typed expression, packed-projection,
 and concatenation resolution, canonical
 constant expressions and packed-width algebra, predicate analysis, and
 identity-based expression-use and recursive projected/concatenated-lvalue
-analysis. These pieces are tested independently and are not yet the production
-lowering path.
+analysis. One-edge clocked processes containing direct nonblocking assignments
+now also resolve into canonical clock domains and atomic transfer objects.
+These pieces are tested independently and are not yet the production lowering
+path.
 
 The intended compiler flow is:
 

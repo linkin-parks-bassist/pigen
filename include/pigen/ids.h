@@ -23,6 +23,7 @@ PIGEN_ID_TYPE(pigen_parameter_id);
 PIGEN_ID_TYPE(pigen_value_id);
 PIGEN_ID_TYPE(pigen_transport_id);
 PIGEN_ID_TYPE(pigen_clock_domain_id);
+PIGEN_ID_TYPE(pigen_process_id);
 PIGEN_ID_TYPE(pigen_transfer_id);
 PIGEN_ID_TYPE(pigen_module_id);
 PIGEN_ID_TYPE(pigen_pipeline_id);

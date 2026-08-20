@@ -168,6 +168,10 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
   never contain copied source text, reconstructed identifiers, or backend RTL.
 - Every procedural semantic action carries its complete normalized guard and
   one clock-domain identity.
+- A clock domain is canonical by resolved clock declaration identity and edge,
+  while each clocked process retains its own syntax identity, clock-expression
+  occurrence, module ownership, and provenance.  Repeated processes on the
+  same edge therefore share a domain without collapsing their source uses.
 - Guard construction preserves SystemVerilog control nesting and dangling-else
   association. Mutual exclusion is a property of predicate structure, not
   string comparison.

@@ -545,9 +545,12 @@ The following limitations therefore still prevent cutover:
   now structured in module parameter lists and module bodies.  Typed and
   aggregate parameter forms remain opaque until their types can be represented
   without approximation.
-- Transfers, pipeline stages, and other procedural constructs do not yet point
-  at the shared expression arena.  Until one of those paths becomes authoritative
-  and its textual scanner is deleted, the production compiler remains textual.
+- Procedural coverage does not yet comprehensively use the shared expression
+  arena.  Direct nonblocking
+  assignments in fully representable one-edge clocked bodies now do; guarded
+  controls, cases, explicit atomic blocks, and transport actions remain to be
+  added.  Until that path becomes authoritative and its textual scanner is
+  deleted, the production compiler remains textual.
 
 Do not integrate the partial model into the production driver merely as an
 additional validation pass; that would create a second authority without
@@ -673,6 +676,25 @@ setting distinct lvalue, index, and type context bits.  Member destinations
 remain unrepresented until aggregate field types exist.  With direct, indexed,
 selected, grouped, and concatenated lvalues now structural, procedural transfer
 syntax can target this model without rescanning destination text.
+
+The first procedural syntax slice is deliberately all-or-nothing.  A plain
+`always` or `always_ff` with one `posedge` value name and a body consisting
+entirely of direct nonblocking assignments becomes a clocked-process node,
+one procedural-block node, and ordered assignment children.  Expression-arena
+counts are rolled back if any statement is not representable, and the complete
+process remains opaque; no partial clock or action facts survive.  This boundary
+must move outward as structured `if`/`else`, `case`, and action syntax land.
+
+Resolution gives clock domains, process occurrences, and transfers distinct
+stable IDs.  Domains are interned by the resolved ordinary-value clock symbol,
+so separate processes on the same clock share identity while retaining distinct
+clock expression occurrences and provenance.  Each assignment resolves through
+the shared expression and recursive-lvalue services, carries the canonical true
+predicate for this direct-body slice, and owns its process and domain IDs.
+Ordinary nets and input ports are rejected as procedural destinations.  Every
+transport use in the lvalue—including index expressions—and RHS binds the
+transport to the process domain on first use; incompatible later use and direct
+buffered self-consumption are rejected structurally by transport identity.
 
 ## Rewrite strategy
 

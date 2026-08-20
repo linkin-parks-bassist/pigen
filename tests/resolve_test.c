@@ -57,6 +57,29 @@ static const pigen_semantic_value *find_value(
 	return NULL;
 }
 
+static void expect_resolve_error(const char *text, const char *expected)
+{
+	pigen_source_manager sources = {0};
+	pigen_source_id source = pigen_source_add(&sources, "error.pigen", text,
+		strlen(text));
+	pigen_preprocess_result preprocessed = {0};
+	pigen_preprocess_error preprocess_error = {0};
+	pigen_syntax_tree syntax = {0};
+	pigen_syntax_error syntax_error = {0};
+	pigen_semantic_model model;
+	pigen_resolve_error error = {0};
+
+	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
+		&preprocess_error));
+	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
+	assert(!pigen_resolve_semantics(&syntax, &model, &error));
+	assert(error.message && strstr(error.message, expected));
+	pigen_free_semantic_model(&model);
+	pigen_free_syntax_tree(&syntax);
+	pigen_free_preprocess_result(&preprocessed);
+	pigen_free_sources(&sources);
+}
+
 int main(void)
 {
 	const char text[] =
@@ -70,6 +93,10 @@ int main(void)
 		"  logic [7:0] memory [0:3];\n"
 		"  buf byte_t left, right;\n"
 		"  fifo word_t[MASK_DEPTH] queue;\n"
+		"  always_ff @(posedge clk) begin\n"
+		"    right <= left;\n"
+		"  end\n"
+		"  always @(posedge clk) state <= next_state;\n"
 		"endmodule\n"
 		"module second;\n"
 		"  port bit [0:0] pulse;\n"
@@ -114,6 +141,13 @@ int main(void)
 	const pigen_semantic_value *state;
 	const pigen_semantic_value *next_state;
 	const pigen_semantic_module *first_module;
+	const pigen_semantic_clock_domain *clock_domain;
+	const pigen_semantic_process *first_process;
+	const pigen_semantic_process *second_process;
+	const pigen_semantic_transfer *first_transfer;
+	const pigen_semantic_transfer *second_transfer;
+	const pigen_semantic_lvalue *transfer_destination;
+	const pigen_semantic_expr *transfer_value;
 	const pigen_semantic_type *queue_type;
 	const pigen_semantic_type *left_type;
 	const pigen_semantic_type *boolean_type;
@@ -160,12 +194,15 @@ int main(void)
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
 	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
-	assert(pigen_resolve_declarations(&syntax, &model, &error));
+	assert(pigen_resolve_semantics(&syntax, &model, &error));
 	assert(model.compilation_scope.index != PIGEN_INVALID_ID);
 	assert(model.module_count == 2);
 	assert(model.parameter_count == 13);
 	assert(model.value_count == 6);
 	assert(model.transport_count == 4);
+	assert(model.clock_domain_count == 1);
+	assert(model.process_count == 2);
+	assert(model.transfer_count == 2);
 	first_module = pigen_module_get(&model, (pigen_module_id){0});
 	assert(first_module && first_module->scope.index != PIGEN_INVALID_ID);
 	assert(pigen_symbol_module(&model, first_module->symbol).index == 0);
@@ -198,6 +235,40 @@ int main(void)
 		pigen_symbol_value(&model, state->symbol)) == state);
 	assert(pigen_symbol_transport(&model, state->symbol).index ==
 		PIGEN_INVALID_ID);
+	clock_domain = pigen_clock_domain_get(&model, (pigen_clock_domain_id){0});
+	first_process = pigen_process_get(&model, (pigen_process_id){0});
+	second_process = pigen_process_get(&model, (pigen_process_id){1});
+	first_transfer = pigen_transfer_get(&model, (pigen_transfer_id){0});
+	second_transfer = pigen_transfer_get(&model, (pigen_transfer_id){1});
+	assert(clock_domain && first_process && second_process && first_transfer &&
+		second_transfer);
+	assert(clock_domain->clock_symbol.index == clk->symbol.index &&
+		clock_domain->edge == PIGEN_SEMANTIC_POSEDGE);
+	assert(first_process->domain.index == second_process->domain.index &&
+		first_process->domain.index == 0);
+	assert(first_transfer->process.index == 0 &&
+		second_transfer->process.index == 1);
+	assert(first_transfer->domain.index == second_transfer->domain.index &&
+		first_transfer->guard.index == model.true_predicate.index &&
+		second_transfer->guard.index == model.true_predicate.index);
+	transfer_destination = pigen_lvalue_get(&model,
+		first_transfer->destination);
+	transfer_value = pigen_expr_get(&model, first_transfer->value);
+	assert(transfer_destination &&
+		transfer_destination->kind == PIGEN_LVALUE_PROJECTION);
+	assert(transfer_destination->as.projection.base_symbol.index == right->symbol.index);
+	assert(transfer_destination->as.projection.transport.index ==
+		pigen_symbol_transport(&model, right->symbol).index);
+	assert(transfer_value && transfer_value->kind == PIGEN_EXPR_SYMBOL &&
+		transfer_value->as.symbol.index == left->symbol.index);
+	transfer_destination = pigen_lvalue_get(&model,
+		second_transfer->destination);
+	transfer_value = pigen_expr_get(&model, second_transfer->value);
+	assert(transfer_destination &&
+		transfer_destination->as.projection.base_symbol.index == state->symbol.index &&
+		transfer_destination->as.projection.transport.index == PIGEN_INVALID_ID);
+	assert(transfer_value && transfer_value->kind == PIGEN_EXPR_SYMBOL &&
+		transfer_value->as.symbol.index == next_state->symbol.index);
 	width = find_parameter(&sources, &model, "WIDTH");
 	depth = find_parameter(&sources, &model, "DEPTH");
 	last = find_parameter(&sources, &model, "LAST");
@@ -332,7 +403,9 @@ int main(void)
 		pigen_symbol_transport(&model, queue->symbol)) == queue);
 	assert(pigen_symbol_module(&model, left->symbol).index == PIGEN_INVALID_ID);
 	assert(left->kind == PIGEN_SEMANTIC_BUF);
+	assert(left->domain.index == 0 && right->domain.index == 0);
 	assert(queue->kind == PIGEN_SEMANTIC_FIFO);
+	assert(queue->domain.index == PIGEN_INVALID_ID);
 	assert(queue->fifo_depth.index != PIGEN_INVALID_ID);
 	bound = pigen_const_expr_get(&model,
 		pigen_expr_constant(&model, queue->fifo_depth));
@@ -387,7 +460,7 @@ int main(void)
 		&preprocess_error));
 	assert(pigen_parse_syntax(&duplicate_preprocessed.expanded, &duplicate_syntax,
 		&syntax_error));
-	assert(!pigen_resolve_declarations(&duplicate_syntax,
+	assert(!pigen_resolve_semantics(&duplicate_syntax,
 		&duplicate_model, &error));
 	assert(error.message && strstr(error.message, "duplicate module"));
 	assert(span_is(&sources, error.span, "same"));
@@ -397,15 +470,33 @@ int main(void)
 		&preprocess_error));
 	assert(pigen_parse_syntax(&unknown_preprocessed.expanded, &unknown_syntax,
 		&syntax_error));
-	assert(!pigen_resolve_declarations(&unknown_syntax,
+	assert(!pigen_resolve_semantics(&unknown_syntax,
 		&unknown_model, &error));
 	assert(error.message && strstr(error.message, "unknown type"));
 	assert(span_is(&sources, error.span, "missing_t"));
 	assert(pigen_preprocess(&sources, inout_source, NULL, &inout_preprocessed,
 		&preprocess_error));
 	assert(pigen_parse_syntax(&inout_preprocessed.expanded, &inout_syntax, &syntax_error));
-	assert(!pigen_resolve_declarations(&inout_syntax, &inout_model, &error));
+	assert(!pigen_resolve_semantics(&inout_syntax, &inout_model, &error));
 	assert(error.message && strstr(error.message, "not inout"));
+
+	expect_resolve_error(
+		"module bad(input logic clk); wire x; logic y; "
+		"always @(posedge clk) x <= y; endmodule\n",
+		"not a writable");
+	expect_resolve_error(
+		"module bad(input logic clk, input buf [7:0] x); "
+		"always @(posedge clk) x <= 8'h0; endmodule\n",
+		"not a writable");
+	expect_resolve_error(
+		"module bad(input logic clk); buf [7:0] x; "
+		"always @(posedge clk) x <= x; endmodule\n",
+		"cannot source its destination");
+	expect_resolve_error(
+		"module bad(input logic clk_a, clk_b); buf [7:0] x, y; "
+		"always @(posedge clk_a) y <= x; "
+		"always @(posedge clk_b) y <= x; endmodule\n",
+		"across clock domains");
 
 	pigen_free_semantic_model(&inout_model);
 	pigen_free_semantic_model(&unknown_model);
@@ -420,6 +511,6 @@ int main(void)
 	pigen_free_preprocess_result(&duplicate_preprocessed);
 	pigen_free_preprocess_result(&preprocessed);
 	pigen_free_sources(&sources);
-	puts("PASS: parameters, typedefs, values, and transports resolve by scope and identity");
+	puts("PASS: declarations, clock domains, and transfers resolve by identity");
 	return 0;
 }

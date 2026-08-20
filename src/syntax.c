@@ -722,6 +722,169 @@ static const char *opaque_unit_closer(const syntax_parser *parser, size_t at)
 	return NULL;
 }
 
+typedef struct {
+	size_t start;
+	size_t after;
+	pigen_syntax_expr_id destination;
+	pigen_syntax_expr_id value;
+} parsed_assignment;
+
+static size_t matching_end(const syntax_parser *parser, size_t open,
+	size_t limit)
+{
+	size_t at;
+	size_t depth = 0;
+
+	for (at = open; at < limit; at++)
+	{
+		if (token_is(parser, at, "begin")) depth++;
+		else if (token_is(parser, at, "end") && depth && !--depth) return at;
+	}
+	return limit;
+}
+
+static void abandon_process_parse(syntax_parser *parser, size_t node_count,
+	size_t child_count, pigen_syntax_error saved_error)
+{
+	parser->tree->expressions.node_count = node_count;
+	parser->tree->expressions.child_count = child_count;
+	if (parser->error) *parser->error = saved_error;
+}
+
+static int parse_clocked_process(syntax_parser *parser,
+	pigen_syntax_id module, size_t start, size_t limit,
+	syntax_cursor *opaque_cursor, size_t *after_process)
+{
+	pigen_syntax_expr_arena *expressions = &parser->tree->expressions;
+	size_t saved_node_count = expressions->node_count;
+	size_t saved_child_count = expressions->child_count;
+	pigen_syntax_error saved_error = parser->error ? *parser->error :
+		(pigen_syntax_error){0};
+	size_t event_open = start + 2;
+	size_t event_close;
+	size_t body_start;
+	size_t body_after;
+	size_t process_after;
+	size_t at;
+	int explicit_block;
+	pigen_syntax_expr_id clock;
+	parsed_assignment *assignments = NULL;
+	size_t assignment_count = 0;
+	size_t assignment_capacity = 0;
+	pigen_syntax_node node = {0};
+	pigen_syntax_id process;
+	pigen_syntax_id block;
+
+	if ((!token_is(parser, start, "always") &&
+		!token_is(parser, start, "always_ff")) ||
+		!token_is(parser, start + 1, "@") ||
+		!token_is(parser, event_open, "(")) return 0;
+	event_close = matching_parenthesis(parser, event_open, limit);
+	if (event_close == limit || !token_is(parser, event_open + 1, "posedge") ||
+		event_open + 3 != event_close || !identifier(parser, event_open + 2))
+		return 0;
+	if (!pigen_parse_expression(parser->expanded, event_open + 2, event_close,
+		expressions, &clock, parser->error))
+	{
+		abandon_process_parse(parser, saved_node_count, saved_child_count,
+			saved_error);
+		return 0;
+	}
+	body_start = event_close + 1;
+	explicit_block = token_is(parser, body_start, "begin");
+	if (explicit_block)
+	{
+		size_t close = matching_end(parser, body_start, limit);
+		if (close == limit || token_is(parser, close + 1, ":"))
+		{
+			abandon_process_parse(parser, saved_node_count, saved_child_count,
+				saved_error);
+			return 0;
+		}
+		at = body_start + 1;
+		body_after = close;
+		process_after = close + 1;
+	}
+	else
+	{
+		size_t semicolon = top_level_token(parser, body_start, limit, ";");
+		if (semicolon == limit)
+		{
+			abandon_process_parse(parser, saved_node_count, saved_child_count,
+				saved_error);
+			return 0;
+		}
+		at = body_start;
+		body_after = semicolon + 1;
+		process_after = body_after;
+	}
+	while (at < body_after)
+	{
+		size_t semicolon = top_level_token(parser, at, body_after, ";");
+		size_t separator;
+		parsed_assignment parsed;
+
+		if (semicolon == body_after) break;
+		separator = top_level_token(parser, at, semicolon, "<=");
+		if (separator == at || separator == semicolon || separator + 1 == semicolon)
+			break;
+		parsed = (parsed_assignment){at, semicolon + 1,
+			INVALID_ID(pigen_syntax_expr_id), INVALID_ID(pigen_syntax_expr_id)};
+		if (!pigen_parse_expression(parser->expanded, at, separator, expressions,
+			&parsed.destination, parser->error) ||
+			!pigen_parse_expression(parser->expanded, separator + 1, semicolon,
+				expressions, &parsed.value, parser->error)) break;
+		if (assignment_count == assignment_capacity)
+		{
+			assignment_capacity = assignment_capacity ? assignment_capacity * 2 : 4;
+			assignments = pigen_resize(assignments,
+				assignment_capacity * sizeof(*assignments));
+		}
+		assignments[assignment_count++] = parsed;
+		at = semicolon + 1;
+	}
+	if (at != body_after || !assignment_count)
+	{
+		free(assignments);
+		abandon_process_parse(parser, saved_node_count, saved_child_count,
+			saved_error);
+		return 0;
+	}
+
+	add_opaque(parser, module, *opaque_cursor, start);
+	node.kind = PIGEN_SYNTAX_CLOCKED_PROCESS;
+	node.location = range_location(parser, start, process_after);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.clocked_process.edge = PIGEN_EDGE_POSEDGE;
+	node.as.clocked_process.clock = clock;
+	process = add_node(parser, node);
+	add_child(parser, module, process);
+	node = (pigen_syntax_node){0};
+	node.kind = PIGEN_SYNTAX_PROCEDURAL_BLOCK;
+	node.location = range_location(parser, body_start, process_after);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	block = add_node(parser, node);
+	add_child(parser, process, block);
+	for (size_t i = 0; i < assignment_count; i++)
+	{
+		node = (pigen_syntax_node){0};
+		node.kind = PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT;
+		node.location = range_location(parser, assignments[i].start,
+			assignments[i].after);
+		node.parent = INVALID_SYNTAX;
+		node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+		node.as.nonblocking_assignment.destination = assignments[i].destination;
+		node.as.nonblocking_assignment.value = assignments[i].value;
+		add_child(parser, block, add_node(parser, node));
+	}
+	free(assignments);
+	*opaque_cursor = process_after;
+	*after_process = process_after;
+	return 1;
+}
+
 static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 	size_t first, size_t after, syntax_cursor *opaque_cursor)
 {
@@ -734,6 +897,18 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 		pigen_syntax_transport_kind ignored;
 		size_t kind_at = at;
 		int candidate;
+		if (item_start && (token_is(parser, at, "always") ||
+			token_is(parser, at, "always_ff")))
+		{
+			size_t process_after;
+			if (parse_clocked_process(parser, module, at, after, opaque_cursor,
+				&process_after))
+			{
+				at = process_after;
+				item_start = 1;
+				continue;
+			}
+		}
 		if (item_start && (token_is(parser, at, "parameter") ||
 			token_is(parser, at, "localparam")))
 		{

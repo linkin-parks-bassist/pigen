@@ -41,7 +41,7 @@ expression-use-test:
 	/tmp/pigen-expression-use-test
 
 resolve-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-resolve-test tests/resolve_test.c src/resolve.c src/expression_resolve.c src/semantic.c src/syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-resolve-test tests/resolve_test.c src/resolve.c src/expression_resolve.c src/expression_use.c src/predicate.c src/semantic.c src/syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 	/tmp/pigen-resolve-test
 
 fabric-test: pigen

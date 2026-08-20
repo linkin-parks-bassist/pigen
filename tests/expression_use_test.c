@@ -104,7 +104,7 @@ int main(void)
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
 	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
-	assert(pigen_resolve_declarations(&syntax, &model, &resolve_error));
+	assert(pigen_resolve_semantics(&syntax, &model, &resolve_error));
 	for (first = 0; first < preprocessed.expanded.token_count; first++)
 		if (token_is(&preprocessed.expanded, first, "endmodule")) break;
 	assert(first + 1 < preprocessed.expanded.token_count);

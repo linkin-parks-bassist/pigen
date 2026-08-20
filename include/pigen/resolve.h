@@ -10,7 +10,7 @@ typedef struct {
 	const char *message;
 } pigen_resolve_error;
 
-int pigen_resolve_declarations(const pigen_syntax_tree *syntax,
+int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model,
 	pigen_resolve_error *error);
 

@@ -90,6 +90,8 @@ int main(void)
 	size_t typedefs = 0;
 	size_t parameters = 0;
 	size_t values = 0;
+	size_t clocked_processes = 0;
+	size_t assignments = 0;
 	int unpacked_is_opaque = 0;
 
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
@@ -157,6 +159,29 @@ int main(void)
 			values++;
 			continue;
 		}
+		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS)
+		{
+			const pigen_syntax_node *block = pigen_syntax_get(&tree,
+				node->first_child);
+			const pigen_syntax_node *assignment;
+			assert(node->as.clocked_process.edge == PIGEN_EDGE_POSEDGE);
+			assert(expression_is(&sources, &tree,
+				node->as.clocked_process.clock, "clk"));
+			assert(block && block->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK &&
+				block->parent.index == at.index);
+			assignment = pigen_syntax_get(&tree, block->first_child);
+			assert(assignment &&
+				assignment->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT &&
+				assignment->parent.index == node->first_child.index);
+			assert(expression_is(&sources, &tree,
+				assignment->as.nonblocking_assignment.destination, "right"));
+			assert(expression_is(&sources, &tree,
+				assignment->as.nonblocking_assignment.value, "left"));
+			assert(assignment->next_sibling.index == PIGEN_INVALID_ID);
+			clocked_processes++;
+			assignments++;
+			continue;
+		}
 		assert(node->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATION);
 		for (pigen_syntax_id declarator_id = node->first_child;
 			declarator_id.index != PIGEN_INVALID_ID; )
@@ -207,6 +232,8 @@ int main(void)
 	assert(typedefs == 2);
 	assert(parameters == 3);
 	assert(values == 1);
+	assert(clocked_processes == 1);
+	assert(assignments == 1);
 	assert(unpacked_is_opaque);
 	assert(opaques >= 2);
 
@@ -219,6 +246,6 @@ int main(void)
 	pigen_free_preprocess_result(&bad_preprocessed);
 	pigen_free_preprocess_result(&preprocessed);
 	pigen_free_sources(&sources);
-	puts("PASS: modules, parameters, typedefs, values, and transports have structured syntax");
+	puts("PASS: declarations and direct clocked assignments have structured syntax");
 	return 0;
 }
