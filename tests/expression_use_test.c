@@ -24,14 +24,18 @@ static int token_is(const pigen_expanded_source *source, size_t at,
 int main(void)
 {
 	const char text[] =
-		"module uses;\n"
+		"module uses #(parameter TOP = 6, WIDTH = 3);\n"
 		"  buf [7:0] left, right;\n"
 		"endmodule\n"
 		"left ? right : left\n"
 		"(right)\n"
 		"right[left]\n"
 		"(right[left])\n"
-		"right[left][left]\n";
+		"right[left][left]\n"
+		"right[TOP:2]\n"
+		"(right[left +: WIDTH])\n"
+		"right[6 -: left]\n"
+		"right[left:2]\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "uses.pigen", text,
 		strlen(text));
@@ -48,18 +52,34 @@ int main(void)
 		INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_expr_id syntax_invalid_index =
 		INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_range = INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_select_lvalue =
+		INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_invalid_width =
+		INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_invalid_range =
+		INVALID_ID(pigen_syntax_expr_id);
 	pigen_expr_id expression;
 	pigen_expr_id lvalue_expression;
 	pigen_expr_id index_expression;
 	pigen_expr_id index_lvalue_expression;
+	pigen_expr_id range_expression;
+	pigen_expr_id select_lvalue_expression;
 	pigen_lvalue_id lvalue;
 	pigen_lvalue_id index_lvalue;
+	pigen_lvalue_id select_lvalue;
 	pigen_predicate_id always;
 	pigen_expression_use_analysis analysis = {0};
 	const pigen_semantic_expr *conditional;
 	const pigen_semantic_expr *indexed;
 	const pigen_semantic_expr *indexed_base;
 	const pigen_semantic_expr *indexed_subscript;
+	const pigen_semantic_expr *range;
+	const pigen_semantic_expr *select_lvalue_root;
+	const pigen_semantic_expr *select_lvalue_projection;
+	const pigen_packed_dimension *select_dimensions;
+	const pigen_const_expr *select_upper;
+	const pigen_const_expr *select_width;
 	const pigen_predicate_atom *true_atoms;
 	const pigen_predicate_atom *false_atoms;
 	size_t first;
@@ -72,7 +92,7 @@ int main(void)
 		if (token_is(&preprocessed.expanded, first, "endmodule")) break;
 	assert(first + 1 < preprocessed.expanded.token_count);
 	first++;
-	assert(preprocessed.expanded.token_count - 1 == first + 25);
+	assert(preprocessed.expanded.token_count - 1 == first + 51);
 	assert(pigen_parse_expression(&preprocessed.expanded, first, first + 5,
 		&syntax.expressions,
 		&syntax_expression, &syntax_error));
@@ -84,6 +104,14 @@ int main(void)
 		&syntax.expressions, &syntax_index_lvalue, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 18, first + 25,
 		&syntax.expressions, &syntax_invalid_index, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 25, first + 31,
+		&syntax.expressions, &syntax_range, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 31, first + 39,
+		&syntax.expressions, &syntax_select_lvalue, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 39, first + 45,
+		&syntax.expressions, &syntax_invalid_width, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 45, first + 51,
+		&syntax.expressions, &syntax_invalid_range, &syntax_error));
 	expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_expression);
@@ -94,9 +122,20 @@ int main(void)
 	index_lvalue_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_index_lvalue);
+	range_expression = pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_range);
+	select_lvalue_expression = pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope,
+		syntax_select_lvalue);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_invalid_index).index == PIGEN_INVALID_ID);
+	assert(pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope,
+		syntax_invalid_width).index == PIGEN_INVALID_ID);
+	assert(pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope,
+		syntax_invalid_range).index == PIGEN_INVALID_ID);
 	conditional = pigen_expr_get(&model, expression);
 	indexed = pigen_expr_get(&model, index_expression);
 	assert(conditional && conditional->kind == PIGEN_EXPR_CONDITIONAL);
@@ -192,6 +231,55 @@ int main(void)
 		index_lvalue_expression.index);
 	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_LVALUE);
 	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
+
+	pigen_free_expression_use_analysis(&analysis);
+	range = pigen_expr_get(&model, range_expression);
+	assert(range && range->kind == PIGEN_EXPR_SELECT);
+	assert(range->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE);
+	assert(pigen_analyze_expression_uses(&model, range_expression, always,
+		PIGEN_EXPRESSION_USE_READ, &analysis));
+	assert(analysis.use_count == 2);
+	assert(analysis.transport_count == 1);
+	assert(analysis.uses[0].expression.index == range_expression.index);
+	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_TYPE);
+
+	pigen_free_expression_use_analysis(&analysis);
+	select_lvalue_root = pigen_expr_get(&model, select_lvalue_expression);
+	assert(select_lvalue_root &&
+		select_lvalue_root->kind == PIGEN_EXPR_GROUP);
+	select_lvalue_projection = pigen_expr_get(&model,
+		select_lvalue_root->as.group.operand);
+	assert(select_lvalue_projection &&
+		select_lvalue_projection->kind == PIGEN_EXPR_SELECT);
+	assert(select_lvalue_projection->as.select.kind ==
+		PIGEN_SEMANTIC_SELECT_INDEXED_UP);
+	select_dimensions = pigen_type_dimensions(&model,
+		select_lvalue_root->type);
+	assert(select_dimensions &&
+		pigen_type_get(&model, select_lvalue_root->type)->dimension_count == 1);
+	select_upper = pigen_const_expr_get(&model, select_dimensions->left);
+	assert(select_upper && select_upper->kind == PIGEN_CONST_EXPR_BINARY &&
+		select_upper->as.binary.operator == PIGEN_BINARY_SUBTRACT);
+	select_width = pigen_const_expr_get(&model,
+		select_upper->as.binary.left);
+	assert(select_width &&
+		select_width->kind == PIGEN_CONST_EXPR_SELECT_WIDTH &&
+		select_width->as.select_width.kind ==
+			PIGEN_SEMANTIC_SELECT_INDEXED_UP &&
+		select_width->as.select_width.left.index == PIGEN_INVALID_ID);
+	select_lvalue = pigen_lvalue_resolve(&model, select_lvalue_expression);
+	assert(select_lvalue.index != PIGEN_INVALID_ID);
+	assert(pigen_analyze_lvalue_uses(&model, select_lvalue, always, &analysis));
+	assert(analysis.use_count == 3);
+	assert(analysis.transport_count == 2);
+	assert(analysis.uses[0].expression.index ==
+		select_lvalue_expression.index);
+	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.uses[2].context == PIGEN_EXPRESSION_USE_TYPE);
 	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
 	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
 

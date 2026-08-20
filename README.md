@@ -164,10 +164,10 @@ transformation.
 A structured replacement frontend and compiler middle are now under active
 development. They already provide immutable source management, preprocessing
 with token provenance, syntax trees, scopes and symbols, structural types,
-typed expression and packed-index resolution, canonical constant expressions,
-predicate analysis, and identity-based expression-use and projected-lvalue
-analysis. These pieces are tested independently and are not yet the production
-lowering path.
+typed expression and packed-projection resolution, canonical constant
+expressions, predicate analysis, and identity-based expression-use and
+projected-lvalue analysis. These pieces are tested independently and are not
+yet the production lowering path.
 
 The intended compiler flow is:
 

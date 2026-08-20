@@ -58,6 +58,9 @@ int main(void)
 	pigen_type_id matrix_type;
 	pigen_type_id row_type;
 	pigen_type_id element_type;
+	pigen_type_id selected_type;
+	pigen_type_id reverse_selected_type;
+	pigen_type_id indexed_selected_type;
 	pigen_scope_id module_scope;
 	pigen_scope_id pipeline_scope;
 	pigen_scope_id first_stage;
@@ -118,6 +121,56 @@ int main(void)
 		PIGEN_INVALID_ID);
 	assert(pigen_type_packed_element(&model, integer_type).index ==
 		boolean_type.index);
+	selected_type = pigen_type_packed_select(&model, matrix_type,
+		pigen_expr_constant(&model, left_bound),
+		pigen_expr_constant(&model, right_bound),
+		PIGEN_SEMANTIC_SELECT_RANGE);
+	assert(pigen_type_get(&model, selected_type)->kind == PIGEN_TYPE_LOGIC);
+	assert(pigen_type_get(&model, selected_type)->signedness ==
+		PIGEN_SIGN_UNSIGNED);
+	assert(pigen_type_get(&model, selected_type)->dimension_count == 2);
+	reverse_selected_type = pigen_type_packed_select(&model, matrix_type,
+		pigen_expr_constant(&model, right_bound),
+		pigen_expr_constant(&model, left_bound),
+		PIGEN_SEMANTIC_SELECT_RANGE);
+	assert(reverse_selected_type.index == selected_type.index);
+	{
+		const pigen_packed_dimension *selected_dimensions =
+			pigen_type_dimensions(&model, selected_type);
+		const pigen_const_expr *upper =
+			pigen_const_expr_get(&model, selected_dimensions[0].left);
+		const pigen_const_expr *width;
+		assert(upper && upper->kind == PIGEN_CONST_EXPR_BINARY &&
+			upper->as.binary.operator == PIGEN_BINARY_SUBTRACT);
+		width = pigen_const_expr_get(&model, upper->as.binary.left);
+		assert(width && width->kind == PIGEN_CONST_EXPR_SELECT_WIDTH &&
+			width->as.select_width.kind == PIGEN_SEMANTIC_SELECT_RANGE &&
+			width->as.select_width.left.index ==
+				pigen_expr_constant(&model, left_bound).index &&
+			width->as.select_width.right.index ==
+				pigen_expr_constant(&model, right_bound).index);
+		assert(selected_dimensions[1].left.index == dimension.left.index);
+		assert(selected_dimensions[1].right.index == dimension.right.index);
+	}
+	indexed_selected_type = pigen_type_packed_select(&model, matrix_type,
+		INVALID_ID(pigen_const_expr_id),
+		pigen_expr_constant(&model, left_bound),
+		PIGEN_SEMANTIC_SELECT_INDEXED_DOWN);
+	assert(pigen_type_get(&model, indexed_selected_type)->dimension_count == 2);
+	assert(pigen_type_packed_select(&model, matrix_type,
+		INVALID_ID(pigen_const_expr_id),
+		pigen_expr_constant(&model, left_bound),
+		PIGEN_SEMANTIC_SELECT_INDEXED_UP).index ==
+		indexed_selected_type.index);
+	assert(pigen_type_packed_select(&model, element_type,
+		pigen_expr_constant(&model, left_bound),
+		pigen_expr_constant(&model, right_bound),
+		PIGEN_SEMANTIC_SELECT_RANGE).index == PIGEN_INVALID_ID);
+	assert(pigen_type_get(&model,
+		pigen_type_packed_select(&model, integer_type,
+			pigen_expr_constant(&model, left_bound),
+			pigen_expr_constant(&model, right_bound),
+			PIGEN_SEMANTIC_SELECT_RANGE))->dimension_count == 1);
 
 	module_scope = pigen_scope_add(&model, INVALID_ID(pigen_scope_id), whole);
 	pipeline_scope = pigen_scope_add(&model, module_scope, whole);

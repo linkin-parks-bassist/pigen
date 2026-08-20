@@ -354,6 +354,21 @@ static int binary_boolean_result(pigen_syntax_operator operator)
 		operator == PIGEN_SYNTAX_OP_LOGICAL_OR;
 }
 
+static pigen_select_kind select_kind(pigen_syntax_select_kind kind)
+{
+	switch (kind)
+	{
+		case PIGEN_SELECT_RANGE:
+			return PIGEN_SEMANTIC_SELECT_RANGE;
+		case PIGEN_SELECT_INDEXED_UP:
+			return PIGEN_SEMANTIC_SELECT_INDEXED_UP;
+		case PIGEN_SELECT_INDEXED_DOWN:
+			return PIGEN_SEMANTIC_SELECT_INDEXED_DOWN;
+	}
+	pigen_fail("invalid syntax select kind");
+	return PIGEN_SEMANTIC_SELECT_RANGE;
+}
+
 static int supported_integral_type(const expression_resolver *resolver,
 	pigen_type_id type)
 {
@@ -494,6 +509,22 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 				return INVALID_ID(pigen_expr_id);
 			return pigen_expr_add_index(resolver->model, left, right,
 				syntax->location.source_span);
+		case PIGEN_SYNTAX_EXPR_SELECT:
+		{
+			pigen_expr_id base = resolve_expression(resolver, scope,
+				syntax->as.select.base);
+			left = resolve_expression(resolver, scope,
+				syntax->as.select.left);
+			right = resolve_expression(resolver, scope,
+				syntax->as.select.right);
+			if (!pigen_expr_get(resolver->model, base) ||
+				!pigen_expr_get(resolver->model, left) ||
+				!pigen_expr_get(resolver->model, right))
+				return INVALID_ID(pigen_expr_id);
+			return pigen_expr_add_select(resolver->model, base, left, right,
+				select_kind(syntax->as.select.kind),
+				syntax->location.source_span);
+		}
 		default:
 			return INVALID_ID(pigen_expr_id);
 	}

@@ -136,6 +136,18 @@ static int visit(use_analyzer *analyzer, pigen_expr_id expression,
 				visit(analyzer, known->as.index.index,
 					INVALID_ID(pigen_expr_id), predicate,
 					PIGEN_EXPRESSION_USE_INDEX);
+		case PIGEN_EXPR_SELECT:
+			return visit(analyzer, known->as.select.base,
+				projection.index == PIGEN_INVALID_ID ? expression : projection,
+				predicate, context) &&
+				visit(analyzer, known->as.select.left,
+					INVALID_ID(pigen_expr_id), predicate,
+					known->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE ?
+						PIGEN_EXPRESSION_USE_TYPE :
+						PIGEN_EXPRESSION_USE_INDEX) &&
+				visit(analyzer, known->as.select.right,
+					INVALID_ID(pigen_expr_id), predicate,
+					PIGEN_EXPRESSION_USE_TYPE);
 	}
 	return 0;
 }
@@ -163,6 +175,18 @@ static int visit_lvalue(use_analyzer *analyzer, pigen_expr_id expression,
 				visit(analyzer, known->as.index.index,
 					INVALID_ID(pigen_expr_id), predicate,
 					PIGEN_EXPRESSION_USE_INDEX);
+		case PIGEN_EXPR_SELECT:
+			return visit_lvalue(analyzer, known->as.select.base,
+				projection.index == PIGEN_INVALID_ID ? expression : projection,
+				predicate) &&
+				visit(analyzer, known->as.select.left,
+					INVALID_ID(pigen_expr_id), predicate,
+					known->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE ?
+						PIGEN_EXPRESSION_USE_TYPE :
+						PIGEN_EXPRESSION_USE_INDEX) &&
+				visit(analyzer, known->as.select.right,
+					INVALID_ID(pigen_expr_id), predicate,
+					PIGEN_EXPRESSION_USE_TYPE);
 		case PIGEN_EXPR_INTEGER:
 		case PIGEN_EXPR_BITS:
 		case PIGEN_EXPR_UNARY:

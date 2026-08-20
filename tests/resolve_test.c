@@ -95,6 +95,8 @@ int main(void)
 	const pigen_semantic_type *boolean_type;
 	const pigen_semantic_type *signed_type;
 	const pigen_semantic_type *element_type;
+	const pigen_semantic_type *selected_type;
+	pigen_symbol_id left_typedef;
 	const pigen_packed_dimension *queue_dimension;
 	const pigen_packed_dimension *left_dimension;
 	const pigen_packed_dimension *signed_dimension;
@@ -291,11 +293,24 @@ int main(void)
 		bound->as.symbol.index == mask_depth->symbol.index);
 	left_type = pigen_type_get(&model, left->payload_type);
 	assert(left_type && left_type->kind == PIGEN_TYPE_NAMED);
+	left_typedef = left_type->named_symbol;
 	element_type = pigen_type_get(&model,
 		pigen_type_packed_element(&model, left->payload_type));
 	assert(element_type && element_type->kind == PIGEN_TYPE_LOGIC &&
 		element_type->signedness == PIGEN_SIGN_UNSIGNED &&
 		element_type->dimension_count == 0);
+	left_type = pigen_type_get(&model, left->payload_type);
+	selected_type = pigen_type_get(&model,
+		pigen_type_packed_select(&model, left->payload_type,
+			pigen_type_dimensions(&model,
+				pigen_symbol_get(&model, left_typedef)->type)->left,
+			pigen_type_dimensions(&model,
+				pigen_symbol_get(&model, left_typedef)->type)->right,
+			PIGEN_SEMANTIC_SELECT_RANGE));
+	assert(selected_type && selected_type->kind == PIGEN_TYPE_LOGIC &&
+		selected_type->signedness == PIGEN_SIGN_UNSIGNED &&
+		selected_type->dimension_count == 1);
+	left_type = pigen_type_get(&model, left->payload_type);
 	left_dimension = pigen_type_dimensions(&model,
 		pigen_symbol_get(&model, left_type->named_symbol)->type);
 	assert(left_dimension);

@@ -96,11 +96,12 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 - A resolved lvalue has its own stable occurrence identity and points at the
   expression which projects the destination, its type, assignable base symbol,
   and optional base transport.  Direct value and transport symbols,
-  transparent grouping, and packed indexing are supported; parameters and
-  operator trees are never accepted as destinations.  Each packed index owns
-  separate base and subscript expression identities.  Its base retains the
-  complete projected expression identity while its subscript is analyzed under
-  index context.
+  transparent grouping, packed indexing, ordinary ranges, and indexed
+  part-selects are supported; parameters and operator trees are never accepted
+  as destinations.  Each packed projection owns separate base and selector
+  expression identities.  Its base retains the complete projected expression
+  identity; runtime subscripts use index context, while constant range and
+  width expressions use type context.
 - Transport use analysis traverses expression nodes once and records base
   transport identity, projection, use context, and evaluation predicate.
   Repeated projections of one base transport are deduplicated by identity.
@@ -111,10 +112,10 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
   opposite polarities of that same condition identity.  An impossible path
   contributes no uses.
 - Lvalue use analysis records the projected lvalue expression under the
-  lvalue context and each subscript expression under index context.  If a
-  transport is both read and written in an analyzed set, one deduplicated
-  transport summary carries all applicable context bits while the occurrence
-  records remain distinct.
+  lvalue context, each runtime subscript under index context, and selector
+  bounds which determine type under type context.  If a transport is both read
+  and written in an analyzed set, one deduplicated transport summary carries
+  all applicable context bits while the occurrence records remain distinct.
 - Contextual sizing and signedness are established before transport or RTL
   lowering. The emitter never infers them from rendered text.
 - Builtin semantic types have model-owned stable identities. Constant-expression

@@ -24,7 +24,12 @@ int main(void)
 		"left == width\n"
 		"width + width\n"
 		"8'hA5[width]\n"
-		"left[width]\n";
+		"left[width]\n"
+		"8'hA5[6:2]\n"
+		"8'hA5[width +: 3]\n"
+		"left[width -: 3]\n"
+		"left[left:3]\n"
+		"left[width +: left]\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "expressions.pigen",
 		text, strlen(text));
@@ -43,11 +48,19 @@ int main(void)
 	pigen_syntax_expr_id constant_syntax;
 	pigen_syntax_expr_id constant_index_syntax;
 	pigen_syntax_expr_id runtime_index_syntax;
+	pigen_syntax_expr_id constant_range_syntax;
+	pigen_syntax_expr_id constant_indexed_syntax;
+	pigen_syntax_expr_id runtime_select_syntax;
+	pigen_syntax_expr_id invalid_range_syntax;
+	pigen_syntax_expr_id invalid_width_syntax;
 	pigen_expr_id runtime;
 	pigen_expr_id comparison;
 	pigen_expr_id constant;
 	pigen_expr_id constant_index;
 	pigen_expr_id runtime_index;
+	pigen_expr_id constant_range;
+	pigen_expr_id constant_indexed;
+	pigen_expr_id runtime_select;
 	const pigen_semantic_expr *known;
 	const pigen_semantic_expr *left_read;
 	const pigen_semantic_expr *width_read;
@@ -75,6 +88,11 @@ int main(void)
 	constant_syntax = parse(&preprocessed, &syntax, 8, 11);
 	constant_index_syntax = parse(&preprocessed, &syntax, 11, 15);
 	runtime_index_syntax = parse(&preprocessed, &syntax, 15, 19);
+	constant_range_syntax = parse(&preprocessed, &syntax, 19, 25);
+	constant_indexed_syntax = parse(&preprocessed, &syntax, 25, 31);
+	runtime_select_syntax = parse(&preprocessed, &syntax, 31, 37);
+	invalid_range_syntax = parse(&preprocessed, &syntax, 37, 43);
+	invalid_width_syntax = parse(&preprocessed, &syntax, 43, 49);
 
 	runtime = pigen_resolve_expression(&syntax, &model, scope,
 		runtime_syntax);
@@ -128,6 +146,36 @@ int main(void)
 	assert(known->type.index == boolean_type.index);
 	assert(pigen_expr_constant(&model, runtime_index).index ==
 		PIGEN_INVALID_ID);
+
+	constant_range = pigen_resolve_constant_expression(&syntax, &model, scope,
+		constant_range_syntax);
+	known = pigen_expr_get(&model, constant_range);
+	assert(known && known->kind == PIGEN_EXPR_SELECT);
+	assert(known->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE);
+	assert(pigen_const_expr_get(&model,
+		pigen_expr_constant(&model, constant_range))->kind ==
+		PIGEN_CONST_EXPR_SELECT);
+
+	constant_indexed = pigen_resolve_constant_expression(&syntax, &model,
+		scope, constant_indexed_syntax);
+	known = pigen_expr_get(&model, constant_indexed);
+	assert(known && known->kind == PIGEN_EXPR_SELECT);
+	assert(known->as.select.kind == PIGEN_SEMANTIC_SELECT_INDEXED_UP);
+	assert(pigen_const_expr_get(&model,
+		pigen_expr_constant(&model, constant_indexed))->kind ==
+		PIGEN_CONST_EXPR_SELECT);
+
+	runtime_select = pigen_resolve_expression(&syntax, &model, scope,
+		runtime_select_syntax);
+	known = pigen_expr_get(&model, runtime_select);
+	assert(known && known->kind == PIGEN_EXPR_SELECT);
+	assert(known->as.select.kind == PIGEN_SEMANTIC_SELECT_INDEXED_DOWN);
+	assert(pigen_expr_constant(&model, runtime_select).index ==
+		PIGEN_INVALID_ID);
+	assert(pigen_resolve_expression(&syntax, &model, scope,
+		invalid_range_syntax).index == PIGEN_INVALID_ID);
+	assert(pigen_resolve_expression(&syntax, &model, scope,
+		invalid_width_syntax).index == PIGEN_INVALID_ID);
 
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_expr_arena(&syntax.expressions);

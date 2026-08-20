@@ -32,8 +32,9 @@ typedef struct {
 	size_t transport_capacity;
 } pigen_expression_use_analysis;
 
-/* Root traversal is currently read-only.  Packed indices encountered within
- * reads or lvalues are recorded under the distinct index context. */
+/* Root traversal is currently read-only.  Packed subscripts encountered within
+ * reads or lvalues use index context; constant range/width expressions use type
+ * context. */
 int pigen_analyze_expression_uses(pigen_semantic_model *model,
 	pigen_expr_id expression, pigen_predicate_id predicate,
 	pigen_expression_use_context context,

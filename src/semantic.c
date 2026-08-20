@@ -165,6 +165,28 @@ const pigen_packed_dimension *pigen_type_dimensions(
 	return model->dimensions + known->first_dimension;
 }
 
+static pigen_type_id packed_projection_base(
+	const pigen_semantic_model *model, pigen_type_id type)
+{
+	size_t remaining;
+
+	if (!model) return INVALID_ID(pigen_type_id);
+	remaining = model->type_count + 1;
+	while (remaining--)
+	{
+		const pigen_semantic_type *known = pigen_type_get(model, type);
+		const pigen_symbol *symbol;
+		if (!known) return INVALID_ID(pigen_type_id);
+		if (known->dimension_count || known->kind != PIGEN_TYPE_NAMED)
+			return type;
+		symbol = pigen_symbol_get(model, known->named_symbol);
+		if (!symbol || symbol->kind != PIGEN_SYMBOL_TYPEDEF)
+			return INVALID_ID(pigen_type_id);
+		type = symbol->type;
+	}
+	return INVALID_ID(pigen_type_id);
+}
+
 pigen_type_id pigen_type_packed_element(pigen_semantic_model *model,
 	pigen_type_id type)
 {
@@ -177,18 +199,11 @@ pigen_type_id pigen_type_packed_element(pigen_semantic_model *model,
 	pigen_type_id result;
 
 	if (!model) return INVALID_ID(pigen_type_id);
+	type = packed_projection_base(model, type);
 	known = pigen_type_get(model, type);
 	if (!known) return INVALID_ID(pigen_type_id);
 	if (!known->dimension_count)
 	{
-		if (known->kind == PIGEN_TYPE_NAMED)
-		{
-			const pigen_symbol *symbol =
-				pigen_symbol_get(model, known->named_symbol);
-			return symbol && symbol->kind == PIGEN_SYMBOL_TYPEDEF ?
-				pigen_type_packed_element(model, symbol->type) :
-				INVALID_ID(pigen_type_id);
-		}
 		if (known->kind == PIGEN_TYPE_INTEGER)
 			return pigen_semantic_boolean_result_type(model);
 		return INVALID_ID(pigen_type_id);
@@ -212,6 +227,86 @@ pigen_type_id pigen_type_packed_element(pigen_semantic_model *model,
 		remaining, remaining_count);
 	free(remaining);
 	return result;
+}
+
+static int select_kind_valid(pigen_select_kind kind)
+{
+	return kind >= PIGEN_SEMANTIC_SELECT_RANGE &&
+		kind <= PIGEN_SEMANTIC_SELECT_INDEXED_DOWN;
+}
+
+static pigen_type_id packed_select_with_dimension(
+	pigen_semantic_model *model, pigen_type_id type,
+	pigen_packed_dimension selected)
+{
+	const pigen_semantic_type *known;
+	pigen_packed_dimension *dimensions;
+	pigen_semantic_type_kind kind;
+	pigen_symbol_id named_symbol;
+	size_t dimension_count;
+	pigen_type_id result;
+
+	type = packed_projection_base(model, type);
+	known = pigen_type_get(model, type);
+	if (!known) return INVALID_ID(pigen_type_id);
+	if (!known->dimension_count)
+	{
+		if (known->kind != PIGEN_TYPE_INTEGER)
+			return INVALID_ID(pigen_type_id);
+		kind = PIGEN_TYPE_LOGIC;
+		named_symbol = INVALID_ID(pigen_symbol_id);
+		dimension_count = 1;
+		dimensions = pigen_resize(NULL, sizeof(*dimensions));
+		dimensions[0] = selected;
+	}
+	else
+	{
+		const pigen_packed_dimension *base_dimensions =
+			pigen_type_dimensions(model, type);
+		kind = known->kind;
+		named_symbol = known->named_symbol;
+		dimension_count = known->dimension_count;
+		dimensions = pigen_resize(NULL,
+			dimension_count * sizeof(*dimensions));
+		dimensions[0] = selected;
+		if (dimension_count > 1)
+			memcpy(dimensions + 1, base_dimensions + 1,
+				(dimension_count - 1) * sizeof(*dimensions));
+	}
+	result = pigen_type_intern(model, kind, PIGEN_SIGN_UNSIGNED,
+		named_symbol, dimensions, dimension_count);
+	free(dimensions);
+	return result;
+}
+
+pigen_type_id pigen_type_packed_select(pigen_semantic_model *model,
+	pigen_type_id type, pigen_const_expr_id left,
+	pigen_const_expr_id right, pigen_select_kind kind)
+{
+	pigen_type_id integer_type;
+	pigen_const_expr_id width;
+	pigen_const_expr_id one;
+	pigen_const_expr_id zero;
+	pigen_const_expr_id upper;
+	pigen_packed_dimension dimension;
+
+	if (!model || !select_kind_valid(kind) ||
+		!pigen_const_expr_get(model, right) ||
+		(kind == PIGEN_SEMANTIC_SELECT_RANGE) !=
+			(left.index != PIGEN_INVALID_ID))
+		return INVALID_ID(pigen_type_id);
+	integer_type = pigen_semantic_integer_type(model);
+	width = pigen_const_expr_intern_select_width(model, left, right, kind);
+	one = pigen_const_expr_intern_integer(model, 1, integer_type);
+	zero = pigen_const_expr_intern_integer(model, 0, integer_type);
+	upper = pigen_const_expr_intern_binary(model, PIGEN_BINARY_SUBTRACT,
+		width, one, integer_type);
+	if (width.index == PIGEN_INVALID_ID ||
+		one.index == PIGEN_INVALID_ID || zero.index == PIGEN_INVALID_ID ||
+		upper.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_type_id);
+	dimension = (pigen_packed_dimension){upper, zero};
+	return packed_select_with_dimension(model, type, dimension);
 }
 
 static int const_expressions_equal(const pigen_semantic_model *model,
@@ -248,6 +343,20 @@ static int const_expressions_equal(const pigen_semantic_model *model,
 		case PIGEN_CONST_EXPR_INDEX:
 			return left->as.index.base.index == right->as.index.base.index &&
 				left->as.index.index.index == right->as.index.index.index;
+		case PIGEN_CONST_EXPR_SELECT:
+			return left->as.select.base.index ==
+					right->as.select.base.index &&
+				left->as.select.left.index ==
+					right->as.select.left.index &&
+				left->as.select.right.index ==
+					right->as.select.right.index &&
+				left->as.select.kind == right->as.select.kind;
+		case PIGEN_CONST_EXPR_SELECT_WIDTH:
+			return left->as.select_width.left.index ==
+					right->as.select_width.left.index &&
+				left->as.select_width.right.index ==
+					right->as.select_width.right.index &&
+				left->as.select_width.kind == right->as.select_width.kind;
 	}
 	return 0;
 }
@@ -430,6 +539,61 @@ pigen_const_expr_id pigen_const_expr_intern_index(
 	expression.type = type;
 	expression.as.index.base = base;
 	expression.as.index.index = index;
+	return intern_const_expression(model, expression);
+}
+
+pigen_const_expr_id pigen_const_expr_intern_select_width(
+	pigen_semantic_model *model, pigen_const_expr_id left,
+	pigen_const_expr_id right, pigen_select_kind kind)
+{
+	pigen_const_expr expression = {0};
+
+	if (!model || !select_kind_valid(kind) ||
+		!pigen_const_expr_get(model, right) ||
+		(kind == PIGEN_SEMANTIC_SELECT_RANGE) !=
+			(left.index != PIGEN_INVALID_ID) ||
+		(left.index != PIGEN_INVALID_ID &&
+		!pigen_const_expr_get(model, left)))
+		return INVALID_ID(pigen_const_expr_id);
+	if (kind == PIGEN_SEMANTIC_SELECT_RANGE && left.index > right.index)
+	{
+		pigen_const_expr_id swap = left;
+		left = right;
+		right = swap;
+	}
+	else if (kind != PIGEN_SEMANTIC_SELECT_RANGE)
+		kind = PIGEN_SEMANTIC_SELECT_INDEXED_UP;
+	expression.kind = PIGEN_CONST_EXPR_SELECT_WIDTH;
+	expression.type = pigen_semantic_integer_type(model);
+	expression.as.select_width.left = left;
+	expression.as.select_width.right = right;
+	expression.as.select_width.kind = kind;
+	return intern_const_expression(model, expression);
+}
+
+pigen_const_expr_id pigen_const_expr_intern_select(
+	pigen_semantic_model *model, pigen_const_expr_id base,
+	pigen_const_expr_id left, pigen_const_expr_id right,
+	pigen_select_kind kind, pigen_type_id type)
+{
+	const pigen_const_expr *base_expression =
+		pigen_const_expr_get(model, base);
+	pigen_const_expr expression = {0};
+	pigen_const_expr_id type_left =
+		kind == PIGEN_SEMANTIC_SELECT_RANGE ?
+			left : INVALID_ID(pigen_const_expr_id);
+
+	if (!base_expression || !pigen_const_expr_get(model, left) ||
+		!pigen_const_expr_get(model, right) || !select_kind_valid(kind) ||
+		pigen_type_packed_select(model, base_expression->type,
+			type_left, right, kind).index != type.index)
+		return INVALID_ID(pigen_const_expr_id);
+	expression.kind = PIGEN_CONST_EXPR_SELECT;
+	expression.type = type;
+	expression.as.select.base = base;
+	expression.as.select.left = left;
+	expression.as.select.right = right;
+	expression.as.select.kind = kind;
 	return intern_const_expression(model, expression);
 }
 
@@ -672,6 +836,54 @@ pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 	return add_expression(model, expression);
 }
 
+pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
+	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
+	pigen_select_kind kind, pigen_source_span span)
+{
+	const pigen_semantic_expr *base_expression = pigen_expr_get(model, base);
+	const pigen_semantic_expr *left_expression = pigen_expr_get(model, left);
+	const pigen_semantic_expr *right_expression = pigen_expr_get(model, right);
+	pigen_const_expr_id base_constant;
+	pigen_const_expr_id left_constant;
+	pigen_const_expr_id right_constant;
+	pigen_const_expr_id type_left;
+	pigen_semantic_expr expression = {0};
+
+	if (!base_expression || !left_expression || !right_expression ||
+		!select_kind_valid(kind))
+		return INVALID_ID(pigen_expr_id);
+	base_constant = base_expression->constant;
+	left_constant = left_expression->constant;
+	right_constant = right_expression->constant;
+	if (right_constant.index == PIGEN_INVALID_ID ||
+		(kind == PIGEN_SEMANTIC_SELECT_RANGE &&
+		left_constant.index == PIGEN_INVALID_ID))
+		return INVALID_ID(pigen_expr_id);
+	type_left = kind == PIGEN_SEMANTIC_SELECT_RANGE ?
+		left_constant : INVALID_ID(pigen_const_expr_id);
+	expression.kind = PIGEN_EXPR_SELECT;
+	expression.type = pigen_type_packed_select(model, base_expression->type,
+		type_left, right_constant, kind);
+	if (expression.type.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_expr_id);
+	expression.span = span;
+	expression.constant =
+		base_constant.index == PIGEN_INVALID_ID ||
+		left_constant.index == PIGEN_INVALID_ID ?
+		INVALID_ID(pigen_const_expr_id) :
+		pigen_const_expr_intern_select(model, base_constant, left_constant,
+			right_constant, kind, expression.type);
+	if (base_constant.index != PIGEN_INVALID_ID &&
+		left_constant.index != PIGEN_INVALID_ID &&
+		expression.constant.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_expr_id);
+	expression.as.select.base = base;
+	expression.as.select.left = left;
+	expression.as.select.right = right;
+	expression.as.select.kind = kind;
+	return add_expression(model, expression);
+}
+
 const pigen_semantic_expr *pigen_expr_get(const pigen_semantic_model *model,
 	pigen_expr_id expression)
 {
@@ -703,9 +915,15 @@ pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 	if (!root) return INVALID_ID(pigen_lvalue_id);
 	base = root;
 	while (base && (base->kind == PIGEN_EXPR_GROUP ||
-		base->kind == PIGEN_EXPR_INDEX))
-		base = pigen_expr_get(model, base->kind == PIGEN_EXPR_GROUP ?
-			base->as.group.operand : base->as.index.base);
+		base->kind == PIGEN_EXPR_INDEX ||
+		base->kind == PIGEN_EXPR_SELECT))
+	{
+		pigen_expr_id next = base->kind == PIGEN_EXPR_GROUP ?
+			base->as.group.operand :
+			base->kind == PIGEN_EXPR_INDEX ?
+				base->as.index.base : base->as.select.base;
+		base = pigen_expr_get(model, next);
+	}
 	if (!base || base->kind != PIGEN_EXPR_SYMBOL)
 		return INVALID_ID(pigen_lvalue_id);
 	symbol = pigen_symbol_get(model, base->as.symbol);
