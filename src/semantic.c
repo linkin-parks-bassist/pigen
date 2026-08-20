@@ -357,6 +357,17 @@ static int const_expressions_equal(const pigen_semantic_model *model,
 				left->as.select_width.right.index ==
 					right->as.select_width.right.index &&
 				left->as.select_width.kind == right->as.select_width.kind;
+		case PIGEN_CONST_EXPR_CONCATENATION:
+		case PIGEN_CONST_EXPR_WIDTH_SUM:
+		case PIGEN_CONST_EXPR_WIDTH_PRODUCT:
+			return left->as.sequence.child_count ==
+					right->as.sequence.child_count &&
+				!memcmp(model->constant_expression_children +
+						left->as.sequence.first_child,
+					model->constant_expression_children +
+						right->as.sequence.first_child,
+					left->as.sequence.child_count *
+						sizeof(*model->constant_expression_children));
 	}
 	return 0;
 }
@@ -595,6 +606,320 @@ pigen_const_expr_id pigen_const_expr_intern_select(
 	expression.as.select.right = right;
 	expression.as.select.kind = kind;
 	return intern_const_expression(model, expression);
+}
+
+const pigen_const_expr_id *pigen_const_expr_children(
+	const pigen_semantic_model *model, size_t first, size_t count)
+{
+	if (!model || first > model->constant_expression_child_count ||
+		count > model->constant_expression_child_count - first)
+		return NULL;
+	return model->constant_expression_children + first;
+}
+
+static size_t append_const_children(pigen_semantic_model *model,
+	const pigen_const_expr_id *children, size_t count)
+{
+	size_t first = model->constant_expression_child_count;
+	size_t needed;
+	size_t capacity;
+
+	if (!count || !children ||
+		count > SIZE_MAX - model->constant_expression_child_count)
+		return SIZE_MAX;
+	needed = model->constant_expression_child_count + count;
+	if (needed > model->constant_expression_child_capacity)
+	{
+		capacity = model->constant_expression_child_capacity ?
+			model->constant_expression_child_capacity * 2 : 32;
+		while (capacity < needed) capacity *= 2;
+		model->constant_expression_children = pigen_resize(
+			model->constant_expression_children,
+			capacity * sizeof(*model->constant_expression_children));
+		model->constant_expression_child_capacity = capacity;
+	}
+	memcpy(model->constant_expression_children +
+			model->constant_expression_child_count,
+		children, count * sizeof(*children));
+	model->constant_expression_child_count = needed;
+	return first;
+}
+
+static pigen_const_expr_id intern_const_sequence(
+	pigen_semantic_model *model, pigen_const_expr_kind kind,
+	const pigen_const_expr_id *children, size_t count, pigen_type_id type)
+{
+	pigen_const_expr expression = {0};
+	pigen_const_expr_id result;
+	size_t before;
+	size_t first;
+	size_t i;
+
+	if (!model || !count || !children ||
+		(kind != PIGEN_CONST_EXPR_CONCATENATION &&
+		kind != PIGEN_CONST_EXPR_WIDTH_SUM &&
+		kind != PIGEN_CONST_EXPR_WIDTH_PRODUCT))
+		return INVALID_ID(pigen_const_expr_id);
+	for (i = 0; i < count; i++)
+		if (!pigen_const_expr_get(model, children[i]))
+			return INVALID_ID(pigen_const_expr_id);
+	first = append_const_children(model, children, count);
+	if (first == SIZE_MAX) return INVALID_ID(pigen_const_expr_id);
+	expression.kind = kind;
+	expression.type = type;
+	expression.as.sequence.first_child = first;
+	expression.as.sequence.child_count = count;
+	before = model->constant_expression_count;
+	result = intern_const_expression(model, expression);
+	if (result.index == PIGEN_INVALID_ID ||
+		model->constant_expression_count == before)
+		model->constant_expression_child_count = first;
+	return result;
+}
+
+static int const_id_compare(const void *left, const void *right)
+{
+	const pigen_const_expr_id *left_id = left;
+	const pigen_const_expr_id *right_id = right;
+	return left_id->index < right_id->index ? -1 :
+		left_id->index > right_id->index;
+}
+
+static int collect_width_terms(const pigen_semantic_model *model,
+	pigen_const_expr_kind kind, pigen_const_expr_id expression,
+	pigen_const_expr_id **terms, size_t *count, size_t *capacity)
+{
+	const pigen_const_expr *known = pigen_const_expr_get(model, expression);
+	const pigen_const_expr_id *children;
+	size_t i;
+
+	if (!known) return 0;
+	if (known->kind == kind)
+	{
+		children = pigen_const_expr_children(model,
+			known->as.sequence.first_child, known->as.sequence.child_count);
+		if (!children) return 0;
+		for (i = 0; i < known->as.sequence.child_count; i++)
+			if (!collect_width_terms(model, kind, children[i],
+				terms, count, capacity))
+				return 0;
+		return 1;
+	}
+	if (known->kind == PIGEN_CONST_EXPR_INTEGER &&
+		((kind == PIGEN_CONST_EXPR_WIDTH_SUM && known->as.integer == 0) ||
+		(kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT &&
+		known->as.integer == 1)))
+		return 1;
+	if (*count == *capacity)
+	{
+		*capacity = *capacity ? *capacity * 2 : 8;
+		*terms = pigen_resize(*terms, *capacity * sizeof(**terms));
+	}
+	(*terms)[(*count)++] = expression;
+	return 1;
+}
+
+static pigen_const_expr_id intern_width_sequence(
+	pigen_semantic_model *model, pigen_const_expr_kind kind,
+	const pigen_const_expr_id *children, size_t count)
+{
+	pigen_const_expr_id *terms = NULL;
+	pigen_const_expr_id result;
+	pigen_type_id integer_type = pigen_semantic_integer_type(model);
+	size_t term_count = 0;
+	size_t capacity = 0;
+	size_t i;
+
+	if (!count || !children ||
+		(kind != PIGEN_CONST_EXPR_WIDTH_SUM &&
+		kind != PIGEN_CONST_EXPR_WIDTH_PRODUCT))
+		return INVALID_ID(pigen_const_expr_id);
+	for (i = 0; i < count; i++)
+		if (!collect_width_terms(model, kind, children[i],
+			&terms, &term_count, &capacity))
+		{
+			free(terms);
+			return INVALID_ID(pigen_const_expr_id);
+		}
+	if (!term_count)
+		result = pigen_const_expr_intern_integer(model,
+			kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ? 1 : 0, integer_type);
+	else if (term_count == 1)
+		result = terms[0];
+	else
+	{
+		qsort(terms, term_count, sizeof(*terms), const_id_compare);
+		result = intern_const_sequence(model, kind, terms, term_count,
+			integer_type);
+	}
+	free(terms);
+	return result;
+}
+
+static pigen_const_expr_id packed_width(
+	pigen_semantic_model *model, pigen_type_id type, size_t remaining)
+{
+	const pigen_semantic_type *known = pigen_type_get(model, type);
+	const pigen_packed_dimension *dimensions;
+	pigen_const_expr_id *factors;
+	pigen_const_expr_id result;
+	size_t factor_count = 0;
+	size_t i;
+
+	if (!known || !remaining) return INVALID_ID(pigen_const_expr_id);
+	factors = pigen_resize(NULL,
+		(known->dimension_count + 1) * sizeof(*factors));
+	dimensions = pigen_type_dimensions(model, type);
+	for (i = 0; i < known->dimension_count; i++)
+	{
+		factors[factor_count] = pigen_const_expr_intern_select_width(model,
+			dimensions[i].left, dimensions[i].right,
+			PIGEN_SEMANTIC_SELECT_RANGE);
+		if (factors[factor_count].index == PIGEN_INVALID_ID)
+		{
+			free(factors);
+			return INVALID_ID(pigen_const_expr_id);
+		}
+		factor_count++;
+	}
+	if (known->kind == PIGEN_TYPE_NAMED)
+	{
+		const pigen_symbol *symbol =
+			pigen_symbol_get(model, known->named_symbol);
+		if (!symbol || symbol->kind != PIGEN_SYMBOL_TYPEDEF)
+		{
+			free(factors);
+			return INVALID_ID(pigen_const_expr_id);
+		}
+		factors[factor_count] = packed_width(model, symbol->type,
+			remaining - 1);
+	}
+	else
+		factors[factor_count] = pigen_const_expr_intern_integer(model,
+			known->kind == PIGEN_TYPE_INTEGER ? 32 : 1,
+			pigen_semantic_integer_type(model));
+	if (factors[factor_count].index == PIGEN_INVALID_ID)
+	{
+		free(factors);
+		return INVALID_ID(pigen_const_expr_id);
+	}
+	factor_count++;
+	result = intern_width_sequence(model, PIGEN_CONST_EXPR_WIDTH_PRODUCT,
+		factors, factor_count);
+	free(factors);
+	return result;
+}
+
+pigen_const_expr_id pigen_type_packed_width(pigen_semantic_model *model,
+	pigen_type_id type)
+{
+	return model ? packed_width(model, type, model->type_count + 1) :
+		INVALID_ID(pigen_const_expr_id);
+}
+
+static pigen_semantic_type_kind packed_state_kind(
+	const pigen_semantic_model *model, pigen_type_id type, size_t remaining)
+{
+	const pigen_semantic_type *known = pigen_type_get(model, type);
+	if (!known || !remaining) return PIGEN_TYPE_NAMED;
+	if (known->kind != PIGEN_TYPE_NAMED)
+		return known->kind == PIGEN_TYPE_BIT ?
+			PIGEN_TYPE_BIT : PIGEN_TYPE_LOGIC;
+	{
+		const pigen_symbol *symbol =
+			pigen_symbol_get(model, known->named_symbol);
+		return symbol && symbol->kind == PIGEN_SYMBOL_TYPEDEF ?
+			packed_state_kind(model, symbol->type, remaining - 1) :
+			PIGEN_TYPE_NAMED;
+	}
+}
+
+pigen_type_id pigen_type_concatenation(pigen_semantic_model *model,
+	const pigen_type_id *types, size_t count)
+{
+	pigen_const_expr_id *widths;
+	pigen_const_expr_id width;
+	pigen_const_expr_id one;
+	pigen_const_expr_id zero;
+	pigen_const_expr_id upper;
+	pigen_type_id integer_type;
+	pigen_semantic_type_kind kind = PIGEN_TYPE_BIT;
+	pigen_packed_dimension dimension;
+	const pigen_const_expr *known_width;
+	pigen_type_id result;
+	size_t i;
+
+	if (!model || !types || !count) return INVALID_ID(pigen_type_id);
+	widths = pigen_resize(NULL, count * sizeof(*widths));
+	for (i = 0; i < count; i++)
+	{
+		pigen_semantic_type_kind child_kind =
+			packed_state_kind(model, types[i], model->type_count + 1);
+		if (child_kind != PIGEN_TYPE_BIT && child_kind != PIGEN_TYPE_LOGIC)
+		{
+			free(widths);
+			return INVALID_ID(pigen_type_id);
+		}
+		if (child_kind == PIGEN_TYPE_LOGIC) kind = PIGEN_TYPE_LOGIC;
+		widths[i] = pigen_type_packed_width(model, types[i]);
+		if (widths[i].index == PIGEN_INVALID_ID)
+		{
+			free(widths);
+			return INVALID_ID(pigen_type_id);
+		}
+	}
+	width = intern_width_sequence(model, PIGEN_CONST_EXPR_WIDTH_SUM,
+		widths, count);
+	free(widths);
+	known_width = pigen_const_expr_get(model, width);
+	if (!known_width) return INVALID_ID(pigen_type_id);
+	if (known_width->kind == PIGEN_CONST_EXPR_INTEGER &&
+		known_width->as.integer == 1)
+		return pigen_type_intern(model, kind, PIGEN_SIGN_UNSIGNED,
+			INVALID_ID(pigen_symbol_id), NULL, 0);
+	integer_type = pigen_semantic_integer_type(model);
+	one = pigen_const_expr_intern_integer(model, 1, integer_type);
+	zero = pigen_const_expr_intern_integer(model, 0, integer_type);
+	upper = pigen_const_expr_intern_binary(model, PIGEN_BINARY_SUBTRACT,
+		width, one, integer_type);
+	if (upper.index == PIGEN_INVALID_ID || zero.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_type_id);
+	dimension = (pigen_packed_dimension){upper, zero};
+	result = pigen_type_intern(model, kind, PIGEN_SIGN_UNSIGNED,
+		INVALID_ID(pigen_symbol_id), &dimension, 1);
+	return result;
+}
+
+pigen_const_expr_id pigen_const_expr_intern_concatenation(
+	pigen_semantic_model *model, const pigen_const_expr_id *children,
+	size_t count, pigen_type_id type)
+{
+	pigen_type_id *types;
+	pigen_const_expr_id result;
+	size_t i;
+
+	if (!model || !children || !count) return INVALID_ID(pigen_const_expr_id);
+	types = pigen_resize(NULL, count * sizeof(*types));
+	for (i = 0; i < count; i++)
+	{
+		const pigen_const_expr *child =
+			pigen_const_expr_get(model, children[i]);
+		if (!child)
+		{
+			free(types);
+			return INVALID_ID(pigen_const_expr_id);
+		}
+		types[i] = child->type;
+	}
+	if (pigen_type_concatenation(model, types, count).index != type.index)
+	{
+		free(types);
+		return INVALID_ID(pigen_const_expr_id);
+	}
+	free(types);
+	result = intern_const_sequence(model, PIGEN_CONST_EXPR_CONCATENATION,
+		children, count, type);
+	return result;
 }
 
 const pigen_const_expr *pigen_const_expr_get(
@@ -882,6 +1207,93 @@ pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 	expression.as.select.right = right;
 	expression.as.select.kind = kind;
 	return add_expression(model, expression);
+}
+
+const pigen_expr_id *pigen_expr_children(
+	const pigen_semantic_model *model, size_t first, size_t count)
+{
+	if (!model || first > model->expression_child_count ||
+		count > model->expression_child_count - first)
+		return NULL;
+	return model->expression_children + first;
+}
+
+static size_t append_expression_children(pigen_semantic_model *model,
+	const pigen_expr_id *children, size_t count)
+{
+	size_t first = model->expression_child_count;
+	size_t needed;
+	size_t capacity;
+
+	if (!count || !children || count > SIZE_MAX - model->expression_child_count)
+		return SIZE_MAX;
+	needed = model->expression_child_count + count;
+	if (needed > model->expression_child_capacity)
+	{
+		capacity = model->expression_child_capacity ?
+			model->expression_child_capacity * 2 : 32;
+		while (capacity < needed) capacity *= 2;
+		model->expression_children = pigen_resize(model->expression_children,
+			capacity * sizeof(*model->expression_children));
+		model->expression_child_capacity = capacity;
+	}
+	memcpy(model->expression_children + model->expression_child_count,
+		children, count * sizeof(*children));
+	model->expression_child_count = needed;
+	return first;
+}
+
+pigen_expr_id pigen_expr_add_concatenation(pigen_semantic_model *model,
+	const pigen_expr_id *children, size_t count, pigen_source_span span)
+{
+	pigen_type_id *types;
+	pigen_const_expr_id *constants;
+	pigen_semantic_expr expression = {0};
+	pigen_expr_id result;
+	size_t first;
+	size_t i;
+	int all_constant = 1;
+
+	if (!model || !children || !count) return INVALID_ID(pigen_expr_id);
+	types = pigen_resize(NULL, count * sizeof(*types));
+	constants = pigen_resize(NULL, count * sizeof(*constants));
+	for (i = 0; i < count; i++)
+	{
+		const pigen_semantic_expr *child = pigen_expr_get(model, children[i]);
+		if (!child)
+		{
+			free(types);
+			free(constants);
+			return INVALID_ID(pigen_expr_id);
+		}
+		types[i] = child->type;
+		constants[i] = child->constant;
+		if (constants[i].index == PIGEN_INVALID_ID) all_constant = 0;
+	}
+	expression.kind = PIGEN_EXPR_CONCATENATION;
+	expression.type = pigen_type_concatenation(model, types, count);
+	free(types);
+	if (expression.type.index == PIGEN_INVALID_ID)
+	{
+		free(constants);
+		return INVALID_ID(pigen_expr_id);
+	}
+	expression.span = span;
+	expression.constant = all_constant ?
+		pigen_const_expr_intern_concatenation(model, constants, count,
+			expression.type) :
+		INVALID_ID(pigen_const_expr_id);
+	free(constants);
+	if (all_constant && expression.constant.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_expr_id);
+	first = append_expression_children(model, children, count);
+	if (first == SIZE_MAX) return INVALID_ID(pigen_expr_id);
+	expression.as.sequence.first_child = first;
+	expression.as.sequence.child_count = count;
+	result = add_expression(model, expression);
+	if (result.index == PIGEN_INVALID_ID)
+		model->expression_child_count = first;
+	return result;
 }
 
 const pigen_semantic_expr *pigen_expr_get(const pigen_semantic_model *model,
@@ -1295,7 +1707,9 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->scopes);
 	free(model->symbols);
 	free(model->expressions);
+	free(model->expression_children);
 	free(model->constant_expressions);
+	free(model->constant_expression_children);
 	free(model->literal_states);
 	free(model->predicates);
 	free(model->predicate_atoms);

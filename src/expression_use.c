@@ -148,6 +148,19 @@ static int visit(use_analyzer *analyzer, pigen_expr_id expression,
 				visit(analyzer, known->as.select.right,
 					INVALID_ID(pigen_expr_id), predicate,
 					PIGEN_EXPRESSION_USE_TYPE);
+		case PIGEN_EXPR_CONCATENATION:
+		{
+			const pigen_expr_id *children = pigen_expr_children(
+				analyzer->model, known->as.sequence.first_child,
+				known->as.sequence.child_count);
+			size_t i;
+			if (!children) return 0;
+			for (i = 0; i < known->as.sequence.child_count; i++)
+				if (!visit(analyzer, children[i],
+					INVALID_ID(pigen_expr_id), predicate, context))
+					return 0;
+			return 1;
+		}
 	}
 	return 0;
 }
@@ -192,6 +205,7 @@ static int visit_lvalue(use_analyzer *analyzer, pigen_expr_id expression,
 		case PIGEN_EXPR_UNARY:
 		case PIGEN_EXPR_BINARY:
 		case PIGEN_EXPR_CONDITIONAL:
+		case PIGEN_EXPR_CONCATENATION:
 			return 0;
 	}
 	return 0;

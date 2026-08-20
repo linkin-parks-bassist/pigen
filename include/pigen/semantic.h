@@ -40,7 +40,8 @@ typedef enum {
 	PIGEN_EXPR_BINARY,
 	PIGEN_EXPR_CONDITIONAL,
 	PIGEN_EXPR_INDEX,
-	PIGEN_EXPR_SELECT
+	PIGEN_EXPR_SELECT,
+	PIGEN_EXPR_CONCATENATION
 } pigen_semantic_expr_kind;
 
 typedef enum {
@@ -52,7 +53,10 @@ typedef enum {
 	PIGEN_CONST_EXPR_CONDITIONAL,
 	PIGEN_CONST_EXPR_INDEX,
 	PIGEN_CONST_EXPR_SELECT,
-	PIGEN_CONST_EXPR_SELECT_WIDTH
+	PIGEN_CONST_EXPR_SELECT_WIDTH,
+	PIGEN_CONST_EXPR_CONCATENATION,
+	PIGEN_CONST_EXPR_WIDTH_SUM,
+	PIGEN_CONST_EXPR_WIDTH_PRODUCT
 } pigen_const_expr_kind;
 
 typedef uint8_t pigen_bit_state;
@@ -197,6 +201,10 @@ typedef struct {
 			pigen_expr_id right;
 			pigen_select_kind kind;
 		} select;
+		struct {
+			size_t first_child;
+			size_t child_count;
+		} sequence;
 	} as;
 } pigen_semantic_expr;
 
@@ -236,6 +244,10 @@ typedef struct {
 			pigen_const_expr_id right;
 			pigen_select_kind kind;
 		} select_width;
+		struct {
+			size_t first_child;
+			size_t child_count;
+		} sequence;
 	} as;
 } pigen_const_expr;
 
@@ -302,9 +314,15 @@ typedef struct {
 	pigen_semantic_expr *expressions;
 	size_t expression_count;
 	size_t expression_capacity;
+	pigen_expr_id *expression_children;
+	size_t expression_child_count;
+	size_t expression_child_capacity;
 	pigen_const_expr *constant_expressions;
 	size_t constant_expression_count;
 	size_t constant_expression_capacity;
+	pigen_const_expr_id *constant_expression_children;
+	size_t constant_expression_child_count;
+	size_t constant_expression_child_capacity;
 	pigen_bit_state *literal_states;
 	size_t literal_state_count;
 	size_t literal_state_capacity;
@@ -354,6 +372,10 @@ pigen_type_id pigen_type_packed_element(pigen_semantic_model *model,
 pigen_type_id pigen_type_packed_select(pigen_semantic_model *model,
 	pigen_type_id type, pigen_const_expr_id left,
 	pigen_const_expr_id right, pigen_select_kind kind);
+pigen_const_expr_id pigen_type_packed_width(pigen_semantic_model *model,
+	pigen_type_id type);
+pigen_type_id pigen_type_concatenation(pigen_semantic_model *model,
+	const pigen_type_id *types, size_t count);
 pigen_type_id pigen_semantic_integer_type(pigen_semantic_model *model);
 pigen_type_id pigen_semantic_boolean_result_type(pigen_semantic_model *model);
 pigen_const_expr_id pigen_const_expr_intern_integer(
@@ -382,6 +404,11 @@ pigen_const_expr_id pigen_const_expr_intern_select(
 pigen_const_expr_id pigen_const_expr_intern_select_width(
 	pigen_semantic_model *model, pigen_const_expr_id left,
 	pigen_const_expr_id right, pigen_select_kind kind);
+pigen_const_expr_id pigen_const_expr_intern_concatenation(
+	pigen_semantic_model *model, const pigen_const_expr_id *children,
+	size_t count, pigen_type_id type);
+const pigen_const_expr_id *pigen_const_expr_children(
+	const pigen_semantic_model *model, size_t first, size_t count);
 const pigen_const_expr *pigen_const_expr_get(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
 const pigen_bit_state *pigen_const_expr_bits(
@@ -409,6 +436,10 @@ pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
 	pigen_select_kind kind, pigen_source_span span);
+pigen_expr_id pigen_expr_add_concatenation(pigen_semantic_model *model,
+	const pigen_expr_id *children, size_t count, pigen_source_span span);
+const pigen_expr_id *pigen_expr_children(
+	const pigen_semantic_model *model, size_t first, size_t count);
 const pigen_semantic_expr *pigen_expr_get(const pigen_semantic_model *model,
 	pigen_expr_id expression);
 pigen_const_expr_id pigen_expr_constant(const pigen_semantic_model *model,

@@ -294,6 +294,9 @@ int main(void)
 	left_type = pigen_type_get(&model, left->payload_type);
 	assert(left_type && left_type->kind == PIGEN_TYPE_NAMED);
 	left_typedef = left_type->named_symbol;
+	assert(pigen_type_packed_width(&model, left->payload_type).index ==
+		pigen_type_packed_width(&model,
+			pigen_symbol_get(&model, left_typedef)->type).index);
 	element_type = pigen_type_get(&model,
 		pigen_type_packed_element(&model, left->payload_type));
 	assert(element_type && element_type->kind == PIGEN_TYPE_LOGIC &&

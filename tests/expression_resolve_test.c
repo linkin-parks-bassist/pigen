@@ -29,7 +29,10 @@ int main(void)
 		"8'hA5[width +: 3]\n"
 		"left[width -: 3]\n"
 		"left[left:3]\n"
-		"left[width +: left]\n";
+		"left[width +: left]\n"
+		"{8'hA5, 8'h5A}\n"
+		"{left, width}\n"
+		"{width, left}\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "expressions.pigen",
 		text, strlen(text));
@@ -53,6 +56,9 @@ int main(void)
 	pigen_syntax_expr_id runtime_select_syntax;
 	pigen_syntax_expr_id invalid_range_syntax;
 	pigen_syntax_expr_id invalid_width_syntax;
+	pigen_syntax_expr_id constant_concat_syntax;
+	pigen_syntax_expr_id runtime_concat_syntax;
+	pigen_syntax_expr_id swapped_concat_syntax;
 	pigen_expr_id runtime;
 	pigen_expr_id comparison;
 	pigen_expr_id constant;
@@ -61,6 +67,9 @@ int main(void)
 	pigen_expr_id constant_range;
 	pigen_expr_id constant_indexed;
 	pigen_expr_id runtime_select;
+	pigen_expr_id constant_concat;
+	pigen_expr_id runtime_concat;
+	pigen_expr_id swapped_concat;
 	const pigen_semantic_expr *known;
 	const pigen_semantic_expr *left_read;
 	const pigen_semantic_expr *width_read;
@@ -93,6 +102,9 @@ int main(void)
 	runtime_select_syntax = parse(&preprocessed, &syntax, 31, 37);
 	invalid_range_syntax = parse(&preprocessed, &syntax, 37, 43);
 	invalid_width_syntax = parse(&preprocessed, &syntax, 43, 49);
+	constant_concat_syntax = parse(&preprocessed, &syntax, 49, 54);
+	runtime_concat_syntax = parse(&preprocessed, &syntax, 54, 59);
+	swapped_concat_syntax = parse(&preprocessed, &syntax, 59, 64);
 
 	runtime = pigen_resolve_expression(&syntax, &model, scope,
 		runtime_syntax);
@@ -176,6 +188,35 @@ int main(void)
 		invalid_range_syntax).index == PIGEN_INVALID_ID);
 	assert(pigen_resolve_expression(&syntax, &model, scope,
 		invalid_width_syntax).index == PIGEN_INVALID_ID);
+
+	constant_concat = pigen_resolve_constant_expression(&syntax, &model, scope,
+		constant_concat_syntax);
+	known = pigen_expr_get(&model, constant_concat);
+	assert(known && known->kind == PIGEN_EXPR_CONCATENATION);
+	assert(known->as.sequence.child_count == 2);
+	assert(pigen_const_expr_get(&model,
+		pigen_expr_constant(&model, constant_concat))->kind ==
+		PIGEN_CONST_EXPR_CONCATENATION);
+
+	runtime_concat = pigen_resolve_expression(&syntax, &model, scope,
+		runtime_concat_syntax);
+	swapped_concat = pigen_resolve_expression(&syntax, &model, scope,
+		swapped_concat_syntax);
+	known = pigen_expr_get(&model, runtime_concat);
+	assert(known && known->kind == PIGEN_EXPR_CONCATENATION);
+	assert(known->type.index ==
+		pigen_expr_get(&model, swapped_concat)->type.index);
+	assert(pigen_expr_constant(&model, runtime_concat).index ==
+		PIGEN_INVALID_ID);
+	{
+		const pigen_expr_id *children = pigen_expr_children(&model,
+			known->as.sequence.first_child, known->as.sequence.child_count);
+		assert(children && known->as.sequence.child_count == 2);
+		assert(pigen_expr_get(&model, children[0])->as.symbol.index ==
+			left.index);
+		assert(pigen_expr_get(&model, children[1])->as.symbol.index ==
+			width.index);
+	}
 
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_expr_arena(&syntax.expressions);

@@ -615,7 +615,9 @@ read or lvalue context.  A bit subscript or indexed part-select starting index
 uses the distinct index context; constant range bounds and indexed widths use
 type context.  A transport used as a runtime subscript therefore remains a
 first-class occurrence and can later participate in transfer validity and
-ownership rather than disappearing into a projection string.
+ownership rather than disappearing into a projection string.  Concatenation
+reads retain ordered child `ExprId` values and traverse each child as its own
+projection occurrence; result-type calculation does not erase value order.
 
 The semantic model now also interns resolved lvalue occurrences by their
 projecting `ExprId`.  A lvalue owns its type, assignable base `SymbolId`, optional
@@ -638,10 +640,22 @@ falsely distinct result types.  The derived node retains symbolic elaboration
 structure rather than folding it through a host integer.  Positivity and
 concrete-bound validation await the elaboration-value service.
 
+Packed width is now a canonical semantic query.  It recursively traverses
+typedefs, represents every dimension by its direction-independent range width,
+and combines dimensions with flattened, sorted `width_product` nodes.
+Concatenation types combine child widths with flattened, sorted `width_sum`
+nodes.  The sum is commutative for type identity while the concatenation's
+expression children remain ordered for value semantics.  The result is an
+unsigned one-dimensional packed `bit` value when every child is two-state and
+an unsigned packed `logic` value otherwise.  Canonical constant
+concatenations retain the same ordered child sequence.
+
 Lvalue use analysis feeds the same occurrence and deduplicated transport arrays
 as read analysis, setting distinct lvalue, index, and type context bits.  Member
-and concatenated destinations remain unrepresented; add their exact type
-structure before procedural transfer syntax claims them.
+and concatenated destinations remain unrepresented.  Concatenated expressions
+now provide the required ordered value/type structure; the next change must
+replace the single-base lvalue record with projected and concatenated lvalue
+kinds before procedural transfer syntax claims them.
 
 ## Rewrite strategy
 

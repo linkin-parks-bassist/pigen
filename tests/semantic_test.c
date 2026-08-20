@@ -61,6 +61,10 @@ int main(void)
 	pigen_type_id selected_type;
 	pigen_type_id reverse_selected_type;
 	pigen_type_id indexed_selected_type;
+	pigen_type_id bit_type;
+	pigen_type_id bit_concat_type;
+	pigen_type_id mixed_concat_type;
+	pigen_type_id concat_types[2];
 	pigen_scope_id module_scope;
 	pigen_scope_id pipeline_scope;
 	pigen_scope_id first_stage;
@@ -171,6 +175,24 @@ int main(void)
 			pigen_expr_constant(&model, left_bound),
 			pigen_expr_constant(&model, right_bound),
 			PIGEN_SEMANTIC_SELECT_RANGE))->dimension_count == 1);
+	bit_type = pigen_type_intern(&model, PIGEN_TYPE_BIT,
+		PIGEN_SIGN_UNSIGNED, INVALID_ID(pigen_symbol_id), NULL, 0);
+	concat_types[0] = bit_type;
+	concat_types[1] = bit_type;
+	bit_concat_type = pigen_type_concatenation(&model, concat_types, 2);
+	assert(pigen_type_get(&model, bit_concat_type)->kind == PIGEN_TYPE_BIT);
+	assert(pigen_type_get(&model, bit_concat_type)->signedness ==
+		PIGEN_SIGN_UNSIGNED);
+	assert(pigen_type_get(&model, bit_concat_type)->dimension_count == 1);
+	concat_types[1] = boolean_type;
+	mixed_concat_type = pigen_type_concatenation(&model, concat_types, 2);
+	assert(pigen_type_get(&model, mixed_concat_type)->kind ==
+		PIGEN_TYPE_LOGIC);
+	assert(pigen_type_packed_width(&model, matrix_type).index !=
+		PIGEN_INVALID_ID);
+	assert(pigen_const_expr_get(&model,
+		pigen_type_packed_width(&model, matrix_type))->kind ==
+		PIGEN_CONST_EXPR_WIDTH_PRODUCT);
 
 	module_scope = pigen_scope_add(&model, INVALID_ID(pigen_scope_id), whole);
 	pipeline_scope = pigen_scope_add(&model, module_scope, whole);

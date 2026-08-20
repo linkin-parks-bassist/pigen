@@ -525,6 +525,36 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 				select_kind(syntax->as.select.kind),
 				syntax->location.source_span);
 		}
+		case PIGEN_SYNTAX_EXPR_CONCATENATION:
+		{
+			const pigen_syntax_expr_id *syntax_children =
+				pigen_syntax_expr_children(&resolver->syntax->expressions,
+					syntax->as.sequence.first_child,
+					syntax->as.sequence.child_count);
+			pigen_expr_id *children;
+			pigen_expr_id result;
+			size_t i;
+
+			if (!syntax_children || !syntax->as.sequence.child_count)
+				return INVALID_ID(pigen_expr_id);
+			children = pigen_resize(NULL,
+				syntax->as.sequence.child_count * sizeof(*children));
+			for (i = 0; i < syntax->as.sequence.child_count; i++)
+			{
+				children[i] = resolve_expression(resolver, scope,
+					syntax_children[i]);
+				if (children[i].index == PIGEN_INVALID_ID)
+				{
+					free(children);
+					return INVALID_ID(pigen_expr_id);
+				}
+			}
+			result = pigen_expr_add_concatenation(resolver->model, children,
+				syntax->as.sequence.child_count,
+				syntax->location.source_span);
+			free(children);
+			return result;
+		}
 		default:
 			return INVALID_ID(pigen_expr_id);
 	}

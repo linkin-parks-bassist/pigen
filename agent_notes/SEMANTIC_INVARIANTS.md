@@ -93,6 +93,13 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 - Identifier reads, lvalues, concatenations, casts, member selections, bit
   selections, indexed selections, calls, and conditional evaluation are
   distinct expression/use forms.
+- A concatenation expression owns an ordered child range.  Its value and
+  constant identities preserve that order.  Its packed result type is unsigned;
+  state domain is two-state exactly when every child is two-state, and its
+  symbolic width is the canonical commutative sum of child packed widths.
+- Packed-width queries recurse through typedefs and represent multidimensional
+  width as a canonical commutative product.  Width algebra is structural and
+  never folds symbolic bounds through a host integer.
 - A resolved lvalue has its own stable occurrence identity and points at the
   expression which projects the destination, its type, assignable base symbol,
   and optional base transport.  Direct value and transport symbols,

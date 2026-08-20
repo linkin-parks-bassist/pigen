@@ -35,7 +35,8 @@ int main(void)
 		"right[TOP:2]\n"
 		"(right[left +: WIDTH])\n"
 		"right[6 -: left]\n"
-		"right[left:2]\n";
+		"right[left:2]\n"
+		"{right[left], left[TOP:2], right}\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "uses.pigen", text,
 		strlen(text));
@@ -59,12 +60,14 @@ int main(void)
 		INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_expr_id syntax_invalid_range =
 		INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_concat = INVALID_ID(pigen_syntax_expr_id);
 	pigen_expr_id expression;
 	pigen_expr_id lvalue_expression;
 	pigen_expr_id index_expression;
 	pigen_expr_id index_lvalue_expression;
 	pigen_expr_id range_expression;
 	pigen_expr_id select_lvalue_expression;
+	pigen_expr_id concat_expression;
 	pigen_lvalue_id lvalue;
 	pigen_lvalue_id index_lvalue;
 	pigen_lvalue_id select_lvalue;
@@ -80,6 +83,8 @@ int main(void)
 	const pigen_packed_dimension *select_dimensions;
 	const pigen_const_expr *select_upper;
 	const pigen_const_expr *select_width;
+	const pigen_semantic_expr *concat;
+	const pigen_expr_id *concat_children;
 	const pigen_predicate_atom *true_atoms;
 	const pigen_predicate_atom *false_atoms;
 	size_t first;
@@ -92,7 +97,7 @@ int main(void)
 		if (token_is(&preprocessed.expanded, first, "endmodule")) break;
 	assert(first + 1 < preprocessed.expanded.token_count);
 	first++;
-	assert(preprocessed.expanded.token_count - 1 == first + 51);
+	assert(preprocessed.expanded.token_count - 1 == first + 66);
 	assert(pigen_parse_expression(&preprocessed.expanded, first, first + 5,
 		&syntax.expressions,
 		&syntax_expression, &syntax_error));
@@ -112,6 +117,8 @@ int main(void)
 		&syntax.expressions, &syntax_invalid_width, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 45, first + 51,
 		&syntax.expressions, &syntax_invalid_range, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 51, first + 66,
+		&syntax.expressions, &syntax_concat, &syntax_error));
 	expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_expression);
@@ -127,6 +134,8 @@ int main(void)
 	select_lvalue_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_select_lvalue);
+	concat_expression = pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_concat);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_invalid_index).index == PIGEN_INVALID_ID);
@@ -282,6 +291,30 @@ int main(void)
 	assert(analysis.uses[2].context == PIGEN_EXPRESSION_USE_TYPE);
 	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
 	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
+
+	pigen_free_expression_use_analysis(&analysis);
+	concat = pigen_expr_get(&model, concat_expression);
+	assert(concat && concat->kind == PIGEN_EXPR_CONCATENATION);
+	concat_children = pigen_expr_children(&model,
+		concat->as.sequence.first_child, concat->as.sequence.child_count);
+	assert(concat_children && concat->as.sequence.child_count == 3);
+	assert(pigen_lvalue_resolve(&model, concat_expression).index ==
+		PIGEN_INVALID_ID);
+	assert(pigen_analyze_expression_uses(&model, concat_expression, always,
+		PIGEN_EXPRESSION_USE_READ, &analysis));
+	assert(analysis.use_count == 5);
+	assert(analysis.transport_count == 2);
+	assert(analysis.uses[0].expression.index == concat_children[0].index);
+	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.uses[2].expression.index == concat_children[1].index);
+	assert(analysis.uses[2].context == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.uses[3].context == PIGEN_EXPRESSION_USE_TYPE);
+	assert(analysis.uses[4].expression.index == concat_children[2].index);
+	assert(analysis.uses[4].context == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.transports[1].contexts ==
+		(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_INDEX));
 
 	pigen_free_expression_use_analysis(&analysis);
 	pigen_free_semantic_model(&model);
