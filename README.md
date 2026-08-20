@@ -1,75 +1,64 @@
 # Pigen
 
-Pigen (short for **pi**peline **gen**erator) is a SystemVerilog extension that
-builds ready/valid handshake into the language. Its core feature is a small set
-of transport types—`buf`, `port`, `skid`, and `fifo`—whose assignments move
-complete packets only when the source is valid and the destination is ready.
+Pigen is a SystemVerilog extension for describing synchronous, flow-controlled
+hardware. It makes ready/valid transfer a language concept: values move when
+the source has a packet and the destination can accept it, while the compiler
+generates the valid bits, ready paths, storage control, and backpressure logic.
 
-It is an ennicening of Verilog: a Pythonisation of the language without turning
-it into HLS. Clocks, widths, registers, storage choices, backpressure, and cycle
-behavior remain explicit hardware. Pigen removes the repetitive valid bits,
-ready equations, occupancy bookkeeping, and fragile partial-transfer logic.
+The aim is an ennicening of Verilog. Widths, clocks, registers, storage, timing
+boundaries, and cycle behaviour remain explicit hardware choices, but the
+repetitive and error-prone mechanics of moving packets do not dominate the
+source.
 
-Pigen compiles `.pigen` source to readable, synthesizable SystemVerilog. It is
-intended as an incremental extension layer: an existing SV codebase should
-retain its behavior when passed through Pigen, and transports can then be
-introduced one boundary or datapath at a time. Deliberate restrictions must be
-documented and diagnosed; silent semantic drift is never acceptable.
+Pigen compiles `.pigen` files to readable, synthesizable SystemVerilog. Ordinary
+SystemVerilog remains part of the language and has a strict compatibility
+contract: accepted SV must retain its observable behaviour when processed by
+Pigen.
 
-## Handshake is part of assignment
+Pigen is pre-release. The compiler already implements the core transfer model,
+elastic pipelines, queues, FSMs, and routed fabrics. Its extension syntax and
+compiler architecture are being revised as the language takes its intended
+shape.
+
+## The basic idea
+
+This is accepted by the current compiler:
 
 ```systemverilog
 module packet_path
     (
-        input  logic clk,
-        input  logic reset,
-        input  buf [31:0] incoming,
-        output buf [31:0] outgoing
+        input  logic        clk,
+        input  logic        reset,
+        input  buf [31:0]   incoming,
+        output buf [31:0]   outgoing
     );
 
     buf  [31:0] decoded;
     skid [31:0] timing_break;
     fifo [31:0][8] pending;
 
-    always @(posedge clk) begin
-        decoded     <= incoming;
+    always_ff @(posedge clk) begin
+        decoded      <= incoming;
         timing_break <= decoded;
-        pending     <= timing_break;
-        outgoing    <= pending;
+        pending      <= timing_break;
+        outgoing     <= pending;
     end
 endmodule
 ```
 
-Each `<=` is one atomic transfer. It proceeds exactly when every source packet
-is valid and every destination can accept it. Accepted buffered sources are
-consumed; stalled packets remain stable. Backpressure propagates automatically
-until a `skid` or `fifo` deliberately breaks the combinational ready path.
+Each `<=` involving transports is an atomic transfer. It happens on the clock
+edge when its sources are valid and its destinations are ready. A stalled
+packet stays in place, and backpressure propagates to the producer. `skid` and
+`fifo` storage deliberately end the combinational ready path.
 
-The declaration chooses the storage and timing behavior:
-
-| Transport | Use it for | Behavior |
-| --- | --- | --- |
-| `buf T x` | The normal elastic pipeline step | One packet of storage; holds valid and payload under backpressure. |
-| `port T x` | A direct register-shaped boundary or synchronous-memory result | One-cycle valid pulse; no backpressure storage, so an unaccepted output pulse can be lost. |
-| `skid T x` | Breaking a ready timing path with minimal capacity | Exact two-packet skid storage with registered backpressure. |
-| `fifo T[N] x` | Deliberate queueing and burst absorption | Ordered depth-`N` storage; also breaks the ready path. |
-
-The same kinds can be used on module ports. A module can therefore expose the
-delivery contract it needs without manually expanding every packet into
-payload, valid, and ready signals.
-
-## Packets compose like SystemVerilog values
-
-Ordinary expressions form atomic joins:
+Expressions form atomic joins:
 
 ```systemverilog
 result <= sample * coefficient + bias;
 ```
 
-The transfer waits for `sample`, `coefficient`, and `bias`, then consumes all
-three together. None can disappear alone.
-
-Concatenation joins and splits packet bit streams using normal SystemVerilog
+The transfer waits for all three packets and consumes them together.
+Concatenations provide atomic joins and splits using ordinary SystemVerilog bit
 ordering:
 
 ```systemverilog
@@ -78,88 +67,134 @@ packet <= {header, body};
 {upper, lower} <= {wide_packet[15:8], wide_packet[7:0]};
 ```
 
-Only the aggregate widths need to match. Every destination in a grouped split
-must be ready before the source is consumed. A slice such as
-`byte <= wide_packet[7:0]` consumes the complete `wide_packet` token; several
-slices that belong together must be written as one grouped transfer. Constants
-are always-valid, non-consuming source values.
+Every destination in a split must be ready before the source is consumed. A
+projection such as `wide_packet[7:0]` still consumes the complete packet token;
+grouping the related projections states that they belong to one transfer.
 
-Normal SV control flow remains available around transfers. `valid`, `ready`,
-`accepts`, `peek`, `validate`, `invalidate`, and `flush` expose handshake and
-occupancy state when explicit control is useful.
+Normal SystemVerilog control flow surrounds transfers. Pigen understands the
+guards well enough to prove common mutually exclusive routes, and provides
+`valid`, `ready`, `accepts`, `peek`, `validate`, `invalidate`, and `flush` when
+control logic needs to inspect or alter transport state explicitly.
 
-## Storage choices stay visible
+## Data and movement
 
-Pigen does not infer a mysterious pipeline architecture from an untimed
-algorithm. The source still says where a packet may wait and where a ready path
-must end:
+The language is moving toward a clean separation between two concerns:
+
+- a data type describes the value and its width;
+- a transport kind describes how that value waits and moves.
+
+The intended declaration order is data type, optional transport kind, then
+name:
 
 ```systemverilog
-buf  packet_t parsed;       // ordinary one-entry elastic step
-skid packet_t scheduled;    // intentional ready-path break
-fifo packet_t[16] queued;   // intentional traffic elasticity
-port packet_t observed;     // pulse/register-shaped result
+int[16] buf  x;
+int[16] buf  arr[8];
+bit     port finished;
+byte         tag;
 ```
 
-Changing a `buf` to a `skid` or `fifo` is a local, reviewable architectural
-choice rather than a rewrite of handshake plumbing.
+`int[n]`, `uint[n]`, `bit`, and `byte` are the initial planned data types.
+`[n]` is width notation and lowers to the usual SystemVerilog `[n-1:0]` packed
+range. Array dimensions remain after the name, as in the `arr` declaration.
+Ordinary SystemVerilog declarations such as `logic [21:0] h[0:12];` retain their
+ordinary meaning.
 
-## Fabrics make hookup bearable
+The current compiler still accepts the transport-first syntax shown in the
+opening example. Because Pigen has no legacy syntax obligation, the new form
+will replace it outright when its type rules and frontend are complete; there
+will not be two Pigen declaration dialects.
 
-Transport-aware fabric syntax connects module endpoints without the usual wall
-of payload/valid/ready wiring:
+The current transport kinds express these storage and timing choices:
+
+| Kind | Role |
+| --- | --- |
+| `buf` | A one-packet elastic stage that holds payload and validity under backpressure. |
+| `skid` | Two-packet skid storage with registered backpressure. |
+| `fifo` | An ordered queue with explicit depth and a registered ready boundary. |
+| `port` | A one-cycle valid pulse for register-shaped or synchronous-memory results. |
+
+“Transport” is the present name for this family of movement policies; the
+concept is settled more firmly than the term.
+
+Module inputs are also intended to become generic transfer endpoints. An input
+may specify a transport kind when it needs a particular local policy. Without
+one, the emitted module boundary still has a ready/valid handshake, so the
+module accepts transfers uniformly whether the producer is a wire, register,
+buffer, port, FIFO, or skid. Degenerate producers simply tie the appropriate
+handshake signals to constants. The module consumes packets according to the
+interface contract rather than learning how its caller stores them.
+
+## Pipelines, FSMs, and fabrics
+
+Pigen’s ordinary transfer assignments are enough to build an elastic datapath.
+Higher-level constructs organize recurring structures around the same
+semantics:
+
+- `pipeline` describes a sequence of typed, elastic packet transforms;
+- `fsm` keeps state-oriented control beside the transfers it governs;
+- `fabric` connects module endpoints and generates the ready/valid interconnect.
+
+A fabric keeps a large hookup readable:
 
 ```systemverilog
-fabric sample_network begin
-    calibration.coefficient > filter.coefficient;
-    adc_left.samples -> mixer.left;
-    adc_right.samples --> mixer.right;
+fabric sample_network #(
+    parameter integer PAYLOAD_W = 32
+) begin
+    calibration.tx.coefficient > filter.coefficient;
+    adc_left.samples.mixer -> mixer.samples.left;
+    adc_right.samples.mixer --> mixer.samples.right;
 endfabric
 ```
 
-`>` is a direct exclusive connection. Dashed arrows use routed fabric links.
-The hookup syntax is useful in both prototypes and finished Pigen designs: it
-keeps explicit interconnect readable and makes inserting endpoint `buf`, `port`,
-`skid`, and `fifo` behavior much less painful.
-
-Automatic topology and route generation provide a minimal-fuss way to get a
-design working before its real traffic is understood. A mature design may
-replace those automatic choices with explicit routing while keeping the fabric
-description. Pigen emits an SVG of the elaborated endpoints, routers, and links
-for either workflow, so the actual interconnect remains visible and reviewable.
+Pigen currently generates deterministic buffered routing and an SVG showing
+the elaborated endpoints, routers, and links:
 
 <img src="docs/fabric.svg" alt="A Pigen fabric with endpoints and routed links" width="900">
 
 Use `--diagram PATH` to choose the SVG path or `--no-diagram` to suppress it.
-With several fabrics, each gets its own diagram.
+Files containing several fabrics receive one diagram per fabric.
 
-## Convenience syntax
+## Compiler architecture
 
-`pipeline` declarations and `fsm` blocks are higher-level conveniences built on the same
-transport semantics. Pipelines package a sequence of typed elastic transforms;
-FSMs keep state-oriented control next to the transfers it controls. They can
-save source code, but they are not required to obtain Pigen's central benefit:
-ordinary modules using `buf`, `port`, `skid`, `fifo`, and atomic assignments
-already have language-level handshake.
+The existing compiler is a working semantic prototype. It established the
+transfer rules and generated hardware against which the language can be
+tested, but much of its lowering is based on coordinated source-text
+transformation.
 
-## What the compiler guarantees
+A structured replacement frontend and compiler middle are now under active
+development. They already provide immutable source management, preprocessing
+with token provenance, syntax trees, scopes and symbols, structural types,
+typed expression resolution, canonical constant expressions, predicate
+analysis, and identity-based expression-use and lvalue analysis. These pieces
+are tested independently and are not yet the production lowering path.
 
-Pigen rejects ambiguous packet ownership and partial transfers. Buffered values
-have one consumer; joins consume all their inputs together; grouped splits wait
-for every destination; writes must be mutually exclusive; and stored payloads
-remain stable under backpressure.
+The intended compiler flow is:
 
-The output is ordinary SystemVerilog with explicit nets and small storage
-primitives from [`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv). It can be
-read, linted, simulated, and synthesized with normal HDL tools.
+```text
+source and preprocessing
+    -> structured syntax
+    -> names, types, and expressions
+    -> transfers, ownership, and clock domains
+    -> pipelines, FSMs, and fabrics on shared semantics
+    -> elastic RTL IR
+    -> SystemVerilog
+```
 
-Pigen is pre-release. Its extension syntax, generated names, and generated
-interfaces may still change. The ordinary-SystemVerilog compatibility contract
-does not: extension development must not silently change existing SV behavior.
+The next major integration step is a thin complete slice through that flow: one
+module, one clocked block, one atomic transfer, its transport graph, RTL IR,
+and emitted SystemVerilog. From there, each structured pass becomes
+authoritative as the corresponding textual mechanism is removed. Pipelines,
+FSMs, and fabrics will share the same frontend and semantic services rather
+than growing private interpretations of types and expressions.
 
-## Build and try it
+Other planned work includes richer fabric payload typing and topology control,
+whole-unit ready-cycle checking, source-located aggregate-width diagnostics,
+contextual expression typing, and packet-field liveness through pipelines.
 
-Build Pigen with `make`. The test suite also uses Icarus Verilog and Verilator.
+## Build and verify
+
+A C compiler and `make` are enough to build Pigen. The complete verification
+suite also uses Icarus Verilog and Verilator.
 
 ```sh
 make
@@ -168,27 +203,32 @@ make
 make verify
 ```
 
-Good starting points are:
+Generated designs use the small primitives in
+[`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv).
 
-- [`examples/buf_pipeline.pigen`](examples/buf_pipeline.pigen) for the basic
-  elastic transfer model
-- [`examples/join_pipeline.pigen`](examples/join_pipeline.pigen) for an atomic
-  multi-source join
-- [`examples/skid_pipeline.pigen`](examples/skid_pipeline.pigen) and
-  [`examples/fifo_pipeline.pigen`](examples/fifo_pipeline.pigen) for explicit
-  timing and queueing choices
-- [`examples/port_pipeline.pigen`](examples/port_pipeline.pigen) for pulse-like
-  `port` behavior
-- [`examples/biquad_bank.pigen`](examples/biquad_bank.pigen) for an eight-slot,
-  five-coefficient stateful DSP bank, including its clean unconfigured-slot path
-- [`USER_GUIDE.md`](USER_GUIDE.md) for a practical walkthrough
-- [`SPEC.md`](SPEC.md) for the complete language and compatibility contract
+Useful places to start:
 
-## Current limits
+- [`USER_GUIDE.md`](USER_GUIDE.md) is the practical walkthrough for the
+  currently implemented language.
+- [`SPEC.md`](SPEC.md) is the precise current language and SystemVerilog
+  compatibility contract.
+- [`examples/buf_pipeline.pigen`](examples/buf_pipeline.pigen) shows a basic
+  elastic path.
+- [`examples/join_pipeline.pigen`](examples/join_pipeline.pigen) shows an
+  atomic multi-source join.
+- [`examples/skid_pipeline.pigen`](examples/skid_pipeline.pigen),
+  [`examples/fifo_pipeline.pigen`](examples/fifo_pipeline.pigen), and
+  [`examples/port_pipeline.pigen`](examples/port_pipeline.pigen) show the
+  storage choices.
+- [`examples/biquad_bank.pigen`](examples/biquad_bank.pigen) is a larger
+  stateful DSP example.
+- [`agent_notes/COMPILER_ARCHITECTURE.md`](agent_notes/COMPILER_ARCHITECTURE.md)
+  records the compiler architecture and migration plan in depth.
 
-Fabric payload typing and topology control are still evolving. The current
-automatic fabric uses one payload width, fixed endpoint/router buffering, and a
-deterministic balanced topology; arrow tiers and `objective` do not yet drive
-topology optimization. Aggregate co-slice widths are checked by the generated
-SystemVerilog at elaboration time; reporting those mismatches directly at the
-original Pigen source location is still planned.
+## Development and AI
+
+Pigen is designed and directed by David. AI coding agents are used extensively
+for implementation, testing, documentation, code review, and architectural
+exploration. Their work is reviewed against the project’s intended semantics,
+the specification, and the verification suite; architectural and language
+decisions remain deliberate project decisions.
