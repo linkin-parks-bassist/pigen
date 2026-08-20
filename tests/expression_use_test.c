@@ -36,7 +36,9 @@ int main(void)
 		"(right[left +: WIDTH])\n"
 		"right[6 -: left]\n"
 		"right[left:2]\n"
-		"{right[left], left[TOP:2], right}\n";
+		"{right[left], left[TOP:2], right}\n"
+		"{right, TOP}\n"
+		"{{right, left}, right}\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "uses.pigen", text,
 		strlen(text));
@@ -61,6 +63,10 @@ int main(void)
 	pigen_syntax_expr_id syntax_invalid_range =
 		INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_expr_id syntax_concat = INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_invalid_concat =
+		INVALID_ID(pigen_syntax_expr_id);
+	pigen_syntax_expr_id syntax_nested_concat =
+		INVALID_ID(pigen_syntax_expr_id);
 	pigen_expr_id expression;
 	pigen_expr_id lvalue_expression;
 	pigen_expr_id index_expression;
@@ -68,9 +74,13 @@ int main(void)
 	pigen_expr_id range_expression;
 	pigen_expr_id select_lvalue_expression;
 	pigen_expr_id concat_expression;
+	pigen_expr_id invalid_concat_expression;
+	pigen_expr_id nested_concat_expression;
 	pigen_lvalue_id lvalue;
 	pigen_lvalue_id index_lvalue;
 	pigen_lvalue_id select_lvalue;
+	pigen_lvalue_id concat_lvalue;
+	pigen_lvalue_id nested_concat_lvalue;
 	pigen_predicate_id always;
 	pigen_expression_use_analysis analysis = {0};
 	const pigen_semantic_expr *conditional;
@@ -85,6 +95,8 @@ int main(void)
 	const pigen_const_expr *select_width;
 	const pigen_semantic_expr *concat;
 	const pigen_expr_id *concat_children;
+	const pigen_semantic_lvalue *concat_lvalue_node;
+	const pigen_lvalue_id *concat_lvalue_children;
 	const pigen_predicate_atom *true_atoms;
 	const pigen_predicate_atom *false_atoms;
 	size_t first;
@@ -97,7 +109,7 @@ int main(void)
 		if (token_is(&preprocessed.expanded, first, "endmodule")) break;
 	assert(first + 1 < preprocessed.expanded.token_count);
 	first++;
-	assert(preprocessed.expanded.token_count - 1 == first + 66);
+	assert(preprocessed.expanded.token_count - 1 == first + 80);
 	assert(pigen_parse_expression(&preprocessed.expanded, first, first + 5,
 		&syntax.expressions,
 		&syntax_expression, &syntax_error));
@@ -119,6 +131,10 @@ int main(void)
 		&syntax.expressions, &syntax_invalid_range, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 51, first + 66,
 		&syntax.expressions, &syntax_concat, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 66, first + 71,
+		&syntax.expressions, &syntax_invalid_concat, &syntax_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, first + 71, first + 80,
+		&syntax.expressions, &syntax_nested_concat, &syntax_error));
 	expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_expression);
@@ -136,6 +152,12 @@ int main(void)
 		syntax_select_lvalue);
 	concat_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_concat);
+	invalid_concat_expression = pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope,
+		syntax_invalid_concat);
+	nested_concat_expression = pigen_resolve_expression(&syntax, &model,
+		pigen_module_get(&model, (pigen_module_id){0})->scope,
+		syntax_nested_concat);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_invalid_index).index == PIGEN_INVALID_ID);
@@ -195,7 +217,10 @@ int main(void)
 	assert(pigen_lvalue_resolve(&model, expression).index == PIGEN_INVALID_ID);
 	assert(pigen_lvalue_get(&model, lvalue)->expression.index ==
 		lvalue_expression.index);
-	assert(pigen_lvalue_get(&model, lvalue)->transport.index ==
+	assert(pigen_lvalue_get(&model, lvalue)->kind ==
+		PIGEN_LVALUE_PROJECTION);
+	assert(pigen_lvalue_get(&model,
+		lvalue)->as.projection.transport.index ==
 		analysis.uses[1].transport.index);
 	assert(pigen_analyze_lvalue_uses(&model, lvalue, always, &analysis));
 	assert(analysis.use_count == 4);
@@ -231,7 +256,10 @@ int main(void)
 		index_lvalue_expression.index);
 	assert(pigen_lvalue_get(&model, index_lvalue)->type.index ==
 		pigen_semantic_boolean_result_type(&model).index);
-	assert(pigen_lvalue_get(&model, index_lvalue)->base_symbol.index ==
+	assert(pigen_lvalue_get(&model, index_lvalue)->kind ==
+		PIGEN_LVALUE_PROJECTION);
+	assert(pigen_lvalue_get(&model,
+		index_lvalue)->as.projection.base_symbol.index ==
 		indexed_base->as.symbol.index);
 	assert(pigen_analyze_lvalue_uses(&model, index_lvalue, always, &analysis));
 	assert(analysis.use_count == 2);
@@ -298,8 +326,6 @@ int main(void)
 	concat_children = pigen_expr_children(&model,
 		concat->as.sequence.first_child, concat->as.sequence.child_count);
 	assert(concat_children && concat->as.sequence.child_count == 3);
-	assert(pigen_lvalue_resolve(&model, concat_expression).index ==
-		PIGEN_INVALID_ID);
 	assert(pigen_analyze_expression_uses(&model, concat_expression, always,
 		PIGEN_EXPRESSION_USE_READ, &analysis));
 	assert(analysis.use_count == 5);
@@ -315,6 +341,62 @@ int main(void)
 	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_READ);
 	assert(analysis.transports[1].contexts ==
 		(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_INDEX));
+
+	pigen_free_expression_use_analysis(&analysis);
+	concat_lvalue = pigen_lvalue_resolve(&model, concat_expression);
+	concat_lvalue_node = pigen_lvalue_get(&model, concat_lvalue);
+	assert(concat_lvalue_node &&
+		concat_lvalue_node->kind == PIGEN_LVALUE_CONCATENATION);
+	concat_lvalue_children = pigen_lvalue_children(&model,
+		concat_lvalue_node->as.sequence.first_child,
+		concat_lvalue_node->as.sequence.child_count);
+	assert(concat_lvalue_children &&
+		concat_lvalue_node->as.sequence.child_count == 3);
+	for (size_t i = 0; i < 3; i++)
+	{
+		const pigen_semantic_lvalue *child =
+			pigen_lvalue_get(&model, concat_lvalue_children[i]);
+		assert(child && child->kind == PIGEN_LVALUE_PROJECTION);
+		assert(child->expression.index == concat_children[i].index);
+	}
+	assert(pigen_analyze_lvalue_uses(&model, concat_lvalue, always, &analysis));
+	assert(analysis.use_count == 5);
+	assert(analysis.transport_count == 2);
+	assert(analysis.uses[0].expression.index == concat_children[0].index);
+	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.uses[2].expression.index == concat_children[1].index);
+	assert(analysis.uses[2].context == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.uses[3].context == PIGEN_EXPRESSION_USE_TYPE);
+	assert(analysis.uses[4].expression.index == concat_children[2].index);
+	assert(analysis.uses[4].context == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.transports[1].contexts ==
+		(PIGEN_EXPRESSION_USE_LVALUE | PIGEN_EXPRESSION_USE_INDEX));
+
+	pigen_free_expression_use_analysis(&analysis);
+	assert(pigen_lvalue_resolve(&model, invalid_concat_expression).index ==
+		PIGEN_INVALID_ID);
+	nested_concat_lvalue = pigen_lvalue_resolve(&model,
+		nested_concat_expression);
+	concat_lvalue_node = pigen_lvalue_get(&model, nested_concat_lvalue);
+	assert(concat_lvalue_node &&
+		concat_lvalue_node->kind == PIGEN_LVALUE_CONCATENATION);
+	concat_lvalue_children = pigen_lvalue_children(&model,
+		concat_lvalue_node->as.sequence.first_child,
+		concat_lvalue_node->as.sequence.child_count);
+	assert(concat_lvalue_children &&
+		concat_lvalue_node->as.sequence.child_count == 2);
+	assert(pigen_lvalue_get(&model, concat_lvalue_children[0])->kind ==
+		PIGEN_LVALUE_CONCATENATION);
+	assert(pigen_lvalue_get(&model, concat_lvalue_children[1])->kind ==
+		PIGEN_LVALUE_PROJECTION);
+	assert(pigen_analyze_lvalue_uses(&model, nested_concat_lvalue, always,
+		&analysis));
+	assert(analysis.use_count == 3);
+	assert(analysis.transport_count == 2);
+	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_LVALUE);
 
 	pigen_free_expression_use_analysis(&analysis);
 	pigen_free_semantic_model(&model);

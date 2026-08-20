@@ -209,9 +209,13 @@ int main(void)
 		byte_type, first_value);
 	module_value_lvalue = pigen_lvalue_resolve(&model, module_value_expression);
 	assert(module_value_lvalue.index != PIGEN_INVALID_ID);
-	assert(pigen_lvalue_get(&model, module_value_lvalue)->base_symbol.index ==
+	assert(pigen_lvalue_get(&model, module_value_lvalue)->kind ==
+		PIGEN_LVALUE_PROJECTION);
+	assert(pigen_lvalue_get(&model,
+		module_value_lvalue)->as.projection.base_symbol.index ==
 		module_value.index);
-	assert(pigen_lvalue_get(&model, module_value_lvalue)->transport.index ==
+	assert(pigen_lvalue_get(&model,
+		module_value_lvalue)->as.projection.transport.index ==
 		PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, pipeline_scope, PIGEN_SYMBOL_VALUE,
 		byte_type, second_value, whole, &pipeline_value, &shadowed) == PIGEN_DECLARE_OK);

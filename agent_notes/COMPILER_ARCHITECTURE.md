@@ -620,16 +620,24 @@ reads retain ordered child `ExprId` values and traverse each child as its own
 projection occurrence; result-type calculation does not erase value order.
 
 The semantic model now also interns resolved lvalue occurrences by their
-projecting `ExprId`.  A lvalue owns its type, assignable base `SymbolId`, optional
-base `TransportId`, and provenance.  Direct ordinary values, direct transports,
-transparent grouping, and recursive packed projections are
-authoritative; parameters and operator trees are rejected.  Packed indexing and
-all three part-select forms have semantic expression and canonical
-constant-expression nodes.  Their result types are derived by the shared type
-service, including traversal through typedef identity, projection of the
-leftmost packed dimension, unsigned select results, preservation of remaining
-packed dimensions, and the implicit packed shape of `integer`.  Scalar
-logic/bit values cannot be selected.
+projecting `ExprId`.  It is now a recursive arena rather than a flat
+single-base record.  A projection leaf owns its type, assignable base
+`SymbolId`, optional base `TransportId`, and provenance.  A concatenation
+node owns an ordered range of child `LvalueId` values and may nest.  Direct
+ordinary values, direct transports, transparent grouping, recursive packed
+projections, and concatenated destinations are authoritative; parameters and
+operator trees are rejected.  A concatenation resolves only when every child
+is independently assignable, so a mixed destination cannot exist as a partial
+semantic lvalue.  Each expression carries a direct optional back-reference to
+its interned lvalue occurrence; resolution and repeated lookup do not scan the
+lvalue arena.
+
+Packed indexing and all three part-select forms have semantic expression and
+canonical constant-expression nodes.  Their result types are derived by the
+shared type service, including traversal through typedef identity, projection
+of the leftmost packed dimension, unsigned select results, preservation of
+remaining packed dimensions, and the implicit packed shape of `integer`.
+Scalar logic/bit values cannot be selected.
 
 Part-select result types use a derived canonical `select_width` expression.
 For `[left:right]` it denotes `abs(left-right)+1`; for
@@ -650,12 +658,12 @@ unsigned one-dimensional packed `bit` value when every child is two-state and
 an unsigned packed `logic` value otherwise.  Canonical constant
 concatenations retain the same ordered child sequence.
 
-Lvalue use analysis feeds the same occurrence and deduplicated transport arrays
-as read analysis, setting distinct lvalue, index, and type context bits.  Member
-and concatenated destinations remain unrepresented.  Concatenated expressions
-now provide the required ordered value/type structure; the next change must
-replace the single-base lvalue record with projected and concatenated lvalue
-kinds before procedural transfer syntax claims them.
+Lvalue use analysis walks recursive child `LvalueId` ranges in source order and
+feeds the same occurrence and deduplicated transport arrays as read analysis,
+setting distinct lvalue, index, and type context bits.  Member destinations
+remain unrepresented until aggregate field types exist.  With direct, indexed,
+selected, grouped, and concatenated lvalues now structural, procedural transfer
+syntax can target this model without rescanning destination text.
 
 ## Rewrite strategy
 

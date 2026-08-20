@@ -232,17 +232,38 @@ int pigen_analyze_expression_uses(pigen_semantic_model *model,
 	return 0;
 }
 
+static int analyze_lvalue(use_analyzer *analyzer,
+	pigen_lvalue_id lvalue_id, pigen_predicate_id predicate)
+{
+	const pigen_semantic_lvalue *lvalue =
+		pigen_lvalue_get(analyzer->model, lvalue_id);
+	const pigen_lvalue_id *children;
+	size_t i;
+
+	if (!lvalue) return 0;
+	if (lvalue->kind == PIGEN_LVALUE_PROJECTION)
+		return visit_lvalue(analyzer, lvalue->expression,
+			INVALID_ID(pigen_expr_id), predicate);
+	if (lvalue->kind != PIGEN_LVALUE_CONCATENATION) return 0;
+	children = pigen_lvalue_children(analyzer->model,
+		lvalue->as.sequence.first_child, lvalue->as.sequence.child_count);
+	if (!children) return 0;
+	for (i = 0; i < lvalue->as.sequence.child_count; i++)
+		if (!analyze_lvalue(analyzer, children[i], predicate))
+			return 0;
+	return 1;
+}
+
 int pigen_analyze_lvalue_uses(pigen_semantic_model *model,
 	pigen_lvalue_id lvalue_id, pigen_predicate_id predicate,
 	pigen_expression_use_analysis *analysis)
 {
-	const pigen_semantic_lvalue *lvalue = pigen_lvalue_get(model, lvalue_id);
 	const pigen_predicate *guard = pigen_predicate_get(model, predicate);
 	use_analyzer analyzer = {model, analysis};
-	if (!model || !analysis || !lvalue || !guard) return 0;
+	if (!model || !analysis || !pigen_lvalue_get(model, lvalue_id) || !guard)
+		return 0;
 	if (guard->impossible) return 1;
-	return visit_lvalue(&analyzer, lvalue->expression,
-		INVALID_ID(pigen_expr_id), predicate);
+	return analyze_lvalue(&analyzer, lvalue_id, predicate);
 }
 
 void pigen_free_expression_use_analysis(

@@ -172,6 +172,7 @@ typedef struct {
 	pigen_type_id type;
 	pigen_source_span span;
 	pigen_const_expr_id constant;
+	pigen_lvalue_id lvalue;
 	union {
 		uint64_t integer;
 		struct { size_t first_state; size_t state_count; } bits;
@@ -262,12 +263,26 @@ typedef struct {
 	int impossible;
 } pigen_predicate;
 
+typedef enum {
+	PIGEN_LVALUE_PROJECTION,
+	PIGEN_LVALUE_CONCATENATION
+} pigen_lvalue_kind;
+
 typedef struct {
+	pigen_lvalue_kind kind;
 	pigen_expr_id expression;
 	pigen_type_id type;
-	pigen_symbol_id base_symbol;
-	pigen_transport_id transport;
 	pigen_source_span span;
+	union {
+		struct {
+			pigen_symbol_id base_symbol;
+			pigen_transport_id transport;
+		} projection;
+		struct {
+			size_t first_child;
+			size_t child_count;
+		} sequence;
+	} as;
 } pigen_semantic_lvalue;
 
 typedef struct {
@@ -335,6 +350,9 @@ typedef struct {
 	pigen_semantic_lvalue *lvalues;
 	size_t lvalue_count;
 	size_t lvalue_capacity;
+	pigen_lvalue_id *lvalue_children;
+	size_t lvalue_child_count;
+	size_t lvalue_child_capacity;
 	pigen_semantic_module *modules;
 	size_t module_count;
 	size_t module_capacity;
@@ -448,6 +466,8 @@ pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 	pigen_expr_id expression);
 const pigen_semantic_lvalue *pigen_lvalue_get(
 	const pigen_semantic_model *model, pigen_lvalue_id lvalue);
+const pigen_lvalue_id *pigen_lvalue_children(
+	const pigen_semantic_model *model, size_t first, size_t count);
 pigen_scope_id pigen_scope_add(pigen_semantic_model *model,
 	pigen_scope_id parent, pigen_source_span span);
 const pigen_scope *pigen_scope_get(const pigen_semantic_model *model,

@@ -166,8 +166,9 @@ development. They already provide immutable source management, preprocessing
 with token provenance, syntax trees, scopes and symbols, structural types,
 typed expression, packed-projection, and concatenation resolution, canonical
 constant expressions and packed-width algebra, predicate analysis, and
-identity-based expression-use and projected-lvalue analysis. These pieces are
-tested independently and are not yet the production lowering path.
+identity-based expression-use and recursive projected/concatenated-lvalue
+analysis. These pieces are tested independently and are not yet the production
+lowering path.
 
 The intended compiler flow is:
 

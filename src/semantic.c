@@ -948,6 +948,7 @@ static pigen_expr_id add_expression(pigen_semantic_model *model,
 {
 	pigen_expr_id result;
 
+	expression.lvalue = INVALID_ID(pigen_lvalue_id);
 	if (!pigen_type_get(model, expression.type) ||
 		!pigen_source_span_valid(model->sources, expression.span) ||
 		(expression.constant.index != PIGEN_INVALID_ID &&
@@ -1312,19 +1313,155 @@ pigen_const_expr_id pigen_expr_constant(const pigen_semantic_model *model,
 	return known ? known->constant : INVALID_ID(pigen_const_expr_id);
 }
 
+static pigen_lvalue_id find_lvalue(
+	const pigen_semantic_model *model, pigen_expr_id expression)
+{
+	const pigen_semantic_expr *known = pigen_expr_get(model, expression);
+	const pigen_semantic_lvalue *lvalue;
+	if (!known) return INVALID_ID(pigen_lvalue_id);
+	lvalue = pigen_lvalue_get(model, known->lvalue);
+	if (lvalue && lvalue->expression.index == expression.index)
+		return known->lvalue;
+	return INVALID_ID(pigen_lvalue_id);
+}
+
+static pigen_lvalue_id add_lvalue(pigen_semantic_model *model,
+	pigen_semantic_lvalue lvalue)
+{
+	const pigen_symbol *symbol;
+	pigen_semantic_expr *expression;
+	pigen_lvalue_id result;
+	if (!pigen_expr_get(model, lvalue.expression) ||
+		!pigen_type_get(model, lvalue.type) ||
+		!pigen_source_span_valid(model->sources, lvalue.span) ||
+		!id_capacity_available(model->lvalue_count))
+		return INVALID_ID(pigen_lvalue_id);
+	if (lvalue.kind == PIGEN_LVALUE_PROJECTION)
+	{
+		symbol = pigen_symbol_get(model, lvalue.as.projection.base_symbol);
+		if (!symbol ||
+			(symbol->kind != PIGEN_SYMBOL_VALUE &&
+			symbol->kind != PIGEN_SYMBOL_TRANSPORT) ||
+			(symbol->kind == PIGEN_SYMBOL_TRANSPORT ?
+				pigen_symbol_transport(model,
+					lvalue.as.projection.base_symbol).index !=
+					lvalue.as.projection.transport.index :
+				lvalue.as.projection.transport.index != PIGEN_INVALID_ID))
+			return INVALID_ID(pigen_lvalue_id);
+	}
+	else if (lvalue.kind == PIGEN_LVALUE_CONCATENATION)
+	{
+		const pigen_lvalue_id *children = pigen_lvalue_children(model,
+			lvalue.as.sequence.first_child,
+			lvalue.as.sequence.child_count);
+		size_t i;
+		if (!children || !lvalue.as.sequence.child_count)
+			return INVALID_ID(pigen_lvalue_id);
+		for (i = 0; i < lvalue.as.sequence.child_count; i++)
+			if (!pigen_lvalue_get(model, children[i]))
+				return INVALID_ID(pigen_lvalue_id);
+	}
+	else
+		return INVALID_ID(pigen_lvalue_id);
+	expression = &model->expressions[lvalue.expression.index];
+	if (expression->lvalue.index != PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_lvalue_id);
+	if (model->lvalue_count == model->lvalue_capacity)
+	{
+		model->lvalue_capacity = model->lvalue_capacity ?
+			model->lvalue_capacity * 2 : 16;
+		model->lvalues = pigen_resize(model->lvalues,
+			model->lvalue_capacity * sizeof(*model->lvalues));
+	}
+	result = (pigen_lvalue_id){(uint32_t)model->lvalue_count};
+	model->lvalues[model->lvalue_count++] = lvalue;
+	expression->lvalue = result;
+	return result;
+}
+
+static size_t append_lvalue_children(pigen_semantic_model *model,
+	const pigen_lvalue_id *children, size_t count)
+{
+	size_t first = model->lvalue_child_count;
+	size_t needed;
+	size_t capacity;
+
+	if (!count || !children || count > SIZE_MAX - model->lvalue_child_count)
+		return SIZE_MAX;
+	needed = model->lvalue_child_count + count;
+	if (needed > model->lvalue_child_capacity)
+	{
+		capacity = model->lvalue_child_capacity ?
+			model->lvalue_child_capacity * 2 : 16;
+		while (capacity < needed) capacity *= 2;
+		model->lvalue_children = pigen_resize(model->lvalue_children,
+			capacity * sizeof(*model->lvalue_children));
+		model->lvalue_child_capacity = capacity;
+	}
+	memcpy(model->lvalue_children + model->lvalue_child_count,
+		children, count * sizeof(*children));
+	model->lvalue_child_count = needed;
+	return first;
+}
+
 pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 	pigen_expr_id expression)
 {
 	const pigen_semantic_expr *root;
+	const pigen_semantic_expr *shape;
 	const pigen_semantic_expr *base;
 	const pigen_symbol *symbol;
+	pigen_lvalue_id existing;
+	pigen_semantic_lvalue lvalue = {0};
 	pigen_transport_id transport = INVALID_ID(pigen_transport_id);
-	pigen_lvalue_id result;
-	size_t i;
 
 	if (!model) return INVALID_ID(pigen_lvalue_id);
+	existing = find_lvalue(model, expression);
+	if (existing.index != PIGEN_INVALID_ID) return existing;
 	root = pigen_expr_get(model, expression);
 	if (!root) return INVALID_ID(pigen_lvalue_id);
+	shape = root;
+	while (shape && shape->kind == PIGEN_EXPR_GROUP)
+		shape = pigen_expr_get(model, shape->as.group.operand);
+	if (!shape) return INVALID_ID(pigen_lvalue_id);
+	lvalue.expression = expression;
+	lvalue.type = root->type;
+	lvalue.span = root->span;
+	if (shape->kind == PIGEN_EXPR_CONCATENATION)
+	{
+		const pigen_expr_id *expressions = pigen_expr_children(model,
+			shape->as.sequence.first_child, shape->as.sequence.child_count);
+		pigen_lvalue_id *children;
+		pigen_lvalue_id result;
+		size_t first;
+		size_t i;
+
+		if (!expressions || !shape->as.sequence.child_count)
+			return INVALID_ID(pigen_lvalue_id);
+		children = pigen_resize(NULL,
+			shape->as.sequence.child_count * sizeof(*children));
+		for (i = 0; i < shape->as.sequence.child_count; i++)
+		{
+			children[i] = pigen_lvalue_resolve(model, expressions[i]);
+			if (children[i].index == PIGEN_INVALID_ID)
+			{
+				free(children);
+				return INVALID_ID(pigen_lvalue_id);
+			}
+		}
+		first = append_lvalue_children(model, children,
+			shape->as.sequence.child_count);
+		free(children);
+		if (first == SIZE_MAX) return INVALID_ID(pigen_lvalue_id);
+		lvalue.kind = PIGEN_LVALUE_CONCATENATION;
+		lvalue.as.sequence.first_child = first;
+		lvalue.as.sequence.child_count = shape->as.sequence.child_count;
+		result = add_lvalue(model, lvalue);
+		if (result.index == PIGEN_INVALID_ID)
+			model->lvalue_child_count = first;
+		return result;
+	}
+
 	base = root;
 	while (base && (base->kind == PIGEN_EXPR_GROUP ||
 		base->kind == PIGEN_EXPR_INDEX ||
@@ -1348,22 +1485,10 @@ pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 		if (transport.index == PIGEN_INVALID_ID)
 			return INVALID_ID(pigen_lvalue_id);
 	}
-	for (i = 0; i < model->lvalue_count; i++)
-		if (model->lvalues[i].expression.index == expression.index)
-			return (pigen_lvalue_id){(uint32_t)i};
-	if (!id_capacity_available(model->lvalue_count))
-		return INVALID_ID(pigen_lvalue_id);
-	if (model->lvalue_count == model->lvalue_capacity)
-	{
-		model->lvalue_capacity = model->lvalue_capacity ?
-			model->lvalue_capacity * 2 : 16;
-		model->lvalues = pigen_resize(model->lvalues,
-			model->lvalue_capacity * sizeof(*model->lvalues));
-	}
-	result = (pigen_lvalue_id){(uint32_t)model->lvalue_count};
-	model->lvalues[model->lvalue_count++] = (pigen_semantic_lvalue){
-		expression, root->type, base->as.symbol, transport, root->span};
-	return result;
+	lvalue.kind = PIGEN_LVALUE_PROJECTION;
+	lvalue.as.projection.base_symbol = base->as.symbol;
+	lvalue.as.projection.transport = transport;
+	return add_lvalue(model, lvalue);
 }
 
 const pigen_semantic_lvalue *pigen_lvalue_get(
@@ -1373,6 +1498,15 @@ const pigen_semantic_lvalue *pigen_lvalue_get(
 		lvalue.index >= model->lvalue_count)
 		return NULL;
 	return &model->lvalues[lvalue.index];
+}
+
+const pigen_lvalue_id *pigen_lvalue_children(
+	const pigen_semantic_model *model, size_t first, size_t count)
+{
+	if (!model || first > model->lvalue_child_count ||
+		count > model->lvalue_child_count - first)
+		return NULL;
+	return model->lvalue_children + first;
 }
 
 pigen_scope_id pigen_scope_add(pigen_semantic_model *model,
@@ -1714,6 +1848,7 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->predicates);
 	free(model->predicate_atoms);
 	free(model->lvalues);
+	free(model->lvalue_children);
 	free(model->modules);
 	free(model->parameters);
 	free(model->transports);

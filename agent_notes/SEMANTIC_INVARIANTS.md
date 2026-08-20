@@ -101,11 +101,15 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
   width as a canonical commutative product.  Width algebra is structural and
   never folds symbolic bounds through a host integer.
 - A resolved lvalue has its own stable occurrence identity and points at the
-  expression which projects the destination, its type, assignable base symbol,
-  and optional base transport.  Direct value and transport symbols,
-  transparent grouping, packed indexing, ordinary ranges, and indexed
-  part-selects are supported; parameters and operator trees are never accepted
-  as destinations.  Each packed projection owns separate base and selector
+  expression which projects the destination and its type.  A projection lvalue
+  owns one assignable base symbol and optional base transport; a concatenation
+  lvalue owns an ordered, recursively nestable child range.  Every child must
+  resolve before the concatenation exists.  Direct value and transport symbols,
+  transparent grouping, packed indexing, ordinary ranges, indexed part-selects,
+  and concatenations are supported; parameters and operator trees are never
+  accepted as destinations.  The expression owns the direct optional
+  back-reference to its lvalue identity; no name or arena scan reconstructs the
+  relationship.  Each packed projection owns separate base and selector
   expression identities.  Its base retains the complete projected expression
   identity; runtime subscripts use index context, while constant range and
   width expressions use type context.
@@ -120,9 +124,11 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
   contributes no uses.
 - Lvalue use analysis records the projected lvalue expression under the
   lvalue context, each runtime subscript under index context, and selector
-  bounds which determine type under type context.  If a transport is both read
-  and written in an analyzed set, one deduplicated transport summary carries
-  all applicable context bits while the occurrence records remain distinct.
+  bounds which determine type under type context.  Concatenated lvalues walk
+  their child identities in source order and record each projection
+  independently.  If a transport is both read and written in an analyzed set,
+  one deduplicated transport summary carries all applicable context bits while
+  the occurrence records remain distinct.
 - Contextual sizing and signedness are established before transport or RTL
   lowering. The emitter never infers them from rendered text.
 - Builtin semantic types have model-owned stable identities. Constant-expression
