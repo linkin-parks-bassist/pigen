@@ -416,12 +416,22 @@ static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 {
 	pigen_expression_use_analysis destination_uses = {0};
 	pigen_expression_use_analysis value_uses = {0};
+	pigen_expression_use_analysis guard_uses = {0};
+	const pigen_predicate *predicate = pigen_predicate_get(resolver->model,
+		guard);
+	const pigen_predicate_atom *atoms = pigen_predicate_atoms(resolver->model,
+		guard);
 	size_t i;
 	size_t capacity = 0;
-	int valid = pigen_analyze_lvalue_uses(resolver->model, destination, guard,
+	int valid = predicate && pigen_analyze_lvalue_uses(resolver->model,
+		destination, guard,
 		&destination_uses) &&
 		pigen_analyze_expression_uses(resolver->model, value, guard,
 			PIGEN_EXPRESSION_USE_READ, &value_uses);
+	for (i = 0; valid && i < predicate->atom_count; i++)
+		valid = pigen_analyze_expression_uses(resolver->model,
+			atoms[i].condition, pigen_predicate_true(resolver->model),
+			PIGEN_EXPRESSION_USE_READ, &guard_uses);
 
 	if (!valid)
 		fail(resolver, span, "cannot analyze transfer uses");
@@ -441,6 +451,10 @@ static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 		add_transfer_transport_use(transport_uses, transport_use_count,
 			&capacity, value_uses.transports[i].transport,
 			PIGEN_TRANSFER_CONSUMER);
+	for (i = 0; valid && i < guard_uses.transport_count; i++)
+		add_transfer_transport_use(transport_uses, transport_use_count,
+			&capacity, guard_uses.transports[i].transport,
+			PIGEN_TRANSFER_CONSUMER);
 	for (i = 0; valid && i < *transport_use_count; i++)
 		if ((*transport_uses)[i].roles ==
 			(PIGEN_TRANSFER_CONSUMER | PIGEN_TRANSFER_PRODUCER))
@@ -457,6 +471,7 @@ static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 		}
 	pigen_free_expression_use_analysis(&value_uses);
 	pigen_free_expression_use_analysis(&destination_uses);
+	pigen_free_expression_use_analysis(&guard_uses);
 	if (!valid)
 	{
 		free(*transport_uses);
@@ -464,6 +479,130 @@ static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 		*transport_use_count = 0;
 	}
 	return valid;
+}
+
+static int resolve_procedural_statement(resolver *resolver,
+	pigen_module_id module_id, pigen_process_id process,
+	pigen_clock_domain_id domain, pigen_syntax_id statement_id,
+	pigen_predicate_id guard);
+
+static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
+	pigen_process_id process, pigen_clock_domain_id domain,
+	pigen_syntax_id assignment_id, const pigen_syntax_node *assignment,
+	pigen_predicate_id guard)
+{
+	pigen_semantic_model *model = resolver->model;
+	const pigen_semantic_module *module = pigen_module_get(model, module_id);
+	pigen_expr_id destination_expression = pigen_resolve_expression(
+		resolver->syntax, model, module->scope,
+		assignment->as.nonblocking_assignment.destination);
+	pigen_lvalue_id destination = pigen_lvalue_resolve(model,
+		destination_expression);
+	pigen_expr_id value;
+	pigen_transfer_id transfer;
+	pigen_transfer_transport_use *transport_uses = NULL;
+	size_t transport_use_count = 0;
+
+	if (destination.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, assignment->location,
+			"transfer destination requires a supported lvalue");
+	value = pigen_resolve_expression(resolver->syntax, model, module->scope,
+		assignment->as.nonblocking_assignment.value);
+	if (value.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, assignment->location,
+			"transfer value requires a supported expression");
+	if (!lvalue_is_assignable(model, destination))
+		return fail_location(resolver, assignment->location,
+			"transfer destination is not a writable variable or transport");
+	if (!analyze_transfer(resolver, destination, value, guard, domain,
+		assignment->location.source_span, &transport_uses,
+		&transport_use_count)) return 0;
+	transfer = pigen_transfer_add(model, assignment_id, module_id, process,
+		destination, value, guard, domain, transport_uses,
+		transport_use_count, assignment->location.source_span);
+	free(transport_uses);
+	if (transfer.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, assignment->location,
+			"invalid transfer semantic object");
+	return 1;
+}
+
+static int resolve_if_statement(resolver *resolver,
+	pigen_module_id module_id, pigen_process_id process,
+	pigen_clock_domain_id domain, const pigen_syntax_node *statement,
+	pigen_predicate_id guard)
+{
+	const pigen_semantic_module *module = pigen_module_get(resolver->model,
+		module_id);
+	pigen_expr_id condition = pigen_resolve_expression(resolver->syntax,
+		resolver->model, module->scope, statement->as.if_statement.condition);
+	pigen_predicate_id then_guard;
+	pigen_predicate_id else_guard;
+	pigen_syntax_id then_id = statement->first_child;
+	const pigen_syntax_node *then_statement = pigen_syntax_get(resolver->syntax,
+		then_id);
+	pigen_syntax_id else_id;
+
+	if (condition.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, statement->location,
+			"if condition requires a supported integral expression");
+	if (!then_statement)
+		return fail_location(resolver, statement->location,
+			"if statement requires a then branch");
+	else_id = then_statement->next_sibling;
+	if ((statement->as.if_statement.has_else &&
+		else_id.index == PIGEN_INVALID_ID) ||
+		(!statement->as.if_statement.has_else &&
+		else_id.index != PIGEN_INVALID_ID))
+		return fail_location(resolver, statement->location,
+			"invalid if branch structure");
+	if (else_id.index != PIGEN_INVALID_ID &&
+		pigen_syntax_get(resolver->syntax, else_id)->next_sibling.index !=
+			PIGEN_INVALID_ID)
+		return fail_location(resolver, statement->location,
+			"invalid if branch structure");
+	then_guard = pigen_predicate_and_condition(resolver->model, guard,
+		condition, 1);
+	else_guard = pigen_predicate_and_condition(resolver->model, guard,
+		condition, 0);
+	if (then_guard.index == PIGEN_INVALID_ID ||
+		else_guard.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, statement->location,
+			"invalid if condition predicate");
+	if (!resolve_procedural_statement(resolver, module_id, process, domain,
+		then_id, then_guard)) return 0;
+	return else_id.index == PIGEN_INVALID_ID ||
+		resolve_procedural_statement(resolver, module_id, process, domain,
+			else_id, else_guard);
+}
+
+static int resolve_procedural_statement(resolver *resolver,
+	pigen_module_id module_id, pigen_process_id process,
+	pigen_clock_domain_id domain, pigen_syntax_id statement_id,
+	pigen_predicate_id guard)
+{
+	const pigen_syntax_node *statement = pigen_syntax_get(resolver->syntax,
+		statement_id);
+	pigen_syntax_id child;
+
+	if (!statement) return 0;
+	if (statement->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT)
+		return resolve_assignment(resolver, module_id, process, domain,
+			statement_id, statement, guard);
+	if (statement->kind == PIGEN_SYNTAX_IF_STATEMENT)
+		return resolve_if_statement(resolver, module_id, process, domain,
+			statement, guard);
+	if (statement->kind != PIGEN_SYNTAX_PROCEDURAL_BLOCK)
+		return fail_location(resolver, statement->location,
+			"invalid procedural statement");
+	for (child = statement->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *known = pigen_syntax_get(resolver->syntax, child);
+		if (!resolve_procedural_statement(resolver, module_id, process, domain,
+			child, guard)) return 0;
+		child = known->next_sibling;
+	}
+	return 1;
 }
 
 static int add_clocked_process(resolver *resolver,
@@ -477,10 +616,8 @@ static int add_clocked_process(resolver *resolver,
 	const pigen_semantic_expr *clock_expression = pigen_expr_get(model, clock);
 	pigen_clock_domain_id domain;
 	pigen_process_id process;
-	pigen_predicate_id guard;
-	pigen_syntax_id block_id = syntax_node->first_child;
-	const pigen_syntax_node *block = pigen_syntax_get(resolver->syntax, block_id);
-	pigen_syntax_id assignment_id;
+	pigen_syntax_id body_id = syntax_node->first_child;
+	const pigen_syntax_node *body = pigen_syntax_get(resolver->syntax, body_id);
 
 	if (!clock_expression || clock_expression->kind != PIGEN_EXPR_SYMBOL ||
 		pigen_symbol_value(model, clock_expression->as.symbol).index ==
@@ -498,55 +635,11 @@ static int add_clocked_process(resolver *resolver,
 	if (process.index == PIGEN_INVALID_ID)
 		return fail_location(resolver, syntax_node->location,
 			"invalid clocked process");
-	if (!block || block->kind != PIGEN_SYNTAX_PROCEDURAL_BLOCK ||
-		block->next_sibling.index != PIGEN_INVALID_ID)
+	if (!body || body->next_sibling.index != PIGEN_INVALID_ID)
 		return fail_location(resolver, syntax_node->location,
-			"invalid procedural block");
-	guard = pigen_predicate_true(model);
-	for (assignment_id = block->first_child;
-		assignment_id.index != PIGEN_INVALID_ID; )
-	{
-		const pigen_syntax_node *assignment = pigen_syntax_get(resolver->syntax,
-			assignment_id);
-		pigen_expr_id destination_expression;
-		pigen_lvalue_id destination;
-		pigen_expr_id value;
-		pigen_transfer_id transfer;
-		pigen_transfer_transport_use *transport_uses = NULL;
-		size_t transport_use_count = 0;
-
-		if (!assignment ||
-			assignment->kind != PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT)
-			return fail_location(resolver, block->location,
-				"invalid procedural statement");
-		destination_expression = pigen_resolve_expression(resolver->syntax,
-			model, module->scope,
-			assignment->as.nonblocking_assignment.destination);
-		destination = pigen_lvalue_resolve(model, destination_expression);
-		if (destination.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, assignment->location,
-				"transfer destination requires a supported lvalue");
-		value = pigen_resolve_expression(resolver->syntax, model, module->scope,
-			assignment->as.nonblocking_assignment.value);
-		if (value.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, assignment->location,
-				"transfer value requires a supported expression");
-		if (!lvalue_is_assignable(model, destination))
-			return fail_location(resolver, assignment->location,
-				"transfer destination is not a writable variable or transport");
-		if (!analyze_transfer(resolver, destination, value, guard, domain,
-			assignment->location.source_span, &transport_uses,
-			&transport_use_count)) return 0;
-		transfer = pigen_transfer_add(model, assignment_id, module_id, process,
-			destination, value, guard, domain, transport_uses,
-			transport_use_count, assignment->location.source_span);
-		free(transport_uses);
-		if (transfer.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, assignment->location,
-				"invalid transfer semantic object");
-		assignment_id = assignment->next_sibling;
-	}
-	return 1;
+			"invalid procedural body");
+	return resolve_procedural_statement(resolver, module_id, process, domain,
+		body_id, pigen_predicate_true(model));
 }
 
 static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,

@@ -16,6 +16,7 @@ typedef enum {
 	PIGEN_SYNTAX_TRANSPORT_DECLARATOR,
 	PIGEN_SYNTAX_CLOCKED_PROCESS,
 	PIGEN_SYNTAX_PROCEDURAL_BLOCK,
+	PIGEN_SYNTAX_IF_STATEMENT,
 	PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT,
 	PIGEN_SYNTAX_OPAQUE
 } pigen_syntax_kind;
@@ -107,6 +108,10 @@ typedef struct {
 			pigen_syntax_edge edge;
 			pigen_syntax_expr_id clock;
 		} clocked_process;
+		struct {
+			pigen_syntax_expr_id condition;
+			int has_else;
+		} if_statement;
 		struct {
 			pigen_syntax_expr_id destination;
 			pigen_syntax_expr_id value;

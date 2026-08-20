@@ -546,11 +546,11 @@ The following limitations therefore still prevent cutover:
   aggregate parameter forms remain opaque until their types can be represented
   without approximation.
 - Procedural coverage does not yet comprehensively use the shared expression
-  arena.  Direct nonblocking
-  assignments in fully representable one-edge clocked bodies now do; guarded
-  controls, cases, explicit atomic blocks, and transport actions remain to be
-  added.  Until that path becomes authoritative and its textual scanner is
-  deleted, the production compiler remains textual.
+  arena.  Nonblocking assignments under recursively structured `begin`/`end`
+  and `if`/`else` controls in fully representable one-edge clocked bodies now
+  do.  Cases, explicit atomic blocks, and transport actions remain to be added.
+  Until that path becomes authoritative and its textual scanner is deleted,
+  the production compiler remains textual.
 
 Do not integrate the partial model into the production driver merely as an
 additional validation pass; that would create a second authority without
@@ -677,24 +677,29 @@ remain unrepresented until aggregate field types exist.  With direct, indexed,
 selected, grouped, and concatenated lvalues now structural, procedural transfer
 syntax can target this model without rescanning destination text.
 
-The first procedural syntax slice is deliberately all-or-nothing.  A plain
-`always` or `always_ff` with one `posedge` value name and a body consisting
-entirely of direct nonblocking assignments becomes a clocked-process node,
-one procedural-block node, and ordered assignment children.  Expression-arena
-counts are rolled back if any statement is not representable, and the complete
-process remains opaque; no partial clock or action facts survive.  This boundary
-must move outward as structured `if`/`else`, `case`, and action syntax land.
+The procedural syntax slice is deliberately all-or-nothing.  A plain `always`
+or `always_ff` with one `posedge` value name and a body recursively consisting
+of procedural blocks, `if`/`else` controls, and nonblocking assignments becomes
+a clocked-process tree.  The tree preserves source statement order, nested
+blocks, and SystemVerilog's nearest-unmatched-`if` association for a dangling
+`else`.  Syntax-node and expression-arena counts are rolled back if any
+statement is not representable, and the complete process remains opaque; no
+partial clock, guard, or action facts survive.  `syntax_test.c` exercises both
+nested dangling-else structure and rollback after a representable prefix.
 
 Resolution gives clock domains, process occurrences, and transfers distinct
 stable IDs.  Domains are interned by the resolved ordinary-value clock symbol,
 so separate processes on the same clock share identity while retaining distinct
-clock expression occurrences and provenance.  Each assignment resolves through
-the shared expression and recursive-lvalue services, carries the canonical true
-predicate for this direct-body slice, and owns its process and domain IDs.
-Ordinary nets and input ports are rejected as procedural destinations.  Every
-transport use in the lvalue—including index expressions—and RHS binds the
-transport to the process domain on first use; incompatible later use and direct
-buffered self-consumption are rejected structurally by transport identity.
+clock expression occurrences and provenance.  Each `if` condition resolves
+once through the shared typed-expression service.  Recursive resolution adds
+its truth or falsehood to the incoming canonical predicate, so every assignment
+owns its complete control guard as well as its process and domain IDs.  Reads
+needed by guard conditions join lvalue-index and RHS reads in the transfer's
+deduplicated incidence set; guard transports therefore bind to the same clock
+domain and participate in ownership and self-feedback checks.  Ordinary nets
+and input ports are rejected as procedural destinations.  Incompatible later
+domain use and direct buffered self-consumption are rejected structurally by
+transport identity.
 
 Resolved transfers now form an explicit transport hypergraph.  A transfer owns
 one compact, deduplicated incidence range whose entries pair `TransportId` with
@@ -703,10 +708,11 @@ transport reads in RHS expressions and lvalue indices are consumers.  The
 domain binder and self-feedback check consume this same range rather than
 walking syntax again.  After all modules resolve, whole-unit ownership analysis
 compares incidences by transport identity and permits repeated producers or
-consumers only when their canonical predicates are mutually exclusive.  The
-current direct-body slice gives every transfer the true predicate, so duplicate
-routes are rejected; structured controls will make the already-present
-predicate criterion useful without changing the graph representation.
+consumers only when their canonical predicates are mutually exclusive.
+Structured nested alternatives now exercise that criterion directly: guarded
+routes may share an endpoint only when opposite atoms prove their paths
+disjoint.  `resolve_test.c` covers pairwise-exclusive nested consumers and
+producers, a transport-valued condition, and unconditional conflicts.
 
 ## Rewrite strategy
 

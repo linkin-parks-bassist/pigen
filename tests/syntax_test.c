@@ -60,7 +60,11 @@ int main(void)
 		"  port logic unsigned [15:0] pulse;\n"
 		"  logic [7:0] memory [0:3];\n"
 		"  always @(posedge clk) begin\n"
-		"    right <= left;\n"
+		"    if (clk)\n"
+		"      if (clk)\n"
+		"        right <= left;\n"
+		"      else\n"
+		"        left <= right;\n"
 		"  end\n"
 		"endmodule\n"
 		"module ordinary #(parameter int X = 1);\n"
@@ -69,15 +73,27 @@ int main(void)
 		"endmodule\n";
 	const char invalid[] =
 		"module bad; fifo [7:0] queue; endmodule\n";
+	const char rollback[] =
+		"module rollback(input logic clk);\n"
+		"  buf bit left, right;\n"
+		"  always @(posedge clk) begin\n"
+		"    right <= left;\n"
+		"    $display(\"opaque\");\n"
+		"  end\n"
+		"endmodule\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "syntax.pigen", text,
 		strlen(text));
 	pigen_source_id bad_source = pigen_source_add(&sources, "bad.pigen", invalid,
 		strlen(invalid));
+	pigen_source_id rollback_source = pigen_source_add(&sources,
+		"rollback.pigen", rollback, strlen(rollback));
 	pigen_syntax_tree tree = {0};
 	pigen_syntax_tree bad_tree = {0};
+	pigen_syntax_tree rollback_tree = {0};
 	pigen_preprocess_result preprocessed = {0};
 	pigen_preprocess_result bad_preprocessed = {0};
+	pigen_preprocess_result rollback_preprocessed = {0};
 	pigen_preprocess_error preprocess_error = {0};
 	pigen_syntax_error error = {0};
 	const pigen_syntax_node *root;
@@ -163,23 +179,38 @@ int main(void)
 		{
 			const pigen_syntax_node *block = pigen_syntax_get(&tree,
 				node->first_child);
+			const pigen_syntax_node *outer_if;
+			const pigen_syntax_node *inner_if;
 			const pigen_syntax_node *assignment;
 			assert(node->as.clocked_process.edge == PIGEN_EDGE_POSEDGE);
 			assert(expression_is(&sources, &tree,
 				node->as.clocked_process.clock, "clk"));
 			assert(block && block->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK &&
 				block->parent.index == at.index);
-			assignment = pigen_syntax_get(&tree, block->first_child);
+			outer_if = pigen_syntax_get(&tree, block->first_child);
+			assert(outer_if && outer_if->kind == PIGEN_SYNTAX_IF_STATEMENT &&
+				!outer_if->as.if_statement.has_else);
+			inner_if = pigen_syntax_get(&tree, outer_if->first_child);
+			assert(inner_if && inner_if->kind == PIGEN_SYNTAX_IF_STATEMENT &&
+				inner_if->as.if_statement.has_else);
+			assignment = pigen_syntax_get(&tree, inner_if->first_child);
 			assert(assignment &&
 				assignment->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT &&
-				assignment->parent.index == node->first_child.index);
+				assignment->parent.index == outer_if->first_child.index);
 			assert(expression_is(&sources, &tree,
 				assignment->as.nonblocking_assignment.destination, "right"));
 			assert(expression_is(&sources, &tree,
 				assignment->as.nonblocking_assignment.value, "left"));
+			assignment = pigen_syntax_get(&tree, assignment->next_sibling);
+			assert(assignment &&
+				assignment->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
+			assert(expression_is(&sources, &tree,
+				assignment->as.nonblocking_assignment.destination, "left"));
+			assert(expression_is(&sources, &tree,
+				assignment->as.nonblocking_assignment.value, "right"));
 			assert(assignment->next_sibling.index == PIGEN_INVALID_ID);
 			clocked_processes++;
-			assignments++;
+			assignments += 2;
 			continue;
 		}
 		assert(node->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATION);
@@ -233,7 +264,7 @@ int main(void)
 	assert(parameters == 3);
 	assert(values == 1);
 	assert(clocked_processes == 1);
-	assert(assignments == 1);
+	assert(assignments == 2);
 	assert(unpacked_is_opaque);
 	assert(opaques >= 2);
 
@@ -241,11 +272,32 @@ int main(void)
 		&preprocess_error));
 	assert(!pigen_parse_syntax(&bad_preprocessed.expanded, &bad_tree, &error));
 	assert(error.message && strstr(error.message, "depth"));
+
+	assert(pigen_preprocess(&sources, rollback_source, NULL,
+		&rollback_preprocessed, &preprocess_error));
+	assert(pigen_parse_syntax(&rollback_preprocessed.expanded, &rollback_tree,
+		&error));
+	root = pigen_syntax_get(&rollback_tree, (pigen_syntax_id){0});
+	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
+	module = pigen_syntax_get(&rollback_tree, root->first_child);
+	assert(module && module->kind == PIGEN_SYNTAX_MODULE);
+	clocked_processes = 0;
+	for (at = module->first_child; at.index != PIGEN_INVALID_ID;
+		at = node->next_sibling)
+	{
+		node = pigen_syntax_get(&rollback_tree, at);
+		assert(node);
+		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS) clocked_processes++;
+	}
+	assert(!clocked_processes);
+	assert(rollback_tree.expressions.node_count == 0);
 	pigen_free_syntax_tree(&bad_tree);
+	pigen_free_syntax_tree(&rollback_tree);
 	pigen_free_syntax_tree(&tree);
 	pigen_free_preprocess_result(&bad_preprocessed);
+	pigen_free_preprocess_result(&rollback_preprocessed);
 	pigen_free_preprocess_result(&preprocessed);
 	pigen_free_sources(&sources);
-	puts("PASS: declarations and direct clocked assignments have structured syntax");
+	puts("PASS: declarations and recursive clocked controls have structured syntax");
 	return 0;
 }
