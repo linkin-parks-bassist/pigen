@@ -185,6 +185,32 @@ The example uses Pigen's intended data-first declaration syntax, described
 below. The current compiler's pipeline syntax uses ordinary SystemVerilog types
 inside the block.
 
+## Fabric blocks
+
+A `fabric` connects module endpoints while keeping routing out of the modules
+themselves:
+
+```systemverilog
+fabric system_bus #(
+    parameter integer PAYLOAD_W = 32
+) begin
+    dma.tx   >  memory.dma_rx;
+    cpu.tx   -> memory.rx;
+    debug.tx --> memory.rx;
+endfabric
+```
+
+`>` is a direct exclusive link. The routed forms build deterministic buffered
+interconnect and arbitrate where routes meet. Endpoints remain ordinary
+single-producer, single-consumer ready/valid interfaces; they do not need to
+know the topology or carry magic routing metadata.
+
+Pigen generates an SVG from the same topology used to generate the RTL:
+
+<img src="docs/fabric.svg" alt="A Pigen fabric with endpoints and routed links" width="900">
+
+Use `--diagram PATH` to choose the SVG path or `--no-diagram` to suppress it.
+
 ## FSM blocks
 
 An `fsm` is not a different model of hardware. It is the familiar synchronous
@@ -212,32 +238,6 @@ States, reset behaviour and transitions are explicit. The useful difference is
 that the state machine speaks the same transfer language as the datapath: it
 can wait on validity, readiness or an accepted transfer without rebuilding the
 handshake by hand.
-
-## Fabric blocks
-
-A `fabric` connects module endpoints while keeping routing out of the modules
-themselves:
-
-```systemverilog
-fabric system_bus #(
-    parameter integer PAYLOAD_W = 32
-) begin
-    dma.tx   >  memory.dma_rx;
-    cpu.tx   -> memory.rx;
-    debug.tx --> memory.rx;
-endfabric
-```
-
-`>` is a direct exclusive link. The routed forms build deterministic buffered
-interconnect and arbitrate where routes meet. Endpoints remain ordinary
-single-producer, single-consumer ready/valid interfaces; they do not need to
-know the topology or carry magic routing metadata.
-
-Pigen generates an SVG from the same topology used to generate the RTL:
-
-<img src="docs/fabric.svg" alt="A Pigen fabric with endpoints and routed links" width="900">
-
-Use `--diagram PATH` to choose the SVG path or `--no-diagram` to suppress it.
 
 ## SystemVerilog remains SystemVerilog
 
