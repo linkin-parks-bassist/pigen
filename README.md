@@ -170,7 +170,8 @@ and concatenation resolution, canonical
 constant expressions and packed-width algebra, predicate analysis, and
 identity-based expression-use and recursive projected/concatenated-lvalue
 analysis. One-edge clocked processes containing direct nonblocking assignments
-now also resolve into canonical clock domains and atomic transfer objects.
+now also resolve into canonical clock domains and atomic transfer objects with
+an explicit producer/consumer incidence graph and whole-unit ownership checks.
 These pieces are tested independently and are not yet the production lowering
 path.
 

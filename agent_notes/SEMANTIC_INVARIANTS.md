@@ -145,6 +145,10 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
   consumption, and production behavior.
 - An atomic transfer owns an ordered destination bit stream, one value bit
   stream, a guard predicate, a clock domain, and its source span.
+- Each transfer also owns one deduplicated incidence entry per participating
+  transport.  The entry records producer and consumer roles independently;
+  destination-index reads are consumers even though they occur syntactically
+  on the left-hand side.
 - All consuming sources and buffered destinations in a transfer advance
   together or none do. Constants and degenerate values do not consume.
 - A projected payload read consumes its complete base transport unless it is

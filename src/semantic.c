@@ -1894,21 +1894,38 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module_id,
 	pigen_process_id process_id, pigen_lvalue_id destination,
 	pigen_expr_id value, pigen_predicate_id guard,
-	pigen_clock_domain_id domain_id, pigen_source_span span)
+	pigen_clock_domain_id domain_id,
+	const pigen_transfer_transport_use *transport_uses,
+	size_t transport_use_count, pigen_source_span span)
 {
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	const pigen_semantic_process *process = pigen_process_get(model, process_id);
 	pigen_transfer_id result;
+	size_t i;
+	size_t j;
 
 	if (!module || !process || process->module.index != module_id.index ||
 		process->domain.index != domain_id.index ||
 		!pigen_clock_domain_get(model, domain_id) ||
 		!pigen_lvalue_get(model, destination) || !pigen_expr_get(model, value) ||
 		guard.index == PIGEN_INVALID_ID || guard.index >= model->predicate_count ||
+		(transport_use_count && !transport_uses) ||
 		!span_contains(process->span, span) || syntax.index == PIGEN_INVALID_ID ||
 		!pigen_source_span_valid(model->sources, span) ||
 		!id_capacity_available(model->transfer_count))
 		return INVALID_ID(pigen_transfer_id);
+	for (i = 0; i < transport_use_count; i++)
+	{
+		if (!pigen_transport_get(model, transport_uses[i].transport) ||
+			!transport_uses[i].roles ||
+			(transport_uses[i].roles & ~(PIGEN_TRANSFER_CONSUMER |
+				PIGEN_TRANSFER_PRODUCER)))
+			return INVALID_ID(pigen_transfer_id);
+		for (j = 0; j < i; j++)
+			if (transport_uses[j].transport.index ==
+				transport_uses[i].transport.index)
+				return INVALID_ID(pigen_transfer_id);
+	}
 	if (model->transfer_count == model->transfer_capacity)
 	{
 		model->transfer_capacity = model->transfer_capacity ?
@@ -1916,9 +1933,27 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 		model->transfers = pigen_resize(model->transfers,
 			model->transfer_capacity * sizeof(*model->transfers));
 	}
+	if (model->transfer_transport_use_count + transport_use_count >
+		model->transfer_transport_use_capacity)
+	{
+		size_t capacity = model->transfer_transport_use_capacity ?
+			model->transfer_transport_use_capacity * 2 : 32;
+		while (capacity < model->transfer_transport_use_count + transport_use_count)
+			capacity *= 2;
+		model->transfer_transport_uses = pigen_resize(
+			model->transfer_transport_uses,
+			capacity * sizeof(*model->transfer_transport_uses));
+		model->transfer_transport_use_capacity = capacity;
+	}
 	result = (pigen_transfer_id){(uint32_t)model->transfer_count};
 	model->transfers[model->transfer_count++] = (pigen_semantic_transfer){
-		syntax, module_id, process_id, destination, value, guard, domain_id, span};
+		syntax, module_id, process_id, destination, value, guard, domain_id,
+		model->transfer_transport_use_count, transport_use_count, span};
+	if (transport_use_count)
+		memcpy(model->transfer_transport_uses +
+			model->transfer_transport_use_count, transport_uses,
+			transport_use_count * sizeof(*transport_uses));
+	model->transfer_transport_use_count += transport_use_count;
 	return result;
 }
 
@@ -2028,6 +2063,18 @@ const pigen_semantic_transfer *pigen_transfer_get(
 	return &model->transfers[transfer.index];
 }
 
+const pigen_transfer_transport_use *pigen_transfer_transport_uses(
+	const pigen_semantic_model *model, pigen_transfer_id transfer_id)
+{
+	const pigen_semantic_transfer *transfer = pigen_transfer_get(model,
+		transfer_id);
+	if (!transfer || !transfer->transport_use_count ||
+		transfer->first_transport_use +
+		transfer->transport_use_count > model->transfer_transport_use_count)
+		return NULL;
+	return model->transfer_transport_uses + transfer->first_transport_use;
+}
+
 void pigen_free_semantic_model(pigen_semantic_model *model)
 {
 	free(model->types);
@@ -2050,5 +2097,6 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->clock_domains);
 	free(model->processes);
 	free(model->transfers);
+	free(model->transfer_transport_uses);
 	*model = (pigen_semantic_model){0};
 }

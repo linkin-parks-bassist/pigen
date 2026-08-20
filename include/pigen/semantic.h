@@ -355,8 +355,20 @@ typedef struct {
 	pigen_expr_id value;
 	pigen_predicate_id guard;
 	pigen_clock_domain_id domain;
+	size_t first_transport_use;
+	size_t transport_use_count;
 	pigen_source_span span;
 } pigen_semantic_transfer;
+
+typedef enum {
+	PIGEN_TRANSFER_CONSUMER = 1u << 0,
+	PIGEN_TRANSFER_PRODUCER = 1u << 1
+} pigen_transfer_transport_role;
+
+typedef struct {
+	pigen_transport_id transport;
+	unsigned roles;
+} pigen_transfer_transport_use;
 
 typedef struct {
 	const pigen_source_manager *sources;
@@ -420,6 +432,9 @@ typedef struct {
 	pigen_semantic_transfer *transfers;
 	size_t transfer_count;
 	size_t transfer_capacity;
+	pigen_transfer_transport_use *transfer_transport_uses;
+	size_t transfer_transport_use_count;
+	size_t transfer_transport_use_capacity;
 	pigen_scope_id compilation_scope;
 	pigen_type_id integer_type;
 	pigen_type_id boolean_result_type;
@@ -566,6 +581,8 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_process_id process,
 	pigen_lvalue_id destination, pigen_expr_id value,
 	pigen_predicate_id guard, pigen_clock_domain_id domain,
+	const pigen_transfer_transport_use *transport_uses,
+	size_t transport_use_count,
 	pigen_source_span span);
 pigen_module_id pigen_symbol_module(const pigen_semantic_model *model,
 	pigen_symbol_id symbol);
@@ -588,6 +605,8 @@ const pigen_semantic_clock_domain *pigen_clock_domain_get(
 const pigen_semantic_process *pigen_process_get(
 	const pigen_semantic_model *model, pigen_process_id process);
 const pigen_semantic_transfer *pigen_transfer_get(
+	const pigen_semantic_model *model, pigen_transfer_id transfer);
+const pigen_transfer_transport_use *pigen_transfer_transport_uses(
 	const pigen_semantic_model *model, pigen_transfer_id transfer);
 void pigen_free_semantic_model(pigen_semantic_model *model);
 

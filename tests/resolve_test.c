@@ -148,6 +148,7 @@ int main(void)
 	const pigen_semantic_transfer *second_transfer;
 	const pigen_semantic_lvalue *transfer_destination;
 	const pigen_semantic_expr *transfer_value;
+	const pigen_transfer_transport_use *transfer_uses;
 	const pigen_semantic_type *queue_type;
 	const pigen_semantic_type *left_type;
 	const pigen_semantic_type *boolean_type;
@@ -251,6 +252,24 @@ int main(void)
 	assert(first_transfer->domain.index == second_transfer->domain.index &&
 		first_transfer->guard.index == model.true_predicate.index &&
 		second_transfer->guard.index == model.true_predicate.index);
+	assert(first_transfer->transport_use_count == 2 &&
+		second_transfer->transport_use_count == 0);
+	transfer_uses = pigen_transfer_transport_uses(&model,
+		(pigen_transfer_id){0});
+	assert(transfer_uses);
+	assert(((transfer_uses[0].transport.index ==
+		pigen_symbol_transport(&model, right->symbol).index &&
+		transfer_uses[0].roles == PIGEN_TRANSFER_PRODUCER) ||
+		(transfer_uses[1].transport.index ==
+		pigen_symbol_transport(&model, right->symbol).index &&
+		transfer_uses[1].roles == PIGEN_TRANSFER_PRODUCER)));
+	assert(((transfer_uses[0].transport.index ==
+		pigen_symbol_transport(&model, left->symbol).index &&
+		transfer_uses[0].roles == PIGEN_TRANSFER_CONSUMER) ||
+		(transfer_uses[1].transport.index ==
+		pigen_symbol_transport(&model, left->symbol).index &&
+		transfer_uses[1].roles == PIGEN_TRANSFER_CONSUMER)));
+	assert(!pigen_transfer_transport_uses(&model, (pigen_transfer_id){1}));
 	transfer_destination = pigen_lvalue_get(&model,
 		first_transfer->destination);
 	transfer_value = pigen_expr_get(&model, first_transfer->value);
@@ -497,6 +516,14 @@ int main(void)
 		"always @(posedge clk_a) y <= x; "
 		"always @(posedge clk_b) y <= x; endmodule\n",
 		"across clock domains");
+	expect_resolve_error(
+		"module bad(input logic clk); buf [7:0] x, y, z; "
+		"always @(posedge clk) begin y <= x; z <= x; end endmodule\n",
+		"nonexclusive consumers");
+	expect_resolve_error(
+		"module bad(input logic clk); buf [7:0] x, y, z; "
+		"always @(posedge clk) begin y <= x; y <= z; end endmodule\n",
+		"nonexclusive producers");
 
 	pigen_free_semantic_model(&inout_model);
 	pigen_free_semantic_model(&unknown_model);

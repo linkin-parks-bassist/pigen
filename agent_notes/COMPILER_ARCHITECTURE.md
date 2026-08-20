@@ -696,6 +696,18 @@ transport use in the lvalue—including index expressions—and RHS binds the
 transport to the process domain on first use; incompatible later use and direct
 buffered self-consumption are rejected structurally by transport identity.
 
+Resolved transfers now form an explicit transport hypergraph.  A transfer owns
+one compact, deduplicated incidence range whose entries pair `TransportId` with
+producer and/or consumer role bits.  Buffered lvalue leaves are producers;
+transport reads in RHS expressions and lvalue indices are consumers.  The
+domain binder and self-feedback check consume this same range rather than
+walking syntax again.  After all modules resolve, whole-unit ownership analysis
+compares incidences by transport identity and permits repeated producers or
+consumers only when their canonical predicates are mutually exclusive.  The
+current direct-body slice gives every transfer the true predicate, so duplicate
+routes are rejected; structured controls will make the already-present
+predicate criterion useful without changing the graph representation.
+
 ## Rewrite strategy
 
 A roughly full rewrite of the compiler middle is warranted. It may be built in

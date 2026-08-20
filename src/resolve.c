@@ -389,14 +389,35 @@ static int lvalue_is_assignable(const pigen_semantic_model *model,
 	}
 }
 
-static int bind_transfer_domain(resolver *resolver, pigen_lvalue_id destination,
+static void add_transfer_transport_use(
+	pigen_transfer_transport_use **uses, size_t *count, size_t *capacity,
+	pigen_transport_id transport, unsigned roles)
+{
+	size_t i;
+	for (i = 0; i < *count; i++)
+		if ((*uses)[i].transport.index == transport.index)
+		{
+			(*uses)[i].roles |= roles;
+			return;
+		}
+	if (*count == *capacity)
+	{
+		*capacity = *capacity ? *capacity * 2 : 4;
+		*uses = pigen_resize(*uses, *capacity * sizeof(**uses));
+	}
+	(*uses)[(*count)++] = (pigen_transfer_transport_use){transport, roles};
+}
+
+static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 	pigen_expr_id value, pigen_predicate_id guard,
-	pigen_clock_domain_id domain, pigen_source_span span)
+	pigen_clock_domain_id domain, pigen_source_span span,
+	pigen_transfer_transport_use **transport_uses,
+	size_t *transport_use_count)
 {
 	pigen_expression_use_analysis destination_uses = {0};
 	pigen_expression_use_analysis value_uses = {0};
 	size_t i;
-	size_t j;
+	size_t capacity = 0;
 	int valid = pigen_analyze_lvalue_uses(resolver->model, destination, guard,
 		&destination_uses) &&
 		pigen_analyze_expression_uses(resolver->model, value, guard,
@@ -405,42 +426,43 @@ static int bind_transfer_domain(resolver *resolver, pigen_lvalue_id destination,
 	if (!valid)
 		fail(resolver, span, "cannot analyze transfer uses");
 	for (i = 0; valid && i < destination_uses.transport_count; i++)
-		if (!pigen_transport_bind_domain(resolver->model,
-			destination_uses.transports[i].transport, domain))
-		{
-			fail(resolver, span, "transport used across clock domains");
-			valid = 0;
-		}
-	for (i = 0; valid && i < value_uses.transport_count; i++)
-		if (!pigen_transport_bind_domain(resolver->model,
-			value_uses.transports[i].transport, domain))
-		{
-			fail(resolver, span, "transport used across clock domains");
-			valid = 0;
-		}
-	for (i = 0; valid && i < destination_uses.transport_count; i++)
 	{
-		if (!(destination_uses.transports[i].contexts &
-			PIGEN_EXPRESSION_USE_LVALUE)) continue;
+		unsigned roles = 0;
 		if (destination_uses.transports[i].contexts &
-			PIGEN_EXPRESSION_USE_INDEX)
+			PIGEN_EXPRESSION_USE_LVALUE) roles |= PIGEN_TRANSFER_PRODUCER;
+		if (destination_uses.transports[i].contexts &
+			(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_INDEX))
+			roles |= PIGEN_TRANSFER_CONSUMER;
+		if (roles) add_transfer_transport_use(transport_uses,
+			transport_use_count, &capacity,
+			destination_uses.transports[i].transport, roles);
+	}
+	for (i = 0; valid && i < value_uses.transport_count; i++)
+		add_transfer_transport_use(transport_uses, transport_use_count,
+			&capacity, value_uses.transports[i].transport,
+			PIGEN_TRANSFER_CONSUMER);
+	for (i = 0; valid && i < *transport_use_count; i++)
+		if ((*transport_uses)[i].roles ==
+			(PIGEN_TRANSFER_CONSUMER | PIGEN_TRANSFER_PRODUCER))
 		{
 			fail(resolver, span, "buffered transfer cannot source its destination");
 			valid = 0;
-			break;
 		}
-		for (j = 0; j < value_uses.transport_count; j++)
-			if (destination_uses.transports[i].transport.index ==
-				value_uses.transports[j].transport.index)
-			{
-				fail(resolver, span,
-					"buffered transfer cannot source its destination");
-				valid = 0;
-				break;
-			}
-	}
+	for (i = 0; valid && i < *transport_use_count; i++)
+		if (!pigen_transport_bind_domain(resolver->model,
+			(*transport_uses)[i].transport, domain))
+		{
+			fail(resolver, span, "transport used across clock domains");
+			valid = 0;
+		}
 	pigen_free_expression_use_analysis(&value_uses);
 	pigen_free_expression_use_analysis(&destination_uses);
+	if (!valid)
+	{
+		free(*transport_uses);
+		*transport_uses = NULL;
+		*transport_use_count = 0;
+	}
 	return valid;
 }
 
@@ -490,6 +512,8 @@ static int add_clocked_process(resolver *resolver,
 		pigen_lvalue_id destination;
 		pigen_expr_id value;
 		pigen_transfer_id transfer;
+		pigen_transfer_transport_use *transport_uses = NULL;
+		size_t transport_use_count = 0;
 
 		if (!assignment ||
 			assignment->kind != PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT)
@@ -510,10 +534,13 @@ static int add_clocked_process(resolver *resolver,
 		if (!lvalue_is_assignable(model, destination))
 			return fail_location(resolver, assignment->location,
 				"transfer destination is not a writable variable or transport");
-		if (!bind_transfer_domain(resolver, destination, value, guard, domain,
-			assignment->location.source_span)) return 0;
+		if (!analyze_transfer(resolver, destination, value, guard, domain,
+			assignment->location.source_span, &transport_uses,
+			&transport_use_count)) return 0;
 		transfer = pigen_transfer_add(model, assignment_id, module_id, process,
-			destination, value, guard, domain, assignment->location.source_span);
+			destination, value, guard, domain, transport_uses,
+			transport_use_count, assignment->location.source_span);
+		free(transport_uses);
 		if (transfer.index == PIGEN_INVALID_ID)
 			return fail_location(resolver, assignment->location,
 				"invalid transfer semantic object");
@@ -575,6 +602,51 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	return 1;
 }
 
+static int validate_transport_ownership(resolver *resolver)
+{
+	pigen_semantic_model *model = resolver->model;
+	size_t later_index;
+
+	for (later_index = 0; later_index < model->transfer_count; later_index++)
+	{
+		const pigen_semantic_transfer *later = pigen_transfer_get(model,
+			(pigen_transfer_id){(uint32_t)later_index});
+		const pigen_transfer_transport_use *later_uses =
+			pigen_transfer_transport_uses(model,
+				(pigen_transfer_id){(uint32_t)later_index});
+		size_t earlier_index;
+		size_t i;
+
+		for (earlier_index = 0; earlier_index < later_index; earlier_index++)
+		{
+			const pigen_semantic_transfer *earlier = pigen_transfer_get(model,
+				(pigen_transfer_id){(uint32_t)earlier_index});
+			const pigen_transfer_transport_use *earlier_uses =
+				pigen_transfer_transport_uses(model,
+					(pigen_transfer_id){(uint32_t)earlier_index});
+			size_t j;
+
+			if (pigen_predicates_mutually_exclusive(model, earlier->guard,
+				later->guard)) continue;
+			for (i = 0; i < later->transport_use_count; i++)
+				for (j = 0; j < earlier->transport_use_count; j++)
+				{
+					unsigned overlap;
+					if (later_uses[i].transport.index !=
+						earlier_uses[j].transport.index) continue;
+					overlap = later_uses[i].roles & earlier_uses[j].roles;
+					if (overlap & PIGEN_TRANSFER_CONSUMER)
+						return fail(resolver, later->span,
+							"transport has nonexclusive consumers");
+					if (overlap & PIGEN_TRANSFER_PRODUCER)
+						return fail(resolver, later->span,
+							"transport has nonexclusive producers");
+				}
+		}
+	}
+	return 1;
+}
+
 int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model,
 	pigen_resolve_error *error)
@@ -606,5 +678,5 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 			!add_module(&resolver, node, child)) return 0;
 		child = node->next_sibling;
 	}
-	return 1;
+	return validate_transport_ownership(&resolver);
 }
