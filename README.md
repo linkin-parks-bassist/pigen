@@ -187,29 +187,68 @@ inside the block.
 
 ## Fabric blocks
 
-A `fabric` connects module endpoints while keeping routing out of the modules
-themselves:
+A fabric is the easy way to hook the input and output ports of child modules
+together. It lives inside their parent module, alongside the instances it
+connects:
 
 ```systemverilog
-fabric system_bus #(
-    parameter integer PAYLOAD_W = 32
-) begin
-    dma.tx   >  memory.dma_rx;
-    cpu.tx   -> memory.rx;
-    debug.tx --> memory.rx;
-endfabric
+module system (...);
+    cpu    cpu    (...);
+    dma    dma    (...);
+    memory memory (...);
+    debug  debug  (...);
+
+    fabric interconnect begin
+        dma.requests   >  memory.dma_requests;
+        cpu.requests   -> memory.requests;
+        debug.requests --> memory.requests;
+    endfabric
+endmodule
 ```
 
-`>` is a direct exclusive link. The routed forms build deterministic buffered
-interconnect and arbitrate where routes meet. Endpoints remain ordinary
-single-producer, single-consumer ready/valid interfaces; they do not need to
-know the topology or carry magic routing metadata.
+The lines in the fabric are literally port-to-port connections: an output on
+one child instance to an input on another. The modules at either end remain
+source- and destination-blind. They see only their normal payload, valid and
+ready signals; none of them knows what it is connected to, how far away it is,
+or which other sources share the route.
+
+Pigen infers and checks the payload width from the two ports. There is no fabric
+width parameter to keep synchronized with the modules. It then builds the
+interconnect: endpoint queues, routing, pipelining, backpressure and arbitration
+are all consequences of those few connection lines.
+
+The routed arrows construct a balanced network of small three-port routers, so
+the number of router hops grows logarithmically rather than linearly with the
+number of endpoints. The fabric is deliberately skidward inside: endpoint and
+router buffering breaks long ready paths, absorbs backpressure and keeps every
+hop pipelined. When several routes want the same link, the router arbitrates
+them; the present implementation uses round-robin arbitration. Connection tiers
+are already part of the notation, and planned priority controls will make it
+possible to favour important traffic without teaching either endpoint about
+the fabric.
+
+Routes use compact relative addresses. Each router looks only at the next local
+turn and advances the route as the packet moves, rather than comparing a global
+destination address at every hop. Those route bits exist only inside the
+fabric. A plain `>` is the useful degenerate case: a direct, exclusive
+connection which bypasses the routed network altogether.
+
+The result is that growing or rearranging an interconnect is mostly a matter of
+adding or moving one readable line. The topology, route calculation,
+reachability checks, buffering and ready/valid plumbing stay automatic.
 
 Pigen generates an SVG from the same topology used to generate the RTL:
 
 <img src="docs/fabric.svg" alt="A Pigen fabric with endpoints and routed links" width="900">
 
 Use `--diagram PATH` to choose the SVG path or `--no-diagram` to suppress it.
+
+This inline, width-inferred form is the intended language shape. The current
+compiler still accepts fabrics as top-level blocks with one explicit shared
+payload width and lowers them to generated fabric modules. That form will be
+replaced, not retained as a second fabric dialect. A cleaner, struct-like child
+module instantiation syntax is planned too; the example uses ordinary
+SystemVerilog instances only to show which objects the fabric connects.
 
 ## FSM blocks
 
