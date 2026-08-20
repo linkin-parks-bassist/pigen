@@ -1,7 +1,8 @@
 # Pigen
 
-Pigen is a SystemVerilog extension for describing synchronous, flow-controlled
-hardware. It makes ready/valid transfer a language concept: values move when
+Pigen (short for *pi*peline *gen*erator) is a SystemVerilog extension for
+describing synchronous, flow-controlled hardware. It makes ready/valid transfer
+a language concept: values move when
 the source has a packet and the destination can accept it, while the compiler
 generates the valid bits, ready paths, storage control, and backpressure logic.
 
