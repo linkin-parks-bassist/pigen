@@ -12,6 +12,20 @@ static int span_is(const pigen_source_manager *sources, pigen_source_span span,
 	return text && length == strlen(expected) && !memcmp(text, expected, length);
 }
 
+static int span_contains(const pigen_source_manager *sources,
+	pigen_source_span span, const char *needle)
+{
+	size_t length;
+	size_t needle_length = strlen(needle);
+	const char *text = pigen_source_span_text(sources, span, &length);
+	size_t i;
+
+	if (!text || needle_length > length) return 0;
+	for (i = 0; i + needle_length <= length; i++)
+		if (!memcmp(text + i, needle, needle_length)) return 1;
+	return 0;
+}
+
 static int token_is(const pigen_expanded_source *source,
 	pigen_token_id token, const char *expected)
 {
@@ -44,6 +58,7 @@ int main(void)
 		"  buf signed [WIDTH-1:0] left, right;\n"
 		"  fifo packet_t[DEPTH] queue;\n"
 		"  port logic unsigned [15:0] pulse;\n"
+		"  logic [7:0] memory [0:3];\n"
 		"  always @(posedge clk) begin\n"
 		"    right <= left;\n"
 		"  end\n"
@@ -74,6 +89,8 @@ int main(void)
 	size_t opaques = 0;
 	size_t typedefs = 0;
 	size_t parameters = 0;
+	size_t values = 0;
+	int unpacked_is_opaque = 0;
 
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
@@ -101,6 +118,8 @@ int main(void)
 		if (node->kind == PIGEN_SYNTAX_OPAQUE)
 		{
 			opaques++;
+			if (span_contains(&sources, node->location.source_span, "memory"))
+				unpacked_is_opaque = 1;
 			continue;
 		}
 		if (node->kind == PIGEN_SYNTAX_TYPEDEF)
@@ -122,6 +141,20 @@ int main(void)
 			}
 			else
 				assert(!node->as.parameter.is_local);
+			continue;
+		}
+		if (node->kind == PIGEN_SYNTAX_VALUE_DECLARATION)
+		{
+			const pigen_syntax_node *declarator = pigen_syntax_get(&tree,
+				node->first_child);
+			assert(declarator &&
+				declarator->kind == PIGEN_SYNTAX_VALUE_DECLARATOR);
+			assert(token_is(&preprocessed.expanded,
+				declarator->as.value_declarator.name, "clk"));
+			assert(node->as.value_declaration.direction == PIGEN_DIRECTION_INPUT);
+			assert(node->as.value_declaration.storage == PIGEN_VALUE_NET);
+			assert(node->as.value_declaration.type.base == PIGEN_SYNTAX_TYPE_LOGIC);
+			values++;
 			continue;
 		}
 		assert(node->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATION);
@@ -173,6 +206,8 @@ int main(void)
 	assert(transports == 4);
 	assert(typedefs == 2);
 	assert(parameters == 3);
+	assert(values == 1);
+	assert(unpacked_is_opaque);
 	assert(opaques >= 2);
 
 	assert(pigen_preprocess(&sources, bad_source, NULL, &bad_preprocessed,
@@ -184,6 +219,6 @@ int main(void)
 	pigen_free_preprocess_result(&bad_preprocessed);
 	pigen_free_preprocess_result(&preprocessed);
 	pigen_free_sources(&sources);
-	puts("PASS: modules, parameters, typedefs, and transports have structured syntax");
+	puts("PASS: modules, parameters, typedefs, values, and transports have structured syntax");
 	return 0;
 }

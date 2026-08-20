@@ -1610,6 +1610,9 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 		case PIGEN_SYMBOL_PARAMETER:
 			symbol.object.parameter = INVALID_ID(pigen_parameter_id);
 			break;
+		case PIGEN_SYMBOL_VALUE:
+			symbol.object.value = INVALID_ID(pigen_value_id);
+			break;
 		case PIGEN_SYMBOL_TRANSPORT:
 			symbol.object.transport = INVALID_ID(pigen_transport_id);
 			break;
@@ -1625,7 +1628,6 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 		case PIGEN_SYMBOL_FABRIC:
 			symbol.object.fabric = INVALID_ID(pigen_fabric_id);
 			break;
-		case PIGEN_SYMBOL_VALUE:
 		case PIGEN_SYMBOL_TYPEDEF:
 			symbol.object.module = INVALID_ID(pigen_module_id);
 			break;
@@ -1729,6 +1731,44 @@ pigen_parameter_id pigen_parameter_add(pigen_semantic_model *model,
 	return result;
 }
 
+pigen_value_id pigen_value_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module_id,
+	pigen_symbol_id symbol_id, pigen_type_id type,
+	pigen_semantic_value_storage storage, pigen_semantic_direction direction,
+	pigen_source_span span)
+{
+	const pigen_semantic_module *module = pigen_module_get(model, module_id);
+	pigen_symbol *symbol = symbol_id.index < model->symbol_count ?
+		&model->symbols[symbol_id.index] : NULL;
+	pigen_value_id result;
+
+	if (!module || !symbol || symbol->kind != PIGEN_SYMBOL_VALUE ||
+		symbol->object.value.index != PIGEN_INVALID_ID ||
+		symbol->scope.index != module->scope.index ||
+		symbol->type.index != type.index ||
+		!spans_equal(symbol->declaration, span) || !pigen_type_get(model, type) ||
+		storage < PIGEN_SEMANTIC_VALUE_NET ||
+		storage > PIGEN_SEMANTIC_VALUE_VARIABLE ||
+		direction < PIGEN_SEMANTIC_INTERNAL ||
+		direction > PIGEN_SEMANTIC_INOUT ||
+		syntax.index == PIGEN_INVALID_ID ||
+		!pigen_source_span_valid(model->sources, span) ||
+		!id_capacity_available(model->value_count))
+		return INVALID_ID(pigen_value_id);
+	if (model->value_count == model->value_capacity)
+	{
+		model->value_capacity = model->value_capacity ?
+			model->value_capacity * 2 : 32;
+		model->values = pigen_resize(model->values,
+			model->value_capacity * sizeof(*model->values));
+	}
+	result = (pigen_value_id){(uint32_t)model->value_count};
+	model->values[model->value_count++] = (pigen_semantic_value){
+		syntax, module_id, symbol_id, type, storage, direction, span};
+	symbol->object.value = result;
+	return result;
+}
+
 pigen_transport_id pigen_transport_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module_id,
 	pigen_symbol_id symbol_id, pigen_type_id payload_type,
@@ -1796,6 +1836,18 @@ pigen_parameter_id pigen_symbol_parameter(const pigen_semantic_model *model,
 		symbol->object.parameter : INVALID_ID(pigen_parameter_id);
 }
 
+pigen_value_id pigen_symbol_value(const pigen_semantic_model *model,
+	pigen_symbol_id symbol_id)
+{
+	const pigen_symbol *symbol = pigen_symbol_get(model, symbol_id);
+	const pigen_semantic_value *value;
+	if (!symbol || symbol->kind != PIGEN_SYMBOL_VALUE)
+		return INVALID_ID(pigen_value_id);
+	value = pigen_value_get(model, symbol->object.value);
+	return value && value->symbol.index == symbol_id.index ?
+		symbol->object.value : INVALID_ID(pigen_value_id);
+}
+
 pigen_transport_id pigen_symbol_transport(const pigen_semantic_model *model,
 	pigen_symbol_id symbol_id)
 {
@@ -1825,6 +1877,14 @@ const pigen_semantic_parameter *pigen_parameter_get(
 	return &model->parameters[parameter.index];
 }
 
+const pigen_semantic_value *pigen_value_get(
+	const pigen_semantic_model *model, pigen_value_id value)
+{
+	if (value.index == PIGEN_INVALID_ID || value.index >= model->value_count)
+		return NULL;
+	return &model->values[value.index];
+}
+
 const pigen_semantic_transport *pigen_transport_get(
 	const pigen_semantic_model *model, pigen_transport_id transport)
 {
@@ -1851,6 +1911,7 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->lvalue_children);
 	free(model->modules);
 	free(model->parameters);
+	free(model->values);
 	free(model->transports);
 	*model = (pigen_semantic_model){0};
 }

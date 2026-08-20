@@ -165,7 +165,8 @@ transformation.
 A structured replacement frontend and compiler middle are now under active
 development. They already provide immutable source management, preprocessing
 with token provenance, syntax trees, scopes and symbols, structural types,
-typed expression, packed-projection, and concatenation resolution, canonical
+structured ordinary values and transports, typed expression, packed-projection,
+and concatenation resolution, canonical
 constant expressions and packed-width algebra, predicate analysis, and
 identity-based expression-use and recursive projected/concatenated-lvalue
 analysis. These pieces are tested independently and are not yet the production

@@ -171,6 +171,18 @@ static pigen_semantic_direction semantic_direction(pigen_syntax_direction direct
 	return PIGEN_SEMANTIC_INTERNAL;
 }
 
+static pigen_semantic_value_storage semantic_value_storage(
+	pigen_syntax_value_storage storage)
+{
+	switch (storage)
+	{
+		case PIGEN_VALUE_NET: return PIGEN_SEMANTIC_VALUE_NET;
+		case PIGEN_VALUE_VARIABLE: return PIGEN_SEMANTIC_VALUE_VARIABLE;
+	}
+	pigen_fail("invalid syntax value storage");
+	return PIGEN_SEMANTIC_VALUE_NET;
+}
+
 static int add_parameter(resolver *resolver, pigen_module_id module_id,
 	pigen_syntax_id syntax_id, const pigen_syntax_node *syntax_node)
 {
@@ -274,6 +286,50 @@ static int add_transport_declaration(resolver *resolver,
 	return 1;
 }
 
+static int add_value_declaration(resolver *resolver,
+	pigen_module_id module_id, const pigen_syntax_node *syntax_node)
+{
+	pigen_semantic_model *model = resolver->model;
+	const pigen_semantic_module *module = pigen_module_get(model, module_id);
+	pigen_type_id type = resolve_type(resolver, module->scope,
+		&syntax_node->as.value_declaration.type);
+	pigen_syntax_id declarator_id;
+
+	if (type.index == PIGEN_INVALID_ID) return 0;
+	for (declarator_id = syntax_node->first_child;
+		declarator_id.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *declarator = pigen_syntax_get(resolver->syntax,
+			declarator_id);
+		pigen_symbol_id symbol;
+		pigen_value_id value;
+		pigen_declare_result declared;
+
+		if (!declarator || declarator->kind != PIGEN_SYNTAX_VALUE_DECLARATOR)
+			return fail_location(resolver, syntax_node->location,
+				"invalid value declarator");
+		declared = pigen_symbol_declare(model, module->scope,
+			PIGEN_SYMBOL_VALUE, type,
+			token_spelling(resolver, declarator->as.value_declarator.name),
+			syntax_node->location.source_span, &symbol, NULL);
+		if (declared == PIGEN_DECLARE_DUPLICATE)
+			return fail_token(resolver, declarator->as.value_declarator.name,
+				"duplicate module declaration");
+		if (declared != PIGEN_DECLARE_OK)
+			return fail_location(resolver, syntax_node->location,
+				"invalid value declaration");
+		value = pigen_value_add(model, declarator_id, module_id, symbol, type,
+			semantic_value_storage(syntax_node->as.value_declaration.storage),
+			semantic_direction(syntax_node->as.value_declaration.direction),
+			syntax_node->location.source_span);
+		if (value.index == PIGEN_INVALID_ID)
+			return fail_location(resolver, declarator->location,
+				"invalid value semantic object");
+		declarator_id = declarator->next_sibling;
+	}
+	return 1;
+}
+
 static int add_typedef(resolver *resolver, pigen_scope_id scope,
 	const pigen_syntax_node *syntax_node)
 {
@@ -334,6 +390,8 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 			!add_parameter(resolver, module_id, child, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_TYPEDEF &&
 			!add_typedef(resolver, scope, node)) return 0;
+		if (node->kind == PIGEN_SYNTAX_VALUE_DECLARATION &&
+			!add_value_declaration(resolver, module_id, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATION &&
 			!add_transport_declaration(resolver, module_id, node)) return 0;
 		child = node->next_sibling;

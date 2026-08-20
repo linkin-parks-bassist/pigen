@@ -10,6 +10,8 @@ typedef enum {
 	PIGEN_SYNTAX_MODULE,
 	PIGEN_SYNTAX_PARAMETER,
 	PIGEN_SYNTAX_TYPEDEF,
+	PIGEN_SYNTAX_VALUE_DECLARATION,
+	PIGEN_SYNTAX_VALUE_DECLARATOR,
 	PIGEN_SYNTAX_TRANSPORT_DECLARATION,
 	PIGEN_SYNTAX_TRANSPORT_DECLARATOR,
 	PIGEN_SYNTAX_OPAQUE
@@ -28,6 +30,11 @@ typedef enum {
 	PIGEN_DIRECTION_OUTPUT,
 	PIGEN_DIRECTION_INOUT
 } pigen_syntax_direction;
+
+typedef enum {
+	PIGEN_VALUE_NET,
+	PIGEN_VALUE_VARIABLE
+} pigen_syntax_value_storage;
 
 typedef enum {
 	PIGEN_SYNTAX_SIGN_IMPLICIT,
@@ -75,6 +82,12 @@ typedef struct {
 			pigen_token_id name;
 			pigen_syntax_type type;
 		} type_definition;
+		struct {
+			pigen_syntax_direction direction;
+			pigen_syntax_value_storage storage;
+			pigen_syntax_type type;
+		} value_declaration;
+		struct { pigen_token_id name; } value_declarator;
 		struct {
 			pigen_syntax_transport_kind kind;
 			pigen_syntax_direction direction;

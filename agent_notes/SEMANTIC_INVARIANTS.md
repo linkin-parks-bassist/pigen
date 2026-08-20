@@ -49,6 +49,9 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 
 - Each declaration belongs to exactly one scope and introduces exactly one
   symbol identity.
+- An ordinary module value owns a distinct semantic identity, structural data
+  type, port direction, and net-or-variable storage class.  It is not modeled
+  as a transport merely because Pigen actions may read or write it.
 - A symbol for a semantic object has one typed binding back to that object, and
   the object has the same symbol identity.  Recovering a `TransportId`,
   `ParameterId`, or `ModuleId` from a resolved name is constant-time and never

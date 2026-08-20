@@ -20,6 +20,7 @@ PIGEN_ID_TYPE(pigen_const_expr_id);
 PIGEN_ID_TYPE(pigen_predicate_id);
 PIGEN_ID_TYPE(pigen_lvalue_id);
 PIGEN_ID_TYPE(pigen_parameter_id);
+PIGEN_ID_TYPE(pigen_value_id);
 PIGEN_ID_TYPE(pigen_transport_id);
 PIGEN_ID_TYPE(pigen_clock_domain_id);
 PIGEN_ID_TYPE(pigen_transfer_id);

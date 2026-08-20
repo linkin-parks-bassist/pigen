@@ -42,14 +42,32 @@ static const pigen_semantic_parameter *find_parameter(
 	return NULL;
 }
 
+static const pigen_semantic_value *find_value(
+	const pigen_source_manager *sources, const pigen_semantic_model *model,
+	const char *name)
+{
+	size_t i;
+	for (i = 0; i < model->value_count; i++)
+	{
+		const pigen_semantic_value *value = pigen_value_get(model,
+			(pigen_value_id){(uint32_t)i});
+		const pigen_symbol *symbol = pigen_symbol_get(model, value->symbol);
+		if (span_is(sources, symbol->name, name)) return value;
+	}
+	return NULL;
+}
+
 int main(void)
 {
 	const char text[] =
 		"typedef logic [31:0] word_t;\n"
-		"module first #(parameter WIDTH = 8, DEPTH = WIDTH / 2, ENABLED = DEPTH >= 4 && !(WIDTH == 0), SELECTED = ENABLED ? DEPTH : WIDTH, HEX = 8'hff, BINARY = 8'b1111_1111, SIGNED_VALUE = 18'sd8192, UNKNOWN_VALUE = 12'hx3z, MASK_DEPTH = HEX == BINARY ? 8'd4 : 8'd2, WIDE_HEX = 80'hffff_ffff_ffff_ffff_ffff, WIDE_DECIMAL = 80'd1208925819614629174706175);\n"
+		"module first #(parameter WIDTH = 8, DEPTH = WIDTH / 2, ENABLED = DEPTH >= 4 && !(WIDTH == 0), SELECTED = ENABLED ? DEPTH : WIDTH, HEX = 8'hff, BINARY = 8'b1111_1111, SIGNED_VALUE = 18'sd8192, UNKNOWN_VALUE = 12'hx3z, MASK_DEPTH = HEX == BINARY ? 8'd4 : 8'd2, WIDE_HEX = 80'hffff_ffff_ffff_ffff_ffff, WIDE_DECIMAL = 80'd1208925819614629174706175) (input logic clk, reset, output reg [7:0] count);\n"
 		"  localparam LAST = WIDTH - 1;\n"
 		"  localparam NONZERO = |WIDTH;\n"
 		"  typedef logic unsigned [LAST:NONZERO] byte_t;\n"
+		"  wire ready;\n"
+		"  logic [WIDTH-1:0] state, next_state;\n"
+		"  logic [7:0] memory [0:3];\n"
 		"  buf byte_t left, right;\n"
 		"  fifo word_t[MASK_DEPTH] queue;\n"
 		"endmodule\n"
@@ -89,6 +107,12 @@ int main(void)
 	const pigen_semantic_transport *left;
 	const pigen_semantic_transport *right;
 	const pigen_semantic_transport *queue;
+	const pigen_semantic_value *clk;
+	const pigen_semantic_value *reset;
+	const pigen_semantic_value *count;
+	const pigen_semantic_value *ready;
+	const pigen_semantic_value *state;
+	const pigen_semantic_value *next_state;
 	const pigen_semantic_module *first_module;
 	const pigen_semantic_type *queue_type;
 	const pigen_semantic_type *left_type;
@@ -140,6 +164,7 @@ int main(void)
 	assert(model.compilation_scope.index != PIGEN_INVALID_ID);
 	assert(model.module_count == 2);
 	assert(model.parameter_count == 13);
+	assert(model.value_count == 6);
 	assert(model.transport_count == 4);
 	first_module = pigen_module_get(&model, (pigen_module_id){0});
 	assert(first_module && first_module->scope.index != PIGEN_INVALID_ID);
@@ -151,6 +176,28 @@ int main(void)
 	right = find_transport(&sources, &model, "right");
 	queue = find_transport(&sources, &model, "queue");
 	assert(left && right && queue);
+	clk = find_value(&sources, &model, "clk");
+	reset = find_value(&sources, &model, "reset");
+	count = find_value(&sources, &model, "count");
+	ready = find_value(&sources, &model, "ready");
+	state = find_value(&sources, &model, "state");
+	next_state = find_value(&sources, &model, "next_state");
+	assert(clk && reset && count && ready && state && next_state);
+	assert(clk->direction == PIGEN_SEMANTIC_INPUT &&
+		clk->storage == PIGEN_SEMANTIC_VALUE_NET);
+	assert(reset->type.index == clk->type.index);
+	assert(count->direction == PIGEN_SEMANTIC_OUTPUT &&
+		count->storage == PIGEN_SEMANTIC_VALUE_VARIABLE);
+	assert(ready->direction == PIGEN_SEMANTIC_INTERNAL &&
+		ready->storage == PIGEN_SEMANTIC_VALUE_NET);
+	assert(state->storage == PIGEN_SEMANTIC_VALUE_VARIABLE &&
+		state->type.index == next_state->type.index);
+	assert(pigen_value_get(&model,
+		pigen_symbol_value(&model, clk->symbol)) == clk);
+	assert(pigen_value_get(&model,
+		pigen_symbol_value(&model, state->symbol)) == state);
+	assert(pigen_symbol_transport(&model, state->symbol).index ==
+		PIGEN_INVALID_ID);
 	width = find_parameter(&sources, &model, "WIDTH");
 	depth = find_parameter(&sources, &model, "DEPTH");
 	last = find_parameter(&sources, &model, "LAST");
@@ -373,6 +420,6 @@ int main(void)
 	pigen_free_preprocess_result(&duplicate_preprocessed);
 	pigen_free_preprocess_result(&preprocessed);
 	pigen_free_sources(&sources);
-	puts("PASS: parameters, typedefs, and transports resolve by scope and identity");
+	puts("PASS: parameters, typedefs, values, and transports resolve by scope and identity");
 	return 0;
 }

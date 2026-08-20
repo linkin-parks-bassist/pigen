@@ -129,6 +129,11 @@ typedef enum {
 	PIGEN_SEMANTIC_INOUT
 } pigen_semantic_direction;
 
+typedef enum {
+	PIGEN_SEMANTIC_VALUE_NET,
+	PIGEN_SEMANTIC_VALUE_VARIABLE
+} pigen_semantic_value_storage;
+
 typedef struct {
 	pigen_const_expr_id left;
 	pigen_const_expr_id right;
@@ -159,6 +164,7 @@ typedef struct {
 	union {
 		pigen_module_id module;
 		pigen_parameter_id parameter;
+		pigen_value_id value;
 		pigen_transport_id transport;
 		pigen_pipeline_id pipeline;
 		pigen_stage_id stage;
@@ -305,6 +311,16 @@ typedef struct {
 	pigen_syntax_id syntax;
 	pigen_module_id module;
 	pigen_symbol_id symbol;
+	pigen_type_id type;
+	pigen_semantic_value_storage storage;
+	pigen_semantic_direction direction;
+	pigen_source_span span;
+} pigen_semantic_value;
+
+typedef struct {
+	pigen_syntax_id syntax;
+	pigen_module_id module;
+	pigen_symbol_id symbol;
 	pigen_type_id payload_type;
 	pigen_expr_id fifo_depth;
 	pigen_semantic_transport_kind kind;
@@ -359,6 +375,9 @@ typedef struct {
 	pigen_semantic_parameter *parameters;
 	size_t parameter_count;
 	size_t parameter_capacity;
+	pigen_semantic_value *values;
+	size_t value_count;
+	size_t value_capacity;
 	pigen_semantic_transport *transports;
 	size_t transport_count;
 	size_t transport_capacity;
@@ -486,6 +505,10 @@ pigen_module_id pigen_module_add(pigen_semantic_model *model,
 pigen_parameter_id pigen_parameter_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
 	pigen_expr_id value, int is_local, pigen_source_span span);
+pigen_value_id pigen_value_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
+	pigen_type_id type, pigen_semantic_value_storage storage,
+	pigen_semantic_direction direction, pigen_source_span span);
 pigen_transport_id pigen_transport_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
 	pigen_type_id payload_type, pigen_expr_id fifo_depth,
@@ -495,12 +518,16 @@ pigen_module_id pigen_symbol_module(const pigen_semantic_model *model,
 	pigen_symbol_id symbol);
 pigen_parameter_id pigen_symbol_parameter(const pigen_semantic_model *model,
 	pigen_symbol_id symbol);
+pigen_value_id pigen_symbol_value(const pigen_semantic_model *model,
+	pigen_symbol_id symbol);
 pigen_transport_id pigen_symbol_transport(const pigen_semantic_model *model,
 	pigen_symbol_id symbol);
 const pigen_semantic_module *pigen_module_get(const pigen_semantic_model *model,
 	pigen_module_id module);
 const pigen_semantic_parameter *pigen_parameter_get(
 	const pigen_semantic_model *model, pigen_parameter_id parameter);
+const pigen_semantic_value *pigen_value_get(
+	const pigen_semantic_model *model, pigen_value_id value);
 const pigen_semantic_transport *pigen_transport_get(
 	const pigen_semantic_model *model, pigen_transport_id transport);
 void pigen_free_semantic_model(pigen_semantic_model *model);

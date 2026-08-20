@@ -424,6 +424,14 @@ corrections are complete:
   owning two declarator nodes; declaration identity no longer overlaps.
 - ANSI transport ports, including inherited comma-list declarators, use the
   same declaration representation as internal transports.
+- Supported ordinary ANSI ports and module values likewise use one declaration
+  node with ordered declarator children.  Each resolved declarator has its own
+  `ValueId`, bidirectional symbol binding, structural type, direction, and
+  net-or-variable storage class.  Clock and reset ports can therefore become
+  real expression operands and clock-domain inputs rather than names recovered
+  from opaque module text.  Declarations with unpacked dimensions remain wholly
+  opaque until array shape is represented in the type system; the frontend
+  does not publish a scalar or packed prefix as a misleading partial fact.
 
 Canonical constant expressions are a separate arena, identified by
 `pigen_const_expr_id`.  A source expression occurrence has an `ExprId`, type,
@@ -584,7 +592,8 @@ boolean result type, so callers do not privately intern competing builtin
 types.
 
 Symbols and their current semantic objects are bidirectionally linked.  Module,
-parameter, and transport arenas are grown only by semantic-model constructors;
+parameter, ordinary-value, and transport arenas are grown only by
+semantic-model constructors;
 each constructor validates scope ownership, type agreement, required constant
 expressions, and provenance before installing the object's typed identity in
 its symbol.  Typed symbol lookup functions verify the reverse link.  Expression
