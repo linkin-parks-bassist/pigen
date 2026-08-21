@@ -124,29 +124,6 @@ static int fill_decimal_literal(const char *digits, size_t length,
 	return any;
 }
 
-static pigen_type_id sized_literal_type(expression_resolver *resolver,
-	size_t width, int is_signed)
-{
-	pigen_packed_dimension dimension;
-	pigen_const_expr_id left;
-	pigen_const_expr_id right;
-
-	if (width == 1)
-		return pigen_type_intern(resolver->model, PIGEN_TYPE_LOGIC,
-			is_signed ? PIGEN_SIGN_SIGNED : PIGEN_SIGN_UNSIGNED,
-			INVALID_ID(pigen_symbol_id), NULL, 0);
-	left = pigen_const_expr_intern_integer(resolver->model,
-		(uint64_t)(width - 1), resolver->integer_type);
-	right = pigen_const_expr_intern_integer(resolver->model, 0,
-		resolver->integer_type);
-	if (left.index == PIGEN_INVALID_ID || right.index == PIGEN_INVALID_ID)
-		return INVALID_ID(pigen_type_id);
-	dimension = (pigen_packed_dimension){left, right};
-	return pigen_type_intern(resolver->model, PIGEN_TYPE_LOGIC,
-		is_signed ? PIGEN_SIGN_SIGNED : PIGEN_SIGN_UNSIGNED,
-		INVALID_ID(pigen_symbol_id), &dimension, 1);
-}
-
 static int based_literal(expression_resolver *resolver,
 	const pigen_syntax_expr *expression, pigen_bit_state **states,
 	size_t *state_count, pigen_type_id *type)
@@ -201,7 +178,8 @@ static int based_literal(expression_resolver *resolver,
 		*states = NULL;
 		return 0;
 	}
-	*type = sized_literal_type(resolver, width, is_signed);
+	*type = pigen_data_type_sized_logic(resolver->model, width,
+		is_signed ? PIGEN_SIGN_SIGNED : PIGEN_SIGN_UNSIGNED);
 	if (type->index == PIGEN_INVALID_ID)
 	{
 		free(*states);

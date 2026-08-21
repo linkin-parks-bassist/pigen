@@ -35,6 +35,44 @@ int pigen_data_type_is_integral(const pigen_semantic_model *model,
 		known->kind == PIGEN_TYPE_LOGIC || known->kind == PIGEN_TYPE_BIT);
 }
 
+pigen_state_domain pigen_data_type_state_domain(
+	const pigen_semantic_model *model, pigen_type_id type)
+{
+	const pigen_semantic_type *known = pigen_type_get(model,
+		underlying_type(model, type));
+
+	if (!known) return PIGEN_DATA_TYPE_STATE_INVALID;
+	if (known->kind == PIGEN_TYPE_BIT) return PIGEN_DATA_TYPE_STATE_TWO;
+	if (known->kind == PIGEN_TYPE_LOGIC || known->kind == PIGEN_TYPE_INTEGER)
+		return PIGEN_DATA_TYPE_STATE_FOUR;
+	return PIGEN_DATA_TYPE_STATE_INVALID;
+}
+
+pigen_type_id pigen_data_type_sized_logic(pigen_semantic_model *model,
+	size_t width, pigen_signedness signedness)
+{
+	pigen_packed_dimension dimension;
+	pigen_const_expr_id left;
+	pigen_const_expr_id right;
+	pigen_type_id integer_type;
+
+	if (!model || !width || (signedness != PIGEN_SIGN_SIGNED &&
+		signedness != PIGEN_SIGN_UNSIGNED))
+		return INVALID_ID(pigen_type_id);
+	if (width == 1)
+		return pigen_type_intern(model, PIGEN_TYPE_LOGIC, signedness,
+			INVALID_ID(pigen_symbol_id), NULL, 0);
+	integer_type = pigen_semantic_integer_type(model);
+	left = pigen_const_expr_intern_integer(model, (uint64_t)(width - 1),
+		integer_type);
+	right = pigen_const_expr_intern_integer(model, 0, integer_type);
+	if (left.index == PIGEN_INVALID_ID || right.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_type_id);
+	dimension = (pigen_packed_dimension){left, right};
+	return pigen_type_intern(model, PIGEN_TYPE_LOGIC, signedness,
+		INVALID_ID(pigen_symbol_id), &dimension, 1);
+}
+
 static int unary_boolean_result(pigen_unary_operator operator)
 {
 	return operator == PIGEN_UNARY_LOGICAL_NOT ||

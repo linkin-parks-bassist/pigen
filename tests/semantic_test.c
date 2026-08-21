@@ -67,6 +67,7 @@ int main(void)
 	pigen_type_id reverse_selected_type;
 	pigen_type_id indexed_selected_type;
 	pigen_type_id bit_type;
+	pigen_type_id sized_logic_type;
 	pigen_type_id bit_concat_type;
 	pigen_type_id mixed_concat_type;
 	pigen_shape_id scalar_shape;
@@ -235,6 +236,8 @@ int main(void)
 			PIGEN_SEMANTIC_SELECT_RANGE))->dimension_count == 1);
 	bit_type = pigen_type_intern(&model, PIGEN_TYPE_BIT,
 		PIGEN_SIGN_UNSIGNED, INVALID_ID(pigen_symbol_id), NULL, 0);
+	assert(pigen_data_type_state_domain(&model, bit_type) ==
+		PIGEN_DATA_TYPE_STATE_TWO);
 	concat_types[0] = bit_type;
 	concat_types[1] = bit_type;
 	bit_concat_type = pigen_type_concatenation(&model, concat_types, 2);
@@ -282,6 +285,17 @@ int main(void)
 		aliased_integer_type.index);
 	assert(!pigen_data_type_is_integral(&model,
 		INVALID_ID(pigen_type_id)));
+	assert(pigen_data_type_state_domain(&model, integer_type) ==
+		PIGEN_DATA_TYPE_STATE_FOUR);
+	assert(pigen_data_type_state_domain(&model, aliased_integer_type) ==
+		PIGEN_DATA_TYPE_STATE_FOUR);
+	sized_logic_type = pigen_data_type_sized_logic(&model, 8,
+		PIGEN_SIGN_SIGNED);
+	assert(sized_logic_type.index != PIGEN_INVALID_ID);
+	assert(pigen_type_get(&model, sized_logic_type)->kind == PIGEN_TYPE_LOGIC);
+	assert(pigen_type_get(&model, sized_logic_type)->signedness ==
+		PIGEN_SIGN_SIGNED);
+	assert(pigen_type_get(&model, sized_logic_type)->dimension_count == 1);
 	module_scope = pigen_scope_add(&model, model.compilation_scope, whole);
 	module = pigen_module_add(&model, (pigen_syntax_id){0}, module_symbol,
 		module_scope, whole);

@@ -956,23 +956,6 @@ pigen_const_expr_id pigen_type_packed_width(pigen_semantic_model *model,
 		INVALID_ID(pigen_const_expr_id);
 }
 
-static pigen_semantic_type_kind packed_state_kind(
-	const pigen_semantic_model *model, pigen_type_id type, size_t remaining)
-{
-	const pigen_semantic_type *known = pigen_type_get(model, type);
-	if (!known || !remaining) return PIGEN_TYPE_NAMED;
-	if (known->kind != PIGEN_TYPE_NAMED)
-		return known->kind == PIGEN_TYPE_BIT ?
-			PIGEN_TYPE_BIT : PIGEN_TYPE_LOGIC;
-	{
-		const pigen_symbol *symbol =
-			pigen_symbol_get(model, known->named_symbol);
-		return symbol && symbol->kind == PIGEN_SYMBOL_TYPEDEF ?
-			packed_state_kind(model, symbol->type, remaining - 1) :
-			PIGEN_TYPE_NAMED;
-	}
-}
-
 pigen_type_id pigen_type_concatenation(pigen_semantic_model *model,
 	const pigen_type_id *types, size_t count)
 {
@@ -992,14 +975,14 @@ pigen_type_id pigen_type_concatenation(pigen_semantic_model *model,
 	widths = pigen_resize(NULL, count * sizeof(*widths));
 	for (i = 0; i < count; i++)
 	{
-		pigen_semantic_type_kind child_kind =
-			packed_state_kind(model, types[i], model->type_count + 1);
-		if (child_kind != PIGEN_TYPE_BIT && child_kind != PIGEN_TYPE_LOGIC)
+		pigen_state_domain state = pigen_data_type_state_domain(model,
+			types[i]);
+		if (state == PIGEN_DATA_TYPE_STATE_INVALID)
 		{
 			free(widths);
 			return INVALID_ID(pigen_type_id);
 		}
-		if (child_kind == PIGEN_TYPE_LOGIC) kind = PIGEN_TYPE_LOGIC;
+		if (state == PIGEN_DATA_TYPE_STATE_FOUR) kind = PIGEN_TYPE_LOGIC;
 		widths[i] = pigen_type_packed_width(model, types[i]);
 		if (widths[i].index == PIGEN_INVALID_ID)
 		{

@@ -21,6 +21,12 @@ typedef enum {
 } pigen_signedness;
 
 typedef enum {
+	PIGEN_DATA_TYPE_STATE_INVALID,
+	PIGEN_DATA_TYPE_STATE_TWO,
+	PIGEN_DATA_TYPE_STATE_FOUR
+} pigen_state_domain;
+
+typedef enum {
 	PIGEN_SYMBOL_SIGNAL,
 	PIGEN_SYMBOL_MODULE,
 	PIGEN_SYMBOL_PARAMETER,
@@ -486,6 +492,10 @@ pigen_type_id pigen_semantic_integer_type(pigen_semantic_model *model);
 pigen_type_id pigen_semantic_boolean_result_type(pigen_semantic_model *model);
 int pigen_data_type_is_integral(const pigen_semantic_model *model,
 	pigen_type_id type);
+pigen_state_domain pigen_data_type_state_domain(
+	const pigen_semantic_model *model, pigen_type_id type);
+pigen_type_id pigen_data_type_sized_logic(pigen_semantic_model *model,
+	size_t width, pigen_signedness signedness);
 pigen_type_id pigen_data_type_unary_result(pigen_semantic_model *model,
 	pigen_unary_operator operator, pigen_type_id operand);
 pigen_type_id pigen_data_type_binary_result(pigen_semantic_model *model,
