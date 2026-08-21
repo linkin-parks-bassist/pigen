@@ -34,3 +34,7 @@ copy unless David explicitly wants it there.
 
 Runnable snippets must use syntax accepted by the current compiler unless they
 are plainly labelled as intended syntax.
+
+Prefer the concise state form in FSM examples. If an example genuinely needs a
+multi-statement state, format its opener as `state name: begin` on one line;
+never dangle the state body's `begin` beneath the state label.
