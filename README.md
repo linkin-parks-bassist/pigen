@@ -256,17 +256,9 @@ transfers left in their natural form:
 ```systemverilog
 fsm sender @(posedge clk) reset (reset) initial idle
 begin
-    state idle:
-    begin
-        if (start)
-            goto send;
-    end
+    state idle: if (start) goto send;
 
-    state send:
-    begin
-        if (destination <= source)
-            goto idle;
-    end
+    state send: if (destination <= source) goto idle;
 end
 ```
 

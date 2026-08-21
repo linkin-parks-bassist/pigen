@@ -279,6 +279,9 @@ contract stated in `SPEC.md`.
 
 - An FSM owns one state type, one initial state, a unique set of state
   identities, and transitions whose targets resolve to those identities.
+- A state body is one ordinary statement. A single statement follows
+  `state name:` directly; multiple statements use `begin`/`end`, with no
+  semantic difference beyond statement grouping.
 - State actions use the same expression, signal, guard, ownership, and clock
   services as ordinary transfers. An FSM does not privately rediscover them.
 - Transition priority and transfer atomicity are represented before RTL

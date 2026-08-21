@@ -598,14 +598,20 @@ SystemVerilog matching semantics.
 
 ## FSMs
 
+```text
+fsm-state ::= "state" identifier ":" statement
+```
+
+The state body follows the ordinary SystemVerilog statement rule: one statement
+needs no `begin`/`end`, while multiple statements use a sequential block. Thus
+`state idle: goto run;` and `state idle: begin ... end` introduce the same kind
+of state; the block changes only how many statements its body contains.
+
 ```systemverilog
 fsm sender @(posedge clk) reset (reset) initial idle
 begin
-    state idle:
-    begin
-        if (valid(in_packet))
-            goto send;
-    end
+    state idle: if (valid(in_packet)) goto send;
+
     state send:
     begin
         out_packet <= in_packet;

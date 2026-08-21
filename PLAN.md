@@ -165,6 +165,8 @@ operation semantics remain incomplete.
 - [ ] Represent state, initial state, transition, priority, guard, and action
   identities through shared scopes, expressions, signals, domains, and
   transfers.
+- [ ] Accept a single statement directly after `state name:` and use ordinary
+  `begin`/`end` only when a state contains multiple statements.
 - [ ] Lower FSM control into the common RTL IR and delete textual FSM lowering.
 
 ### 6. Migrate instances and fabrics
