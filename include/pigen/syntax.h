@@ -4,16 +4,17 @@
 #include <stddef.h>
 
 #include "pigen/expression.h"
+#include "pigen/transfer_type.h"
 
 typedef enum {
 	PIGEN_SYNTAX_COMPILATION_UNIT,
 	PIGEN_SYNTAX_MODULE,
 	PIGEN_SYNTAX_PARAMETER,
 	PIGEN_SYNTAX_TYPEDEF,
-	PIGEN_SYNTAX_VALUE_DECLARATION,
-	PIGEN_SYNTAX_VALUE_DECLARATOR,
-	PIGEN_SYNTAX_TRANSPORT_DECLARATION,
-	PIGEN_SYNTAX_TRANSPORT_DECLARATOR,
+	PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATION,
+	PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR,
+	PIGEN_SYNTAX_SIGNAL_DECLARATION,
+	PIGEN_SYNTAX_SIGNAL_DECLARATOR,
 	PIGEN_SYNTAX_CLOCKED_PROCESS,
 	PIGEN_SYNTAX_PROCEDURAL_BLOCK,
 	PIGEN_SYNTAX_IF_STATEMENT,
@@ -22,23 +23,11 @@ typedef enum {
 } pigen_syntax_kind;
 
 typedef enum {
-	PIGEN_TRANSPORT_BUF,
-	PIGEN_TRANSPORT_PORT,
-	PIGEN_TRANSPORT_SKID,
-	PIGEN_TRANSPORT_FIFO
-} pigen_syntax_transport_kind;
-
-typedef enum {
 	PIGEN_DIRECTION_INTERNAL,
 	PIGEN_DIRECTION_INPUT,
 	PIGEN_DIRECTION_OUTPUT,
 	PIGEN_DIRECTION_INOUT
 } pigen_syntax_direction;
-
-typedef enum {
-	PIGEN_VALUE_NET,
-	PIGEN_VALUE_VARIABLE
-} pigen_syntax_value_storage;
 
 typedef enum {
 	PIGEN_EDGE_POSEDGE,
@@ -93,17 +82,17 @@ typedef struct {
 		} type_definition;
 		struct {
 			pigen_syntax_direction direction;
-			pigen_syntax_value_storage storage;
+			pigen_transfer_type transfer_type;
 			pigen_syntax_type type;
-		} value_declaration;
-		struct { pigen_token_id name; } value_declarator;
+		} static_signal_declaration;
+		struct { pigen_token_id name; } static_signal_declarator;
 		struct {
-			pigen_syntax_transport_kind kind;
+			pigen_transfer_type transfer_type;
 			pigen_syntax_direction direction;
 			pigen_syntax_type payload;
 			pigen_syntax_expr_id fifo_depth;
-		} transport_declaration;
-		struct { pigen_token_id name; } transport_declarator;
+		} signal_declaration;
+		struct { pigen_token_id name; } signal_declarator;
 		struct {
 			pigen_syntax_edge edge;
 			pigen_syntax_expr_id clock;

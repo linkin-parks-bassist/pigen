@@ -26,7 +26,7 @@ fabric mixer_network #(
     mixer.output.metering -> meter.samples.mixer;
 
     // Local exclusive links deliberately bypass the routing network.
-    recorder.control.transport > storage.command;
+    recorder.control.request > storage.command;
     storage.status.position > recorder.position;
 
 endfabric

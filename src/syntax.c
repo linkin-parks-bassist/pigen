@@ -1,4 +1,4 @@
-/* Source-spanned syntax nodes for modules and internal transport declarations. */
+/* Source-spanned syntax nodes for modules and internal signal declarations. */
 #include <stdlib.h>
 #include <string.h>
 
@@ -112,13 +112,13 @@ static void add_opaque(syntax_parser *parser, pigen_syntax_id parent,
 	add_child(parser, parent, id);
 }
 
-static int transport_kind(const syntax_parser *parser, size_t at,
-	pigen_syntax_transport_kind *kind)
+static int transfer_type_at(const syntax_parser *parser, size_t at,
+	pigen_transfer_type *transfer_type)
 {
-	if (token_is(parser, at, "buf")) *kind = PIGEN_TRANSPORT_BUF;
-	else if (token_is(parser, at, "port")) *kind = PIGEN_TRANSPORT_PORT;
-	else if (token_is(parser, at, "skid")) *kind = PIGEN_TRANSPORT_SKID;
-	else if (token_is(parser, at, "fifo")) *kind = PIGEN_TRANSPORT_FIFO;
+	if (token_is(parser, at, "buf")) *transfer_type = PIGEN_TRANSFER_TYPE_BUF;
+	else if (token_is(parser, at, "port")) *transfer_type = PIGEN_TRANSFER_TYPE_PORT;
+	else if (token_is(parser, at, "skid")) *transfer_type = PIGEN_TRANSFER_TYPE_SKID;
+	else if (token_is(parser, at, "fifo")) *transfer_type = PIGEN_TRANSFER_TYPE_FIFO;
 	else return 0;
 	return 1;
 }
@@ -251,7 +251,7 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	if (final_group_is_depth && !payload_groups &&
 		type->base == PIGEN_SYNTAX_TYPE_IMPLICIT_LOGIC)
 		return fail(parser, *name_at,
-			"fifo declaration requires a payload type before its depth");
+			"fifo declaration requires a data type before its depth");
 	type->first_dimension = parser->tree->dimension_count;
 	type->dimension_count = payload_groups;
 	at = groups_start;
@@ -275,33 +275,33 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	return 1;
 }
 
-static pigen_syntax_id add_transport_declarator(syntax_parser *parser,
+static pigen_syntax_id add_signal_declarator(syntax_parser *parser,
 	pigen_syntax_id declaration, size_t name)
 {
 	pigen_syntax_node node = {0};
 	pigen_syntax_id id;
 
-	node.kind = PIGEN_SYNTAX_TRANSPORT_DECLARATOR;
+	node.kind = PIGEN_SYNTAX_SIGNAL_DECLARATOR;
 	node.location = range_location(parser, name, name + 1);
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
-	node.as.transport_declarator.name = (pigen_token_id){(uint32_t)name};
+	node.as.signal_declarator.name = (pigen_token_id){(uint32_t)name};
 	id = add_node(parser, node);
 	add_child(parser, declaration, id);
 	return id;
 }
 
-static pigen_syntax_id add_value_declarator(syntax_parser *parser,
+static pigen_syntax_id add_static_signal_declarator(syntax_parser *parser,
 	pigen_syntax_id declaration, size_t name)
 {
 	pigen_syntax_node node = {0};
 	pigen_syntax_id id;
 
-	node.kind = PIGEN_SYNTAX_VALUE_DECLARATOR;
+	node.kind = PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR;
 	node.location = range_location(parser, name, name + 1);
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
-	node.as.value_declarator.name = (pigen_token_id){(uint32_t)name};
+	node.as.static_signal_declarator.name = (pigen_token_id){(uint32_t)name};
 	id = add_node(parser, node);
 	add_child(parser, declaration, id);
 	return id;
@@ -350,7 +350,7 @@ static int parse_value(syntax_parser *parser, pigen_syntax_id module,
 	size_t name_start;
 	int explicit_data_type = 0;
 	pigen_syntax_direction direction = PIGEN_DIRECTION_INTERNAL;
-	pigen_syntax_value_storage storage;
+	pigen_transfer_type transfer_type;
 	pigen_syntax_type type = {0};
 	pigen_syntax_expr_id unused_depth = INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_node node = {0};
@@ -361,12 +361,12 @@ static int parse_value(syntax_parser *parser, pigen_syntax_id module,
 	else if (token_is(parser, at, "inout")) { direction = PIGEN_DIRECTION_INOUT; at++; }
 	if (token_is(parser, at, "wire"))
 	{
-		storage = PIGEN_VALUE_NET;
+		transfer_type = PIGEN_TRANSFER_TYPE_WIRE;
 		at++;
 	}
 	else if (token_is(parser, at, "reg"))
 	{
-		storage = PIGEN_VALUE_VARIABLE;
+		transfer_type = PIGEN_TRANSFER_TYPE_REG;
 		explicit_data_type = 1;
 		at++;
 	}
@@ -374,31 +374,31 @@ static int parse_value(syntax_parser *parser, pigen_syntax_id module,
 	{
 		explicit_data_type = token_is(parser, at, "logic") ||
 			token_is(parser, at, "bit");
-		storage = direction == PIGEN_DIRECTION_INTERNAL ||
+		transfer_type = direction == PIGEN_DIRECTION_INTERNAL ||
 			(direction == PIGEN_DIRECTION_OUTPUT && explicit_data_type) ?
-			PIGEN_VALUE_VARIABLE : PIGEN_VALUE_NET;
+			PIGEN_TRANSFER_TYPE_LOGIC : PIGEN_TRANSFER_TYPE_WIRE;
 	}
 	if (!parse_type(parser, at, type_limit, 0, 1, &type, &name_start,
 		&unused_depth)) return 0;
 
 	add_opaque(parser, module, *opaque_cursor, start);
-	node.kind = PIGEN_SYNTAX_VALUE_DECLARATION;
+	node.kind = PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATION;
 	node.location = range_location(parser, start, declaration_after);
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
-	node.as.value_declaration.direction = direction;
-	node.as.value_declaration.storage = storage;
-	node.as.value_declaration.type = type;
+	node.as.static_signal_declaration.direction = direction;
+	node.as.static_signal_declaration.transfer_type = transfer_type;
+	node.as.static_signal_declaration.type = type;
 	declaration_id = add_node(parser, node);
 	add_child(parser, module, declaration_id);
 	for (at = name_start; at < type_limit; )
 	{
 		if (!identifier(parser, at))
-			return fail(parser, at, "expected value name");
-		add_value_declarator(parser, declaration_id, at++);
+			return fail(parser, at, "expected signal name");
+		add_static_signal_declarator(parser, declaration_id, at++);
 		if (at == type_limit) break;
 		if (!token_is(parser, at, ","))
-			return fail(parser, at, "unsupported value declarator");
+			return fail(parser, at, "unsupported signal declarator");
 		at++;
 	}
 	*opaque_cursor = declaration_after;
@@ -406,14 +406,14 @@ static int parse_value(syntax_parser *parser, pigen_syntax_id module,
 	return 1;
 }
 
-static int parse_transport(syntax_parser *parser, pigen_syntax_id module,
+static int parse_signal(syntax_parser *parser, pigen_syntax_id module,
 	size_t start, size_t type_limit, size_t declaration_after,
 	syntax_cursor *opaque_cursor, pigen_syntax_id *declaration)
 {
 	size_t at = start;
 	size_t name_start;
 	pigen_syntax_direction direction = PIGEN_DIRECTION_INTERNAL;
-	pigen_syntax_transport_kind kind;
+	pigen_transfer_type transfer_type;
 	pigen_syntax_type payload = {0};
 	pigen_syntax_expr_id fifo_depth = INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_location declaration_location = range_location(parser, start,
@@ -424,31 +424,31 @@ static int parse_transport(syntax_parser *parser, pigen_syntax_id module,
 	if (token_is(parser, at, "input")) { direction = PIGEN_DIRECTION_INPUT; at++; }
 	else if (token_is(parser, at, "output")) { direction = PIGEN_DIRECTION_OUTPUT; at++; }
 	else if (token_is(parser, at, "inout")) { direction = PIGEN_DIRECTION_INOUT; at++; }
-	if (!transport_kind(parser, at, &kind))
+	if (!transfer_type_at(parser, at, &transfer_type))
 		return 0;
 	at++;
-	if (!parse_type(parser, at, type_limit, kind == PIGEN_TRANSPORT_FIFO, 0,
+	if (!parse_type(parser, at, type_limit, transfer_type == PIGEN_TRANSFER_TYPE_FIFO, 0,
 		&payload, &name_start, &fifo_depth)) return 0;
 
 	add_opaque(parser, module, *opaque_cursor, start);
-	node.kind = PIGEN_SYNTAX_TRANSPORT_DECLARATION;
+	node.kind = PIGEN_SYNTAX_SIGNAL_DECLARATION;
 	node.location = declaration_location;
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
-	node.as.transport_declaration.kind = kind;
-	node.as.transport_declaration.direction = direction;
-	node.as.transport_declaration.payload = payload;
-	node.as.transport_declaration.fifo_depth = fifo_depth;
+	node.as.signal_declaration.transfer_type = transfer_type;
+	node.as.signal_declaration.direction = direction;
+	node.as.signal_declaration.payload = payload;
+	node.as.signal_declaration.fifo_depth = fifo_depth;
 	declaration_id = add_node(parser, node);
 	add_child(parser, module, declaration_id);
 	for (at = name_start; at < type_limit; )
 	{
 		if (!identifier(parser, at))
-			return fail(parser, at, "expected transport name");
-		add_transport_declarator(parser, declaration_id, at++);
+			return fail(parser, at, "expected signal name");
+		add_signal_declarator(parser, declaration_id, at++);
 		if (at == type_limit) break;
 		if (!token_is(parser, at, ","))
-			return fail(parser, at, "expected `,` or `;` after transport name");
+			return fail(parser, at, "expected `,` or `;` after signal name");
 		at++;
 	}
 	*opaque_cursor = declaration_after;
@@ -645,14 +645,14 @@ static int parse_ansi_ports(syntax_parser *parser,
 
 	while (at < after)
 	{
-		pigen_syntax_transport_kind ignored;
+		pigen_transfer_type ignored;
 		size_t item_end = ansi_item_end(parser, at, after);
-		size_t kind_at = at;
+		size_t type_at = at;
 		int has_direction = token_is(parser, at, "input") ||
 			token_is(parser, at, "output") || token_is(parser, at, "inout");
 
-		if (has_direction) kind_at++;
-		if (transport_kind(parser, kind_at, &ignored))
+		if (has_direction) type_at++;
+		if (transfer_type_at(parser, type_at, &ignored))
 		{
 			pigen_syntax_id declaration;
 			size_t declaration_after = item_end;
@@ -660,7 +660,7 @@ static int parse_ansi_ports(syntax_parser *parser,
 
 			if (!has_direction)
 				return fail(parser, at,
-					"ANSI transport port requires `input` or `output`");
+					"ANSI signal port requires `input` or `output`");
 			while (continuation < after)
 			{
 				size_t next = continuation + 1;
@@ -669,13 +669,13 @@ static int parse_ansi_ports(syntax_parser *parser,
 				declaration_after = next_end;
 				continuation = next_end;
 			}
-			if (!parse_transport(parser, module, at, item_end,
+			if (!parse_signal(parser, module, at, item_end,
 				declaration_after, opaque_cursor, &declaration)) return 0;
 			continuation = item_end;
 			while (continuation < declaration_after)
 			{
 				size_t next = continuation + 1;
-				add_transport_declarator(parser, declaration, next);
+				add_signal_declarator(parser, declaration, next);
 				continuation = ansi_item_end(parser, next, after);
 			}
 			item_end = declaration_after;
@@ -700,7 +700,7 @@ static int parse_ansi_ports(syntax_parser *parser,
 			while (continuation < declaration_after)
 			{
 				size_t next = continuation + 1;
-				add_value_declarator(parser, declaration, next);
+				add_static_signal_declarator(parser, declaration, next);
 				continuation = ansi_item_end(parser, next, after);
 			}
 			item_end = declaration_after;
@@ -902,8 +902,8 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 
 	while (at < after)
 	{
-		pigen_syntax_transport_kind ignored;
-		size_t kind_at = at;
+		pigen_transfer_type ignored;
+		size_t type_at = at;
 		int candidate;
 		if (item_start && (token_is(parser, at, "always") ||
 			token_is(parser, at, "always_ff")))
@@ -943,15 +943,15 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 		}
 		if (item_start && (token_is(parser, at, "input") ||
 			token_is(parser, at, "output") || token_is(parser, at, "inout")))
-			kind_at++;
-		candidate = item_start && transport_kind(parser, kind_at, &ignored);
+			type_at++;
+		candidate = item_start && transfer_type_at(parser, type_at, &ignored);
 		if (candidate)
 		{
 			size_t semicolon = at;
 			while (semicolon < after && !token_is(parser, semicolon, ";")) semicolon++;
 			if (semicolon == after)
-				return fail(parser, at, "unterminated transport declaration");
-			if (!parse_transport(parser, module, at, semicolon, semicolon + 1,
+				return fail(parser, at, "unterminated signal declaration");
+			if (!parse_signal(parser, module, at, semicolon, semicolon + 1,
 				opaque_cursor, NULL)) return 0;
 			at = semicolon + 1;
 			item_start = 1;
@@ -962,7 +962,7 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 		{
 			size_t semicolon = top_level_token(parser, at, after, ";");
 			if (semicolon == after)
-				return fail(parser, at, "unterminated value declaration");
+				return fail(parser, at, "unterminated signal declaration");
 			if (!parse_value(parser, module, at, semicolon, semicolon + 1,
 				opaque_cursor, NULL)) return 0;
 			at = semicolon + 1;

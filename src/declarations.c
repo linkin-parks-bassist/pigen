@@ -1,4 +1,4 @@
-/* Transport declaration parsing and primitive-instance emission. */
+/* Signal declaration parsing and primitive-instance emission. */
 #include <string.h>
 #include <stdlib.h>
 
@@ -43,11 +43,11 @@ static int last_identifier(const char *start, const char *end, const char **name
 }
 
 /* Accept a primitive after an ANSI port direction, if one is present. */
-char pigen_declaration_kind(const char *start, const char *end, const char **keyword, const char **after_keyword)
+char pigen_declaration_transfer_type(const char *start, const char *end, const char **keyword, const char **after_keyword)
 {
 	const char *cursor = pigen_skip_spaces(start, end);
 	const char *word_start;
-	char kind;
+	char transfer_type;
 	
 	if ((size_t)(end - cursor) >= 5 && !memcmp(cursor, "input", 5) &&
 		(cursor + 5 == end || !pigen_is_identifier_char(cursor[5])))
@@ -63,36 +63,36 @@ char pigen_declaration_kind(const char *start, const char *end, const char **key
 	while (cursor < end && pigen_is_identifier_char((unsigned char)*cursor))
 		cursor++;
 	
-	kind = pigen_type_kind_for_keyword(word_start, (size_t)(cursor - word_start));
-	if (kind)
+	transfer_type = pigen_transfer_type_for_keyword(word_start, (size_t)(cursor - word_start));
+	if (transfer_type)
 	{
 		*keyword = word_start;
 		*after_keyword = cursor;
-		return kind;
+		return transfer_type;
 	}
 
 	return 0;
 }
 
-int pigen_is_storage_kind(char kind)
+int pigen_transfer_type_has_storage(char transfer_type)
 {
-	const pigen_type_descriptor *descriptor = pigen_type_descriptor_for_kind(kind);
+	const pigen_transfer_type_descriptor *descriptor = pigen_transfer_type_descriptor_get(transfer_type);
 
 	return descriptor && descriptor->is_storage;
 }
 
-static int is_constant_kind(char kind)
+static int is_static_transfer_type(char transfer_type)
 {
-	return kind == 'w' || kind == 'r' || kind == 'l';
+	return transfer_type == 'w' || transfer_type == 'r' || transfer_type == 'l';
 }
 
 void pigen_append_control_name(pigen_string *output, const char *name, size_t name_length, const char *suffix);
 
-void pigen_emit_transport_condition(pigen_string *output, pigen_primitive *primitive, const char *suffix)
+void pigen_emit_signal_condition(pigen_string *output, pigen_primitive *primitive, const char *suffix)
 {
-	if (is_constant_kind(primitive->kind))
+	if (is_static_transfer_type(primitive->transfer_type))
 	{
-		if (!strcmp(suffix, "valid") || primitive->kind != 'w')
+		if (!strcmp(suffix, "valid") || primitive->transfer_type != 'w')
 			pigen_append(output, "1'b1");
 		else
 			pigen_append(output, "1'b0");
@@ -201,7 +201,7 @@ static const char *payload_start(const char *start, const char *end)
 	
 	if ((size_t)(end - start) >= 5 && !memcmp(start, "logic", 5) &&
 		(start + 5 == end || !pigen_is_identifier_char(start[5])))
-		pigen_fail("transport types replace logic; write `buf [WIDTH:0] name`");
+		pigen_fail("transfer types replace logic here; write `buf [WIDTH:0] name`");
 	
 	return start;
 }
@@ -221,7 +221,7 @@ static void append_port_control_name(pigen_string *output, const char *name, siz
 	pigen_append(output, suffix);
 }
 
-static void append_payload_type(pigen_string *output, const char *start, const char *end)
+static void append_data_type(pigen_string *output, const char *start, const char *end)
 {
 	const char *trimmed = pigen_skip_spaces(start, end);
 	if (trimmed < end && *trimmed == '[')
@@ -234,10 +234,10 @@ static void append_payload_type(pigen_string *output, const char *start, const c
 	pigen_append_range(output, start, (size_t)(end - start));
 }
 
-static int is_unpacked_reg_array(char kind, const char *after_keyword, const char *end)
+static int is_unpacked_reg_array(char transfer_type, const char *after_keyword, const char *end)
 {
 	const char *cursor;
-	if (kind != 'r' && kind != 'l') return 0;
+	if (transfer_type != 'r' && transfer_type != 'l') return 0;
 	cursor = pigen_skip_spaces(after_keyword, end);
 	if (((size_t)(end - cursor) >= 6 && !memcmp(cursor, "signed", 6) &&
 		(cursor + 6 == end || !pigen_is_identifier_char(cursor[6]))) ||
@@ -256,17 +256,17 @@ static int is_unpacked_reg_array(char kind, const char *after_keyword, const cha
 }
 
 /* Ordinary SV permits a comma-separated list of scalar wire/register names.
- * They are not transports, but Pigen must record each one so a later transfer
+ * They are not signals, but Pigen must record each one so a later transfer
  * can identify its destination. */
 static int emit_plain_declaration_list(pigen_string *output, const char *start,
-	const char *after_keyword, const char *end, pigen_primitives *primitives, char kind)
+	const char *after_keyword, const char *end, pigen_primitives *primitives, char transfer_type)
 {
 	const char *cursor;
 	const char *part_start = after_keyword;
 	int parens = 0, brackets = 0, braces = 0;
 	int has_comma = 0;
 
-	if (kind != 'w' && kind != 'r' && kind != 'l') return 0;
+	if (transfer_type != 'w' && transfer_type != 'r' && transfer_type != 'l') return 0;
 	for (cursor = after_keyword; cursor < end; cursor++)
 	{
 		if (*cursor == '(') parens++;
@@ -290,7 +290,7 @@ static int emit_plain_declaration_list(pigen_string *output, const char *start,
 			size_t name_length;
 			if (!last_identifier(part_start, cursor, &name, &name_length))
 				pigen_fail("declaration list requires an identifier after each comma");
-			pigen_add_primitive(primitives, name, name_length, kind, 1);
+			pigen_add_primitive(primitives, name, name_length, transfer_type, 1);
 			if (cursor == end) break;
 			part_start = cursor + 1;
 		}
@@ -300,11 +300,11 @@ static int emit_plain_declaration_list(pigen_string *output, const char *start,
 	return 1;
 }
 
-/* A transport list is merely concise spelling for several declarations with
- * the same payload type.  Lower each member through the normal single-name
+/* A signal list is merely concise spelling for several declarations with
+ * the same data type. Lower each member through the normal single-name
  * path, so each receives its own endpoint and primitive instance. */
-static int emit_transport_declaration_list(pigen_string *output, const char *keyword,
-	const char *after_keyword, const char *end, pigen_primitives *primitives, char kind)
+static int emit_signal_declaration_list(pigen_string *output, const char *keyword,
+	const char *after_keyword, const char *end, pigen_primitives *primitives, char transfer_type)
 {
 	const char *cursor;
 	const char *first_comma = NULL;
@@ -315,7 +315,7 @@ static int emit_transport_declaration_list(pigen_string *output, const char *key
 	size_t keyword_length = 0;
 	int parens = 0, brackets = 0, braces = 0;
 
-	if (!pigen_is_storage_kind(kind)) return 0;
+	if (!pigen_transfer_type_has_storage(transfer_type)) return 0;
 	while (pigen_is_identifier_char((unsigned char)keyword[keyword_length])) keyword_length++;
 	for (cursor = after_keyword; cursor < end; cursor++)
 	{
@@ -342,7 +342,7 @@ static int emit_transport_declaration_list(pigen_string *output, const char *key
 		size_t name_length;
 		pigen_string declaration = {0};
 		if (!last_identifier(part_start, part_end, &name, &name_length))
-			pigen_fail("transport declaration list requires an identifier after each comma");
+			pigen_fail("signal declaration list requires an identifier after each comma");
 		pigen_append_range(&declaration, keyword, keyword_length);
 		pigen_append(&declaration, " ");
 		pigen_append_range(&declaration, after_keyword, (size_t)(payload_end - after_keyword));
@@ -382,33 +382,33 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 	const char *payload_end;
 	const char *fifo_payload_end = NULL;
 	const char *primitive_module;
-	const pigen_type_descriptor *descriptor;
+	const pigen_transfer_type_descriptor *descriptor;
 	const char *fifo_depth = NULL;
 	size_t fifo_depth_length = 0;
 	size_t name_length;
-	char kind = pigen_declaration_kind(start, end, &keyword, &after_keyword);
+	char transfer_type = pigen_declaration_transfer_type(start, end, &keyword, &after_keyword);
 
-	if (emit_plain_declaration_list(output, start, after_keyword, end, primitives, kind))
+	if (emit_plain_declaration_list(output, start, after_keyword, end, primitives, transfer_type))
 		return;
-	if (emit_transport_declaration_list(output, keyword, after_keyword, end, primitives, kind))
+	if (emit_signal_declaration_list(output, keyword, after_keyword, end, primitives, transfer_type))
 		return;
 
-	/* Plain unpacked reg/logic arrays are ordinary SV memories, not transport
+	/* Plain unpacked reg/logic arrays are ordinary SV memories, not signal
 	 * declarations.  Preserve them so a port write can infer a synchronous RAM. */
-	if (is_unpacked_reg_array(kind, after_keyword, end))
+	if (is_unpacked_reg_array(transfer_type, after_keyword, end))
 	{
 		pigen_append_range(output, start, (size_t)(end - start));
 		pigen_append(output, ";");
 		return;
 	}
 	
-	if (kind == 'f')
+	if (transfer_type == 'f')
 		after_keyword = fifo_payload_start(after_keyword, end, &fifo_depth, &fifo_depth_length, &fifo_payload_end);
 
 	after_keyword = payload_start(after_keyword, end);
 	end = pigen_trim_end(after_keyword, end);
 	
-	if (!kind || !last_identifier(after_keyword, end, &name, &name_length))
+	if (!transfer_type || !last_identifier(after_keyword, end, &name, &name_length))
 	{
 		pigen_append_range(output, start, (size_t)(end - start));
 		pigen_append(output, ";");
@@ -432,17 +432,17 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 
 	payload_end = fifo_payload_end ? fifo_payload_end : pigen_trim_end(after_keyword, name);
 	pigen_append(output, "\t");
-	append_payload_type(output, after_keyword, payload_end);
+	append_data_type(output, after_keyword, payload_end);
 	pigen_append(output, " ");
 	pigen_append_range(output, name, name_length);
 	pigen_append(output, ";\n\n");
 
-	if (pigen_is_storage_kind(kind))
+	if (pigen_transfer_type_has_storage(transfer_type))
 	{
 		/* A port payload is written directly by its source always_ff block.
 		 * Keeping it out of a wrapper primitive lets synchronous RAM reads infer
 		 * without a write-enable on the payload register. */
-		if (kind == 'h')
+		if (transfer_type == 'h')
 		{
 			pigen_append(output, "\tlogic ");
 			pigen_append_control_name(output, name, name_length, "valid");
@@ -461,15 +461,15 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 			pigen_append(output, ";\n\tassign ");
 			pigen_append_control_name(output, name, name_length, "out_ready");
 			pigen_append(output, " = 1'b1;\n\n");
-			pigen_add_primitive(primitives, name, name_length, kind, 1);
+			pigen_add_primitive(primitives, name, name_length, transfer_type, 1);
 			pigen_set_port_metadata(primitives, name, name_length, after_keyword,
 				(size_t)(payload_end - after_keyword), NULL, 0, 0);
 			return;
 		}
-		descriptor = pigen_type_descriptor_for_kind(kind);
+		descriptor = pigen_transfer_type_descriptor_get(transfer_type);
 		primitive_module = descriptor->primitive_module;
 		pigen_append(output, "\ttypedef ");
-		append_payload_type(output, after_keyword, payload_end);
+		append_data_type(output, after_keyword, payload_end);
 		pigen_append(output, " ");
 		pigen_append_control_name(output, name, name_length, "payload_t");
 		pigen_append(output, ";\n");
@@ -478,7 +478,7 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, name, name_length, "in_ready");
 		pigen_append(output, ";\n\t");
-		append_payload_type(output, after_keyword, payload_end);
+		append_data_type(output, after_keyword, payload_end);
 		pigen_append(output, " ");
 		pigen_append_control_name(output, name, name_length, "packet_in");
 		pigen_append(output, ";\n\tlogic ");
@@ -496,21 +496,21 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, name, name_length, "force_after_transfer");
 		pigen_append(output, ";\n\n\t");
-		if (kind == 'i')
+		if (transfer_type == 'i')
 		{
 			/* An ingress has the standard destination endpoint, but no storage:
 			 * its `in_ready` is driven by the consuming pipeline stage. */
-			pigen_add_primitive(primitives, name, name_length, kind, 1);
+			pigen_add_primitive(primitives, name, name_length, transfer_type, 1);
 			pigen_set_port_metadata(primitives, name, name_length, after_keyword,
 				(size_t)(payload_end - after_keyword), NULL, 0, 0);
 			return;
 		}
 		pigen_append(output, primitive_module);
 		pigen_append(output, " #(\n\t\t.PAYLOAD_T(");
-		append_payload_type(output, after_keyword, payload_end);
+		append_data_type(output, after_keyword, payload_end);
 		pigen_append(output, ")");
 
-		if (kind == 'f')
+		if (transfer_type == 'f')
 		{
 			pigen_append(output, ",\n\t\t.DEPTH(");
 			pigen_append_range(output, fifo_depth, fifo_depth_length);
@@ -545,14 +545,14 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 		pigen_append_range(output, name, name_length);
 		pigen_append(output, ")\n\t);\n\n");
 
-		pigen_add_primitive(primitives, name, name_length, kind, 1);
+		pigen_add_primitive(primitives, name, name_length, transfer_type, 1);
 		pigen_set_port_metadata(primitives, name, name_length, after_keyword,
-			(size_t)(payload_end - after_keyword), kind == 'f' ? fifo_depth : NULL,
-			kind == 'f' ? fifo_depth_length : 0, 0);
+			(size_t)(payload_end - after_keyword), transfer_type == 'f' ? fifo_depth : NULL,
+			transfer_type == 'f' ? fifo_depth_length : 0, 0);
 		return;
 	}
 
-	pigen_add_primitive(primitives, name, name_length, kind, 1);
+	pigen_add_primitive(primitives, name, name_length, transfer_type, 1);
 	pigen_set_port_metadata(primitives, name, name_length, after_keyword,
 		(size_t)(payload_end - after_keyword), NULL, 0, 0);
 }
@@ -572,7 +572,7 @@ static void emit_port_item(pigen_string *output, const char *start, const char *
 	const char *name;
 	const char *trimmed_start = pigen_skip_spaces(start, end);
 	size_t name_length;
-	char kind = pigen_declaration_kind(trimmed_start, end, &keyword, &after_keyword);
+	char transfer_type = pigen_declaration_transfer_type(trimmed_start, end, &keyword, &after_keyword);
 	int is_input = is_port_direction(trimmed_start, end, "input");
 	int is_output = is_port_direction(trimmed_start, end, "output");
 	const char *fifo_depth;
@@ -582,26 +582,26 @@ static void emit_port_item(pigen_string *output, const char *start, const char *
 	
 	pigen_append(output, "\t\t");
 
-	if (!kind)
+	if (!transfer_type)
 	{
 		pigen_append_range(output, trimmed_start, (size_t)(end - trimmed_start));
 		pigen_append(output, trailing_comma ? ",\n" : "\n");
 		return;
 	}
 
-	/* `logic` stays an ordinary SV boundary signal, but has reg transport semantics internally. */
-	if (kind == 'l')
+	/* `logic` stays an ordinary SV boundary signal, but has reg signal semantics internally. */
+	if (transfer_type == 'l')
 	{
 		if (!last_identifier(after_keyword, end, &name, &name_length))
 			pigen_fail("logic port needs a name");
 
 		pigen_append_range(output, trimmed_start, (size_t)(end - trimmed_start));
 		pigen_append(output, trailing_comma ? ",\n" : "\n");
-		pigen_add_primitive(primitives, name, name_length, kind, 0);
+		pigen_add_primitive(primitives, name, name_length, transfer_type, 0);
 		return;
 	}
 
-	if (kind == 'f')
+	if (transfer_type == 'f')
 		after_keyword = fifo_payload_start(after_keyword, end, &fifo_depth, &fifo_depth_length, &fifo_payload_end);
 
 	after_keyword = payload_start(after_keyword, end);
@@ -615,7 +615,7 @@ static void emit_port_item(pigen_string *output, const char *start, const char *
 
 	payload_end = fifo_payload_end ? fifo_payload_end : pigen_trim_end(after_keyword, name);
 	pigen_append(output, is_input ? "input  " : "output ");
-	append_payload_type(output, after_keyword, payload_end);
+	append_data_type(output, after_keyword, payload_end);
 	pigen_append(output, " ");
 	pigen_append_range(output, name, name_length);
 	pigen_append(output, ",\n\t\t");
@@ -626,8 +626,8 @@ static void emit_port_item(pigen_string *output, const char *start, const char *
 	append_port_control_name(output, name, name_length, "ready");
 	pigen_append(output, trailing_comma ? ",\n" : "\n");
 
-	pigen_add_primitive(primitives, name, name_length, kind, 0);
-	pigen_set_port_metadata(primitives, name, name_length, after_keyword, (size_t)(payload_end - after_keyword), kind == 'f' ? fifo_depth : NULL, kind == 'f' ? fifo_depth_length : 0, is_output);
+	pigen_add_primitive(primitives, name, name_length, transfer_type, 0);
+	pigen_set_port_metadata(primitives, name, name_length, after_keyword, (size_t)(payload_end - after_keyword), transfer_type == 'f' ? fifo_depth : NULL, transfer_type == 'f' ? fifo_depth_length : 0, is_output);
 }
 
 void pigen_emit_ports(pigen_string *output, const char *start, const char *end, pigen_primitives *primitives)
@@ -663,18 +663,18 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 	for (i = 0; i < primitives->count; i++)
 	{
 		pigen_primitive *primitive = &primitives->items[i];
-		const pigen_type_descriptor *descriptor;
+		const pigen_transfer_type_descriptor *descriptor;
 		const char *module_name;
 		size_t name_length;
 
 		name_length = strlen(primitive->name);
 
-		if (primitive->kind == 'l')
+		if (primitive->transfer_type == 'l')
 			continue;
 
-		if (!pigen_is_storage_kind(primitive->kind))
+		if (!pigen_transfer_type_has_storage(primitive->transfer_type))
 		{
-			/* Degenerate transport controls are constants, not private nets. */
+			/* Static signal controls are constants, not private nets. */
 			if (primitive->is_output)
 			{
 				pigen_append(output, "\tassign ");
@@ -685,7 +685,7 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 			{
 				pigen_append(output, "\tassign ");
 				append_port_control_name(output, primitive->name, name_length, "ready");
-				pigen_append(output, primitive->kind == 'r' ? " = 1'b1;\n\n" : " = 1'b0;\n\n");
+				pigen_append(output, primitive->transfer_type == 'r' ? " = 1'b1;\n\n" : " = 1'b0;\n\n");
 			}
 
 			continue;
@@ -709,11 +709,11 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 			continue;
 		}
 
-		descriptor = pigen_type_descriptor_for_kind(primitive->kind);
+		descriptor = pigen_transfer_type_descriptor_get(primitive->transfer_type);
 		module_name = descriptor->primitive_module;
 
 		pigen_append(output, "\ttypedef ");
-		append_payload_type(output, primitive->payload_type, primitive->payload_type + strlen(primitive->payload_type));
+		append_data_type(output, primitive->data_type, primitive->data_type + strlen(primitive->data_type));
 		pigen_append(output, " ");
 		pigen_append_control_name(output, primitive->name, name_length, "payload_t");
 		pigen_append(output, ";\n");
@@ -736,16 +736,16 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 		pigen_append(output, ";\n\tlogic ");
 		pigen_append_control_name(output, primitive->name, name_length, "force_after_transfer");
 		pigen_append(output, ";\n\t");
-		append_payload_type(output, primitive->payload_type, primitive->payload_type + strlen(primitive->payload_type));
+		append_data_type(output, primitive->data_type, primitive->data_type + strlen(primitive->data_type));
 		pigen_append(output, " ");
 		pigen_append_control_name(output, primitive->name, name_length, "packet_in");
 		pigen_append(output, ";\n\n\t");
 		pigen_append(output, module_name);
 		pigen_append(output, " #(\n\t\t.PAYLOAD_T(");
-		append_payload_type(output, primitive->payload_type, primitive->payload_type + strlen(primitive->payload_type));
+		append_data_type(output, primitive->data_type, primitive->data_type + strlen(primitive->data_type));
 		pigen_append(output, ")");
 
-		if (primitive->kind == 'f')
+		if (primitive->transfer_type == 'f')
 		{
 			pigen_append(output, ",\n\t\t.DEPTH(");
 			pigen_append(output, primitive->fifo_depth);

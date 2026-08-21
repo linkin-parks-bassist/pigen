@@ -104,10 +104,10 @@ static int write_file(const char *path, const char *data, size_t length)
 	return 1;
 }
 
-/* An ordinary sequential storage write whose RHS is a transport value.  This
+/* An ordinary sequential storage write whose RHS is a signal value.  This
  * is the escape hatch for inferred memories: Pigen owns the source handshake,
  * while the user retains the original SystemVerilog array destination. */
-static int extract_manual_transport_write(const char *start, const char *end, pigen_primitives *primitives,
+static int extract_manual_signal_write(const char *start, const char *end, pigen_primitives *primitives,
 	const char **prefix_end, const char **destination, size_t *destination_length,
 	const char **source, size_t *source_length)
 {
@@ -282,13 +282,13 @@ int main(int argc, char **argv)
 			size_t destination_length;
 			size_t expression_length;
 			size_t guard_length;
-			int clear_action_kind;
-			char kind = pigen_declaration_kind(head, pigen_trim_end(head, end), &keyword, &after_keyword);
+			int clear_action_code;
+			char transfer_type = pigen_declaration_transfer_type(head, pigen_trim_end(head, end), &keyword, &after_keyword);
 			procedural_statement = end > start ?
 				pigen_procedural_statement_for(&procedural_ast, end - 1) : NULL;
 			action_start = procedural_statement ? procedural_statement->start : start;
 
-			if (kind)
+			if (transfer_type)
 			{
 				pigen_append_range(&output, start, (size_t)(head - start));
 				pigen_emit_internal_declaration(&output, head, end, &primitives);
@@ -331,10 +331,10 @@ int main(int argc, char **argv)
 				pigen_emit_port_adapters(&output, &primitives);
 				previous_statement_was_generated = 0;
 			}
-			else if (pigen_extract_clear_action(start, end, &primitives, &prefix_end, &destination, &destination_length, &clear_action_kind))
+			else if (pigen_extract_clear_action(start, end, &primitives, &prefix_end, &destination, &destination_length, &clear_action_code))
 			{
 				if (!pigen_procedural_statement_for(&procedural_ast, prefix_end))
-					fail("transport clear actions are allowed only in clocked always blocks");
+					fail("signal clear actions are allowed only in clocked always blocks");
 				const char *parsed_guard = pigen_procedural_guard_for(&procedural_ast, prefix_end);
 				const char *domain = pigen_procedural_domain_for(&procedural_ast, prefix_end);
 				pigen_string rewritten_guard = {0};
@@ -342,15 +342,15 @@ int main(int argc, char **argv)
 				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard, parsed_guard + strlen(parsed_guard), &primitives);
 				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives);
 				pigen_append(&output, ";");
-				if (clear_action_kind != 3)
+				if (clear_action_code != 3)
 					pigen_add_clear(&clears, destination, destination_length,
 						rewritten_guard.data ? rewritten_guard.data : "",
 						rewritten_guard.data ? strlen(rewritten_guard.data) : 0, domain,
-						strlen(domain), clear_action_kind, (size_t)(prefix_end - source));
+						strlen(domain), clear_action_code, (size_t)(prefix_end - source));
 				free(rewritten_guard.data);
 				previous_statement_was_generated = 0;
 			}
-			else if (pigen_extract_transport_transfer(action_start, end, &primitives, &transfer))
+			else if (pigen_extract_signal_transfer(action_start, end, &primitives, &transfer))
 			{
 				size_t group = assignments.next_group++;
 				if (transfer.requires_exact_width)
@@ -359,7 +359,7 @@ int main(int argc, char **argv)
 						transfer.width_rhs_length, group);
 				prefix_end = transfer.prefix_end;
 				if (!pigen_procedural_statement_for(&procedural_ast, prefix_end))
-					fail("transport assignments are allowed only in clocked always blocks");
+					fail("signal assignments are allowed only in clocked always blocks");
 				const char *parsed_guard = pigen_procedural_guard_for(&procedural_ast, prefix_end);
 				const char *domain = pigen_procedural_domain_for(&procedural_ast, prefix_end);
 				pigen_string rewritten_guard = {0};
@@ -374,9 +374,9 @@ int main(int argc, char **argv)
 
 				for (size_t transfer_index = 0; transfer_index < transfer.count; transfer_index++)
 				{
-					if (transfer.items[transfer_index].destination_kind == 'r' ||
-						transfer.items[transfer_index].destination_kind == 'l' ||
-						transfer.items[transfer_index].destination_kind == 'm')
+					if (transfer.items[transfer_index].destination_code == 'r' ||
+						transfer.items[transfer_index].destination_code == 'l' ||
+						transfer.items[transfer_index].destination_code == 'm')
 						has_immediate_member = 1;
 					else
 						grouped_immediate = 0;
@@ -398,7 +398,7 @@ int main(int argc, char **argv)
 				for (size_t transfer_index = 0; transfer_index < transfer.count; transfer_index++)
 				{
 					pigen_transfer_item *item = &transfer.items[transfer_index];
-					if (!grouped_immediate && (item->destination_kind == 'r' || item->destination_kind == 'l' || item->destination_kind == 'm'))
+					if (!grouped_immediate && (item->destination_code == 'r' || item->destination_code == 'l' || item->destination_code == 'm'))
 					{
 						if (emitted_register_member)
 							pigen_append(&output, "\n\t\t");
@@ -412,20 +412,20 @@ int main(int argc, char **argv)
 						emitted_register_member = 1;
 					}
 					pigen_add_assignment_in_group(&assignments, item->destination, item->destination_length,
-						item->expression, item->expression_length, guard, guard_length, domain, strlen(domain), item->destination_kind, group, (size_t)(prefix_end - source));
+						item->expression, item->expression_length, guard, guard_length, domain, strlen(domain), item->destination_code, group, (size_t)(prefix_end - source));
 				}
 				pigen_free_transfer(&transfer);
 				free(rewritten_guard.data);
 				previous_statement_was_generated = 0;
 			}
-			else if (extract_manual_transport_write(start, end, &primitives, &prefix_end, &destination,
+			else if (extract_manual_signal_write(start, end, &primitives, &prefix_end, &destination,
 				&destination_length, &expression, &expression_length))
 			{
 				const char *parsed_guard;
 				const char *domain;
 				pigen_string rewritten_guard = {0};
 				if (!pigen_procedural_statement_for(&procedural_ast, prefix_end))
-					fail("manual transport writes are allowed only in clocked always blocks");
+					fail("manual signal writes are allowed only in clocked always blocks");
 				parsed_guard = pigen_procedural_guard_for(&procedural_ast, prefix_end);
 				domain = pigen_procedural_domain_for(&procedural_ast, prefix_end);
 				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard,
@@ -460,9 +460,9 @@ int main(int argc, char **argv)
 						pigen_conditional_transfer *transfer = &procedural_ast.conditional_transfers[conditional_index];
 						pigen_transfer conditional;
 						pigen_string rewritten_transfer_guard = {0};
-						if (!pigen_extract_transport_transfer(transfer->start, transfer->end, &primitives, &conditional) ||
+						if (!pigen_extract_signal_transfer(transfer->start, transfer->end, &primitives, &conditional) ||
 							pigen_skip_spaces(transfer->start, transfer->end) != conditional.prefix_end)
-							fail("conditional transfer requires declared transport values");
+							fail("conditional transfer requires declared signals");
 						pigen_emit_rewritten_expression(&rewritten_transfer_guard, transfer->guard,
 							transfer->guard + strlen(transfer->guard), &primitives);
 						{
@@ -477,7 +477,7 @@ int main(int argc, char **argv)
 									rewritten_transfer_guard.data ? rewritten_transfer_guard.data : "",
 									rewritten_transfer_guard.data ? strlen(rewritten_transfer_guard.data) : 0,
 									transfer->domain, strlen(transfer->domain),
-									conditional.items[member].destination_kind == 'r' ? 'R' : conditional.items[member].destination_kind == 'l' ? 'L' : conditional.items[member].destination_kind == 'm' ? 'M' : conditional.items[member].destination_kind, group, (size_t)(transfer->start - source));
+									conditional.items[member].destination_code == 'r' ? 'R' : conditional.items[member].destination_code == 'l' ? 'L' : conditional.items[member].destination_code == 'm' ? 'M' : conditional.items[member].destination_code, group, (size_t)(transfer->start - source));
 						}
 						pigen_free_transfer(&conditional);
 						free(rewritten_transfer_guard.data);

@@ -1,4 +1,4 @@
-module degenerate_validate
+module static_validate
     (
         input logic clk
     );

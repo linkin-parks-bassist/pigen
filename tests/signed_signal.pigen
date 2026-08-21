@@ -1,4 +1,4 @@
-module signed_transport
+module signed_signal
     (
         input logic clk,
         input logic reset,

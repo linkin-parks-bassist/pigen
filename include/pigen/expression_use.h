@@ -13,23 +13,23 @@ typedef enum {
 typedef struct {
 	pigen_expr_id expression;
 	pigen_symbol_id symbol;
-	pigen_transport_id transport;
+	pigen_signal_id signal;
 	pigen_predicate_id predicate;
 	pigen_expression_use_context context;
 } pigen_expression_use;
 
 typedef struct {
-	pigen_transport_id transport;
+	pigen_signal_id signal;
 	unsigned contexts;
-} pigen_expression_transport_use;
+} pigen_expression_signal_use;
 
 typedef struct {
 	pigen_expression_use *uses;
 	size_t use_count;
 	size_t use_capacity;
-	pigen_expression_transport_use *transports;
-	size_t transport_count;
-	size_t transport_capacity;
+	pigen_expression_signal_use *signals;
+	size_t signal_count;
+	size_t signal_capacity;
 } pigen_expression_use_analysis;
 
 /* Root traversal is currently read-only.  Packed subscripts encountered within

@@ -181,20 +181,20 @@ int main(void)
 		PIGEN_EXPRESSION_USE_READ, &analysis));
 
 	assert(analysis.use_count == 3);
-	assert(analysis.transport_count == 2);
+	assert(analysis.signal_count == 2);
 	assert(analysis.uses[0].symbol.index ==
 		pigen_expr_get(&model, conditional->as.conditional.condition)->
 		as.symbol.index);
 	assert(analysis.uses[0].predicate.index == always.index);
-	assert(analysis.uses[0].transport.index ==
-		analysis.uses[2].transport.index);
+	assert(analysis.uses[0].signal.index ==
+		analysis.uses[2].signal.index);
 	assert(analysis.uses[0].expression.index !=
 		analysis.uses[2].expression.index);
-	assert(analysis.uses[1].transport.index !=
-		analysis.uses[0].transport.index);
+	assert(analysis.uses[1].signal.index !=
+		analysis.uses[0].signal.index);
 	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_READ);
-	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_READ);
-	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.signals[0].contexts == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.signals[1].contexts == PIGEN_EXPRESSION_USE_READ);
 
 	true_atoms = pigen_predicate_atoms(&model, analysis.uses[1].predicate);
 	false_atoms = pigen_predicate_atoms(&model, analysis.uses[2].predicate);
@@ -220,15 +220,15 @@ int main(void)
 	assert(pigen_lvalue_get(&model, lvalue)->kind ==
 		PIGEN_LVALUE_PROJECTION);
 	assert(pigen_lvalue_get(&model,
-		lvalue)->as.projection.transport.index ==
-		analysis.uses[1].transport.index);
+		lvalue)->as.projection.signal.index ==
+		analysis.uses[1].signal.index);
 	assert(pigen_analyze_lvalue_uses(&model, lvalue, always, &analysis));
 	assert(analysis.use_count == 4);
-	assert(analysis.transport_count == 2);
+	assert(analysis.signal_count == 2);
 	assert(analysis.uses[3].expression.index == lvalue_expression.index);
 	assert(analysis.uses[3].context == PIGEN_EXPRESSION_USE_LVALUE);
-	assert(analysis.uses[3].transport.index == analysis.uses[1].transport.index);
-	assert(analysis.transports[1].contexts ==
+	assert(analysis.uses[3].signal.index == analysis.uses[1].signal.index);
+	assert(analysis.signals[1].contexts ==
 		(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_LVALUE));
 
 	pigen_free_expression_use_analysis(&analysis);
@@ -237,17 +237,17 @@ int main(void)
 	assert(pigen_analyze_expression_uses(&model, index_expression, always,
 		PIGEN_EXPRESSION_USE_READ, &analysis));
 	assert(analysis.use_count == 2);
-	assert(analysis.transport_count == 2);
+	assert(analysis.signal_count == 2);
 	assert(analysis.uses[0].expression.index == index_expression.index);
 	assert(analysis.uses[0].symbol.index == indexed_base->as.symbol.index);
 	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_READ);
 	assert(analysis.uses[1].symbol.index ==
 		indexed_subscript->as.symbol.index);
 	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
-	assert(analysis.uses[0].transport.index !=
-		analysis.uses[1].transport.index);
-	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_READ);
-	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.uses[0].signal.index !=
+		analysis.uses[1].signal.index);
+	assert(analysis.signals[0].contexts == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.signals[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
 
 	pigen_free_expression_use_analysis(&analysis);
 	index_lvalue = pigen_lvalue_resolve(&model, index_lvalue_expression);
@@ -263,13 +263,13 @@ int main(void)
 		indexed_base->as.symbol.index);
 	assert(pigen_analyze_lvalue_uses(&model, index_lvalue, always, &analysis));
 	assert(analysis.use_count == 2);
-	assert(analysis.transport_count == 2);
+	assert(analysis.signal_count == 2);
 	assert(analysis.uses[0].expression.index ==
 		index_lvalue_expression.index);
 	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_LVALUE);
 	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
-	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
-	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.signals[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.signals[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
 
 	pigen_free_expression_use_analysis(&analysis);
 	range = pigen_expr_get(&model, range_expression);
@@ -278,7 +278,7 @@ int main(void)
 	assert(pigen_analyze_expression_uses(&model, range_expression, always,
 		PIGEN_EXPRESSION_USE_READ, &analysis));
 	assert(analysis.use_count == 2);
-	assert(analysis.transport_count == 1);
+	assert(analysis.signal_count == 1);
 	assert(analysis.uses[0].expression.index == range_expression.index);
 	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_READ);
 	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_TYPE);
@@ -311,14 +311,14 @@ int main(void)
 	assert(select_lvalue.index != PIGEN_INVALID_ID);
 	assert(pigen_analyze_lvalue_uses(&model, select_lvalue, always, &analysis));
 	assert(analysis.use_count == 3);
-	assert(analysis.transport_count == 2);
+	assert(analysis.signal_count == 2);
 	assert(analysis.uses[0].expression.index ==
 		select_lvalue_expression.index);
 	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_LVALUE);
 	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
 	assert(analysis.uses[2].context == PIGEN_EXPRESSION_USE_TYPE);
-	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
-	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
+	assert(analysis.signals[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.signals[1].contexts == PIGEN_EXPRESSION_USE_INDEX);
 
 	pigen_free_expression_use_analysis(&analysis);
 	concat = pigen_expr_get(&model, concat_expression);
@@ -329,7 +329,7 @@ int main(void)
 	assert(pigen_analyze_expression_uses(&model, concat_expression, always,
 		PIGEN_EXPRESSION_USE_READ, &analysis));
 	assert(analysis.use_count == 5);
-	assert(analysis.transport_count == 2);
+	assert(analysis.signal_count == 2);
 	assert(analysis.uses[0].expression.index == concat_children[0].index);
 	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_READ);
 	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
@@ -338,8 +338,8 @@ int main(void)
 	assert(analysis.uses[3].context == PIGEN_EXPRESSION_USE_TYPE);
 	assert(analysis.uses[4].expression.index == concat_children[2].index);
 	assert(analysis.uses[4].context == PIGEN_EXPRESSION_USE_READ);
-	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_READ);
-	assert(analysis.transports[1].contexts ==
+	assert(analysis.signals[0].contexts == PIGEN_EXPRESSION_USE_READ);
+	assert(analysis.signals[1].contexts ==
 		(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_INDEX));
 
 	pigen_free_expression_use_analysis(&analysis);
@@ -361,7 +361,7 @@ int main(void)
 	}
 	assert(pigen_analyze_lvalue_uses(&model, concat_lvalue, always, &analysis));
 	assert(analysis.use_count == 5);
-	assert(analysis.transport_count == 2);
+	assert(analysis.signal_count == 2);
 	assert(analysis.uses[0].expression.index == concat_children[0].index);
 	assert(analysis.uses[0].context == PIGEN_EXPRESSION_USE_LVALUE);
 	assert(analysis.uses[1].context == PIGEN_EXPRESSION_USE_INDEX);
@@ -370,8 +370,8 @@ int main(void)
 	assert(analysis.uses[3].context == PIGEN_EXPRESSION_USE_TYPE);
 	assert(analysis.uses[4].expression.index == concat_children[2].index);
 	assert(analysis.uses[4].context == PIGEN_EXPRESSION_USE_LVALUE);
-	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
-	assert(analysis.transports[1].contexts ==
+	assert(analysis.signals[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.signals[1].contexts ==
 		(PIGEN_EXPRESSION_USE_LVALUE | PIGEN_EXPRESSION_USE_INDEX));
 
 	pigen_free_expression_use_analysis(&analysis);
@@ -394,9 +394,9 @@ int main(void)
 	assert(pigen_analyze_lvalue_uses(&model, nested_concat_lvalue, always,
 		&analysis));
 	assert(analysis.use_count == 3);
-	assert(analysis.transport_count == 2);
-	assert(analysis.transports[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
-	assert(analysis.transports[1].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.signal_count == 2);
+	assert(analysis.signals[0].contexts == PIGEN_EXPRESSION_USE_LVALUE);
+	assert(analysis.signals[1].contexts == PIGEN_EXPRESSION_USE_LVALUE);
 
 	pigen_free_expression_use_analysis(&analysis);
 	pigen_free_semantic_model(&model);

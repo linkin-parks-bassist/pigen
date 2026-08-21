@@ -7,7 +7,7 @@ exhaustive specification.
 The README must distinguish three layers which currently evolve at different
 speeds:
 
-1. The semantic idea: atomic ready/valid transfer and explicit movement/storage
+1. The semantic idea: atomic ready/valid transfer and explicit transfer-type
    policy.
 2. The syntax and features accepted by the production compiler, for which
    `USER_GUIDE.md` and the tests are the practical references during migration.

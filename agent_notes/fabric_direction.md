@@ -17,10 +17,10 @@ retain top-level and inline fabric dialects together.
 ## Endpoint and width semantics
 
 A fabric connection resolves an output-port identity on one child instance to
-an input-port identity on another.  Width and payload type come from those
+an input-port identity on another. Width and data type come from those
 resolved ports and are checked per connection; users should not repeat a
-fabric-wide payload-width parameter.  This requires instance, port, and type
-identity in the semantic model before fabric lowering.  A textual
+fabric-wide payload-width parameter. This requires instance, port, and type
+identity in the semantic model before fabric lowering. A textual
 `instance.port` path is only syntax.
 
 Endpoints remain blind to their peers and to the network.  Their contract is

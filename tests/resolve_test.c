@@ -13,16 +13,16 @@ static int span_is(const pigen_source_manager *sources, pigen_source_span span,
 	return text && length == strlen(expected) && !memcmp(text, expected, length);
 }
 
-static const pigen_semantic_transport *find_transport(
+static const pigen_semantic_signal *find_signal(
 	const pigen_source_manager *sources, const pigen_semantic_model *model,
 	const char *name)
 {
 	size_t i;
-	for (i = 0; i < model->transport_count; i++)
+	for (i = 0; i < model->signal_count; i++)
 	{
 		const pigen_symbol *symbol = pigen_symbol_get(model,
-			model->transports[i].symbol);
-		if (span_is(sources, symbol->name, name)) return &model->transports[i];
+			model->signals[i].symbol);
+		if (span_is(sources, symbol->name, name)) return &model->signals[i];
 	}
 	return NULL;
 }
@@ -39,21 +39,6 @@ static const pigen_semantic_parameter *find_parameter(
 		const pigen_symbol *symbol = pigen_symbol_get(model,
 			parameter->symbol);
 		if (span_is(sources, symbol->name, name)) return parameter;
-	}
-	return NULL;
-}
-
-static const pigen_semantic_value *find_value(
-	const pigen_source_manager *sources, const pigen_semantic_model *model,
-	const char *name)
-{
-	size_t i;
-	for (i = 0; i < model->value_count; i++)
-	{
-		const pigen_semantic_value *value = pigen_value_get(model,
-			(pigen_value_id){(uint32_t)i});
-		const pigen_symbol *symbol = pigen_symbol_get(model, value->symbol);
-		if (span_is(sources, symbol->name, name)) return value;
 	}
 	return NULL;
 }
@@ -78,18 +63,18 @@ static int predicate_requires_symbol(const pigen_semantic_model *model,
 	return 0;
 }
 
-static int transfer_has_transport_use(const pigen_semantic_model *model,
-	pigen_transfer_id transfer_id, pigen_transport_id transport, unsigned roles)
+static int transfer_has_signal_use(const pigen_semantic_model *model,
+	pigen_transfer_id transfer_id, pigen_signal_id signal, unsigned roles)
 {
 	const pigen_semantic_transfer *transfer = pigen_transfer_get(model,
 		transfer_id);
-	const pigen_transfer_transport_use *uses =
-		pigen_transfer_transport_uses(model, transfer_id);
+	const pigen_transfer_signal_use *uses =
+		pigen_transfer_signal_uses(model, transfer_id);
 	size_t i;
 
 	if (!transfer) return 0;
-	for (i = 0; i < transfer->transport_use_count; i++)
-		if (uses[i].transport.index == transport.index &&
+	for (i = 0; i < transfer->signal_use_count; i++)
+		if (uses[i].signal.index == signal.index &&
 			uses[i].roles == roles) return 1;
 	return 0;
 }
@@ -172,18 +157,18 @@ int main(void)
 	pigen_semantic_model unknown_model;
 	pigen_semantic_model inout_model;
 	pigen_resolve_error error = {0};
-	const pigen_semantic_transport *left;
-	const pigen_semantic_transport *right;
-	const pigen_semantic_transport *alternate;
-	const pigen_semantic_transport *gate;
-	const pigen_semantic_transport *queue;
-	const pigen_semantic_value *clk;
-	const pigen_semantic_value *reset;
-	const pigen_semantic_value *select;
-	const pigen_semantic_value *count;
-	const pigen_semantic_value *ready;
-	const pigen_semantic_value *state;
-	const pigen_semantic_value *next_state;
+	const pigen_semantic_signal *left;
+	const pigen_semantic_signal *right;
+	const pigen_semantic_signal *alternate;
+	const pigen_semantic_signal *gate;
+	const pigen_semantic_signal *queue;
+	const pigen_semantic_signal *clk;
+	const pigen_semantic_signal *reset;
+	const pigen_semantic_signal *select;
+	const pigen_semantic_signal *count;
+	const pigen_semantic_signal *ready;
+	const pigen_semantic_signal *state;
+	const pigen_semantic_signal *next_state;
 	const pigen_semantic_module *first_module;
 	const pigen_semantic_clock_domain *clock_domain;
 	const pigen_semantic_process *first_process;
@@ -194,7 +179,7 @@ int main(void)
 	const pigen_semantic_transfer *fourth_transfer;
 	const pigen_semantic_lvalue *transfer_destination;
 	const pigen_semantic_expr *transfer_value;
-	const pigen_transfer_transport_use *transfer_uses;
+	const pigen_transfer_signal_use *transfer_uses;
 	const pigen_semantic_type *queue_type;
 	const pigen_semantic_type *left_type;
 	const pigen_semantic_type *boolean_type;
@@ -245,8 +230,7 @@ int main(void)
 	assert(model.compilation_scope.index != PIGEN_INVALID_ID);
 	assert(model.module_count == 2);
 	assert(model.parameter_count == 13);
-	assert(model.value_count == 7);
-	assert(model.transport_count == 6);
+	assert(model.signal_count == 13);
 	assert(model.clock_domain_count == 1);
 	assert(model.process_count == 2);
 	assert(model.transfer_count == 4);
@@ -256,35 +240,33 @@ int main(void)
 	assert(pigen_symbol_parameter(&model, first_module->symbol).index ==
 		PIGEN_INVALID_ID);
 
-	left = find_transport(&sources, &model, "left");
-	right = find_transport(&sources, &model, "right");
-	alternate = find_transport(&sources, &model, "alternate");
-	gate = find_transport(&sources, &model, "gate");
-	queue = find_transport(&sources, &model, "queue");
+	left = find_signal(&sources, &model, "left");
+	right = find_signal(&sources, &model, "right");
+	alternate = find_signal(&sources, &model, "alternate");
+	gate = find_signal(&sources, &model, "gate");
+	queue = find_signal(&sources, &model, "queue");
 	assert(left && right && alternate && gate && queue);
-	clk = find_value(&sources, &model, "clk");
-	reset = find_value(&sources, &model, "reset");
-	select = find_value(&sources, &model, "select");
-	count = find_value(&sources, &model, "count");
-	ready = find_value(&sources, &model, "ready");
-	state = find_value(&sources, &model, "state");
-	next_state = find_value(&sources, &model, "next_state");
+	clk = find_signal(&sources, &model, "clk");
+	reset = find_signal(&sources, &model, "reset");
+	select = find_signal(&sources, &model, "select");
+	count = find_signal(&sources, &model, "count");
+	ready = find_signal(&sources, &model, "ready");
+	state = find_signal(&sources, &model, "state");
+	next_state = find_signal(&sources, &model, "next_state");
 	assert(clk && reset && select && count && ready && state && next_state);
 	assert(clk->direction == PIGEN_SEMANTIC_INPUT &&
-		clk->storage == PIGEN_SEMANTIC_VALUE_NET);
-	assert(reset->type.index == clk->type.index);
+		clk->transfer_type == PIGEN_TRANSFER_TYPE_WIRE);
+	assert(reset->data_type.index == clk->data_type.index);
 	assert(count->direction == PIGEN_SEMANTIC_OUTPUT &&
-		count->storage == PIGEN_SEMANTIC_VALUE_VARIABLE);
+		count->transfer_type == PIGEN_TRANSFER_TYPE_REG);
 	assert(ready->direction == PIGEN_SEMANTIC_INTERNAL &&
-		ready->storage == PIGEN_SEMANTIC_VALUE_NET);
-	assert(state->storage == PIGEN_SEMANTIC_VALUE_VARIABLE &&
-		state->type.index == next_state->type.index);
-	assert(pigen_value_get(&model,
-		pigen_symbol_value(&model, clk->symbol)) == clk);
-	assert(pigen_value_get(&model,
-		pigen_symbol_value(&model, state->symbol)) == state);
-	assert(pigen_symbol_transport(&model, state->symbol).index ==
-		PIGEN_INVALID_ID);
+		ready->transfer_type == PIGEN_TRANSFER_TYPE_WIRE);
+	assert(state->transfer_type == PIGEN_TRANSFER_TYPE_LOGIC &&
+		state->data_type.index == next_state->data_type.index);
+	assert(pigen_signal_get(&model,
+		pigen_symbol_signal(&model, clk->symbol)) == clk);
+	assert(pigen_signal_get(&model,
+		pigen_symbol_signal(&model, state->symbol)) == state);
 	clock_domain = pigen_clock_domain_get(&model, (pigen_clock_domain_id){0});
 	first_process = pigen_process_get(&model, (pigen_process_id){0});
 	second_process = pigen_process_get(&model, (pigen_process_id){1});
@@ -328,28 +310,36 @@ int main(void)
 		second_transfer->guard.index != model.true_predicate.index &&
 		third_transfer->guard.index != model.true_predicate.index &&
 		fourth_transfer->guard.index == model.true_predicate.index);
-	assert(first_transfer->transport_use_count == 3 &&
-		second_transfer->transport_use_count == 3 &&
-		third_transfer->transport_use_count == 2 &&
-		fourth_transfer->transport_use_count == 0);
-	transfer_uses = pigen_transfer_transport_uses(&model,
+	assert(first_transfer->signal_use_count == 4 &&
+		second_transfer->signal_use_count == 4 &&
+		third_transfer->signal_use_count == 3 &&
+		fourth_transfer->signal_use_count == 2);
+	transfer_uses = pigen_transfer_signal_uses(&model,
 		(pigen_transfer_id){0});
 	assert(transfer_uses);
-	assert(transfer_has_transport_use(&model, (pigen_transfer_id){0},
-		pigen_symbol_transport(&model, right->symbol), PIGEN_TRANSFER_PRODUCER));
-	assert(transfer_has_transport_use(&model, (pigen_transfer_id){0},
-		pigen_symbol_transport(&model, left->symbol), PIGEN_TRANSFER_CONSUMER));
-	assert(transfer_has_transport_use(&model, (pigen_transfer_id){0},
-		pigen_symbol_transport(&model, gate->symbol), PIGEN_TRANSFER_CONSUMER));
-	assert(!pigen_transfer_transport_uses(&model, (pigen_transfer_id){3}));
+	assert(transfer_has_signal_use(&model, (pigen_transfer_id){0},
+		pigen_symbol_signal(&model, right->symbol),
+		PIGEN_TRANSFER_SIGNAL_WRITE | PIGEN_TRANSFER_PRODUCER));
+	assert(transfer_has_signal_use(&model, (pigen_transfer_id){0},
+		pigen_symbol_signal(&model, left->symbol),
+		PIGEN_TRANSFER_SIGNAL_READ | PIGEN_TRANSFER_CONSUMER));
+	assert(transfer_has_signal_use(&model, (pigen_transfer_id){0},
+		pigen_symbol_signal(&model, gate->symbol),
+		PIGEN_TRANSFER_SIGNAL_READ | PIGEN_TRANSFER_CONSUMER));
+	assert(transfer_has_signal_use(&model, (pigen_transfer_id){0},
+		pigen_symbol_signal(&model, select->symbol), PIGEN_TRANSFER_SIGNAL_READ));
+	assert(transfer_has_signal_use(&model, (pigen_transfer_id){3},
+		pigen_symbol_signal(&model, state->symbol), PIGEN_TRANSFER_SIGNAL_WRITE));
+	assert(transfer_has_signal_use(&model, (pigen_transfer_id){3},
+		pigen_symbol_signal(&model, next_state->symbol), PIGEN_TRANSFER_SIGNAL_READ));
 	transfer_destination = pigen_lvalue_get(&model,
 		first_transfer->destination);
 	transfer_value = pigen_expr_get(&model, first_transfer->value);
 	assert(transfer_destination &&
 		transfer_destination->kind == PIGEN_LVALUE_PROJECTION);
 	assert(transfer_destination->as.projection.base_symbol.index == right->symbol.index);
-	assert(transfer_destination->as.projection.transport.index ==
-		pigen_symbol_transport(&model, right->symbol).index);
+	assert(transfer_destination->as.projection.signal.index ==
+		pigen_symbol_signal(&model, right->symbol).index);
 	assert(transfer_value && transfer_value->kind == PIGEN_EXPR_SYMBOL &&
 		transfer_value->as.symbol.index == left->symbol.index);
 	transfer_destination = pigen_lvalue_get(&model,
@@ -358,8 +348,8 @@ int main(void)
 	assert(transfer_destination &&
 		transfer_destination->as.projection.base_symbol.index ==
 			alternate->symbol.index &&
-		transfer_destination->as.projection.transport.index ==
-			pigen_symbol_transport(&model, alternate->symbol).index);
+		transfer_destination->as.projection.signal.index ==
+			pigen_symbol_signal(&model, alternate->symbol).index);
 	assert(transfer_value && transfer_value->kind == PIGEN_EXPR_SYMBOL &&
 		transfer_value->as.symbol.index == left->symbol.index);
 	transfer_destination = pigen_lvalue_get(&model,
@@ -367,8 +357,8 @@ int main(void)
 	transfer_value = pigen_expr_get(&model, third_transfer->value);
 	assert(transfer_destination &&
 		transfer_destination->as.projection.base_symbol.index == right->symbol.index &&
-		transfer_destination->as.projection.transport.index ==
-			pigen_symbol_transport(&model, right->symbol).index);
+		transfer_destination->as.projection.signal.index ==
+			pigen_symbol_signal(&model, right->symbol).index);
 	assert(transfer_value && transfer_value->kind == PIGEN_EXPR_SYMBOL &&
 		transfer_value->as.symbol.index == left->symbol.index);
 	transfer_destination = pigen_lvalue_get(&model,
@@ -376,7 +366,8 @@ int main(void)
 	transfer_value = pigen_expr_get(&model, fourth_transfer->value);
 	assert(transfer_destination &&
 		transfer_destination->as.projection.base_symbol.index == state->symbol.index &&
-		transfer_destination->as.projection.transport.index == PIGEN_INVALID_ID);
+		transfer_destination->as.projection.signal.index ==
+			pigen_symbol_signal(&model, state->symbol).index);
 	assert(transfer_value && transfer_value->kind == PIGEN_EXPR_SYMBOL &&
 		transfer_value->as.symbol.index == next_state->symbol.index);
 	width = find_parameter(&sources, &model, "WIDTH");
@@ -399,7 +390,7 @@ int main(void)
 		pigen_symbol_parameter(&model, width->symbol)) == width);
 	assert(pigen_parameter_get(&model,
 		pigen_symbol_parameter(&model, mask_depth->symbol)) == mask_depth);
-	assert(pigen_symbol_transport(&model, width->symbol).index ==
+	assert(pigen_symbol_signal(&model, width->symbol).index ==
 		PIGEN_INVALID_ID);
 	assert(last->is_local && nonzero->is_local);
 	assert(!width->is_local && !depth->is_local && !enabled->is_local);
@@ -506,36 +497,36 @@ int main(void)
 	assert(mask_depth_value &&
 		mask_depth_value->kind == PIGEN_EXPR_CONDITIONAL &&
 		mask_depth_value->type.index == hex_value->type.index);
-	assert(left->payload_type.index == right->payload_type.index);
-	assert(pigen_transport_get(&model,
-		pigen_symbol_transport(&model, left->symbol)) == left);
-	assert(pigen_transport_get(&model,
-		pigen_symbol_transport(&model, queue->symbol)) == queue);
+	assert(left->data_type.index == right->data_type.index);
+	assert(pigen_signal_get(&model,
+		pigen_symbol_signal(&model, left->symbol)) == left);
+	assert(pigen_signal_get(&model,
+		pigen_symbol_signal(&model, queue->symbol)) == queue);
 	assert(pigen_symbol_module(&model, left->symbol).index == PIGEN_INVALID_ID);
-	assert(left->kind == PIGEN_SEMANTIC_BUF);
+	assert(left->transfer_type == PIGEN_TRANSFER_TYPE_BUF);
 	assert(left->domain.index == 0 && right->domain.index == 0 &&
 		alternate->domain.index == 0 && gate->domain.index == 0);
-	assert(queue->kind == PIGEN_SEMANTIC_FIFO);
+	assert(queue->transfer_type == PIGEN_TRANSFER_TYPE_FIFO);
 	assert(queue->domain.index == PIGEN_INVALID_ID);
 	assert(queue->fifo_depth.index != PIGEN_INVALID_ID);
 	bound = pigen_const_expr_get(&model,
 		pigen_expr_constant(&model, queue->fifo_depth));
 	assert(bound && bound->kind == PIGEN_CONST_EXPR_SYMBOL &&
 		bound->as.symbol.index == mask_depth->symbol.index);
-	left_type = pigen_type_get(&model, left->payload_type);
+	left_type = pigen_type_get(&model, left->data_type);
 	assert(left_type && left_type->kind == PIGEN_TYPE_NAMED);
 	left_typedef = left_type->named_symbol;
-	assert(pigen_type_packed_width(&model, left->payload_type).index ==
+	assert(pigen_type_packed_width(&model, left->data_type).index ==
 		pigen_type_packed_width(&model,
 			pigen_symbol_get(&model, left_typedef)->type).index);
 	element_type = pigen_type_get(&model,
-		pigen_type_packed_element(&model, left->payload_type));
+		pigen_type_packed_element(&model, left->data_type));
 	assert(element_type && element_type->kind == PIGEN_TYPE_LOGIC &&
 		element_type->signedness == PIGEN_SIGN_UNSIGNED &&
 		element_type->dimension_count == 0);
-	left_type = pigen_type_get(&model, left->payload_type);
+	left_type = pigen_type_get(&model, left->data_type);
 	selected_type = pigen_type_get(&model,
-		pigen_type_packed_select(&model, left->payload_type,
+		pigen_type_packed_select(&model, left->data_type,
 			pigen_type_dimensions(&model,
 				pigen_symbol_get(&model, left_typedef)->type)->left,
 			pigen_type_dimensions(&model,
@@ -544,7 +535,7 @@ int main(void)
 	assert(selected_type && selected_type->kind == PIGEN_TYPE_LOGIC &&
 		selected_type->signedness == PIGEN_SIGN_UNSIGNED &&
 		selected_type->dimension_count == 1);
-	left_type = pigen_type_get(&model, left->payload_type);
+	left_type = pigen_type_get(&model, left->data_type);
 	left_dimension = pigen_type_dimensions(&model,
 		pigen_symbol_get(&model, left_type->named_symbol)->type);
 	assert(left_dimension);
@@ -554,14 +545,14 @@ int main(void)
 	bound = pigen_const_expr_get(&model, left_dimension->right);
 	assert(bound && bound->kind == PIGEN_CONST_EXPR_SYMBOL &&
 		bound->as.symbol.index == nonzero->symbol.index);
-	queue_type = pigen_type_get(&model, queue->payload_type);
+	queue_type = pigen_type_get(&model, queue->data_type);
 	assert(queue_type && queue_type->kind == PIGEN_TYPE_NAMED);
 	queue_type = pigen_type_get(&model,
 		pigen_symbol_get(&model, queue_type->named_symbol)->type);
 	assert(queue_type && queue_type->kind == PIGEN_TYPE_LOGIC);
 	queue_dimension = pigen_type_dimensions(&model,
 		pigen_symbol_get(&model,
-			pigen_type_get(&model, queue->payload_type)->named_symbol)->type);
+			pigen_type_get(&model, queue->data_type)->named_symbol)->type);
 	assert(queue_dimension);
 	bound = pigen_const_expr_get(&model, queue_dimension->left);
 	assert(bound && bound->as.integer == 31);

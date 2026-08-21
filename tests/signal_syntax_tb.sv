@@ -1,4 +1,4 @@
-module transport_syntax_tb;
+module signal_syntax_tb;
 	logic clk = 1'b0, reset = 1'b1, route_left = 1'b0;
 	logic [23:0] source_wide = 24'h12abcd;
 	logic source_wide_valid = 1'b0, source_wide_ready;
@@ -31,7 +31,7 @@ module transport_syntax_tb;
 	logic [7:0] variable_byte;
 	logic [15:0] scalar_lvalue;
 
-	transport_syntax dut (.*);
+	signal_syntax dut (.*);
 	always #5 clk = ~clk;
 
 	initial begin
@@ -48,11 +48,11 @@ module transport_syntax_tb;
 
 		if (!held_high_valid || held_high != 13'h1579 ||
 			state_middle != 11'h5e5 || memory_two != 8'hc3)
-			$fatal(1, "mixed-width buffered/degenerate repartition was wrong");
+			$fatal(1, "mixed-width buffered/static repartition was wrong");
 		if (source_wide_ready || source_tail_ready)
 			$fatal(1, "mixed group accepted a second token while its buffer member stalled");
 		if (nested_state != 8'h5a || dut.memory[0] != 8'ha5)
-			$fatal(1, "nested degenerate concatenation did not use normal SV ordering");
+			$fatal(1, "nested static concatenation did not use normal SV ordering");
 		if (memory_one[7:4] != 4'hb || nibble_state != 4'hc)
 			$fatal(1, "memory slice transfer did not use normal SV ordering");
 		if (ordered_state != 8'h22)
@@ -62,7 +62,7 @@ module transport_syntax_tb;
 		if (variable_byte != 8'h62 || !source_variable_ready)
 			$fatal(1, "indexed source part-select did not retain SV behavior");
 		if (scalar_lvalue[7:0] != 8'h87 || !source_scalar_lvalue_ready)
-			$fatal(1, "scalar ordinary lvalue slice did not consume its transport source");
+			$fatal(1, "scalar ordinary lvalue slice did not consume its signal source");
 		if (branch_left_valid || !branch_right_valid || branch_right != 4'h9)
 			$fatal(1, "exclusive buffered consumer selected the wrong branch");
 
@@ -70,7 +70,7 @@ module transport_syntax_tb;
 		source_tail = 8'hff;
 		#10;
 		if (state_middle != 11'h5e5 || memory_two != 8'hc3)
-			$fatal(1, "degenerate members updated while a grouped buffer destination stalled");
+			$fatal(1, "static members updated while a grouped buffer destination stalled");
 
 		route_left = 1'b1;
 		source_branch = 8'h72;
@@ -78,7 +78,7 @@ module transport_syntax_tb;
 		if (!branch_left_valid || branch_left != 4'h7)
 			$fatal(1, "mutually exclusive alternate consumer did not transfer");
 
-		$display("PASS: gnarly transport syntax retained atomic and ordinary-SV behavior");
+		$display("PASS: gnarly signal syntax retained atomic and ordinary-SV behavior");
 		$finish;
 	end
 endmodule

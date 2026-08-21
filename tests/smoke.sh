@@ -9,7 +9,7 @@ grep -q 'pigen_buf #(' "$tmp/out.sv"
 grep -q '.in_ready(stage__pigen_in_ready)' "$tmp/out.sv"
 grep -q '.out_ready(stage__pigen_out_ready)' "$tmp/out.sv"
 if grep -q '__pigen_ready' "$tmp/out.sv"; then
-	echo "generated transport readiness must use in_ready/out_ready symmetrically" >&2
+	echo "generated signal readiness must use in_ready/out_ready symmetrically" >&2
 	exit 1
 fi
 "$tool" tests/no_reset.pigen -o "$tmp/no_reset.sv"
@@ -46,11 +46,11 @@ grep -q 'if (source__pigen_valid)' "$tmp/reg_assignment.sv"
 grep -q 'pigen_skid #(' "$tmp/skid_port.sv"
 grep -q 'assign pulse__pigen_out_ready = 1'"'"'b1;' "$tmp/skid_port.sv"
 grep -q 'assign skid_queue__pigen_out_ready = 1'"'"'b1;' "$tmp/skid_port.sv"
-"$tool" tests/signed_transport.pigen -o "$tmp/signed_transport.sv"
-grep -q 'input  logic signed \[23:0\] input_sample' "$tmp/signed_transport.sv"
-grep -q 'output logic signed \[23:0\] output_sample' "$tmp/signed_transport.sv"
-grep -q '.PAYLOAD_T(logic signed \[23:0\])' "$tmp/signed_transport.sv"
-verilator --lint-only -Wno-fatal --top-module signed_transport rtl/pigen_primitives.sv "$tmp/signed_transport.sv"
+"$tool" tests/signed_signal.pigen -o "$tmp/signed_signal.sv"
+grep -q 'input  logic signed \[23:0\] input_sample' "$tmp/signed_signal.sv"
+grep -q 'output logic signed \[23:0\] output_sample' "$tmp/signed_signal.sv"
+grep -q '.PAYLOAD_T(logic signed \[23:0\])' "$tmp/signed_signal.sv"
+verilator --lint-only -Wno-fatal --top-module signed_signal rtl/pigen_primitives.sv "$tmp/signed_signal.sv"
 "$tool" tests/discard.pigen -o "$tmp/discard.sv"
 grep -q 'assign source__pigen_out_ready =' "$tmp/discard.sv"
 verilator --lint-only -Wno-fatal --top-module discard_example rtl/pigen_primitives.sv "$tmp/discard.sv"
@@ -84,14 +84,14 @@ grep -q 'fake declaration; valid(stage); must stay a comment' "$tmp/lexical.sv"
 grep -q 'literal semicolon; valid(stage) is not an accessor' "$tmp/lexical.sv"
 grep -q 'assign stage__pigen_in_valid = 1'"'"'b1;' "$tmp/lexical.sv"
 verilator --lint-only -Wno-fatal --top-module lexical rtl/pigen_primitives.sv "$tmp/lexical.sv"
-"$tool" tests/degenerate_ports.pigen -o "$tmp/degenerate_ports.sv"
-grep -q 'assign source_ready = 1'"'"'b0;' "$tmp/degenerate_ports.sv"
-grep -q 'assign state_valid = 1'"'"'b1;' "$tmp/degenerate_ports.sv"
-if grep -q '__pigen_\(valid\|in_ready\|out_ready\)' "$tmp/degenerate_ports.sv"; then
-    echo "degenerate ports must not emit private control nets" >&2
+"$tool" tests/static_ports.pigen -o "$tmp/static_ports.sv"
+grep -q 'assign source_ready = 1'"'"'b0;' "$tmp/static_ports.sv"
+grep -q 'assign state_valid = 1'"'"'b1;' "$tmp/static_ports.sv"
+if grep -q '__pigen_\(valid\|in_ready\|out_ready\)' "$tmp/static_ports.sv"; then
+    echo "static ports must not emit private control nets" >&2
     exit 1
 fi
-verilator --lint-only -Wno-fatal --top-module degenerate_ports rtl/pigen_primitives.sv "$tmp/degenerate_ports.sv"
+verilator --lint-only -Wno-fatal --top-module static_ports rtl/pigen_primitives.sv "$tmp/static_ports.sv"
 "$tool" tests/fifo_preferred.pigen -o "$tmp/fifo_preferred.sv"
 grep -q 'pigen_fifo #(' "$tmp/fifo_preferred.sv"
 grep -q '.DEPTH(4)' "$tmp/fifo_preferred.sv"
@@ -184,17 +184,17 @@ if "$tool" tests/fsm_bad_event.pigen -o "$tmp/fsm_bad_event.sv" 2>"$tmp/fsm_bad_
 fi
 grep -q 'exactly one posedge' "$tmp/fsm_bad_event.log"
 if "$tool" tests/cross_domain_error.pigen -o "$tmp/cross_domain_error.sv" 2>"$tmp/cross_domain_error.log"; then
-    echo "expected cross-domain transport rejection" >&2
+    echo "expected cross-domain signal rejection" >&2
     exit 1
 fi
 grep -q 'across synchronous domains' "$tmp/cross_domain_error.log"
 if "$tool" tests/async_domain_error.pigen -o "$tmp/async_domain_error.sv" 2>"$tmp/async_domain_error.log"; then
-    echo "expected asynchronous transport-domain rejection" >&2
+    echo "expected asynchronous signal-domain rejection" >&2
     exit 1
 fi
 grep -q 'exactly one posedge event control' "$tmp/async_domain_error.log"
 if "$tool" tests/outside_domain_error.pigen -o "$tmp/outside_domain_error.sv" 2>"$tmp/outside_domain_error.log"; then
-	echo "expected outside clocked always transport assignment rejection" >&2
+	echo "expected outside clocked always signal assignment rejection" >&2
 	exit 1
 fi
 grep -q 'only in clocked always blocks' "$tmp/outside_domain_error.log"

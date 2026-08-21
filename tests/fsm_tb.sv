@@ -30,7 +30,7 @@ module fsm_tb;
         source_valid = 0;
         if (!destination_valid || destination != 8'h5a)
             $fatal(1, "FSM state action did not transfer the offered packet");
-        $display("PASS: fsm state transition and transport action completed");
+        $display("PASS: fsm state transition and signal action completed");
         $finish;
     end
 endmodule

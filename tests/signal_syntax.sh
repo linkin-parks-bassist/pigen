@@ -5,10 +5,10 @@ tool=${1:-./pigen}
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 
-"$tool" tests/transport_syntax.pigen -o "$temporary/transport_syntax.sv"
-iverilog -g2012 -o "$temporary/transport_syntax" \
-	rtl/pigen_primitives.sv "$temporary/transport_syntax.sv" tests/transport_syntax_tb.sv
-vvp "$temporary/transport_syntax"
+"$tool" tests/signal_syntax.pigen -o "$temporary/signal_syntax.sv"
+iverilog -g2012 -o "$temporary/signal_syntax" \
+	rtl/pigen_primitives.sv "$temporary/signal_syntax.sv" tests/signal_syntax_tb.sv
+vvp "$temporary/signal_syntax"
 
 cp tests/sv_compat_syntax.pigen "$temporary/sv_original.sv"
 iverilog -g2012 -o "$temporary/sv_original" \
@@ -26,7 +26,7 @@ iverilog -g2012 -s slice_width_error -o "$temporary/slice_width_error" \
 	>"$temporary/width.out" 2>"$temporary/width.err"
 if vvp "$temporary/slice_width_error" >>"$temporary/width.out" \
 	2>>"$temporary/width.err"; then
-	echo "expected sliced transport width mismatch to fail elaboration/simulation" >&2
+	echo "expected sliced signal width mismatch to fail elaboration/simulation" >&2
 	exit 1
 fi
 grep -q 'Pigen transfer aggregate width mismatch' \
@@ -38,7 +38,7 @@ if "$tool" tests/projected_buffer_destination_error.pigen \
 	echo "expected projected buffered destination to fail" >&2
 	exit 1
 fi
-grep -q 'buffered transport destination must be written as a complete value' \
+grep -q 'buffered signal destination must be written as a complete value' \
 	"$temporary/projected.err"
 
 if "$tool" tests/slice_fanout_error.pigen -o "$temporary/slice_fanout_error.sv" \
@@ -46,13 +46,13 @@ if "$tool" tests/slice_fanout_error.pigen -o "$temporary/slice_fanout_error.sv" 
 	echo "expected separate slices of one buffered source to fail ownership checking" >&2
 	exit 1
 fi
-grep -q 'buffered transport value has more than one consumer' "$temporary/fanout.err"
+grep -q 'buffered signal value has more than one consumer' "$temporary/fanout.err"
 
 if "$tool" tests/wire_transfer_destination_error.pigen \
 	-o "$temporary/wire_transfer_destination_error.sv" 2>"$temporary/wire.err"; then
-	echo "expected procedural wire transport destination to fail" >&2
+	echo "expected procedural wire signal destination to fail" >&2
 	exit 1
 fi
-grep -q 'wire cannot be a procedural transport destination' "$temporary/wire.err"
+grep -q 'wire cannot be a procedural signal destination' "$temporary/wire.err"
 
-echo "PASS: transport syntax positive and negative matrix"
+echo "PASS: signal syntax positive and negative matrix"

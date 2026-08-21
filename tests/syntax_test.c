@@ -52,7 +52,7 @@ int main(void)
 	const char text[] =
 		"package prefix; localparam module = 1; endpackage\n"
 		"typedef logic [31:0] global_word_t;\n"
-		"module transports #(parameter WIDTH = 8, DEPTH = WIDTH + 1) (input logic clk);\n"
+		"module signals #(parameter WIDTH = 8, DEPTH = WIDTH + 1) (input logic clk);\n"
 		"  localparam PULSE_W = WIDTH * 2;\n"
 		"  typedef bit [3:0] nibble_t;\n"
 		"  buf signed [WIDTH-1:0] left, right;\n"
@@ -101,11 +101,11 @@ int main(void)
 	const pigen_syntax_node *node;
 	pigen_syntax_id at;
 	pigen_syntax_id module_id;
-	size_t transports = 0;
+	size_t signals = 0;
 	size_t opaques = 0;
 	size_t typedefs = 0;
 	size_t parameters = 0;
-	size_t values = 0;
+	size_t static_signals = 0;
 	size_t clocked_processes = 0;
 	size_t assignments = 0;
 	int unpacked_is_opaque = 0;
@@ -126,7 +126,7 @@ int main(void)
 	module_id = at;
 	module = pigen_syntax_get(&tree, at);
 	assert(module && module->kind == PIGEN_SYNTAX_MODULE);
-	assert(token_is(&preprocessed.expanded, module->as.module.name, "transports"));
+	assert(token_is(&preprocessed.expanded, module->as.module.name, "signals"));
 
 	for (at = module->first_child; at.index != PIGEN_INVALID_ID;
 		at = node->next_sibling)
@@ -161,18 +161,18 @@ int main(void)
 				assert(!node->as.parameter.is_local);
 			continue;
 		}
-		if (node->kind == PIGEN_SYNTAX_VALUE_DECLARATION)
+		if (node->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATION)
 		{
 			const pigen_syntax_node *declarator = pigen_syntax_get(&tree,
 				node->first_child);
 			assert(declarator &&
-				declarator->kind == PIGEN_SYNTAX_VALUE_DECLARATOR);
+				declarator->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR);
 			assert(token_is(&preprocessed.expanded,
-				declarator->as.value_declarator.name, "clk"));
-			assert(node->as.value_declaration.direction == PIGEN_DIRECTION_INPUT);
-			assert(node->as.value_declaration.storage == PIGEN_VALUE_NET);
-			assert(node->as.value_declaration.type.base == PIGEN_SYNTAX_TYPE_LOGIC);
-			values++;
+				declarator->as.static_signal_declarator.name, "clk"));
+			assert(node->as.static_signal_declaration.direction == PIGEN_DIRECTION_INPUT);
+			assert(node->as.static_signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_WIRE);
+			assert(node->as.static_signal_declaration.type.base == PIGEN_SYNTAX_TYPE_LOGIC);
+			static_signals++;
 			continue;
 		}
 		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS)
@@ -213,56 +213,56 @@ int main(void)
 			assignments += 2;
 			continue;
 		}
-		assert(node->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATION);
+		assert(node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION);
 		for (pigen_syntax_id declarator_id = node->first_child;
 			declarator_id.index != PIGEN_INVALID_ID; )
 		{
 			const pigen_syntax_node *declarator =
 				pigen_syntax_get(&tree, declarator_id);
 			assert(declarator &&
-				declarator->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATOR);
+				declarator->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR);
 			assert(declarator->parent.index == at.index);
-			transports++;
+			signals++;
 			if (token_is(&preprocessed.expanded,
-				declarator->as.transport_declarator.name, "left"))
+				declarator->as.signal_declarator.name, "left"))
 			{
 				const pigen_syntax_dimension *dimension =
 					pigen_syntax_type_dimensions(&tree,
-						&node->as.transport_declaration.payload);
-				assert(node->as.transport_declaration.kind == PIGEN_TRANSPORT_BUF);
-				assert(node->as.transport_declaration.payload.signedness ==
+						&node->as.signal_declaration.payload);
+				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_BUF);
+				assert(node->as.signal_declaration.payload.signedness ==
 					PIGEN_SYNTAX_SIGN_SIGNED);
 				assert(dimension && expression_is(&sources, &tree,
 					dimension->left, "WIDTH-1") && expression_is(&sources, &tree,
 						dimension->right, "0"));
 			}
 			else if (token_is(&preprocessed.expanded,
-				declarator->as.transport_declarator.name, "queue"))
+				declarator->as.signal_declarator.name, "queue"))
 			{
-				assert(node->as.transport_declaration.kind == PIGEN_TRANSPORT_FIFO);
-				assert(node->as.transport_declaration.payload.base ==
+				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_FIFO);
+				assert(node->as.signal_declaration.payload.base ==
 					PIGEN_SYNTAX_TYPE_NAMED);
 				assert(token_is(&preprocessed.expanded,
-					node->as.transport_declaration.payload.base_name, "packet_t"));
+					node->as.signal_declaration.payload.base_name, "packet_t"));
 				assert(expression_is(&sources, &tree,
-					node->as.transport_declaration.fifo_depth, "DEPTH"));
+					node->as.signal_declaration.fifo_depth, "DEPTH"));
 			}
 			else if (token_is(&preprocessed.expanded,
-				declarator->as.transport_declarator.name, "pulse"))
+				declarator->as.signal_declarator.name, "pulse"))
 			{
-				assert(node->as.transport_declaration.kind == PIGEN_TRANSPORT_PORT);
-				assert(node->as.transport_declaration.payload.base ==
+				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_PORT);
+				assert(node->as.signal_declaration.payload.base ==
 					PIGEN_SYNTAX_TYPE_LOGIC);
-				assert(node->as.transport_declaration.payload.signedness ==
+				assert(node->as.signal_declaration.payload.signedness ==
 					PIGEN_SYNTAX_SIGN_UNSIGNED);
 			}
 			declarator_id = declarator->next_sibling;
 		}
 	}
-	assert(transports == 4);
+	assert(signals == 4);
 	assert(typedefs == 2);
 	assert(parameters == 3);
-	assert(values == 1);
+	assert(static_signals == 1);
 	assert(clocked_processes == 1);
 	assert(assignments == 2);
 	assert(unpacked_is_opaque);

@@ -1,786 +1,186 @@
-# Compiler architecture: diagnosis and direction
+# Compiler architecture
 
-## Candid assessment
+## Diagnosis
 
-Pigen's language and transport semantics are substantially better designed than
-the compiler architecture currently implementing them.
+The production compiler is a successful semantic prototype, not the intended
+architecture. Rewritten source currently acts as its intermediate
+representation. Meaning is repeatedly recovered through token scans, copied
+substrings, textual comparisons, generated suffixes, byte offsets, and marker
+comments. This makes scope, types, control, ownership, and feature interaction
+fragile even when behavioral tests pass.
 
-The compiler works, and its verification suite exercises meaningful behavior.
-It is not random code. Nevertheless, its large-scale structure is an accreted
-source-to-source prototype whose original abstractions have been outgrown. It
-has compiler-shaped components, but it does not yet have a compiler-shaped
-spine.
-
-The central warning sign is that strings are used not merely at the source and
-output boundaries, but throughout semantic processing. Strings currently stand
-in for identifiers, types, expressions, guards, scopes, packet layouts, and
-inter-pass communication. Meaning is repeatedly recovered with token scans,
-substring copies, textual comparisons, generated suffixes, source offsets, and
-marker comments.
-
-Consequently, the compiler often knows how something is spelled without having
-a durable representation of what it means.
-
-Passing tests do not make that architecture clean. The tests establish that a
-considerable behavioral surface works; they do not establish that the intended
-semantics follow naturally from the implementation. At present, much of the
-correctness comes from coordinated local textual transformations. That makes
-new features involving scope, types, control flow, or ownership disproportionately
-expensive and fragile.
-
-This is why the procedural pipeline change became an ordeal. Its semantics
-require explicit representations of:
-
-- lexical scopes and shadowing;
-- resolved symbols and declaration identity;
-- typed expressions and projections;
-- read, write, consume, and produce uses;
-- immutable incoming and mutable outgoing stage packets;
-- external stage dependencies;
-- transport validity, readiness, and ownership;
-- enclosing guards, reset behavior, and clock domains.
-
-The existing compiler does not represent those facts centrally. Several passes
-therefore had to rediscover partial versions of them from source text and from
-text emitted by earlier passes.
-
-This is maintainable only while one person can remember all the implicit
-textual conventions. It is not a sound base for sustained language growth.
-
-## The architectural failure in one sentence
-
-Generated or rewritten source text is acting as the compiler's intermediate
-representation.
-
-Strings are appropriate here:
+Strings belong at two boundaries:
 
 ```text
-source text -> parser
-backend -> emitted SystemVerilog text
+source text -> frontend
+backend -> emitted SystemVerilog
 ```
 
-They should not be the principal representation between those boundaries.
+They must not carry meaning between compiler passes.
 
-## What should be preserved
+## Target spine
 
-A rewrite should not discard the accumulated semantic work. Important assets
-already exist:
-
-- the language decisions in `SPEC.md` and `PLAN.md`;
-- the ready/valid transport model and RTL primitives;
-- the procedural-pipeline semantics;
-- fabric topology, routing, and diagram algorithms;
-- diagnostics whose behavioral requirements remain valid;
-- the examples, especially the biquad bank;
-- positive, negative, backpressure, atomicity, and full-throughput tests.
-
-The behavioural tests are executable evidence for the replacement compiler,
-especially for ready/valid timing, atomicity, stalls, and throughput. Syntax
-tests for prototype forms are migration inputs, not language authority:
-`SPEC.md` now describes the target v1 surface and those tests must be replaced
-as each clean-break syntax cutover lands. The tests remain more valuable as
-rewrite acceptance criteria than the current lowering code is as a foundation.
-
-The lexer may also be reusable, provided it becomes the entrance to one
-coherent syntax tree rather than a utility repeatedly invoked by independent
-textual passes.
-
-## Recommended large-scale structure
-
-The compiler should have a single, explicit progression:
+The compiler has one forward progression:
 
 ```text
-source files
-    |
-    v
-lossless syntax tree
-    |
-    v
-scopes + symbol resolution + type resolution
-    |
-    v
-typed Pigen semantic IR
-    |
-    v
-transport/control graph and ownership validation
-    |
-    v
-lowered elastic RTL IR
-    |
-    v
-SystemVerilog emission
+immutable sources and preprocessing
+    -> lossless written view + expanded token view
+    -> structured syntax
+    -> scopes, symbols, data types, transfer types, and shapes
+    -> typed expressions, lvalues, predicates, and clock domains
+    -> semantic signals, transfers, pipelines, FSMs, and fabrics
+    -> signal-incidence, ownership, and ready-dependency graphs
+    -> elastic RTL IR
+    -> SystemVerilog and fabric SVG emission
 ```
 
-Each arrow should consume structured data and produce structured data. No pass
-should communicate with another by editing source text and asking the next pass
-to infer what happened.
+Every arrow consumes structured data and produces structured data. Unsupported
+SystemVerilog remains lossless opaque syntax only outside Pigen's semantic
+boundary. Opaque syntax is never searched for semantic dependencies.
 
-### 1. Syntax frontend
+The language model is fixed in `signal_model.md`: every runtime datum is one
+signal with a data type, concrete or abstract transfer type, and declarator
+shape. Ordinary SystemVerilog nets and variables are not a parallel species.
 
-Parse each compilation unit once into a real syntax tree. Preserve source spans
-on every node for diagnostics. The syntax tree may retain trivia where useful,
-but semantic work should never depend on reparsing a rendered form of it.
+## Shared services
 
-The frontend should represent at least:
+The compiler middle owns one implementation of each concern:
 
-- modules, ports, declarations, typedefs, parameters, and localparams;
-- procedural blocks and control flow;
-- expressions, lvalues, concatenations, slices, and casts;
-- transfers and transport actions;
-- pipelines, pipeline declarations, stages, and `yield`;
-- FSMs and fabrics.
+- immutable source files, line tables, spans, and token-origin provenance;
+- preprocessing and written/expanded source views;
+- arenas and stable typed identities;
+- syntax structure and explicit opaque boundaries;
+- scopes, symbols, lookup, and bidirectional semantic bindings;
+- data-type interning, signedness, dimensions, and symbolic width algebra;
+- concrete and abstract transfer types and their behavioral laws;
+- structural expressions, lvalues, and contextual typing;
+- expression-use traversal and deduplicated signal incidences;
+- canonical control predicates and mutual-exclusion proofs;
+- clock domains, ownership, and ready-dependency validation;
+- collision-safe generated names and terminal emission.
 
-Unsupported SystemVerilog can be represented as opaque syntax only where it is
-genuinely irrelevant to Pigen semantics. The boundary must be explicit; opaque
-text must not later be searched for semantic dependencies.
+Pipelines, transfers, FSMs, and fabrics consume these services and produce
+common semantic objects. No feature privately reparses names, expressions,
+types, guards, or generated text.
 
-### 2. Symbols, scopes, and types
+## Semantic-to-RTL boundary
 
-Build scopes once. Every identifier use should resolve to a declaration identity,
-not remain a name string.
+Semantic validation finishes before realization begins. Semantic objects state
+what the program means; elastic RTL IR states how that meaning is implemented
+using ports, nets, registers, instances, equations, and procedural updates.
 
-Useful identity types would be morally equivalent to:
+Static transfer laws may become constant ready/valid ties or disappear through
+ordinary lowering optimization. The semantic signal and its transfer type
+remain present before that boundary. A backend storage element likewise does
+not create or redefine source-level signal identity.
 
-```c
-typedef uint32_t SymbolId;
-typedef uint32_t ScopeId;
-typedef uint32_t TypeId;
-typedef uint32_t ExprId;
-typedef uint32_t TransportId;
-typedef uint32_t PipelineId;
-typedef uint32_t StageId;
-```
+The SystemVerilog backend only renders RTL IR. It performs no scope lookup,
+type inference, ownership analysis, source parsing, or semantic discovery.
+Fabric RTL, routes, manifests, reachability evidence, and SVGs derive from one
+resolved topology model.
 
-The precise representation is unimportant; stable identity is essential.
+## Current replacement foundation (2026-08-21)
 
-Scope lookup should directly encode the intended precedence:
+The unlinked replacement modules already provide:
 
-```text
-stage-local -> pipeline-local -> module-local
-```
+- immutable source storage and binary-searched line provenance;
+- raw written-source and preprocessed expanded-token views;
+- macro invocation, definition, formal, and actual-token origin chains;
+- conditional compilation and recursive include provenance;
+- a partial hierarchical syntax tree with explicit opaque nodes;
+- source-order parameters, typedefs, ordinary declarations, and prototype
+  `buf`/`port`/`fifo`/`skid` declarations;
+- scopes, symbols, stable identities, and structural packed data types;
+- canonical structural shape identities shared by signals and expressions;
+- a shared expression parser with structural operators, concatenations,
+  indexing, and part selects;
+- canonical constant-expression DAGs and symbolic width sums/products;
+- typed expression and recursive lvalue resolution;
+- expression-use analysis with projections, contexts, and predicates;
+- canonical conjunctive predicates and structural branch exclusion;
+- simple clocked processes, direct guarded transfers, clock domains, signal
+  incidences, self-feedback rejection, and pairwise ownership validation.
 
-Shadowing warnings then arise while constructing scopes rather than from
-feature-specific textual scans.
+The focused source, preprocessing, syntax, semantic, predicate, expression,
+use-analysis, and resolution tests pass. These modules are not linked into the
+production executable.
 
-Types should be structured. A type is not the string
-`logic signed [W-1:0]`; it has a base kind, signedness, packed dimensions, and
-width expressions. Typedef identity and canonical resolved type should both be
-available. The SystemVerilog emitter may later choose how to spell it.
+The 2026-08-21 consistency cutover established one transfer-type enum in the
+replacement middle, including the abstract input type and the static constant
+laws, and removed the discarded vocabulary from current source, diagnostics,
+tests, filenames, and documentation. The production prototype's compact
+character representation now calls the axis `transfer_type`, but remains a
+quarantined duplicate until production cutover; generic AST and token variant
+tags remain ordinary implementation discriminators.
 
-### 3. Typed expressions and use analysis
+The replacement middle now has one signal identity arena and one symbol
+binding for statics and the other transfer types. Expression-use analysis and
+direct-transfer incidence retain every participating signal; the central
+transfer-type descriptor supplies consumption, production, ownership, and
+domain behavior. Canonical shape identities are explicit as well; declaration
+shape parsing and the full storage/lowering laws remain before this phase is
+complete.
 
-Expressions need nodes with resolved operands and source spans. The compiler
-must be able to answer without scanning text:
+As a rough architecture estimate, the replacement effort is about **25%**
+complete overall: the reusable frontend and semantic foundation is around
+**55%**, but authoritative production cutover is effectively **0%** and the
+elastic RTL IR/backend does not yet exist. Treat this as a topology-of-work
+estimate, not line-count progress.
 
-- What type and packed width does this expression have?
-- Is it signed?
-- Which symbols does it read?
-- Which transports does it consume?
-- Is a reference a payload projection, an lvalue, an index, or a type query?
-- Under what control predicate is it evaluated?
-- Does it refer to incoming or outgoing pipeline state?
+## Remaining cutover boundary
 
-An expression should contain `SymbolId` references, not copied identifier
-strings. Concatenation and slicing should be structural expression nodes.
+The structured frontend still lacks complete target declarations, abstract
+input transfer types, declaration-shape parsing, cases, atomic blocks, signal actions,
+pipelines, FSMs, instances, and fabrics. Expression typing still lacks several
+SystemVerilog contextual and aggregate forms. Preprocessing still lacks token
+concatenation, stringification, and required advanced macro arguments.
 
-This representation should become common infrastructure for ordinary
-transfers, pipeline stages, FSM actions, and fabric endpoints. Each feature
-should not implement a private approximation of expression analysis.
+There is no elastic RTL IR or structured emitter. Production still lowers
+fabrics, FSMs, atomic blocks, pipelines, declarations, and assignments through
+rewritten source. In particular, pipeline placement still uses marker comments,
+generated names, rescanning, and reparsing.
 
-### 4. Semantic Pigen IR
+That pipeline rewrite also emits a private textual `ingress` declaration and
+models it as a pseudo transfer type in the production primitive table. It is a
+lowering endpoint, not one of Pigen's transfer types, and must not be added to
+the common transfer-type enum. Remove it with the pipeline textual side channel;
+the eventual structured pipeline lowering must represent stage ingress through
+ordinary signal incidence and RTL-IR endpoints.
 
-After resolution, lower surface constructs into a typed semantic IR which is
-still independent of exact emitted RTL.
+Do not link the partial model into production as an additional validator. A
+structured slice becomes authoritative only when the corresponding textual
+authority is deleted in the same change. `PLAN.md` owns the current cutover
+order.
 
-A transfer might be represented conceptually as:
-
-```text
-Transfer {
-    destinations: [ResolvedLvalue],
-    value: ExprId,
-    guard: ExprId,
-    clock_domain: ClockDomainId,
-    source_span: Span,
-}
-```
-
-A pipeline stage might be represented as:
-
-```text
-Stage {
-    scope: ScopeId,
-    incoming_fields: [FieldId],
-    outgoing_fields: [FieldId],
-    external_inputs: [ResolvedInput],
-    transforms: [FieldUpdate],
-    guard: ExprId,
-    clock_domain: ClockDomainId,
-    source_span: Span,
-}
-```
-
-Each `FieldUpdate` reads the immutable incoming packet. All updates jointly
-define the outgoing packet. This makes stagewise nonblocking behavior a property
-of the IR rather than an emitter trick.
-
-`yield` should be a typed expression evaluated against the final outgoing stage
-packet and should define one ordinary buffered transport in the enclosing
-module. A later consumer refers to that transport by identity.
-
-External stage inputs should be inferred from resolved expression uses. Their
-validity and consumption behavior should derive from transport kinds in the
-symbol table. There should be no separate scan of stage-body text.
-
-### 5. Transport and ownership graph
-
-Build a whole-unit graph after semantic lowering. Nodes represent transports,
-stage boundaries, storage elements, and actions; edges represent production,
-consumption, validity, and readiness dependencies.
-
-This graph should be the authority for:
-
-- atomic joins and co-slices;
-- sole-consumer validation;
-- mutually exclusive consumers;
-- producer exclusivity;
-- stage stall conditions;
-- ready-path cycle detection;
-- buffer/FIFO/skid placement;
-- same-cycle consume-and-replenish behavior;
-- reset and invalidation effects.
-
-Guards should be expression nodes or normalized predicates, not rendered text.
-Mutual exclusion should be proven or conservatively rejected at this level.
-
-### 6. Lowered elastic RTL IR
-
-Only after semantic validation should the compiler decide how to realize the
-design in RTL. This IR should contain registers, combinational equations,
-instances, ports, and always blocks, but no unresolved Pigen semantics.
-
-Pipeline lowering is a settled language and backend constraint: every stage is
-inlined structurally into its parent module. The RTL IR should make stage
-packet boundaries, combinational transforms, elastic state, and parameter/type
-dependencies explicit while preserving that parent-module realization. A
-compiler-middle rewrite must reproduce the existing inlined behavior; it must
-not reopen generated child modules as an emission alternative.
-
-### 7. SystemVerilog backend
-
-The backend should render the RTL IR. It should not discover symbols, infer
-types, determine ownership, or reinterpret source expressions.
-
-String construction belongs here. Generated-name allocation should be
-centralized and collision-safe. No later compiler pass should parse the emitted
-SystemVerilog.
-
-## Architectural boundaries
-
-The following dependencies should be one-way:
-
-```text
-lexer -> parser -> resolver -> semantic analysis -> RTL lowering -> emitter
-```
-
-Shared semantic services may include:
-
-- source management and diagnostics;
-- arenas and stable IDs;
-- symbol tables and scopes;
-- type interning and width expressions;
-- expression traversal and use analysis;
-- control predicates and clock domains;
-- transport descriptors.
-
-Feature modules—pipeline, transfer, FSM, and fabric—should consume those
-services and produce common IR. They should not reach backward into source text
-or sideways into another feature's generated spelling.
-
-Important prohibitions:
+## Architectural prohibitions
 
 - no reparsing compiler-generated source;
-- no marker comments used for internal placement;
-- no semantic lookup by generated suffix;
-- no `strstr`-based declaration or dependency discovery;
-- no textual type equality as semantic type equality;
-- no byte-offset repair after source rewriting;
-- no feature-specific duplicate symbol resolver;
-- no emitter function performing semantic inference.
-
-## Best practices for future implementation
-
-### Make semantics structural
-
-The correct behavior should follow from the representation. If stage reads are
-supposed to observe the incoming packet, stage expressions must refer to
-incoming `FieldId`s. Do not depend on carefully ordering textual substitutions.
-
-### Preserve source provenance
-
-Every semantic object should retain the span of the syntax which created it.
-Generated IR should retain provenance chains where useful. Diagnostics should
-never need to guess a source location from transformed text.
-
-### Separate identity from spelling
-
-Names are presentation and lookup keys. After resolution, declarations and
-uses communicate by stable identity. Renaming a source symbol should not alter
-the correctness of an unrelated analysis.
-
-### Centralize invariants
-
-There should be one authoritative implementation for each of:
-
-- type resolution;
-- scope lookup;
-- expression-use discovery;
-- transport-kind behavior;
-- packed width and signedness;
-- guard and clock-domain association;
-- ownership validation.
-
-Duplicated partial knowledge is the primary source of semantic drift.
-
-### Prefer conservative rejection to accidental semantics
-
-If an expression or SystemVerilog construct cannot yet be represented, report
-that limitation at its source span. Do not preserve it as opaque text and then
-make ownership or handshake decisions from an incomplete approximation.
-
-### Treat tests as necessary, not sufficient
-
-Each feature requires behavioral tests, negative diagnostics, stalls,
-full-throughput cases, and interaction tests. It also requires an architectural
-review: does the implementation express the semantic invariant directly, or
-does it merely reproduce expected examples through textual coincidence?
-
-### Make generated RTL auditable
-
-Generated RTL should have a stable relationship to semantic IR objects. Names,
-packets, stages, and handshake equations should be understandable without
-reverse-engineering several string transformations.
-
-## Rules for agent-driven compiler work
-
-The failure was not merely insufficient coding effort. It was working at the
-wrong level of abstraction: repeatedly optimizing for the next local test
-instead of first determining what representation would make the semantics
-natural.
-
-Future agent instructions should include a gate such as:
-
-> Before implementing a language feature, identify the semantic objects and
-> invariants it requires. Show where each is represented in the compiler. If
-> the current IR cannot represent them directly, stop and propose the necessary
-> architectural change before writing the feature.
-
-And a stronger prohibition:
-
-> Do not recover semantic information from generated or rewritten source text.
-> Strings are permitted at parsing and emission boundaries. Any textual
-> rescanning, magic generated naming convention, marker comment, or reparsing
-> of transformed source requires explicit approval.
-
-Agents should also be asked to answer these questions before implementation:
-
-1. What semantic invariant is being introduced or changed?
-2. Which IR node owns that invariant?
-3. Where are names resolved and types established?
-4. How are source locations preserved?
-5. Which existing passes consume the new information?
-6. Does any pass need to rediscover information already known earlier?
-7. What invalid programs become structurally unrepresentable?
-8. What behavioral and architectural tests demonstrate correctness?
-
-A patch which passes tests but introduces another textual side channel should
-be rejected.
-
-## Replacement-spine status (2026-08-17)
-
-The first replacement foundations now exist in `source.c`, `syntax.c`,
-`semantic.c`, `expression_resolve.c`, and `resolve.c`: immutable source storage, typed
-IDs, source spans, a partial syntax tree, scopes, symbols, structural packed
-types, and resolved module/typedef/internal-transport declarations.  These
-files are not linked into the production compiler.  The live compiler still operates through
-the textual lowering path in `pigen.c`, `assignments.c`, and `pipeline.c`.
-
-Each immutable source file owns an ordered table of line-start byte offsets,
-including the first line and the empty line after a trailing newline.  Source
-location lookup is a binary search in that table rather than a scan from the
-beginning of the file.  Columns remain byte-based, matching lexer spans;
-changing the diagnostic column policy is a separate concern and must not alter
-the byte-offset provenance model.
-
-The frontend now has two deliberately distinct views.  The written-source view
-owns one raw tokenization per physical `SourceId`, refers back to the source
-manager's exact immutable bytes, and records written include sites and their
-resolved file edges.  The expanded view owns the token order seen by semantic
-parsing.  Its hierarchical syntax tree makes structured declarations replace
-their expanded token regions, makes declarators children of declarations, and
-keeps unparsed SystemVerilog explicit as opaque syntax.  Only the written view
-is lossless with respect to the physical input files.  The following early
-corrections are complete:
-
-- Distinct integer-literal occurrences now receive distinct semantic
-  expression IDs and retain their own provenance.
-- A declaration such as `buf [7:0] a, b;` is one transport-declaration node
-  owning two declarator nodes; declaration identity no longer overlaps.
-- ANSI transport ports, including inherited comma-list declarators, use the
-  same declaration representation as internal transports.
-- Supported ordinary ANSI ports and module values likewise use one declaration
-  node with ordered declarator children.  Each resolved declarator has its own
-  `ValueId`, bidirectional symbol binding, structural type, direction, and
-  net-or-variable storage class.  Clock and reset ports can therefore become
-  real expression operands and clock-domain inputs rather than names recovered
-  from opaque module text.  Declarations with unpacked dimensions remain wholly
-  opaque until array shape is represented in the type system; the frontend
-  does not publish a scalar or packed prefix as a misleading partial fact.
-
-Canonical constant expressions are a separate arena, identified by
-`pigen_const_expr_id`.  A source expression occurrence has an `ExprId`, type,
-and source span, and refers to a canonical constant expression when it is
-constant.  Interned `TypeId` dimensions refer only to canonical constant
-expressions.  Thus equal widths compare cheaply without collapsing distinct
-source occurrences or borrowing one occurrence's provenance.  The canonical
-arena represents integers, exact sized bit vectors, resolved parameter symbols,
-and typed unary, binary, and conditional operator DAG nodes.  Sized bit vectors
-are normalized to LSB-first `0`/`1`/`x`/`z` states, so equivalent base spellings
-share canonical identity without losing the separate source occurrences which
-produced them.  Their width is not limited by a host integer.  Packed bounds and
-FIFO depths now parse into a shared expression-syntax arena and resolution
-constructs distinct semantic occurrences backed by those canonical nodes.
-
-`expression.c` is the shared structural expression parser for every future
-Pigen semantic context.  Its arena represents literals, names, grouping, unary
-and binary precedence, conditionals, concatenation and replication, calls,
-member and scope access, indexing, ordinary and indexed selects, and casts.
-Operators are semantic enum values rather than spellings.  Child-reference
-ranges keep variable-arity calls and concatenations compact without imposing
-tree-specific allocations.  The lexer recognizes SystemVerilog's
-multi-character operators by longest match; the live fabric parser was adjusted
-to count the spelling of repeated hyphens in its contextual arrows.
-
-The language boundary is settled: expressions inside Pigen semantic constructs
-remain ordinary SystemVerilog expressions, not a smaller Pigen-only language.
-An expression form not yet represented is rejected explicitly at that boundary;
-ordinary SystemVerilog outside it remains opaque and unchanged.  Streaming
-concatenations, assignment patterns, and the less common primary forms are not
-yet represented.  Do not handle them with textual scanning.
-
-Preprocessing is a token stage before syntax, not a symbolic-macro exception in
-the expression model.  `preprocess.c` now provides stable macro and token-origin
-identities, retains replacement tokens and formal parameters, and recursively
-expands object-like and function-like macros.  A fixed replacement token records
-its invocation and definition-token origins.  A substituted argument token
-instead records its invocation, formal-parameter, and actual-token origins.
-Consequently nested expansion preserves three distinct questions: which user
-call caused a token to appear, which actual spelling supplied it, and through
-which formal binding it entered the replacement.  Macro arguments are split
-structurally across nested parentheses, brackets, and braces before recursive
-expansion; commas inside those groups do not become argument separators.  A
-continued `define` is first projected into one logical sequence of raw-token
-indices.  Continuation backslashes are absent from that sequence, while formal
-parameters and replacement tokens retain their exact physical source origins;
-the macro definition span still covers all participating physical lines.
-`ifdef`/`ifndef`/`elsif`/`else`/`endif` use one nested selection stack and the
-source-order macro environment.  Inactive branches are inert: they neither emit
-tokens nor execute definitions, undefinitions, includes, or macro calls.  The
-conditional directive ends after its required keyword/name tokens rather than
-owning the physical line, so selected source may follow it on that same line.
-The conditional stack and macro environment cross include boundaries just as
-the textually included token stream does.  Quoted includes are loaded recursively
-through a caller-owned source provider.  The provider, not the preprocessor,
-owns path resolution and I/O; it returns a `SourceId` already registered with
-the shared source manager.  Included files retain their own source identity and
-are checked for recursive inclusion.  Include operands expand through a private
-token destination rather than the program-token arena.  The result must be
-exactly one quoted path or one angle-bracket path; the written include edge
-retains the physical operand span even when its spelling came from a macro.
-Token concatenation/stringification and variadic/default macro arguments remain
-explicit unfinished preprocessor work.
-
-Structured syntax now consumes only the immutable preprocessed token stream;
-the raw-token parser entry point has been removed.  Every syntax location owns
-a typed half-open token extent, a diagnostic origin, and an optional contiguous
-original-source span.  Names are token identities.  Resolution compares the
-spelling reached through token provenance, while errors use the expansion
-location, so macro-generated spelling and user-facing diagnostics are no longer
-conflated.  A macro-expanded bound or FIFO depth is parsed from expanded tokens
-and retains the invocation as its expression provenance.  Never
-manufacture a contiguous source span when future includes make one unavailable.
-
-The include losslessness boundary is settled: do not attach written include
-directives to the expanded syntax tree.  `pigen_preprocess_result` contains a
-`written` source view and a separate `expanded` token view.  The syntax parser
-accepts only the latter, making the dependency unambiguous in the type system.
-The written view preserves the former include directive and edge; the expanded
-view contains the included tokens in compilation order.  Cross-file syntax
-locations retain token extents and provenance but no fabricated byte span.
-Opaque expanded syntax likewise covers token extents only; physical gaps,
-comments, directive text, and other exact bytes belong exclusively to the
-written view.  A compilation-unit semantic scope may consequently have no
-single source span.  Such a scope uses the invalid-span sentinel deliberately;
-individual declarations and diagnostic sites retain concrete provenance.
-
-The shared lexer also previously classified decimal tokens as identifiers
-because its general identifier-character branch preceded its digit branch.
-Numbers now have their actual token kind.  This matters to structured constant
-resolution and also removes accidental name treatment from the prototype
-pipeline lexer users.
-
-The following limitations therefore still prevent cutover:
-
-- Constant resolution handles unsized decimal literals, exact explicitly sized
-  `b`/`o`/`d`/`h` literals, parameter-symbol leaves, integer
-  arithmetic/bitwise trees, and boolean comparison, equality, logical, and
-  reduction trees.  Binary, octal, and hexadecimal values preserve four-state
-  digits; numeric decimal values are converted directly into the requested
-  width without a host-integer intermediate.  Literal signedness and width own
-  a structural logic type.  Boolean-producing operators share one interned
-  unsigned scalar-logic result type.  Conditional constant expressions are
-  structured when both branches already have the same resolved type; mixed
-  branch types remain unresolved until SystemVerilog's conditional merge rules
-  are represented.  Unbased, unsized based, decimal `x`/`z`, and aggregate
-  forms remain syntax only until their context and SystemVerilog result typing
-  are represented; assigning them a generic integer type would silently encode
-  false sizing semantics.  Untyped integer
-  `parameter` and `localparam` declarations are
-  now structured in module parameter lists and module bodies.  Typed and
-  aggregate parameter forms remain opaque until their types can be represented
-  without approximation.
-- Procedural coverage does not yet comprehensively use the shared expression
-  arena.  Nonblocking assignments under recursively structured `begin`/`end`
-  and `if`/`else` controls in fully representable one-edge clocked bodies now
-  do.  Cases, explicit atomic blocks, and transport actions remain to be added.
-  Until that path becomes authoritative and its textual scanner is deleted,
-  the production compiler remains textual.
-
-Do not integrate the partial model into the production driver merely as an
-additional validation pass; that would create a second authority without
-deleting a textual path.
-
-Parameter declarations are resolved in source order into dedicated semantic
-parameter objects.  Each object owns its syntax identity, module, symbol,
-constant value expression, locality, and provenance.  Parameter-derived packed
-bounds and FIFO depths retain canonical symbol-expression nodes rather than
-copying or evaluating the parameter's source spelling.  An initializer may
-refer to an earlier parameter in the same module; it cannot acquire its own
-symbol before its value has resolved.  Unsupported typed parameter declarations
-remain ordinary opaque SystemVerilog and do not create partial semantic facts.
-
-Relational, equality, logical, and reduction operators map from syntax operator
-enums to semantic operator enums without rendering their spelling.  Their
-result is a canonical unsigned scalar-logic type, while source-expression
-occurrences retain their own provenance and point at interned constant DAG
-nodes.  This is deliberately structural rather than an evaluator: elaboration
-values are not folded into host integers, and parameter references remain
-symbol leaves.
-
-Conditional expressions likewise have distinct occurrence and canonical DAG
-nodes.  Their condition and both alternatives are expression identities, not
-source fragments.  The current resolver accepts only integral conditions and
-identically typed alternatives, making the result type exactly the shared
-branch type.  Do not broaden this by choosing one branch or a generic integer;
-mixed widths and signedness require the proper SystemVerilog merge operation.
-
-`expression_resolve.c` owns the shared recursive resolution of expression
-syntax into typed semantic occurrences.  Constant-expression checking is a
-policy of this service, not a separate expression species: parameter-only trees
-also point at canonical constant DAG nodes, while runtime value and transport
-reads carry an invalid constant identity without losing their type, provenance,
-or structural operands.  Declaration resolution uses the constant policy for
-parameter values, packed bounds, and FIFO depths; future transfers and pipeline
-stages must use the general policy rather than adding a feature-local resolver.
-Semantic unary and binary operator enums are correspondingly shared and do not
-carry a misleading `const` prefix.  The semantic model also owns lazy stable
-identities for the ordinary unsized-integer type and the unsigned scalar-logic
-boolean result type, so callers do not privately intern competing builtin
-types.
-
-Symbols and their current semantic objects are bidirectionally linked.  Module,
-parameter, ordinary-value, and transport arenas are grown only by
-semantic-model constructors;
-each constructor validates scope ownership, type agreement, required constant
-expressions, and provenance before installing the object's typed identity in
-its symbol.  Typed symbol lookup functions verify the reverse link.  Expression
-use analysis must use this binding to recover a `TransportId` from a symbol—it
-must not scan the transport arena or compare declaration names a second time.
-
-`predicate.c` owns canonical evaluation guards independently of rendered
-expressions.  A predicate is an interned conjunction of typed expression
-identities and required truth polarities; empty conjunction and contradiction
-have explicit true and false identities.  Conjunction insertion sorts by
-`ExprId`, removes repetition, and turns opposite requirements into false.
-Mutual-exclusion queries merge the sorted atom lists and therefore prove
-opposite conditional branches without comparing strings.  This deliberately
-small algebra represents nested `if`/`else` and ternary evaluation paths; a
-future need for disjunction must extend the predicate algebra rather than
-encode guards as rendered text.
-
-`expression_use.c` performs the first shared semantic-expression traversal.
-Its read analysis records every symbol occurrence with its projected
-expression identity, typed symbol identity, evaluation `PredicateId`, and
-`TransportId` when the symbol denotes a transport.  A separate summary array
-deduplicates transports by identity while occurrence records preserve repeated
-projections and provenance.  Conditional expressions read their condition
-under the incoming predicate and traverse their alternatives under opposite
-condition polarities; false predicates prune unreachable uses.  Packed index
-and part-select expressions traverse their payload base under the enclosing
-read or lvalue context.  A bit subscript or indexed part-select starting index
-uses the distinct index context; constant range bounds and indexed widths use
-type context.  A transport used as a runtime subscript therefore remains a
-first-class occurrence and can later participate in transfer validity and
-ownership rather than disappearing into a projection string.  Concatenation
-reads retain ordered child `ExprId` values and traverse each child as its own
-projection occurrence; result-type calculation does not erase value order.
-
-The semantic model now also interns resolved lvalue occurrences by their
-projecting `ExprId`.  It is now a recursive arena rather than a flat
-single-base record.  A projection leaf owns its type, assignable base
-`SymbolId`, optional base `TransportId`, and provenance.  A concatenation
-node owns an ordered range of child `LvalueId` values and may nest.  Direct
-ordinary values, direct transports, transparent grouping, recursive packed
-projections, and concatenated destinations are authoritative; parameters and
-operator trees are rejected.  A concatenation resolves only when every child
-is independently assignable, so a mixed destination cannot exist as a partial
-semantic lvalue.  Each expression carries a direct optional back-reference to
-its interned lvalue occurrence; resolution and repeated lookup do not scan the
-lvalue arena.
-
-Packed indexing and all three part-select forms have semantic expression and
-canonical constant-expression nodes.  Their result types are derived by the
-shared type service, including traversal through typedef identity, projection
-of the leftmost packed dimension, unsigned select results, preservation of
-remaining packed dimensions, and the implicit packed shape of `integer`.
-Scalar logic/bit values cannot be selected.
-
-Part-select result types use a derived canonical `select_width` expression.
-For `[left:right]` it denotes `abs(left-right)+1`; for
-`[base +: width]` and `[base -: width]` it denotes `width`.  Range operands
-are canonicalized symmetrically, and indexed direction is absent from width
-identity, so opposite bound orderings and `+:`/`-:` choices do not create
-falsely distinct result types.  The derived node retains symbolic elaboration
-structure rather than folding it through a host integer.  Positivity and
-concrete-bound validation await the elaboration-value service.
-
-Packed width is now a canonical semantic query.  It recursively traverses
-typedefs, represents every dimension by its direction-independent range width,
-and combines dimensions with flattened, sorted `width_product` nodes.
-Concatenation types combine child widths with flattened, sorted `width_sum`
-nodes.  The sum is commutative for type identity while the concatenation's
-expression children remain ordered for value semantics.  The result is an
-unsigned one-dimensional packed `bit` value when every child is two-state and
-an unsigned packed `logic` value otherwise.  Canonical constant
-concatenations retain the same ordered child sequence.
-
-Lvalue use analysis walks recursive child `LvalueId` ranges in source order and
-feeds the same occurrence and deduplicated transport arrays as read analysis,
-setting distinct lvalue, index, and type context bits.  Member destinations
-remain unrepresented until aggregate field types exist.  With direct, indexed,
-selected, grouped, and concatenated lvalues now structural, procedural transfer
-syntax can target this model without rescanning destination text.
-
-The procedural syntax slice is deliberately all-or-nothing.  A plain `always`
-or `always_ff` with one `posedge` value name and a body recursively consisting
-of procedural blocks, `if`/`else` controls, and nonblocking assignments becomes
-a clocked-process tree.  The tree preserves source statement order, nested
-blocks, and SystemVerilog's nearest-unmatched-`if` association for a dangling
-`else`.  Syntax-node and expression-arena counts are rolled back if any
-statement is not representable, and the complete process remains opaque; no
-partial clock, guard, or action facts survive.  `syntax_test.c` exercises both
-nested dangling-else structure and rollback after a representable prefix.
-
-Resolution gives clock domains, process occurrences, and transfers distinct
-stable IDs.  Domains are interned by the resolved ordinary-value clock symbol,
-so separate processes on the same clock share identity while retaining distinct
-clock expression occurrences and provenance.  Each `if` condition resolves
-once through the shared typed-expression service.  Recursive resolution adds
-its truth or falsehood to the incoming canonical predicate, so every assignment
-owns its complete control guard as well as its process and domain IDs.  Reads
-needed by guard conditions join lvalue-index and RHS reads in the transfer's
-deduplicated incidence set; guard transports therefore bind to the same clock
-domain and participate in ownership and self-feedback checks.  Ordinary nets
-and input ports are rejected as procedural destinations.  Incompatible later
-domain use and direct buffered self-consumption are rejected structurally by
-transport identity.
-
-Resolved transfers now form an explicit transport hypergraph.  A transfer owns
-one compact, deduplicated incidence range whose entries pair `TransportId` with
-producer and/or consumer role bits.  Buffered lvalue leaves are producers;
-transport reads in RHS expressions and lvalue indices are consumers.  The
-domain binder and self-feedback check consume this same range rather than
-walking syntax again.  After all modules resolve, whole-unit ownership analysis
-compares incidences by transport identity and permits repeated producers or
-consumers only when their canonical predicates are mutually exclusive.
-Structured nested alternatives now exercise that criterion directly: guarded
-routes may share an endpoint only when opposite atoms prove their paths
-disjoint.  `resolve_test.c` covers pairwise-exclusive nested consumers and
-producers, a transport-valued condition, and unconditional conflicts.
-
-## Rewrite strategy
-
-A roughly full rewrite of the compiler middle is warranted. It may be built in
-small, independently tested slices, but there is no compatibility architecture:
-when a slice becomes authoritative, it replaces and deletes the corresponding
-textual mechanism in the same change. No dual path, feature flag, deprecated
-form, or fallback remains in the compiler.
-
-Suggested order:
-
-1. Freeze new language features temporarily and treat current tests as an
-   executable description of current semantics. Deliberate language changes
-   update those tests rather than preserving prior Pigen behavior.
-2. Write down the semantic invariants for scopes, types, expressions,
-   transports, transfers, pipelines, FSMs, and fabrics.
-3. Introduce source management, arenas/stable IDs, syntax nodes, scopes,
-   symbols, and structured types.
-4. Parse ordinary modules and transport declarations into the new frontend.
-5. Implement typed expression and lvalue resolution.
-6. Lower ordinary transfers into the common semantic IR and match the existing
-   transfer tests.
-7. Implement the whole-unit transport/ownership graph.
-8. Lower procedural pipelines into the same IR and match pipeline and biquad
-   verification.
-9. Move FSMs and fabrics onto the common frontend and semantic services while
-   retaining their specialized algorithms.
-10. Introduce a structured RTL IR and make SystemVerilog emission terminal.
-11. Delete each textual pass in the same change that makes its structured
-    replacement authoritative.
-
-The new compiler should not import current implementation boundaries merely to
-stage the rewrite conveniently. In particular, do not create a new `pipeline` subsystem
-which once again privately parses types, scopes, and expressions. Build the
-shared frontend first.
-
-## A useful initial experiment
-
-Before committing to the full rewrite, implement one thin vertical slice:
-
-```text
-one module
-  -> declarations and scopes
-  -> one clocked block
-  -> one atomic transfer
-  -> typed semantic IR
-  -> transport graph
-  -> RTL IR
-  -> SystemVerilog
-```
-
-Then reproduce the existing two-stage inlined elastic pipeline behavior with
-one later-stage external buffer dependency. If this can be expressed without
-source rewriting or semantic strings, the core architecture is probably
-sound. The biquad bank then becomes the decisive integration target.
-
-## Final perspective
-
-The present implementation should be regarded as a successful semantic
-prototype and an executable requirements generator, not as the desired mature
-compiler architecture.
-
-The language vision is not the problem. The problem is that semantic structure
-has been encoded in coordinated text manipulation instead of represented as
-data. Further local cleverness will deepen that debt. The next large move
-should be to give the compiler a coherent semantic spine, after which pipelines
-and transports can become straightforward consequences of the model rather
-than recurring feats of textual reconstruction.
+- no marker comments as internal placement channels;
+- no semantic lookup by generated spelling or suffix;
+- no declaration, dependency, type, or ownership discovery by substring scan;
+- no textual type or guard equality;
+- no byte-offset repair after rewriting;
+- no feature-specific symbol, expression, or scope resolver;
+- no emitter-side semantic inference;
+- no shadow validation path, feature flag, compatibility implementation, or
+  fallback for superseded Pigen behavior.
+
+## Review gate
+
+Before implementing a language or compiler feature, record:
+
+1. the semantic invariant and owning object;
+2. the resolution and type boundary;
+3. the provenance path used by diagnostics;
+4. every downstream consumer;
+5. states made structurally unrepresentable;
+6. behavioral and architectural verification;
+7. confirmation that no pass rediscovers an already-known fact from text.
+
+Passing tests are necessary but do not excuse a textual side channel. Tests for
+superseded Pigen forms are replaced at clean breaks; ordinary SystemVerilog
+compatibility tests are permanent.
+
+This compact architecture record was organized by Ariadne after David's signal
+and transfer-type decisions. Git history retains the discarded chronological
+diary if a past implementation detail ever needs forensic recovery.

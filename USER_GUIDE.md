@@ -29,7 +29,7 @@ prototype top-level routed-fabric units.
 
 ## The central idea
 
-Pigen transport values carry a payload plus a ready/valid contract. Inside an
+Pigen signals carry a payload plus a ready/valid contract. Inside an
 clocked `always @(posedge ...)` block (`always_ff` is also accepted), this:
 
 ```systemverilog
@@ -96,7 +96,7 @@ SystemVerilog.
 
 Compiling a source containing one fabric writes an inspectable topology diagram
 next to the SV output, for example `command_network.sv.svg`. The SVG labels the
-units, transport endpoints, generated router and port IDs, physical router
+units, signal endpoints, generated router and port IDs, physical router
 links, direct links, and declared connections. Its topology-aware layout places
 ports toward their peers, separates node and label footprints, and reduces
 wire crossings, with direct links weighted most heavily. Use `--diagram PATH` to choose
@@ -128,7 +128,7 @@ endmodule
 item; that backpressure reaches `incoming` automatically. Add stages by naming
 them, not by rebuilding handshake logic.
 
-## Choose the right transport storage
+## Choose the transfer type
 
 | Declaration | Use it when | Important property |
 | --- | --- | --- |
@@ -136,7 +136,7 @@ them, not by rebuilding handshake logic.
 | `fifo [W:0][DEPTH] x;` | You need ordered queueing or burst absorption | Holds `DEPTH` items and breaks combinational ready propagation. Payload comes before depth. |
 | `skid [W:0] x;` | You need delayed backpressure absorbed | A two-entry, ready-registered skid buffer. |
 | `port [W:0] x;` | You need a sampled one-cycle result | Valid pulses for one cycle; it does not retain an unaccepted item. |
-| `wire`, `reg`, `logic` | The value is always available or is ordinary control/state | They have degenerate transport semantics when used in a Pigen action. |
+| `wire`, `reg`, `logic` | The value is always available or is ordinary control/state | They are statics with constant transfer laws. |
 
 For example:
 
@@ -169,7 +169,7 @@ end
 ```
 
 `if`/`else`, `case`, `casez`, `casex`, `unique case`, and `priority case` are
-understood for transport-route exclusivity. Two writers to the same transport
+understood for signal-route exclusivity. Two writers to the same signal
 are permitted only when their control paths are provably disjoint, as in the
 `if`/`else` above.
 
@@ -197,16 +197,16 @@ if (result <= requests)
 ```
 
 That condition is equivalent to `accepts(result, requests)` and performs the
-same transfer on the accepted cycle. Its two sides are transport identifiers.
+same transfer on the accepted cycle. Its two sides are signal identifiers.
 
 ## Ownership: the rule that keeps flow simple
 
-A buffered transport has one consumer. This makes ownership explicit and lets
+A buffered signal has one consumer. This makes ownership explicit and lets
 Pigen construct one unambiguous ready route. If you need to send one item to
 two places, choose the behavior intentionally: duplicate the payload into two
 destinations, add a fork protocol, or make one consumer own the decision.
 
-A transport cannot consume itself in the transfer that writes it:
+A signal cannot consume itself in the transfer that writes it:
 
 ```systemverilog
 buf [7:0] count;
@@ -218,7 +218,7 @@ Pigen defines both FIFO and skid input readiness from registered occupancy;
 neither propagates output readiness combinationally to its input.
 
 Storage also belongs to the module that declares it. `validate(x);` and
-`invalidate(x);` explicitly set a local transport valid or invalid on the next
+`invalidate(x);` explicitly set a local signal valid or invalid on the next
 clock edge.  They compose in source order with transfers, just like normal
 non-blocking assignments.  This is the normal way to seed elastic feedback
 state, including during reset:
@@ -231,7 +231,7 @@ end
 ```
 
 `x1` and `x2` are now zero-valued valid buffer tokens after reset, so downstream
-joins do not stall waiting for history.  `invalidate(x);` forces a transport
+joins do not stall waiting for history.  `invalidate(x);` forces a signal
 invalid and `flush(x);` empties local buffered storage:
 
 ```systemverilog
@@ -259,7 +259,7 @@ Here `acc_3` advances and the old `x2` token is retired atomically.
 
 ## Module boundaries
 
-Use the same transport spelling in an ANSI module port:
+Use the same transfer-type-first spelling in an ANSI module port:
 
 ```systemverilog
 module worker
@@ -273,10 +273,10 @@ module worker
 endmodule
 ```
 
-Pigen expands each transport boundary into ordinary SV payload, `_valid`, and
+Pigen expands each signal boundary into ordinary SV payload, `_valid`, and
 `_ready` ports. An `input buf`, `input fifo`, or `input skid` is an
 upstream-owned channel view: no duplicate child buffer is created, and the
-child’s ready signal propagates to the upstream owner. An output transport is
+child’s ready signal propagates to the upstream owner. An output signal is
 stored inside the child and presented to its parent using the same contract.
 
 This gives normal data flow a transparent ready chain across hierarchy. Clear
@@ -310,7 +310,7 @@ the familiar `read_data <= mem[read_address];` shape that RAM inference tools
 expect. The Pigen valid pulse is asserted only when `read_enable` was true;
 consumers see that pulse on the following cycle.
 
-You can consume an input transport directly in a conventional memory write:
+You can consume an input signal directly in a conventional memory write:
 
 ```systemverilog
 input port [31:0] write_data;
@@ -355,9 +355,8 @@ its enclosing guard; it does not implicitly wait for a transfer, so use
    queue depth, and a `skid` where two slots are exactly what the timing path
    needs.
 2. Keep Pigen actions inside one `always @(posedge clock)` domain. `always_ff`
-   is also accepted. A
-   transport binds to the first domain that uses it; crossing domains is an
-   error rather than an accidental CDC.
+   is also accepted. A signal binds to the first domain that uses it; crossing
+   domains is an error rather than an accidental CDC.
 3. Treat `valid`, `ready`, and `accepts` as control observations. Prefer a
    direct `<=` route when you simply want data to flow.
 4. Compile early: `./pigen design.pigen -o design.sv`. Read the emitted RTL
@@ -368,7 +367,7 @@ its enclosing guard; it does not implicitly wait for a transfer, so use
 
 ## Fixed-point and ordinary state: two current edges
 
-Pigen transports accept packed SystemVerilog signedness modifiers.  Write
+Pigen signals accept packed SystemVerilog signedness modifiers.  Write
 `buf signed [23:0] sample` (or `fifo signed [23:0][4] samples`) when the
 payload is signed; the generated payload signal and primitive type parameter
 remain signed.  Use `$signed(...)` only when deliberately reinterpreting an
@@ -383,7 +382,7 @@ packet <= sample;
 sample_history <= sample;
 ```
 
-Pack every value that needs to travel together into one transport item, or use
+Pack every value that needs to travel together into one signal item, or use
 the explicit co-sliced transfer described below.  Do not depend on generated
 `__pigen_*` signal names: they are implementation details, not a module
 interface.
@@ -392,7 +391,7 @@ interface.
 
 Use a co-sliced transfer when one accepted token must update several related
 destinations atomically.  Every destination must be ready; each distinct RHS
-transport is valid and consumed once, even if it appears in more than one RHS
+signal is valid and consumed once, even if it appears in more than one RHS
 expression:
 
 ```systemverilog
@@ -431,7 +430,7 @@ only when the same atomic transfer fires:
 
 A buffered destination must still be written whole; a partial write would give
 its one valid bit no coherent packet meaning. Pure ordinary-SV assignments are
-not subjected to transport ownership rules, so normal source-ordered
+not subjected to signal ownership rules, so normal source-ordered
 nonblocking assignment behavior remains intact.
 
 ## Where to look next

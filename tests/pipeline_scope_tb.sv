@@ -1,15 +1,15 @@
 module pipeline_scope_tb;
 	logic clk = 1'b0, reset = 1'b1, enable = 1'b1;
-	logic [7:0] degenerate_source = 8'd40, wire_source, first_source, later_source;
+	logic [7:0] static_source = 8'd40, wire_source, first_source, later_source;
 	logic wire_source_valid = 1'b0, wire_source_ready;
 	logic first_source_valid = 1'b0, first_source_ready;
 	logic later_source_valid = 1'b0, later_source_ready;
 	logic [7:0] wire_result, later_result;
 	logic wire_result_valid, wire_result_ready = 1'b1;
 	logic later_result_valid, later_result_ready = 1'b1;
-	logic [7:0] degenerate_result;
-	logic degenerate_result_valid, degenerate_result_ready = 1'b1;
-	int wire_seen, later_seen, degenerate_seen;
+	logic [7:0] static_result;
+	logic static_result_valid, static_result_ready = 1'b1;
+	int wire_seen, later_seen, static_seen;
 
 	pipeline_scope dut (.*);
 	always #5 clk = ~clk;
@@ -25,10 +25,10 @@ module pipeline_scope_tb;
 				$fatal(1, "later-stage joined result was %0d", later_result);
 			later_seen <= later_seen + 1;
 		end
-		if (!reset && degenerate_result_valid && degenerate_result_ready) begin
-			if (degenerate_result !== 8'd42)
-				$fatal(1, "module wire/localparam result was %0d", degenerate_result);
-			degenerate_seen <= degenerate_seen + 1;
+		if (!reset && static_result_valid && static_result_ready) begin
+			if (static_result !== 8'd42)
+				$fatal(1, "module wire/localparam result was %0d", static_result);
+			static_seen <= static_seen + 1;
 		end
 	end
 
@@ -55,7 +55,7 @@ module pipeline_scope_tb;
 		do @(posedge clk); while (!later_source_ready);
 		@(negedge clk) later_source_valid = 1'b0;
 
-		while (wire_seen != 1 || later_seen != 1 || degenerate_seen == 0) @(posedge clk);
+		while (wire_seen != 1 || later_seen != 1 || static_seen == 0) @(posedge clk);
 		$display("PASS: stage-local scope and later-stage module inputs preserve handshakes");
 		$finish;
 	end

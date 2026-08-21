@@ -9,7 +9,7 @@
 
 typedef struct { char *name; char *type; } pipe_name;
 typedef struct { char *text; char *name; char *type; int expression; } pipe_part;
-typedef struct { char *name; char *type; char kind; } transport_symbol;
+typedef struct { char *name; char *type; char transfer_type; } signal_symbol;
 typedef struct {
 	char *label;
 	pipe_part *inputs; size_t input_count;
@@ -23,7 +23,7 @@ typedef struct {
 	char *name;
 	pipe_part output;
 	pipe_name *names; size_t name_count;
-	transport_symbol *transports; size_t transport_count;
+	signal_symbol *signals; size_t signal_count;
 	pipe_stage *stages; size_t stage_count;
 	size_t source_start, source_end;
 	char *output_buffer, *reset_marker, *reset_guard, *yield_text;
@@ -68,10 +68,10 @@ static pipe_name *find_name(pipeline_model *pipe, const char *name)
 	return NULL;
 }
 
-static const transport_symbol *find_transport(const pipeline_model *pipe, const char *name)
+static const signal_symbol *find_signal(const pipeline_model *pipe, const char *name)
 {
-	for (size_t i = 0; i < pipe->transport_count; i++)
-		if (!strcmp(pipe->transports[i].name, name)) return &pipe->transports[i];
+	for (size_t i = 0; i < pipe->signal_count; i++)
+		if (!strcmp(pipe->signals[i].name, name)) return &pipe->signals[i];
 	return NULL;
 }
 
@@ -98,7 +98,7 @@ static void declare_name(pipeline_model *pipe, const char *name, const char *typ
 static void warn_pipeline_shadow(parser *p, const pipeline_model *pipe,
 	const char *name, size_t name_at)
 {
-	if (!find_transport(pipe, name)) return;
+	if (!find_signal(pipe, name)) return;
 	pigen_set_diagnostic_position(p->source + p->tokens.items[name_at].span.start);
 	pigen_warn("pipeline-local declaration shadows a module-local name");
 }
@@ -124,7 +124,7 @@ static void add_part(pipe_part **parts, size_t *count, const char *text,
 		type ? pigen_copy_range(type, strlen(type)) : NULL, expression};
 }
 
-static char transport_kind(parser *p, size_t at)
+static char transfer_type_at(parser *p, size_t at)
 {
 	if (tok(p, at, "buf")) return 'b';
 	if (tok(p, at, "fifo")) return 'f';
@@ -137,20 +137,20 @@ static char transport_kind(parser *p, size_t at)
 	return 0;
 }
 
-static void add_transport_symbol(pipeline_model *pipe, const char *name,
-	const char *type, char kind)
+static void add_signal_symbol(pipeline_model *pipe, const char *name,
+	const char *type, char transfer_type)
 {
-	if (find_transport(pipe, name)) return;
-	pipe->transports = pigen_resize(pipe->transports,
-		(pipe->transport_count + 1) * sizeof(*pipe->transports));
-	pipe->transports[pipe->transport_count++] = (transport_symbol){
-		pigen_copy_range(name, strlen(name)), pigen_copy_range(type, strlen(type)), kind};
+	if (find_signal(pipe, name)) return;
+	pipe->signals = pigen_resize(pipe->signals,
+		(pipe->signal_count + 1) * sizeof(*pipe->signals));
+	pipe->signals[pipe->signal_count++] = (signal_symbol){
+		pigen_copy_range(name, strlen(name)), pigen_copy_range(type, strlen(type)), transfer_type};
 }
 
-/* Collect transport declarations from the enclosing source before the
+/* Collect signal declarations from the enclosing source before the
  * pipeline is replaced.  Stage input discovery then resolves identifiers
- * against actual module transports rather than guessing from spelling. */
-static void collect_transport_symbols(parser *p, pipeline_model *pipe)
+ * against actual module signals rather than guessing from spelling. */
+static void collect_signal_symbols(parser *p, pipeline_model *pipe)
 {
 	int begin_depth = 0;
 	size_t first = 0, last = p->tokens.count;
@@ -165,7 +165,7 @@ static void collect_transport_symbols(parser *p, pipeline_model *pipe)
 	for (last = first + 1; last < p->tokens.count && !tok(p, last, "endmodule"); last++) ;
 	for (size_t at = first; at < last; at++)
 	{
-		char kind = transport_kind(p, at);
+		char transfer_type = transfer_type_at(p, at);
 		size_t delimiter, name_at;
 		char *type;
 		int parens = 0, brackets = 0, braces = 0;
@@ -175,8 +175,8 @@ static void collect_transport_symbols(parser *p, pipeline_model *pipe)
 		 * begin/end scopes.  In particular, do not mistake stage-local wires
 		 * or unrelated procedural locals for enclosing module names. */
 		if (begin_depth) continue;
-		if (!kind) continue;
-		if (kind == 'l' || kind == 'r' || kind == 'w')
+		if (!transfer_type) continue;
+		if (transfer_type == 'l' || transfer_type == 'r' || transfer_type == 'w')
 		{
 			int is_typedef = 0;
 			for (size_t before = at; before > 0 && !tok(p, before - 1, ";"); before--)
@@ -207,7 +207,7 @@ static void collect_transport_symbols(parser *p, pipeline_model *pipe)
 			char *trim = type + strlen(type);
 			while (trim > type && (trim[-1] == ' ' || trim[-1] == '\t' || trim[-1] == '\n' || trim[-1] == '\r')) *--trim = 0;
 		}
-		if (!*type && kind == 'c')
+		if (!*type && transfer_type == 'c')
 		{
 			free(type);
 			type = pigen_copy_range("integer", 7);
@@ -215,10 +215,10 @@ static void collect_transport_symbols(parser *p, pipeline_model *pipe)
 		if (*type)
 		{
 			char *name = range_copy(p, name_at, name_at + 1);
-			add_transport_symbol(pipe, name, type, kind);
+			add_signal_symbol(pipe, name, type, transfer_type);
 			free(name);
 		}
-		/* A module-body declaration may share its payload type across a list
+		/* A module-body declaration may share its data type across a list
 		 * of bare names. Stop as soon as the next item is another port or a
 		 * typed declaration. */
 		while (tok(p, delimiter, ",") && delimiter + 1 < p->tokens.count &&
@@ -226,7 +226,7 @@ static void collect_transport_symbols(parser *p, pipeline_model *pipe)
 			(delimiter + 2 >= p->tokens.count || tok(p, delimiter + 2, ",") || tok(p, delimiter + 2, ";")))
 		{
 			char *name = range_copy(p, delimiter + 1, delimiter + 2);
-			add_transport_symbol(pipe, name, type, kind);
+			add_signal_symbol(pipe, name, type, transfer_type);
 			free(name);
 			delimiter += 2;
 		}
@@ -245,7 +245,7 @@ static void add_stage_local(parser *body, pipeline_model *pipe, pipe_stage *stag
 	name_at--;
 	name = range_copy(body, name_at, name_at + 1);
 	type = range_copy(body, first + 1, name_at);
-	if (find_name(pipe, name) || find_transport(pipe, name))
+	if (find_name(pipe, name) || find_signal(pipe, name))
 	{
 		pigen_set_diagnostic_position(body->source + body->tokens.items[name_at].span.start);
 		pigen_warn("stage-local declaration shadows a less-local name");
@@ -305,7 +305,7 @@ static void collect_stage_scope(parser *body, pipeline_model *pipe, pipe_stage *
 		if (body->tokens.items[at].kind == PIGEN_TOKEN_IDENTIFIER)
 		{
 			char *name = range_copy(body, at, at + 1);
-			const transport_symbol *symbol = find_transport(pipe, name);
+			const signal_symbol *symbol = find_signal(pipe, name);
 			int known = 0;
 			for (size_t i = 0; i < stage->ingress_count; i++)
 				if (!strcmp(stage->ingress[i].name, name)) known = 1;
@@ -458,7 +458,7 @@ static pipeline_model parse_pipeline(parser *p)
 	pipe.source_start = p->tokens.items[p->at - 1].span.start;
 	pipe.name = identifier(p, "expected pipeline name");
 	expect(p, "begin", "procedural pipeline syntax is `pipeline name begin ... endpipeline`");
-	collect_transport_symbols(p, &pipe);
+	collect_signal_symbols(p, &pipe);
 	while (!tok(p, p->at, "endpipeline"))
 	{
 		if (cur(p)->kind == PIGEN_TOKEN_EOF) fail_at(p, p->at, "unterminated pipeline");
@@ -589,7 +589,7 @@ char *pigen_prepare_pipeline_models(const char *source, size_t length,
 					pigen_append(&out, "};");
 				}
 			/* The empty statement is a real procedural-AST anchor for a pipeline
-			 * whose stages read only always-valid degenerate values. */
+			 * whose stages read only always-valid statics. */
 			pigen_append_format(&out, "/*__PIGEN_PIPELINE_SITE_%s__*/;", pipe.name);
 			copied = pipe.source_end;
 			result->items = pigen_resize(result->items, (result->count + 1) * sizeof(*result->items));
@@ -1180,8 +1180,8 @@ void pigen_free_pipeline_models(pigen_pipelines *pipes)
 		free(p->yield_text); free(p->output.text); free(p->output.name); free(p->output.type);
 		for (size_t j = 0; j < p->name_count; j++) { free(p->names[j].name); free(p->names[j].type); }
 		free(p->names);
-		for (size_t j = 0; j < p->transport_count; j++) { free(p->transports[j].name); free(p->transports[j].type); }
-		free(p->transports);
+		for (size_t j = 0; j < p->signal_count; j++) { free(p->signals[j].name); free(p->signals[j].type); }
+		free(p->signals);
 		for (size_t j = 0; j < p->stage_count; j++)
 		{
 			pipe_stage *s = &p->stages[j]; free(s->label); free(s->body); free(s->ingress_name);

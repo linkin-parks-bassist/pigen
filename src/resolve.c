@@ -146,18 +146,13 @@ static pigen_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 	return result;
 }
 
-static pigen_semantic_transport_kind semantic_transport_kind(
-	pigen_syntax_transport_kind kind)
+static pigen_transfer_type semantic_transfer_type(
+	pigen_transfer_type transfer_type)
 {
-	switch (kind)
-	{
-		case PIGEN_TRANSPORT_BUF: return PIGEN_SEMANTIC_BUF;
-		case PIGEN_TRANSPORT_PORT: return PIGEN_SEMANTIC_PORT;
-		case PIGEN_TRANSPORT_SKID: return PIGEN_SEMANTIC_SKID;
-		case PIGEN_TRANSPORT_FIFO: return PIGEN_SEMANTIC_FIFO;
-	}
-	pigen_fail("invalid syntax transport kind");
-	return PIGEN_SEMANTIC_BUF;
+	if (transfer_type < PIGEN_TRANSFER_TYPE_BUF ||
+		transfer_type > PIGEN_TRANSFER_TYPE_SKID)
+		pigen_fail("invalid transfer type for this signal");
+	return transfer_type;
 }
 
 static pigen_semantic_direction semantic_direction(pigen_syntax_direction direction)
@@ -169,20 +164,18 @@ static pigen_semantic_direction semantic_direction(pigen_syntax_direction direct
 		case PIGEN_DIRECTION_OUTPUT: return PIGEN_SEMANTIC_OUTPUT;
 		case PIGEN_DIRECTION_INOUT: return PIGEN_SEMANTIC_INOUT;
 	}
-	pigen_fail("invalid syntax transport direction");
+	pigen_fail("invalid syntax signal direction");
 	return PIGEN_SEMANTIC_INTERNAL;
 }
 
-static pigen_semantic_value_storage semantic_value_storage(
-	pigen_syntax_value_storage storage)
+static pigen_transfer_type semantic_static_transfer_type(
+	pigen_transfer_type transfer_type)
 {
-	switch (storage)
-	{
-		case PIGEN_VALUE_NET: return PIGEN_SEMANTIC_VALUE_NET;
-		case PIGEN_VALUE_VARIABLE: return PIGEN_SEMANTIC_VALUE_VARIABLE;
-	}
-	pigen_fail("invalid syntax value storage");
-	return PIGEN_SEMANTIC_VALUE_NET;
+	if (transfer_type != PIGEN_TRANSFER_TYPE_WIRE &&
+		transfer_type != PIGEN_TRANSFER_TYPE_REG &&
+		transfer_type != PIGEN_TRANSFER_TYPE_LOGIC)
+		pigen_fail("invalid static transfer type");
+	return transfer_type;
 }
 
 static int add_parameter(resolver *resolver, pigen_module_id module_id,
@@ -220,28 +213,28 @@ static int add_parameter(resolver *resolver, pigen_module_id module_id,
 	return 1;
 }
 
-static int add_transport_declaration(resolver *resolver,
+static int add_signal_declaration(resolver *resolver,
 	pigen_module_id module_id, const pigen_syntax_node *syntax_node)
 {
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
-	pigen_type_id payload_type;
+	pigen_type_id data_type;
 	pigen_expr_id depth = INVALID_ID(pigen_expr_id);
 	pigen_syntax_id declarator_id;
 
-	if (syntax_node->as.transport_declaration.direction == PIGEN_DIRECTION_INOUT)
+	if (syntax_node->as.signal_declaration.direction == PIGEN_DIRECTION_INOUT)
 		return fail_location(resolver, syntax_node->location,
-			"transport ports must be input or output, not inout");
-	payload_type = resolve_type(resolver, module->scope,
-		&syntax_node->as.transport_declaration.payload);
-	if (payload_type.index == PIGEN_INVALID_ID) return 0;
-	if (syntax_node->as.transport_declaration.kind == PIGEN_TRANSPORT_FIFO)
+			"signal ports must be input or output, not inout");
+	data_type = resolve_type(resolver, module->scope,
+		&syntax_node->as.signal_declaration.payload);
+	if (data_type.index == PIGEN_INVALID_ID) return 0;
+	if (syntax_node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_FIFO)
 	{
 		const pigen_syntax_expr *depth_syntax = pigen_syntax_expr_get(
 			&resolver->syntax->expressions,
-			syntax_node->as.transport_declaration.fifo_depth);
+			syntax_node->as.signal_declaration.fifo_depth);
 		depth = resolve_constant(resolver, module->scope,
-			syntax_node->as.transport_declaration.fifo_depth);
+			syntax_node->as.signal_declaration.fifo_depth);
 		if (depth.index == PIGEN_INVALID_ID)
 			return fail_location(resolver, depth_syntax ? depth_syntax->location :
 				syntax_node->location,
@@ -253,48 +246,48 @@ static int add_transport_declaration(resolver *resolver,
 		const pigen_syntax_node *declarator = pigen_syntax_get(resolver->syntax,
 			declarator_id);
 		pigen_symbol_id symbol;
-		pigen_transport_id transport;
+		pigen_signal_id signal;
 		pigen_declare_result declared;
 
 		if (!declarator ||
-			declarator->kind != PIGEN_SYNTAX_TRANSPORT_DECLARATOR)
+			declarator->kind != PIGEN_SYNTAX_SIGNAL_DECLARATOR)
 			return fail_location(resolver, syntax_node->location,
-				"invalid transport declarator");
+				"invalid signal declarator");
 		declared = pigen_symbol_declare(model, module->scope,
-			PIGEN_SYMBOL_TRANSPORT, payload_type,
+			PIGEN_SYMBOL_SIGNAL, data_type,
 			token_spelling(resolver,
-				declarator->as.transport_declarator.name),
+				declarator->as.signal_declarator.name),
 			syntax_node->location.source_span,
 			&symbol, NULL);
 		if (declared == PIGEN_DECLARE_DUPLICATE)
 			return fail_token(resolver,
-				declarator->as.transport_declarator.name,
+				declarator->as.signal_declarator.name,
 				"duplicate module declaration");
 		if (declared != PIGEN_DECLARE_OK)
 			return fail_location(resolver, syntax_node->location,
-				"invalid transport declaration");
-		transport = pigen_transport_add(model, declarator_id, module_id, symbol,
-			payload_type, depth,
-			semantic_transport_kind(
-				syntax_node->as.transport_declaration.kind),
+				"invalid signal declaration");
+		signal = pigen_signal_add(model, declarator_id, module_id, symbol,
+			data_type, pigen_semantic_scalar_shape(model), depth,
+			semantic_transfer_type(
+				syntax_node->as.signal_declaration.transfer_type),
 			semantic_direction(
-				syntax_node->as.transport_declaration.direction),
+				syntax_node->as.signal_declaration.direction),
 			syntax_node->location.source_span);
-		if (transport.index == PIGEN_INVALID_ID)
+		if (signal.index == PIGEN_INVALID_ID)
 			return fail_location(resolver, declarator->location,
-				"invalid transport semantic object");
+				"invalid signal semantic object");
 		declarator_id = declarator->next_sibling;
 	}
 	return 1;
 }
 
-static int add_value_declaration(resolver *resolver,
+static int add_static_signal_declaration(resolver *resolver,
 	pigen_module_id module_id, const pigen_syntax_node *syntax_node)
 {
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	pigen_type_id type = resolve_type(resolver, module->scope,
-		&syntax_node->as.value_declaration.type);
+		&syntax_node->as.static_signal_declaration.type);
 	pigen_syntax_id declarator_id;
 
 	if (type.index == PIGEN_INVALID_ID) return 0;
@@ -304,29 +297,30 @@ static int add_value_declaration(resolver *resolver,
 		const pigen_syntax_node *declarator = pigen_syntax_get(resolver->syntax,
 			declarator_id);
 		pigen_symbol_id symbol;
-		pigen_value_id value;
+		pigen_signal_id signal;
 		pigen_declare_result declared;
 
-		if (!declarator || declarator->kind != PIGEN_SYNTAX_VALUE_DECLARATOR)
+		if (!declarator || declarator->kind != PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR)
 			return fail_location(resolver, syntax_node->location,
-				"invalid value declarator");
+				"invalid signal declarator");
 		declared = pigen_symbol_declare(model, module->scope,
-			PIGEN_SYMBOL_VALUE, type,
-			token_spelling(resolver, declarator->as.value_declarator.name),
+			PIGEN_SYMBOL_SIGNAL, type,
+			token_spelling(resolver, declarator->as.static_signal_declarator.name),
 			syntax_node->location.source_span, &symbol, NULL);
 		if (declared == PIGEN_DECLARE_DUPLICATE)
-			return fail_token(resolver, declarator->as.value_declarator.name,
+			return fail_token(resolver, declarator->as.static_signal_declarator.name,
 				"duplicate module declaration");
 		if (declared != PIGEN_DECLARE_OK)
 			return fail_location(resolver, syntax_node->location,
-				"invalid value declaration");
-		value = pigen_value_add(model, declarator_id, module_id, symbol, type,
-			semantic_value_storage(syntax_node->as.value_declaration.storage),
-			semantic_direction(syntax_node->as.value_declaration.direction),
+				"invalid signal declaration");
+		signal = pigen_signal_add(model, declarator_id, module_id, symbol, type,
+			pigen_semantic_scalar_shape(model), INVALID_ID(pigen_expr_id),
+			semantic_static_transfer_type(syntax_node->as.static_signal_declaration.transfer_type),
+			semantic_direction(syntax_node->as.static_signal_declaration.direction),
 			syntax_node->location.source_span);
-		if (value.index == PIGEN_INVALID_ID)
+		if (signal.index == PIGEN_INVALID_ID)
 			return fail_location(resolver, declarator->location,
-				"invalid value semantic object");
+				"invalid signal semantic object");
 		declarator_id = declarator->next_sibling;
 	}
 	return 1;
@@ -371,31 +365,22 @@ static int lvalue_is_assignable(const pigen_semantic_model *model,
 			if (!lvalue_is_assignable(model, children[i])) return 0;
 		return 1;
 	}
-	if (lvalue->as.projection.transport.index != PIGEN_INVALID_ID)
 	{
-		const pigen_semantic_transport *transport = pigen_transport_get(model,
-			lvalue->as.projection.transport);
-		return transport && transport->direction != PIGEN_SEMANTIC_INPUT &&
-			transport->direction != PIGEN_SEMANTIC_INOUT;
-	}
-	else
-	{
-		pigen_value_id value_id = pigen_symbol_value(model,
-			lvalue->as.projection.base_symbol);
-		const pigen_semantic_value *value = pigen_value_get(model, value_id);
-		return value && value->storage == PIGEN_SEMANTIC_VALUE_VARIABLE &&
-			value->direction != PIGEN_SEMANTIC_INPUT &&
-			value->direction != PIGEN_SEMANTIC_INOUT;
+		const pigen_semantic_signal *signal = pigen_signal_get(model,
+			lvalue->as.projection.signal);
+		return signal && signal->transfer_type != PIGEN_TRANSFER_TYPE_WIRE &&
+			signal->direction != PIGEN_SEMANTIC_INPUT &&
+			signal->direction != PIGEN_SEMANTIC_INOUT;
 	}
 }
 
-static void add_transfer_transport_use(
-	pigen_transfer_transport_use **uses, size_t *count, size_t *capacity,
-	pigen_transport_id transport, unsigned roles)
+static void add_transfer_signal_use(
+	pigen_transfer_signal_use **uses, size_t *count, size_t *capacity,
+	pigen_signal_id signal, unsigned roles)
 {
 	size_t i;
 	for (i = 0; i < *count; i++)
-		if ((*uses)[i].transport.index == transport.index)
+		if ((*uses)[i].signal.index == signal.index)
 		{
 			(*uses)[i].roles |= roles;
 			return;
@@ -405,14 +390,36 @@ static void add_transfer_transport_use(
 		*capacity = *capacity ? *capacity * 2 : 4;
 		*uses = pigen_resize(*uses, *capacity * sizeof(**uses));
 	}
-	(*uses)[(*count)++] = (pigen_transfer_transport_use){transport, roles};
+	(*uses)[(*count)++] = (pigen_transfer_signal_use){signal, roles};
+}
+
+static unsigned transfer_roles_for_context(const pigen_semantic_model *model,
+	pigen_signal_id signal_id, unsigned contexts)
+{
+	const pigen_semantic_signal *signal = pigen_signal_get(model, signal_id);
+	const pigen_transfer_type_laws *laws = signal ?
+		pigen_transfer_type_get(signal->transfer_type) : NULL;
+	unsigned roles = 0;
+
+	if (!laws) return 0;
+	if (contexts & PIGEN_EXPRESSION_USE_LVALUE)
+	{
+		roles |= PIGEN_TRANSFER_SIGNAL_WRITE;
+		if (laws->produces_on_write) roles |= PIGEN_TRANSFER_PRODUCER;
+	}
+	if (contexts & (PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_INDEX))
+	{
+		roles |= PIGEN_TRANSFER_SIGNAL_READ;
+		if (laws->consumes_on_read) roles |= PIGEN_TRANSFER_CONSUMER;
+	}
+	return roles;
 }
 
 static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 	pigen_expr_id value, pigen_predicate_id guard,
 	pigen_clock_domain_id domain, pigen_source_span span,
-	pigen_transfer_transport_use **transport_uses,
-	size_t *transport_use_count)
+	pigen_transfer_signal_use **signal_uses,
+	size_t *signal_use_count)
 {
 	pigen_expression_use_analysis destination_uses = {0};
 	pigen_expression_use_analysis value_uses = {0};
@@ -435,38 +442,40 @@ static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 
 	if (!valid)
 		fail(resolver, span, "cannot analyze transfer uses");
-	for (i = 0; valid && i < destination_uses.transport_count; i++)
+	for (i = 0; valid && i < destination_uses.signal_count; i++)
 	{
-		unsigned roles = 0;
-		if (destination_uses.transports[i].contexts &
-			PIGEN_EXPRESSION_USE_LVALUE) roles |= PIGEN_TRANSFER_PRODUCER;
-		if (destination_uses.transports[i].contexts &
-			(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_INDEX))
-			roles |= PIGEN_TRANSFER_CONSUMER;
-		if (roles) add_transfer_transport_use(transport_uses,
-			transport_use_count, &capacity,
-			destination_uses.transports[i].transport, roles);
+		unsigned roles = transfer_roles_for_context(resolver->model,
+			destination_uses.signals[i].signal,
+			destination_uses.signals[i].contexts);
+		if (roles) add_transfer_signal_use(signal_uses,
+			signal_use_count, &capacity,
+			destination_uses.signals[i].signal, roles);
 	}
-	for (i = 0; valid && i < value_uses.transport_count; i++)
-		add_transfer_transport_use(transport_uses, transport_use_count,
-			&capacity, value_uses.transports[i].transport,
-			PIGEN_TRANSFER_CONSUMER);
-	for (i = 0; valid && i < guard_uses.transport_count; i++)
-		add_transfer_transport_use(transport_uses, transport_use_count,
-			&capacity, guard_uses.transports[i].transport,
-			PIGEN_TRANSFER_CONSUMER);
-	for (i = 0; valid && i < *transport_use_count; i++)
-		if ((*transport_uses)[i].roles ==
+	for (i = 0; valid && i < value_uses.signal_count; i++)
+		add_transfer_signal_use(signal_uses, signal_use_count,
+			&capacity, value_uses.signals[i].signal,
+			transfer_roles_for_context(resolver->model,
+				value_uses.signals[i].signal,
+				value_uses.signals[i].contexts));
+	for (i = 0; valid && i < guard_uses.signal_count; i++)
+		add_transfer_signal_use(signal_uses, signal_use_count,
+			&capacity, guard_uses.signals[i].signal,
+			transfer_roles_for_context(resolver->model,
+				guard_uses.signals[i].signal,
+				guard_uses.signals[i].contexts));
+	for (i = 0; valid && i < *signal_use_count; i++)
+		if (((*signal_uses)[i].roles &
 			(PIGEN_TRANSFER_CONSUMER | PIGEN_TRANSFER_PRODUCER))
+			== (PIGEN_TRANSFER_CONSUMER | PIGEN_TRANSFER_PRODUCER))
 		{
 			fail(resolver, span, "buffered transfer cannot source its destination");
 			valid = 0;
 		}
-	for (i = 0; valid && i < *transport_use_count; i++)
-		if (!pigen_transport_bind_domain(resolver->model,
-			(*transport_uses)[i].transport, domain))
+	for (i = 0; valid && i < *signal_use_count; i++)
+		if (!pigen_signal_bind_domain(resolver->model,
+			(*signal_uses)[i].signal, domain))
 		{
-			fail(resolver, span, "transport used across clock domains");
+			fail(resolver, span, "signal used across clock domains");
 			valid = 0;
 		}
 	pigen_free_expression_use_analysis(&value_uses);
@@ -474,9 +483,9 @@ static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 	pigen_free_expression_use_analysis(&guard_uses);
 	if (!valid)
 	{
-		free(*transport_uses);
-		*transport_uses = NULL;
-		*transport_use_count = 0;
+		free(*signal_uses);
+		*signal_uses = NULL;
+		*signal_use_count = 0;
 	}
 	return valid;
 }
@@ -500,8 +509,8 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 		destination_expression);
 	pigen_expr_id value;
 	pigen_transfer_id transfer;
-	pigen_transfer_transport_use *transport_uses = NULL;
-	size_t transport_use_count = 0;
+	pigen_transfer_signal_use *signal_uses = NULL;
+	size_t signal_use_count = 0;
 
 	if (destination.index == PIGEN_INVALID_ID)
 		return fail_location(resolver, assignment->location,
@@ -513,14 +522,14 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 			"transfer value requires a supported expression");
 	if (!lvalue_is_assignable(model, destination))
 		return fail_location(resolver, assignment->location,
-			"transfer destination is not a writable variable or transport");
+			"transfer destination is not a writable variable or signal");
 	if (!analyze_transfer(resolver, destination, value, guard, domain,
-		assignment->location.source_span, &transport_uses,
-		&transport_use_count)) return 0;
+		assignment->location.source_span, &signal_uses,
+		&signal_use_count)) return 0;
 	transfer = pigen_transfer_add(model, assignment_id, module_id, process,
-		destination, value, guard, domain, transport_uses,
-		transport_use_count, assignment->location.source_span);
-	free(transport_uses);
+		destination, value, guard, domain, signal_uses,
+		signal_use_count, assignment->location.source_span);
+	free(signal_uses);
 	if (transfer.index == PIGEN_INVALID_ID)
 		return fail_location(resolver, assignment->location,
 			"invalid transfer semantic object");
@@ -620,10 +629,10 @@ static int add_clocked_process(resolver *resolver,
 	const pigen_syntax_node *body = pigen_syntax_get(resolver->syntax, body_id);
 
 	if (!clock_expression || clock_expression->kind != PIGEN_EXPR_SYMBOL ||
-		pigen_symbol_value(model, clock_expression->as.symbol).index ==
+		pigen_symbol_signal(model, clock_expression->as.symbol).index ==
 			PIGEN_INVALID_ID)
 		return fail_location(resolver, syntax_node->location,
-			"clock edge requires one ordinary value name");
+			"clock edge requires one static signal name");
 	domain = pigen_clock_domain_intern(model, clock_expression->as.symbol,
 		syntax_node->as.clocked_process.edge == PIGEN_EDGE_POSEDGE ?
 			PIGEN_SEMANTIC_POSEDGE : PIGEN_SEMANTIC_NEGEDGE);
@@ -679,10 +688,10 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 			!add_parameter(resolver, module_id, child, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_TYPEDEF &&
 			!add_typedef(resolver, scope, node)) return 0;
-		if (node->kind == PIGEN_SYNTAX_VALUE_DECLARATION &&
-			!add_value_declaration(resolver, module_id, node)) return 0;
-		if (node->kind == PIGEN_SYNTAX_TRANSPORT_DECLARATION &&
-			!add_transport_declaration(resolver, module_id, node)) return 0;
+		if (node->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATION &&
+			!add_static_signal_declaration(resolver, module_id, node)) return 0;
+		if (node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION &&
+			!add_signal_declaration(resolver, module_id, node)) return 0;
 		child = node->next_sibling;
 	}
 	for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
@@ -695,7 +704,7 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	return 1;
 }
 
-static int validate_transport_ownership(resolver *resolver)
+static int validate_signal_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
 	size_t later_index;
@@ -704,8 +713,8 @@ static int validate_transport_ownership(resolver *resolver)
 	{
 		const pigen_semantic_transfer *later = pigen_transfer_get(model,
 			(pigen_transfer_id){(uint32_t)later_index});
-		const pigen_transfer_transport_use *later_uses =
-			pigen_transfer_transport_uses(model,
+		const pigen_transfer_signal_use *later_uses =
+			pigen_transfer_signal_uses(model,
 				(pigen_transfer_id){(uint32_t)later_index});
 		size_t earlier_index;
 		size_t i;
@@ -714,26 +723,32 @@ static int validate_transport_ownership(resolver *resolver)
 		{
 			const pigen_semantic_transfer *earlier = pigen_transfer_get(model,
 				(pigen_transfer_id){(uint32_t)earlier_index});
-			const pigen_transfer_transport_use *earlier_uses =
-				pigen_transfer_transport_uses(model,
+			const pigen_transfer_signal_use *earlier_uses =
+				pigen_transfer_signal_uses(model,
 					(pigen_transfer_id){(uint32_t)earlier_index});
 			size_t j;
 
 			if (pigen_predicates_mutually_exclusive(model, earlier->guard,
 				later->guard)) continue;
-			for (i = 0; i < later->transport_use_count; i++)
-				for (j = 0; j < earlier->transport_use_count; j++)
+			for (i = 0; i < later->signal_use_count; i++)
+				for (j = 0; j < earlier->signal_use_count; j++)
 				{
+					const pigen_semantic_signal *signal;
+					const pigen_transfer_type_laws *laws;
 					unsigned overlap;
-					if (later_uses[i].transport.index !=
-						earlier_uses[j].transport.index) continue;
+					if (later_uses[i].signal.index !=
+						earlier_uses[j].signal.index) continue;
+					signal = pigen_signal_get(model, later_uses[i].signal);
+					laws = signal ? pigen_transfer_type_get(
+						signal->transfer_type) : NULL;
+					if (!laws || !laws->requires_ownership) continue;
 					overlap = later_uses[i].roles & earlier_uses[j].roles;
 					if (overlap & PIGEN_TRANSFER_CONSUMER)
 						return fail(resolver, later->span,
-							"transport has nonexclusive consumers");
+							"signal has nonexclusive consumers");
 					if (overlap & PIGEN_TRANSFER_PRODUCER)
 						return fail(resolver, later->span,
-							"transport has nonexclusive producers");
+							"signal has nonexclusive producers");
 				}
 		}
 	}
@@ -771,5 +786,5 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 			!add_module(&resolver, node, child)) return 0;
 		child = node->next_sibling;
 	}
-	return validate_transport_ownership(&resolver);
+	return validate_signal_ownership(&resolver);
 }

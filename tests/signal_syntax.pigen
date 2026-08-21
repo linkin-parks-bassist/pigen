@@ -3,7 +3,7 @@ typedef struct packed {
 	logic [11:0] payload;
 } syntax_packet_t;
 
-module transport_syntax
+module signal_syntax
 	(
 		input logic clk,
 		input logic reset,
@@ -46,17 +46,17 @@ module transport_syntax
 		/* A nested ordinary-SV concatenation is one always-ready member. */
 		{{nested_state[7:4], nested_state[3:0]}, memory[0]} <= source_nested;
 
-		/* Ordinary memory slices compose with another degenerate lvalue. */
+		/* Ordinary memory slices compose with another static lvalue. */
 		{memory[1][7:4], nibble_state} <= source_indexed;
 
 		/* Packed members and indexed part-selects preserve SV value syntax;
-		 * each projected read still consumes its complete base transport. */
+		 * each projected read still consumes its complete base signal. */
 		{struct_tag, struct_payload} <=
 			{source_struct.tag, source_struct.payload};
 		variable_byte <= source_variable[variable_base +: 8];
 		scalar_lvalue [7:0] <= source_scalar_lvalue;
 
-		/* Pure degenerate SV remains ordinary source-ordered NBA behavior. */
+		/* Pure static SV remains ordinary source-ordered NBA behavior. */
 		ordered_state <= 8'h11;
 		ordered_state <= 8'h22;
 

@@ -422,8 +422,7 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 				known->kind != PIGEN_SYMBOL_PARAMETER) ||
 				(!resolver->constant_only &&
 				known->kind != PIGEN_SYMBOL_PARAMETER &&
-				known->kind != PIGEN_SYMBOL_VALUE &&
-				known->kind != PIGEN_SYMBOL_TRANSPORT))
+				known->kind != PIGEN_SYMBOL_SIGNAL))
 				return INVALID_ID(pigen_expr_id);
 			return pigen_expr_add_symbol(resolver->model, symbol, known->type,
 				syntax->location.source_span);

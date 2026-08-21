@@ -14,7 +14,7 @@ typedef struct {
 
 /* Transfer blocks are atomic groups.  A member may itself use a co-slice;
  * flatten that destination into the group's outer co-slice so the ordinary
- * transfer parser still sees each transport independently. */
+ * transfer parser still sees each signal independently. */
 static void append_flattened_destination(pigen_string *output, const char *text, size_t length)
 {
 	const char *start = pigen_skip_spaces(text, text + length);

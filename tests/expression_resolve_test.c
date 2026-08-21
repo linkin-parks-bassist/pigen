@@ -41,10 +41,13 @@ int main(void)
 	pigen_syntax_tree syntax = {0};
 	pigen_semantic_model model;
 	pigen_scope_id scope;
+	pigen_module_id module;
 	pigen_type_id integer_type;
 	pigen_type_id boolean_type;
+	pigen_symbol_id module_symbol;
 	pigen_symbol_id width;
 	pigen_symbol_id left;
+	pigen_signal_id left_signal;
 	pigen_symbol_id shadowed;
 	pigen_syntax_expr_id runtime_syntax;
 	pigen_syntax_expr_id comparison_syntax;
@@ -78,18 +81,34 @@ int main(void)
 		&preprocess_error));
 	syntax.expanded = &preprocessed.expanded;
 	pigen_semantic_init(&model, &sources);
+	model.compilation_scope = pigen_scope_add(&model,
+		INVALID_ID(pigen_scope_id),
+		(pigen_source_span){INVALID_ID(pigen_source_id), 0, 0});
+	assert(pigen_symbol_declare(&model, model.compilation_scope,
+		PIGEN_SYMBOL_MODULE, INVALID_ID(pigen_type_id),
+		(pigen_source_span){source, 0, 5},
+		(pigen_source_span){source, 0, strlen(text)}, &module_symbol, NULL) ==
+		PIGEN_DECLARE_OK);
 	scope = pigen_scope_add(&model, model.compilation_scope,
 		(pigen_source_span){source, 0, strlen(text)});
+	module = pigen_module_add(&model, (pigen_syntax_id){0}, module_symbol,
+		scope, (pigen_source_span){source, 0, strlen(text)});
+	assert(module.index != PIGEN_INVALID_ID);
 	integer_type = pigen_semantic_integer_type(&model);
 	boolean_type = pigen_semantic_boolean_result_type(&model);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_PARAMETER,
 		integer_type, (pigen_source_span){source, 0, 5},
 		(pigen_source_span){source, 0, 5}, &width, &shadowed) ==
 		PIGEN_DECLARE_OK);
-	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_TRANSPORT,
+	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_SIGNAL,
 		integer_type, (pigen_source_span){source, 6, 10},
 		(pigen_source_span){source, 6, 10}, &left, &shadowed) ==
 		PIGEN_DECLARE_OK);
+	left_signal = pigen_signal_add(&model, (pigen_syntax_id){1}, module, left,
+		integer_type, pigen_semantic_scalar_shape(&model),
+		INVALID_ID(pigen_expr_id), PIGEN_TRANSFER_TYPE_LOGIC,
+		PIGEN_SEMANTIC_INTERNAL, (pigen_source_span){source, 6, 10});
+	assert(left_signal.index != PIGEN_INVALID_ID);
 
 	/* Expanded token extents exclude the EOF token. */
 	runtime_syntax = parse(&preprocessed, &syntax, 2, 5);

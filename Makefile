@@ -2,7 +2,7 @@ CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
 
-.PHONY: all clean test source-test preprocess-test syntax-model-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test verify coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test source-test preprocess-test syntax-model-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test verify coslice-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
@@ -69,7 +69,7 @@ biquad-bank-test: pigen
 	iverilog -g2012 -o /tmp/pigen-biquad-bank-vvp rtl/pigen_primitives.sv /tmp/pigen-biquad-bank.sv examples/biquad_bank_tb.sv
 	vvp /tmp/pigen-biquad-bank-vvp
 
-verify: test pipeline-scope-test pipeline-syntax-test biquad-bank-test coslice-test slicing-test transport-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
+verify: test pipeline-scope-test pipeline-syntax-test biquad-bank-test coslice-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test
 
 coslice-test: pigen
 	./pigen tests/coslice.pigen -o /tmp/pigen-coslice.sv
@@ -81,8 +81,8 @@ slicing-test: pigen
 	iverilog -g2012 -o /tmp/pigen-slicing-concat-vvp rtl/pigen_primitives.sv /tmp/pigen-slicing-concat.sv tests/slicing_concat_tb.sv
 	vvp /tmp/pigen-slicing-concat-vvp
 
-transport-syntax-test: pigen
-	./tests/transport_syntax.sh ./pigen
+signal-syntax-test: pigen
+	./tests/signal_syntax.sh ./pigen
 
 validate-test: pigen
 	./pigen tests/validate.pigen -o /tmp/pigen-validate.sv

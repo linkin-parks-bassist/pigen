@@ -1,4 +1,4 @@
-/* Parsed procedural-control layer: no transport or emission policy lives here. */
+/* Parsed procedural-control layer: no signal or emission policy lives here. */
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -408,7 +408,7 @@ void pigen_parse_procedural_ast(const char *source, const char *end, pigen_proce
 			continue;
 		}
 		cursor = skip_trivia(cursor + 1, end);
-		/* An ordinary `always @*` remains opaque SystemVerilog. Pigen transport
+		/* An ordinary `always @*` remains opaque SystemVerilog. Pigen signal
 		 * actions require an explicit parenthesized clock event. */
 		if (cursor == end || *cursor != '(')
 		{

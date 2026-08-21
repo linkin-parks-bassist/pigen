@@ -1,181 +1,198 @@
 # Pigen implementation plan
 
-This is a local working plan and is intentionally excluded from commits.
+This tracked plan is the current execution order. `SPEC.md` is authoritative
+for the target language; `agent_notes/SEMANTIC_INVARIANTS.md` and
+`agent_notes/signal_model.md` are authoritative for the replacement compiler
+middle. Completed prototype behavior is evidence, not architecture.
 
-## Development policy
+## Policy
 
-Pigen is pre-release. New decisions replace earlier Pigen extension syntax and
-generated interfaces outright. There is no legacy Pigen compatibility: syntax,
-implementation paths, examples, and tests move together, with no fallbacks or
-deprecated forms. Ordinary SystemVerilog compatibility is a separate permanent
-constraint: accepted SV must retain its observable behavior, and any deliberate
-restriction must be specified and diagnosed rather than emerging accidentally
-from the parser or lowering.
+- Repair the compiler architecture before adding post-v1 features.
+- Every pass communicates through structured identities and records. Strings
+  exist at source ingestion and SystemVerilog emission, not between passes.
+- A structured slice becomes authoritative only when its textual predecessor
+  is deleted in the same change. Never add a shadow validator, fallback,
+  compatibility path, or second Pigen dialect.
+- Superseded Pigen behavior and syntax receive no preservation tests. Replace
+  their tests at each clean break.
+- Ordinary SystemVerilog compatibility is permanent and distinct. Compatibility
+  tests must prove that processing accepted SV does not change observable
+  behavior; a silent change is release-blocking.
+- Every consequential semantic choice which is not fixed by `SPEC.md` stops for
+  David's decision before implementation.
 
-## Overarching compatibility work
+## Fixed semantic foundation
 
-- [ ] Build a representative pure-SystemVerilog pass-through corpus covering
-  modules, interfaces, packages, classes, generate blocks, procedural forms,
-  assignment sizing/signedness, timing controls, assertions, and preprocessor
-  use; compare simulations before and after Pigen.
-- [ ] Add mixed-source regressions proving that introducing one Pigen construct
-  does not reinterpret unrelated ordinary SV in the same file or design.
-- [ ] Audit every current ordinary-SV rejection and classify it as a specified
-  deliberate restriction or an implementation bug. Remove or fix accidental
-  restrictions.
-- [ ] Treat silent behavior changes in ordinary SV as release-blocking bugs.
+- Every runtime datum is a signal: data type × transfer type × declarator
+  shape.
+- Every signal has a transfer type. A transfer type may be concrete or abstract
+  but is never absent.
+- `wire`, `reg`, and `logic` are static transfer types. Their constant transfer
+  laws are ordinary members of the same algebra as `buf`, `port`, `fifo`, and
+  `skid`.
+- Every module input exposes payload, valid, and ready. A unqualified input has an
+  abstract transfer type; an explicit transfer type constrains compatible
+  connections without changing the receiving body's uniform handshake model.
+- Static ready/valid laws may lower to constants and disappear from emitted RTL
+  where context permits. They remain explicit in semantic analysis.
+- `byte` is an unsigned eight-bit bit-vector, not an integer.
+- A net is a SystemVerilog realization category, not Pigen's umbrella semantic
+  object. Backend storage and wiring choices never replace signal identity.
 
-## Locked fabric endpoint model
+## Current architecture status
 
-- A module input transport is source-blind.
-- A module output transport is destination-blind.
-- A fabric connection is `instance.output_port -> instance.input_port`; neither
-  side has a third source, destination, origin, route, or address component.
-- Each output port appears in exactly one connection and reaches exactly one
-  input port.
-- Several routed output ports may target one input port; the fabric arbitrates
-  complete ready/valid transfers and does not expose the winning source to the
-  receiver.
-- One-to-many behavior uses an explicit splitter with one input and several
-  ordinary single-destination outputs. Payload-address interpretation belongs
-  in that splitter or a future protocol-specific fabric, not in endpoint ports.
-- Endpoint transport kind is local. Fabric lowering observes payload and the
-  ready/valid contract; `wire` and `logic`/`reg` use their emitted degenerate
-  handshake constants.
+The replacement foundation has immutable source storage, preprocessing with
+token provenance, a partial structured syntax tree, scopes, stable identities,
+structural packed types, typed expressions and lvalues, canonical predicates,
+clock domains, direct transfers, and a transfer-incidence ownership graph. Its
+focused unit tests pass. Static and general declarations now resolve into one
+signal arena and one symbol binding; every direct-transfer incidence is
+recorded, with transfer-type laws deciding semantic roles and domain behavior.
+The full `make verify` suite passed after the unified-signal and canonical-shape
+cutovers on 2026-08-21.
 
-## Completed baseline
+It is not linked into the production executable. The production compiler still
+uses rewritten source, generated names, marker comments, rescanning, and
+feature-local models. Canonical structural shape identities are now shared by
+signals and expressions, but declaration-shape syntax is not yet parsed by the
+replacement frontend. Storage/lowering laws are not yet fully modeled. There
+is no elastic RTL IR or terminal structured emitter.
 
-- [x] Parse and lower SystemVerilog-shaped modules with transport
-  declarations, actions, atomic joins, buffered storage, ports, and FSMs.
-- [x] Parse top-level `fabric` units in the compiler and emit direct links,
-  endpoint queues, blind routers, routes, and the public wrapper module into
-  the normal SystemVerilog output.
-- [x] Support flattened ready/valid endpoints, deterministic balanced topology,
-  route verification, round-robin router arbitration, and embedded
-  route-manifest comments.
-- [x] Render deterministic fabric SVGs from the integrated compiler topology,
-  faithfully preserving the original tree-seeded spring relaxation, angular
-  forces, footprint collision resolution, disconnected-component packing,
-  crossing minimization, peer-directed ports, label adjustment, SVG structure,
-  and connection legend; support default, custom, suppressed, and multi-fabric
-  output paths without a Python runtime.
-- [x] Parse ordinary modules and top-level fabrics while preserving `pipeline`
-  and `fabric` identifiers where they are ordinary SystemVerilog names.
-- [x] Cover positive behavior, randomized stalls, arbitration, full-throughput
-  queues, mixed-unit files, direct-only fabrics, and negative diagnostics in
-  the test suite.
-- [x] Define degenerate validity actions: `validate` on `wire`, `reg`, or
-  `logic` warns and is a no-op; `invalidate` is rejected.
-- [x] Reject a consuming transfer that feeds a buffered destination from
-  itself, including self-consumption across members of a co-sliced group.
-- [x] Make every FIFO and skid an unconditional combinational ready-chain
-  break: input readiness derives only from registered occupancy. Cover the
-  contract by toggling downstream readiness while each primitive is full.
-- [x] Treat `x <= {a, b}`, `{x, y} <= source`, and
-  `{x, y} <= {a, b}` as the same atomic flattened bit-stream transfer. Allow
-  different RHS/LHS arities and individual widths, and repartition in ordinary
-  SystemVerilog concatenation order.
-- [x] Treat every unpeeked payload projection as a read of its complete base
-  transport; deduplicate repeated projections within one transfer group and
-  retain mutually-exclusive branch consumers.
-- [x] Guard concatenated and projected transfers with aggregate `$bits` checks
-  elaborated by the downstream SystemVerilog tool, so typedefs, parameters,
-  variable part-selects, and nested lvalues use native SV width rules.
-- [ ] Move aggregate mismatch diagnostics from generated elaboration checks to
-  original Pigen source locations when typed expression information permits.
-- [ ] Replace textual transport occurrence scanning with parsed expression
-  nodes carrying base transport, projection, use context, and conditional
-  evaluation predicate.
-- [x] Define degenerate slicing behavior: `reg`/`logic` and ordinary lvalues are
-  always-ready atomic destination members and may use normal SV projections;
-  pure degenerate statements retain ordinary NBA ordering; buffered ownership
-  rules do not apply to them. A procedural `wire` destination is diagnosed.
-- [x] Implement `transfer begin ... end` as readable atomic-transfer syntax,
-  exactly equivalent to concatenating member LHS and RHS expressions in source
-  order. Include transport reads in lvalue indices/selects in the deduplicated
-  validity and single-consumer analysis.
-- [ ] Design optional stage-body transport operations
-  whose pending handshake stalls that stage, plus an explicit `stall();`
-  directive. Do not add an implicit pipeline `busy` mechanism; independent
-  packets must remain dispatchable every cycle when ready/valid permits.
-- [ ] Add contextual expression typing for packed transport and pipeline
-  outputs. A yielded expression should inherit the uniquely determined
-  destination bit range's width and signedness, including across a stage
-  repartition; arithmetic should then extend, truncate, and sign-propagate as
-  that destination requires. This needs parsed typed expression nodes rather
-  than the current token-level lowering, and should eliminate source-level
-  width casts such as `acc_t'(a1)` in ordinary pipeline code.
-- [ ] Add packet-field liveness pruning to pipeline elaboration. Source
-  code should be free to carry one readable aggregate packet/struct across
-  stages and modify the fields it cares about; after type and dependency
-  analysis, emitted stage packets should retain only fields needed by a later
-  expression or exported output. Preserve all fields when analysis is unsure,
-  and make the optimisation visible/auditable in generated RTL.
-- [x] Complete the procedural pipeline surface syntax. A pipeline captures
-  enclosing module scope rather than spelling an input packing. Pipeline-local declarations are
-  mutable travelling packet state; `stage begin x <= x + 1; end` computes the
-  next packet state, rather than describing a sequential algorithm. The
-  elaborated machine remains elastic, staged, and able to issue one packet per
-  cycle wherever handshakes permit. A pipeline-level `yield x;`, after the
-  final stage, exposes that stage's outgoing packet as a module-scope `buf`
-  named for the pipeline, so
-  ordinary statements consume it as `destination <= pipeline_name;` (including
-  ordinary slices and co-slices). This procedural form is the entire pipeline
-  language. Each stage has private local scope;
-  lookup is stage-local, then pipeline-local, then module-local, with a warning
-  for every shadowing declaration. First-stage inputs must be module-scope
-  values or stage-local combinational wires defined with `=`. A non-degenerate
-  external transport read by a stage is an atomic stage input and consumer,
-  qualified by the pipeline's complete enclosing guard. `wire <= value` stays
-  a fatal transfer error. TODO: design `export x;` for exposing an earlier
-  stage as a one-cycle module-scope `port`; do not accept it before its scope,
-  type, and collision rules are decided.
-- [ ] Decide whether pipelines need explicit reset blocks rather than only
-  `pipe_reset`/`pipeline_reset` bindings. Constants and localparams are
-  wire-like transfer sources and therefore validate a transport write; reset
-  semantics must make any exception explicit rather than accidental.
-- [ ] Build whole-unit ready-dependency graphs and reject indirect
-  combinational cycles that do not cross a FIFO, skid, or ordinary register.
+## Architecture cutover
 
-## Next milestones
+### 1. Unify the semantic signal model
 
-1. Apply the blind-endpoint clean break throughout fabric parsing, checking,
-   lowering, examples, and tests: use two-component endpoints, bind every
-   output exactly once, remove public route/path/origin metadata, and retain
-   internal fixed routes plus many-to-one arbitration.
-2. Define declarations that bind pipeline and fabric endpoints directly to
-   named module ports.
-3. Generalize fabric payload typing beyond one fabric-wide `PAYLOAD_W`, with
-   compile-time compatibility diagnostics at every connection.
-4. Define and test an explicit payload-directed splitter component using one
-   input transport and several separately connected output transports.
-5. Make arrow tiers and `objective` drive deterministic topology optimization;
-   the current balanced topology remains the implementation until replaced.
-6. Generalize router and endpoint depths after defining their throughput,
-   latency, and generated-interface guarantees.
-7. Replace remaining text-oriented block lowering with shared compiler model
-   nodes where that improves source diagnostics and cross-unit validation.
-8. Add cross-unit name, parameter, and interface validation before emission.
-9. Extend randomized verification to larger fabrics, contended blind inputs,
-   splitter routing, route-width boundaries, reset during traffic, and long
-   backpressure runs.
-10. Define traffic-safety support for set-and-forget `port` outputs: optional
-    loss monitors detect a valid pulse ending without acceptance and report the
-    responsible router/port IDs; topology optimization may bias these outputs
-    toward low-contention paths without treating that bias as a delivery
-    guarantee.
-11. Add synthesis-oriented checks for generated module naming, timing-critical
-   ready paths, inferred storage, and representative FPGA/ASIC toolchains.
+- [x] Replace the separate static and general signal identities with one
+  signal arena and one symbol binding.
+- [x] Represent data type, concrete or abstract transfer type, declarator shape,
+  direction, provenance, and transfer-type parameters independently.
+- [ ] Centralize transfer-type laws for validity, readiness, storage,
+  consumption, production, ownership, domain binding, and lowering constants.
+- [x] Make expression-use and transfer-incidence analysis record every signal,
+  including statics, and apply behavior through transfer-type laws.
+- [x] Remove the superseded terminology from source, tests, filenames,
+  diagnostics, documentation, and generated comments.
+
+### 2. Complete the shared frontend
+
+- [ ] Parse target data-first declarations and declaration shapes structurally.
+- [ ] Preserve ordinary SystemVerilog declarations without reinterpreting
+  explicit ranges or unrelated expression indexing.
+- [ ] Represent generic input boundaries and explicit transfer-type constraints.
+- [ ] Complete parameter, type, aggregate, array, and expression forms required
+  by accepted Pigen constructs; reject an unsupported form at its original
+  span rather than scanning opaque text.
+- [ ] Finish macro concatenation, stringification, and required argument forms
+  without weakening token provenance.
+
+### 3. Establish one complete vertical lowering slice
+
+- [ ] Lower one module, its declarations, one clocked process, and direct atomic
+  transfers through syntax, resolution, semantic validation, incidence graph,
+  elastic RTL IR, and SystemVerilog emission.
+- [ ] Move contextual sizing, signedness, aggregate-width checks, and mismatch
+  diagnostics before RTL lowering.
+- [ ] Build the whole-unit ready-dependency graph and reject every indirect
+  combinational cycle which crosses no deliberate ready-chain break.
+- [ ] Match current atomicity, projection, concatenation, co-slicing, validity
+  action, domain, ownership, stall, and throughput behavior.
+- [ ] Delete the corresponding production textual scanners and emitters when
+  the structured slice becomes authoritative.
+
+### 4. Migrate pipelines
+
+- [ ] Represent pipeline, stage, travelling field, immutable incoming packet,
+  outgoing update, external dependency, reset binding, and yield identities in
+  the common model.
+- [ ] Lower pipelines structurally into their parent module through the common
+  incidence graph and elastic RTL IR.
+- [ ] Reproduce guarded execution, private stage scopes, shadow diagnostics,
+  external atomic inputs, reset behavior, stage repartitioning, and one-item-per-
+  cycle operation.
+- [ ] Replace prototype pipeline syntax and tests with the target data-first
+  surface in one clean break.
+- [ ] Verify the biquad bank as the decisive pipeline integration target, then
+  delete the pipeline rewriting subsystem.
+
+### 5. Migrate FSMs
+
+- [ ] Represent state, initial state, transition, priority, guard, and action
+  identities through shared scopes, expressions, signals, domains, and
+  transfers.
+- [ ] Lower FSM control into the common RTL IR and delete textual FSM lowering.
+
+### 6. Migrate instances and fabrics
+
+- [ ] Resolve child-module instances and their port signals before fabric
+  analysis; keep the future struct-like instance spelling independent of those
+  identities.
+- [ ] Replace top-level fixed-width fabric units with inline module-owned fabric
+  blocks and two-component `instance.port` endpoints.
+- [ ] Infer and validate payload compatibility per connection; remove the shared
+  `PAYLOAD_W` interface.
+- [ ] Preserve blind endpoints, exclusive direct links, many-to-one routed
+  arbitration, deterministic balanced topology, compact relative routes,
+  reachability proofs, buffered ready-path breaks, manifests, and SVG output.
+- [ ] Derive topology, routes, RTL, diagnostics, and SVGs from one fabric model,
+  then delete top-level fabric parsing and textual block lowering.
+
+### 7. Finish the backend and remove the prototype
+
+- [ ] Make elastic RTL IR the only input to SystemVerilog emission.
+- [ ] Centralize collision-safe generated-name allocation and retain provenance
+  from emitted objects to semantic objects.
+- [ ] Remove every remaining marker comment, generated-name lookup, rewritten-
+  source pass, semantic string comparison, and duplicate feature resolver.
+- [ ] Remove prototype-only syntax, examples, tests, APIs, and files.
+- [ ] Compact architecture notes to durable invariants and current status.
+
+## SystemVerilog compatibility work
+
+- [ ] Build a representative pure-SV pass-through corpus covering modules,
+  interfaces, packages, classes, generate blocks, procedural forms, sizing,
+  signedness, timing controls, assertions, arrays, and preprocessing.
+- [ ] Compare simulation behavior before and after Pigen processing.
+- [ ] Add mixed-source compatibility cases proving that a Pigen construct does
+  not reinterpret unrelated SystemVerilog in the same file or design.
+- [ ] Audit every ordinary-SV rejection: specify and diagnose deliberate
+  restrictions; fix accidental restrictions.
+
+## Specified later language work
+
+These features are named by `SPEC.md` but remain deliberately unimplemented
+until the architecture cutover is complete and their open semantics are fixed:
+
+- stage-body transfer operations and explicit `stall();`;
+- `export` of an earlier pipeline stage;
+- fabric priority and topology controls;
+- a clean struct-like child-instantiation surface;
+- additional scalar, aggregate, enum, and user-defined data types.
+
+## Preserved ideas not yet specified
+
+These ideas from the previous plan are retained so they are not silently lost.
+They are not implementation tasks until David chooses semantics and adds them
+to `SPEC.md` where language-visible:
+
+- packet-field liveness pruning with auditable conservative retention;
+- optional explicit pipeline reset blocks beyond the specified reset bindings;
+- a reusable payload-directed splitter component;
+- an `objective` control for deterministic fabric topology optimization;
+- configurable router and endpoint depths;
+- optional loss monitors for unaccepted `port` pulses;
+- synthesis checks for names, ready paths, inferred storage, and representative
+  FPGA and ASIC toolchains.
 
 ## Release gates
 
-- Pure SystemVerilog compatibility regressions demonstrate equivalent
-  observable behavior before and after Pigen processing.
-- Every intentional rejection of otherwise legal SystemVerilog is documented
-  in `SPEC.md` and has a focused source-located diagnostic test.
-- `make verify` passes from a clean tree.
-- Strict compiler warnings remain errors and the block compiler passes static
-  analysis.
-- Every accepted construct is documented in `SPEC.md` and demonstrated by a
-  `.pigen` source compiled with `pigen`.
-- Generated SystemVerilog is deterministic for identical source and options.
+- [ ] The production executable contains one structured compiler path and no
+  semantic textual side channels.
+- [ ] `make verify` passes from a clean tree with warnings treated as errors.
+- [ ] Pure and mixed SystemVerilog compatibility tests preserve observable
+  behavior.
+- [ ] Every accepted construct is specified and has behavioral, diagnostic,
+  backpressure, atomicity, and throughput coverage appropriate to it.
+- [ ] Every deliberate SystemVerilog restriction is specified and diagnosed at
+  its original source location.
+- [ ] Generated SystemVerilog and fabric SVGs are deterministic for identical
+  inputs and options.

@@ -1,4 +1,4 @@
-/* Shared allocation, lexical, and transport-model utilities. */
+/* Shared allocation, lexical, and signal-model utilities. */
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -7,7 +7,7 @@
 
 #include "pigen/util.h"
 
-const pigen_type_descriptor pigen_types[] =
+const pigen_transfer_type_descriptor pigen_transfer_types[] =
 {
 	{ "wire", 'w', 0, NULL },
 	{ "reg",  'r', 0, NULL },
@@ -150,27 +150,27 @@ int pigen_is_word(const char *src, size_t length, const char *word)
 	return length == strlen(word) && !memcmp(src, word, length);
 }
 
-const pigen_type_descriptor *pigen_type_descriptor_for_kind(char kind)
+const pigen_transfer_type_descriptor *pigen_transfer_type_descriptor_get(char transfer_type)
 {
 	size_t i;
 
-	for (i = 0; i < sizeof(pigen_types) / sizeof(pigen_types[0]); i++)
+	for (i = 0; i < sizeof(pigen_transfer_types) / sizeof(pigen_transfer_types[0]); i++)
 	{
-		if (pigen_types[i].kind == kind)
-			return &pigen_types[i];
+		if (pigen_transfer_types[i].transfer_type == transfer_type)
+			return &pigen_transfer_types[i];
 	}
 
 	return NULL;
 }
 
-char pigen_type_kind_for_keyword(const char *word, size_t length)
+char pigen_transfer_type_for_keyword(const char *word, size_t length)
 {
 	size_t i;
 
-	for (i = 0; i < sizeof(pigen_types) / sizeof(pigen_types[0]); i++)
+	for (i = 0; i < sizeof(pigen_transfer_types) / sizeof(pigen_transfer_types[0]); i++)
 	{
-		if (pigen_is_word(word, length, pigen_types[i].keyword))
-			return pigen_types[i].kind;
+		if (pigen_is_word(word, length, pigen_transfer_types[i].keyword))
+			return pigen_transfer_types[i].transfer_type;
 	}
 
 	return 0;
@@ -256,7 +256,7 @@ const char *pigen_skip_trivia(const char *cursor, const char *end)
 	}
 }
 
-void pigen_add_primitive(pigen_primitives *primitives, const char *name, size_t name_length, char kind, int is_internal)
+void pigen_add_primitive(pigen_primitives *primitives, const char *name, size_t name_length, char transfer_type, int is_internal)
 {
 	size_t i;
 	char *copy;
@@ -278,10 +278,10 @@ void pigen_add_primitive(pigen_primitives *primitives, const char *name, size_t 
 	}
 	
 	primitives->items[primitives->count].name = copy;
-	primitives->items[primitives->count].kind = kind;
+	primitives->items[primitives->count].transfer_type = transfer_type;
 	primitives->items[primitives->count].is_internal = is_internal;
 	primitives->items[primitives->count].is_output = 0;
-	primitives->items[primitives->count].payload_type = NULL;
+	primitives->items[primitives->count].data_type = NULL;
 	primitives->items[primitives->count].fifo_depth = NULL;
 	primitives->count++;
 }
@@ -299,7 +299,7 @@ pigen_primitive *pigen_find_primitive(pigen_primitives *primitives, const char *
 	return NULL;
 }
 
-void pigen_set_port_metadata(pigen_primitives *primitives, const char *name, size_t name_length, const char *payload_type, size_t payload_type_length, const char *fifo_depth, size_t fifo_depth_length, int is_output)
+void pigen_set_port_metadata(pigen_primitives *primitives, const char *name, size_t name_length, const char *data_type, size_t data_type_length, const char *fifo_depth, size_t fifo_depth_length, int is_output)
 {
 	pigen_primitive *primitive = pigen_find_primitive(primitives, name, name_length);
 
@@ -307,7 +307,7 @@ void pigen_set_port_metadata(pigen_primitives *primitives, const char *name, siz
 		pigen_fail("internal port metadata error");
 
 	primitive->is_output = is_output;
-	primitive->payload_type = pigen_copy_range(payload_type, payload_type_length);
+	primitive->data_type = pigen_copy_range(data_type, data_type_length);
 
 	if (fifo_depth)
 		primitive->fifo_depth = pigen_copy_range(fifo_depth, fifo_depth_length);
@@ -327,7 +327,7 @@ void pigen_add_assignment_in_group(pigen_assignments *assignments, const char *d
 	assignments->items[assignments->count].expression = pigen_copy_range(expression, expression_length);
 	assignments->items[assignments->count].guard = pigen_copy_range(guard, guard_length);
 	assignments->items[assignments->count].domain = pigen_copy_range(domain, domain_length);
-	assignments->items[assignments->count].destination_kind = destination_kind;
+	assignments->items[assignments->count].destination_code = destination_kind;
 	assignments->items[assignments->count].group = group;
 	assignments->items[assignments->count].order = order;
 	assignments->count++;
@@ -355,7 +355,7 @@ void pigen_add_width_check(pigen_width_checks *checks, const char *lhs, size_t l
 }
 
 void pigen_add_clear(pigen_clears *clears, const char *target, size_t target_length,
-			     const char *guard, size_t guard_length, const char *domain, size_t domain_length, int action_kind, size_t order)
+			     const char *guard, size_t guard_length, const char *domain, size_t domain_length, int action_code, size_t order)
 {
 	if (clears->count == clears->capacity)
 	{
@@ -366,7 +366,7 @@ void pigen_add_clear(pigen_clears *clears, const char *target, size_t target_len
 	clears->items[clears->count].target = pigen_copy_range(target, target_length);
 	clears->items[clears->count].guard = pigen_copy_range(guard, guard_length);
 	clears->items[clears->count].domain = pigen_copy_range(domain, domain_length);
-	clears->items[clears->count].is_flush = action_kind;
+	clears->items[clears->count].is_flush = action_code;
 	clears->items[clears->count].order = order;
 	clears->count++;
 }

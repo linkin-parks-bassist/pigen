@@ -1,10 +1,10 @@
 # Pigen
 
 Pigen (short for **pi**peline **gen**erator) is a SystemVerilog extension for
-building synchronous, flow-controlled hardware. It adds `buf`, `port`, `fifo`
-and `skid` types alongside SystemVerilog's `wire`, `reg` and `logic`. These new
-types bundle a data payload with automatically generated ready/valid flow
-control. Pigen extends non-blocking assignment to them, so
+building synchronous, ready/valid hardware. Every runtime datum is a signal
+with a data type and a transfer type. Pigen adds the transfer types `buf`,
+`port`, `fifo`, and `skid` alongside the static `wire`, `reg`, and `logic`
+transfer types. Pigen extends non-blocking assignment to signals, so
 `destination <= source` performs the appropriate handshake as part of the
 assignment.
 
@@ -15,34 +15,35 @@ actual design.
 
 Pigen compiles `.pigen` files to readable, synthesizable SystemVerilog.
 
-## Types with built-in flow control
+## Signals and transfer types
 
-Each of Pigen's new types represents one logical value in the source language.
-In the emitted RTL, the compiler represents it as a bundle: a data payload and
-a `valid` signal travel from producer to consumer, while a `ready` signal
-travels back from consumer to producer. Pigen creates and connects that bundle
-automatically, along with the storage and control state required by the type.
+Each signal has a data type, transfer type, and declarator shape. The data type
+describes its bits. The transfer type defines its validity, readiness, storage,
+consumption, and production laws. In emitted RTL, payload and `valid` travel
+from producer to consumer while `ready` travels back. Pigen creates and
+connects that interface automatically.
 
 `valid` means that the producer is offering a value. `ready` means that the
 consumer can accept it. When both are high on a clock edge, the consumer
 accepts the offered value. That event is a *transfer*.
 
-The type determines how the value is stored and how its handshake behaves.
-Existing Verilog values fit the same model as degenerate cases, so all of these
-types participate in the same operation.
+The transfer type determines how the signal is stored and how its handshake
+behaves. Existing Verilog signals are statics in the same model, so all of
+these transfer types participate in the same operation.
 
-| Type | Valid behaviour | Ready behaviour | What it is |
+| Transfer type | Valid behaviour | Ready behaviour | What it is |
 | --- | --- | --- | --- |
 | `wire` | Always valid | Never a destination | An always-offered combinational value |
-| `reg`, `logic` | Always valid | Always ready | A persistent registered value; reading it does not consume it |
+| `reg`, `logic` | Always valid | Always ready | An always-available static signal; reading it does not consume it |
 | `buf` | Valid when occupied | Ready when it can accept | A one-entry elastic register |
 | `port` | A one-cycle pulse | Always ready | A registered result offered for one cycle |
 | `fifo` | Valid when non-empty | Ready when non-full | An ordered, depth-N queue |
 | `skid` | Valid when non-empty | Ready when non-full | A two-entry skid buffer with registered backpressure |
 
-`wire`, `reg` and `logic` do not need flow-control state, but they take part in
-the same transfer language as `buf`, `port`, `fifo` and `skid`. Their constant
-handshake behaviour is simply folded away in the generated hardware.
+`wire`, `reg`, and `logic` are static transfer types, or statics. Their constant
+laws are the trivial cases of the same transfer algebra, not exceptions to it.
+The compiler folds their constant handshake behavior out of generated hardware
+where the connection context permits.
 
 ## The transfer is the fundamental unit
 
@@ -132,7 +133,7 @@ end
 The block fires as a unit. Either both destinations accept the value or neither
 does.
 
-By default, a buffered transport has one producer and one consumer. That rule
+By default, a buffered signal has one producer and one consumer. That rule
 is what makes backpressure and token ownership unambiguous. Multiple syntactic
 routes are allowed when Pigen can prove they are mutually exclusive; deliberate
 fan-out belongs in one co-sliced transfer or transfer block, where its atomicity
@@ -154,7 +155,7 @@ This performs the transfer and enters the branch on the cycle it is accepted.
 It is the operational counterpart of `accepts(destination, source)`, and avoids
 writing a transfer in one place and a subtly different handshake test in
 another. `valid`, `ready`, `accepts`, `peek`, `validate`, `invalidate` and
-`flush` are available when control logic needs to inspect or manage transport
+`flush` are available when control logic needs to inspect or manage signal
 state directly.
 
 ## Pipeline blocks
@@ -272,32 +273,33 @@ retains its widths, signedness, scheduling, reset and cycle behaviour when
 processed by Pigen. Pigen syntax may change freely while the project is young;
 unrelated SystemVerilog does not.
 
-## Data types and transport kinds
+## Data types and transfer types
 
-Pigen is moving toward separating what a value *is* from how it *moves*. The
-intended declaration order is data type, optional transport kind, then name:
+Pigen is moving toward separating what a value *is* from its transfer law. The
+intended declaration order is data type, transfer type, then name:
 
 ```systemverilog
 int[16] buf  x;
 int[16] buf  arr[8];
 uint[24] fifo samples[64];
 bit     port finished;
-byte         tag;
+byte    logic tag;
 ```
 
-`int[n]`, `uint[n]`, `bit` and `byte` are the first planned data types. `[n]`
-means an `n`-bit value and lowers to SystemVerilog's `[n-1:0]`; array dimensions
-remain after the name. Ordinary declarations such as
+`int[n]`, `uint[n]`, `bit`, and `byte` are the first planned data types. `byte`
+is an unsigned eight-bit bit-vector, not an integer. `[n]` means an `n`-bit
+value and lowers to SystemVerilog's `[n-1:0]`; array dimensions remain after
+the name. Ordinary declarations such as
 `logic [21:0] h[0:12];` keep their usual SystemVerilog meaning.
 
-The transport kind is a local implementation choice. Pigen's intended module
-interface reflects that: an input may optionally request a particular kind,
-but an unqualified input is still emitted with payload, valid and ready. The
-module does not need to know whether its caller connected a wire, a register or
-a queue. It sees the same transfer interface in every case. This generic-input
-form is planned rather than implemented today.
+Every signal has a transfer type. An unqualified module input has an abstract
+transfer type which its connection context specializes; an explicit transfer
+type constrains compatible connections. Either way, the input always has
+payload, valid, and ready, so its body need not know whether the caller
+connected a wire, register, buffer, or queue. This generic-input form is
+planned rather than implemented today.
 
-The current compiler still uses transport-first declarations such as
+The current compiler still uses transfer-type-first declarations such as
 `buf [31:0] packet`. The data-first syntax and generic module inputs will
 replace that form once their frontend and type rules are complete. Pigen is
 pre-release, so there will be one clean language rather than two Pigen
@@ -333,9 +335,16 @@ Useful places to continue:
 
 The compiler is being moved from a working source-rewriting prototype to a
 structured frontend and semantic middle. Source, syntax, names, types,
-expressions, clock domains, transfers and ownership are represented explicitly;
-pipelines, FSMs and fabrics will all lower through those shared semantics to an
-elastic RTL representation and then SystemVerilog.
+shapes, expressions, clock domains, transfers and ownership are represented
+explicitly. Canonical shape identities are shared by signals and expressions,
+so array compatibility is structural rather than a comparison of rendered
+brackets. Pipelines, FSMs and fabrics will all lower through those shared
+semantics to an elastic RTL representation and then SystemVerilog.
+
+The target compiler parses each source construct once. Semantic resolution
+consumes syntax objects, lowering consumes semantic identities, and emission
+consumes RTL IR; no later pass reparses source fragments or compiler-generated
+SystemVerilog to recover meaning.
 
 That work is in progress. The current compiler is useful, but Pigen should be
 treated as an experimental language whose syntax and generated implementation

@@ -33,7 +33,7 @@ contract stated in `SPEC.md`.
   to exactly one quoted or angle-bracket path. Operand expansion tokens never
   enter the syntax token stream; the written include edge retains the physical
   directive and operand spans and the provider-selected `SourceId`.
-- Every declaration, scope, type, expression, transport, clock domain,
+- Every declaration, scope, type, expression, signal, clock domain,
   transfer, pipeline, stage, FSM, and fabric object has a stable typed identity.
   Array position may implement an identity, but spelling may not.
 - Names are used only to introduce declarations and perform scope lookup.
@@ -43,6 +43,10 @@ contract stated in `SPEC.md`.
 - A pass consumes structured objects from its predecessor. No pass communicates
   meaning through rewritten source, marker comments, generated suffixes, or a
   second textual scan.
+- Each accepted source construct is parsed exactly once into syntax structure.
+  Semantic resolution consumes that structure, lowering consumes semantic
+  identities, and emission consumes RTL IR. No semantic or backend pass parses
+  source fragments, rendered brackets, or compiler-generated text again.
 - Unsupported syntax is either losslessly preserved outside Pigen's semantic
   boundary or rejected at its original span. Opaque syntax is never searched
   later for Pigen dependencies.
@@ -51,11 +55,13 @@ contract stated in `SPEC.md`.
 
 - Each declaration belongs to exactly one scope and introduces exactly one
   symbol identity.
-- An ordinary module value owns a distinct semantic identity, structural data
-  type, port direction, and net-or-variable storage class.  It is not modeled
-  as a transport merely because Pigen actions may read or write it.
+- Every runtime module declaration denotes a signal, including ordinary
+  SystemVerilog nets and variables. Each signal owns one identity, structural
+  data type, concrete or abstract transfer type, declarator shape, direction,
+  provenance, and any transfer-type parameters. Backend net, variable, and
+  storage choices do not create a parallel semantic species.
 - A symbol for a semantic object has one typed binding back to that object, and
-  the object has the same symbol identity.  Recovering a `TransportId`,
+  the object has the same symbol identity.  Recovering a `SignalId`,
   `ParameterId`, or `ModuleId` from a resolved name is constant-time and never
   scans an object arena or compares names again.
 - Each identifier expression is unresolved syntax or refers to exactly one
@@ -73,14 +79,15 @@ contract stated in `SPEC.md`.
   occurrence for its value. Parameter declarations resolve in source order;
   later constant expressions refer to the parameter symbol rather than copying
   or substituting its initializer.
-- A resolved type records base kind, signedness, packed dimensions, and width
+- A resolved type records its base type, signedness, packed dimensions, and width
   expressions. Typedef identity and canonical resolved type remain separately
   available.
-- Every resolved expression has an expression identity, type identity,
-  provenance, and structural operands.
+- Every resolved expression has an expression identity, type identity, shape
+  identity, provenance, and structural operands. A signal reference carries
+  the referenced signal's canonical shape identity directly.
 - Constant identity is an optional property of a resolved expression, not a
   precondition for its existence.  Parameter-only trees point at canonical
-  constant DAG nodes; runtime value and transport reads remain fully typed
+  constant DAG nodes; runtime signal reads remain fully typed
   semantic expressions with an invalid constant identity.
 - Every explicitly sized based literal has an exact structural logic type and
   an exact-width four-state value.  Canonical literal identity is determined by
@@ -107,9 +114,9 @@ contract stated in `SPEC.md`.
   never folds symbolic bounds through a host integer.
 - A resolved lvalue has its own stable occurrence identity and points at the
   expression which projects the destination and its type.  A projection lvalue
-  owns one assignable base symbol and optional base transport; a concatenation
+  owns one assignable base symbol and optional base signal; a concatenation
   lvalue owns an ordered, recursively nestable child range.  Every child must
-  resolve before the concatenation exists.  Direct value and transport symbols,
+  resolve before the concatenation exists. Direct signal symbols,
   transparent grouping, packed indexing, ordinary ranges, indexed part-selects,
   and concatenations are supported; parameters and operator trees are never
   accepted as destinations.  The expression owns the direct optional
@@ -118,12 +125,12 @@ contract stated in `SPEC.md`.
   expression identities.  Its base retains the complete projected expression
   identity; runtime subscripts use index context, while constant range and
   width expressions use type context.
-- Transport use analysis traverses expression nodes once and records base
-  transport identity, projection, use context, and evaluation predicate.
-  Repeated projections of one base transport are deduplicated by identity.
+- Signal use analysis traverses expression nodes once and records base
+  signal identity, projection, use context, and evaluation predicate.
+  Repeated projections of one base signal are deduplicated by identity.
 - Use analysis retains every symbol occurrence separately, including its
-  projected `ExprId` and predicate, while a parallel transport summary contains
-  each `TransportId` once.  Ternary conditions are read under the incoming
+  projected `ExprId` and predicate, while a parallel signal summary contains
+  each `SignalId` once.  Ternary conditions are read under the incoming
   predicate; true and false alternatives are traversed under conjunctions with
   opposite polarities of that same condition identity.  An impossible path
   contributes no uses.
@@ -131,39 +138,46 @@ contract stated in `SPEC.md`.
   lvalue context, each runtime subscript under index context, and selector
   bounds which determine type under type context.  Concatenated lvalues walk
   their child identities in source order and record each projection
-  independently.  If a transport is both read and written in an analyzed set,
-  one deduplicated transport summary carries all applicable context bits while
+  independently.  If a signal is both read and written in an analyzed set,
+  one deduplicated signal summary carries all applicable context bits while
   the occurrence records remain distinct.
-- Contextual sizing and signedness are established before transport or RTL
+- Contextual sizing and signedness are established before transfer or RTL
   lowering. The emitter never infers them from rendered text.
 - Builtin semantic types have model-owned stable identities. Constant-expression
   checking is a policy on the shared typed-expression resolver used by
   parameters, dimensions, depths, and future semantic consumers; declaration
   features do not own private operator maps or result-typing rules.
 
-## Transports and transfers
+## Signals and transfers
 
-- Data type, transport kind, and declarator shape are independent semantic
+- Data type, transfer type, and declarator shape are independent semantic
   identities. A rendered SystemVerilog declaration never stands in for that
   product.
+- Every signal has a transfer type. The concrete transfer types are `wire`,
+  `reg`, `logic`, `buf`, `port`, `fifo`, and `skid`; an unqualified input has
+  an abstract transfer type constrained by its connection. `wire`, `reg`, and
+  `logic` are statics whose transfer-control laws are constant members of the
+  same algebra.
 - A module input is a boundary endpoint with one uniform payload/valid/ready
-  contract. Its optional written transport kind selects boundary realization;
-  it never changes consumption semantics inside the receiving module.
-- A transport descriptor owns kind-dependent validity, readiness, storage,
-  consumption, and production behavior.
+  contract. Its optional written transfer type constrains compatible
+  connections; it never changes consumption semantics inside the receiving
+  module. Static laws may lower to constant ties without disappearing from the
+  semantic model.
+- A transfer-type descriptor owns transfer-type-specific validity, readiness,
+  storage, consumption, production, ownership, domain, and lowering behavior.
 - An atomic transfer owns an ordered destination bit stream, one value bit
   stream, a guard predicate, a clock domain, and its source span.
 - Each transfer also owns one deduplicated incidence entry per participating
-  transport.  The entry records producer and consumer roles independently;
+  signal.  The entry records producer and consumer roles independently;
   destination-index reads are consumers even though they occur syntactically
   on the left-hand side.
 - All consuming sources and buffered destinations in a transfer advance
-  together or none do. Constants and degenerate values do not consume.
-- A projected payload read consumes its complete base transport unless it is
+  together or none do. Constants and statics do not consume.
+- A projected payload read consumes its complete base signal unless it is
   explicitly a `peek`.
 - Concatenations and co-slices are width-partitioned views of one atomic bit
   stream, not collections of independent transfers.
-- Buffered transports have one consumer. Multiple syntactic consumers are
+- Buffered signals have one consumer. Multiple syntactic consumers are
   permitted only when their predicates are proven mutually exclusive.
 - Producers of one buffered destination are likewise exclusive.
 - A consuming buffered transfer cannot source itself, directly or through a
@@ -187,7 +201,7 @@ contract stated in `SPEC.md`.
 - Guard construction preserves SystemVerilog control nesting and dangling-else
   association. Mutual exclusion is a property of predicate structure, not
   string comparison.
-- Stateful transport operations outside a supported clock domain, or crossing
+- Stateful signal operations outside a supported clock domain, or crossing
   incompatible domains, are rejected at the action span.
 - Reset, invalidate, validate, discard, and flush are explicit semantic
   actions; none is inferred by the emitter.
@@ -200,13 +214,13 @@ contract stated in `SPEC.md`.
   incoming field set and jointly defines a mutable outgoing field set.
 - Stage-local combinational declarations are not packet storage. A nonblocking
   write to a wire is structurally invalid.
-- A stage advances atomically over its packet and inferred external transport
+- A stage advances atomically over its packet and inferred external signal
   inputs. Its complete enclosing procedural guard qualifies validity,
   readiness, and consumption.
 - The first stage cannot read an uninitialised pipeline field. Later stages see
   preceding outgoing fields through stable field identities.
 - `yield` is evaluated from the final outgoing field set and introduces one
-  ordinary module-scope buffered transport with the pipeline's source name.
+  ordinary module-scope buffered signal with the pipeline's source name.
 - Pipeline reset bindings attach predicates directly to generated valid state.
 - Future packet-field pruning may remove only fields proven dead. Uncertain
   fields are preserved, and the decision remains auditable in RTL IR.
@@ -215,9 +229,9 @@ contract stated in `SPEC.md`.
 
 - An FSM owns one state type, one initial state, a unique set of state
   identities, and transitions whose targets resolve to those identities.
-- State actions use the same expression, transport, guard, ownership, and clock
+- State actions use the same expression, signal, guard, ownership, and clock
   services as ordinary transfers. An FSM does not privately rediscover them.
-- Transition priority and transport atomicity are represented before RTL
+- Transition priority and transfer atomicity are represented before RTL
   emission.
 
 ## Fabrics

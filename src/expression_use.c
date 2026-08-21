@@ -1,4 +1,4 @@
-/* Identity-based symbol and transport use analysis over semantic expressions. */
+/* Identity-based symbol and signal use analysis over semantic expressions. */
 #include <stdlib.h>
 
 #include "pigen/expression_use.h"
@@ -11,45 +11,45 @@ typedef struct {
 	pigen_expression_use_analysis *analysis;
 } use_analyzer;
 
-static int add_transport_summary(use_analyzer *analyzer,
-	pigen_transport_id transport, pigen_expression_use_context context)
+static int add_signal_summary(use_analyzer *analyzer,
+	pigen_signal_id signal, pigen_expression_use_context context)
 {
 	pigen_expression_use_analysis *analysis = analyzer->analysis;
 	size_t i;
-	for (i = 0; i < analysis->transport_count; i++)
-		if (analysis->transports[i].transport.index == transport.index)
+	for (i = 0; i < analysis->signal_count; i++)
+		if (analysis->signals[i].signal.index == signal.index)
 		{
-			analysis->transports[i].contexts |= (unsigned)context;
+			analysis->signals[i].contexts |= (unsigned)context;
 			return 1;
 		}
-	if (analysis->transport_count == analysis->transport_capacity)
+	if (analysis->signal_count == analysis->signal_capacity)
 	{
-		analysis->transport_capacity = analysis->transport_capacity ?
-			analysis->transport_capacity * 2 : 8;
-		analysis->transports = pigen_resize(analysis->transports,
-			analysis->transport_capacity * sizeof(*analysis->transports));
+		analysis->signal_capacity = analysis->signal_capacity ?
+			analysis->signal_capacity * 2 : 8;
+		analysis->signals = pigen_resize(analysis->signals,
+			analysis->signal_capacity * sizeof(*analysis->signals));
 	}
-	analysis->transports[analysis->transport_count++] =
-		(pigen_expression_transport_use){transport, (unsigned)context};
+	analysis->signals[analysis->signal_count++] =
+		(pigen_expression_signal_use){signal, (unsigned)context};
 	return 1;
 }
 
 static int add_resolved_use(use_analyzer *analyzer, pigen_expr_id projection,
-	pigen_symbol_id symbol_id, pigen_transport_id transport,
+	pigen_symbol_id symbol_id, pigen_signal_id signal,
 	pigen_predicate_id predicate, pigen_expression_use_context context)
 {
 	const pigen_symbol *symbol = pigen_symbol_get(analyzer->model, symbol_id);
 	pigen_expression_use_analysis *analysis = analyzer->analysis;
 
 	if (!symbol) return 0;
-	if (transport.index != PIGEN_INVALID_ID)
+	if (signal.index != PIGEN_INVALID_ID)
 	{
-		if (pigen_symbol_transport(analyzer->model, symbol_id).index !=
-			transport.index ||
-			!add_transport_summary(analyzer, transport, context))
+		if (pigen_symbol_signal(analyzer->model, symbol_id).index !=
+			signal.index ||
+			!add_signal_summary(analyzer, signal, context))
 			return 0;
 	}
-	else if (symbol->kind == PIGEN_SYMBOL_TRANSPORT)
+	else if (symbol->kind == PIGEN_SYMBOL_SIGNAL)
 		return 0;
 	if (analysis->use_count == analysis->use_capacity)
 	{
@@ -59,7 +59,7 @@ static int add_resolved_use(use_analyzer *analyzer, pigen_expr_id projection,
 			analysis->use_capacity * sizeof(*analysis->uses));
 	}
 	analysis->uses[analysis->use_count++] = (pigen_expression_use){
-		projection, symbol_id, transport, predicate, context};
+		projection, symbol_id, signal, predicate, context};
 	return 1;
 }
 
@@ -70,16 +70,16 @@ static int add_symbol_use(use_analyzer *analyzer, pigen_expr_id expression,
 	const pigen_semantic_expr *known = pigen_expr_get(analyzer->model,
 		expression);
 	const pigen_symbol *symbol;
-	pigen_transport_id transport = INVALID_ID(pigen_transport_id);
+	pigen_signal_id signal = INVALID_ID(pigen_signal_id);
 
 	if (!known || known->kind != PIGEN_EXPR_SYMBOL) return 0;
 	symbol = pigen_symbol_get(analyzer->model, known->as.symbol);
 	if (!symbol) return 0;
-	if (symbol->kind == PIGEN_SYMBOL_TRANSPORT)
-		transport = pigen_symbol_transport(analyzer->model, known->as.symbol);
+	if (symbol->kind == PIGEN_SYMBOL_SIGNAL)
+		signal = pigen_symbol_signal(analyzer->model, known->as.symbol);
 	return add_resolved_use(analyzer,
 		projection.index == PIGEN_INVALID_ID ? expression : projection,
-		known->as.symbol, transport, predicate, context);
+		known->as.symbol, signal, predicate, context);
 }
 
 static int visit(use_analyzer *analyzer, pigen_expr_id expression,
@@ -218,17 +218,17 @@ int pigen_analyze_expression_uses(pigen_semantic_model *model,
 {
 	use_analyzer analyzer = {model, analysis};
 	size_t original_use_count;
-	size_t original_transport_count;
+	size_t original_signal_count;
 
 	if (!model || !analysis || context != PIGEN_EXPRESSION_USE_READ)
 		return 0;
 	original_use_count = analysis->use_count;
-	original_transport_count = analysis->transport_count;
+	original_signal_count = analysis->signal_count;
 	if (visit(&analyzer, expression, INVALID_ID(pigen_expr_id), predicate,
 		context))
 		return 1;
 	analysis->use_count = original_use_count;
-	analysis->transport_count = original_transport_count;
+	analysis->signal_count = original_signal_count;
 	return 0;
 }
 
@@ -271,6 +271,6 @@ void pigen_free_expression_use_analysis(
 {
 	if (!analysis) return;
 	free(analysis->uses);
-	free(analysis->transports);
+	free(analysis->signals);
 	*analysis = (pigen_expression_use_analysis){0};
 }

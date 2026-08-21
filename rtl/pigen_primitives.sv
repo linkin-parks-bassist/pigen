@@ -1,5 +1,5 @@
 /*
- * Pigen transport storage primitives.
+ * Pigen signal storage primitives.
  *
  * Generated modules instantiate these directly.  They are ordinary,
  * synthesizable SystemVerilog and intentionally expose the familiar

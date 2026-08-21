@@ -1,4 +1,4 @@
-module degenerate_ports
+module static_ports
 	(
 		input logic clk,
 		input logic reset,

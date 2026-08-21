@@ -3,7 +3,7 @@
 ## Purpose
 
 Pigen is a source-to-source compiler. Its input language extends SystemVerilog
-with first-class ready/valid transfers, explicit data and transport types, and
+with first-class ready/valid transfers, explicit data and transfer types, and
 inline `pipeline`, `transfer`, `fabric`, and `fsm` blocks. A compiler invocation
 consumes `.pigen` source and writes readable, synthesizable SystemVerilog, using
 the explicit primitives in `rtl/pigen_primitives.sv` where required. It does
@@ -13,7 +13,7 @@ This document specifies the intended v1 language. The compiler is pre-release
 and is being moved onto a structured implementation; it does not yet accept
 every form specified here. In particular, data-first declarations, generic
 input endpoints, and inline width-inferred fabrics are not implemented. The
-currently accepted transport-first declarations and top-level fixed-width
+currently accepted transfer-type-first declarations and top-level fixed-width
 fabric blocks are prototype syntax to be replaced, not alternate language
 forms. Implementation lag does not change the language contract.
 
@@ -84,10 +84,11 @@ incoming packet. A transfer becomes observable only in the following stage; it
 does not introduce a cycle beyond the elastic stage boundary.
 Each stage has a private local scope. Lookup is stage-local, then
 pipeline-local, then enclosing module scope; a shadowing declaration is warned.
-The first stage takes only enclosing module values and stage-local
-combinational values. Every non-degenerate enclosing transport it reads is an
-atomic stage input: the stage waits for all such inputs and consumes them on its
-advance, under the complete enclosing procedural guard of the pipeline.
+The first stage takes only enclosing module signals and stage-local
+combinational signals. Every enclosing signal whose transfer law consumes a
+read is an atomic stage input: the stage waits for all such inputs and consumes
+them on its advance, under the complete enclosing procedural guard of the
+pipeline.
 
 `yield expression;` appears exactly once after the final stage. It evaluates
 from that stage's outgoing packet, so all transfers in the final stage are
@@ -111,9 +112,9 @@ with logical OR. In the absence of an explicit binding, a parent port named
 is intentionally unreset.
 
 Curly braces retain normal packed-concatenation semantics. A stage advances
-atomically over its inferred packet and source transports. Stage-local wires
+atomically over its inferred packet and source signals. Stage-local wires
 use ordinary combinational `=` definitions. `wire <= expression` is a fatal
-error: Pigen `<=` is a transfer and a wire is never ready. Nested transport
+error: Pigen `<=` is a transfer and a wire is never ready. Nested signal
 operations and `stall();` are reserved future syntax, and no implicit `busy`
 mechanism exists.
 
@@ -188,7 +189,7 @@ child-module interfaces.
 
 The compiler renders the elaborated topology directly from the same topology
 model used for RTL emission. The SVG identifies every module instance,
-transport endpoint, generated router, router port, routed physical link, direct
+signal endpoint, generated router, router port, routed physical link, direct
 link, and declared connection. Output is deterministic for identical source
 and compiler options. Layout is seeded from the generated router tree, relaxed
 with topology-aware forces, separated with footprint-aware collision passes,
@@ -204,31 +205,36 @@ the complete network, while each hop can accept one replacement packet per
 cycle. Backpressure, route progression, and round-robin contention arbitration
 are generated automatically. Direct-only fabrics emit no router state.
 
-## Transport declarations
+## Signal declarations
 
-Data type and transport kind are independent axes. Their declaration order is:
+Data type and transfer type are independent axes. Their declaration order is:
 
 ```text
-data-type  transport-kind  declarator
+data-type  transfer-type  declarator
 ```
 
+Every signal has an independent data type, transfer type, and declarator shape.
 The initial Pigen data types are:
 
 - `int[n]`: an `n`-bit signed integer;
 - `uint[n]`: an `n`-bit unsigned integer;
 - `bit`: a one-bit value;
-- `byte`: an eight-bit value.
+- `byte`: an unsigned eight-bit bit-vector.
 
-The two-state/four-state policy of these types and the arithmetic signedness of
-`byte` are not yet fixed. Until they are, programs whose meaning depends on
-those properties are outside the accepted v1 subset. The type algebra is open
-to later scalar, aggregate, enum, and user-defined types.
+`byte` is not an integer and has no arithmetic signedness. The two-state or
+four-state policy of the initial types is not yet fixed. Until it is, programs
+whose meaning depends on that property are outside the accepted v1 subset. The
+data-type algebra is open to later scalar, aggregate, enum, and user-defined
+types.
 
-The transport kinds are `wire`, `reg`, `buf`, `port`, `fifo`, and `skid`.
-`transport` is the current name for this movement/storage axis, not a semantic
-commitment to that terminology. FIFO capacity requires a transport parameter;
-its new data-first surface spelling remains to be specified and the old
-payload-final bracket convention is not part of v1.
+The concrete transfer types are `wire`, `reg`, `logic`, `buf`, `port`, `fifo`,
+and `skid`. `wire`, `reg`, and `logic` are static transfer types, called
+**statics** informally. Their valid and ready behavior is constant, but they are
+full members of the same transfer-type algebra. Static behavior is the trivial
+case of the general transfer behavior, not an exception to it. The complement
+may be called dynamic when contrast is necessary, but ordinary writing simply
+says transfer type. FIFO capacity requires a transfer-type parameter; its
+data-first surface spelling remains to be specified.
 
 Examples of the declaration order are:
 
@@ -246,15 +252,25 @@ not apply to expression indexing: `value[3]` remains a one-bit select. An
 explicit colon-bearing range retains ordinary SystemVerilog direction and
 meaning, including `logic [21:0] h[0:12];`.
 
-Ordinary SystemVerilog declarations continue to coexist with Pigen
-declarations. Pigen declarations are parsed into separate data-type,
-transport-kind, and declarator-shape objects; their meaning is never recovered
-by rewriting or reparsing emitted ranges.
+A signal's declarator shape is the ordered list of dimensions written after its
+declarator. The scalar shape is the empty list. A colonless count and an
+explicit range remain distinct structural forms even when they describe the
+same number of elements. Whole-signal expressions carry the same shape as the
+signal they reference, so shape compatibility between signals and expressions
+is structural and never inferred from rendered bracket text.
+
+The declared entity is a **signal**. Thus `sample` above is a signal whose data
+type is `int[16]` and whose transfer type is `buf`. Ordinary SystemVerilog nets
+and variables are signals too: their declarations imply the appropriate static
+transfer type. `net` retains its precise SystemVerilog realization meaning and
+is not a second Pigen umbrella term. Pigen declarations are parsed into
+separate data-type, transfer-type, and declarator-shape objects; their meaning
+is never recovered by rewriting or reparsing emitted ranges.
 
 ### Module input endpoints
 
-A Pigen module input declares a payload type and may optionally request a
-transport kind:
+A Pigen module input declares a data type and may optionally constrain its
+transfer type:
 
 ```systemverilog
 input int[16] sample;
@@ -262,41 +278,48 @@ input int[16] buf queued_sample;
 output int[16] buf result;
 ```
 
-Whether qualified or not, every Pigen input has the same semantic contract:
-payload and valid enter the module, ready leaves it, and the module consumes a
-value only on their handshake. The body does not know whether the producer is
-a wire, register, port, buffer, FIFO, or skid. An explicit kind selects or
-constrains boundary realization; it does not change the receiving body's
-transfer semantics. A kindless input still emits the complete ready/valid
-interface. Degenerate producers are connected by tying or adapting handshake
-signals at the connection boundary, not by changing the receiver's contract.
+Every input is a signal. Payload and valid enter the module, ready leaves it,
+and the module consumes a value only on their handshake. An unqualified input
+has an abstract transfer type: a type variable constrained by the universal
+ready/valid boundary contract and specialized by its connection context. An
+explicit transfer type constrains that variable; connecting an incompatible
+signal is an error. The annotation does not otherwise change the receiving
+body's consumption model. The body need not know whether the producer is a
+wire, register, port, buffer, FIFO, or skid.
 
-The kindless-output contract has not yet been chosen. Until it is specified,
-Pigen outputs require an explicit transport kind. Their consumer is likewise
+There is no Pigen signal without formally defined valid and ready behavior. A
+connection to a static may allow constant laws to lower to `1'b0` or `1'b1`
+and unused control paths to be optimized away. This is a lowering consequence,
+not an erasure of the signal or its transfer type from the semantic model. A
+module can therefore stimulate or stall external dataflow through ready while
+remaining parametric over its peer's realization.
+
+The unqualified-output contract has not yet been chosen. Until it is specified,
+Pigen outputs require an explicit transfer type. Their consumer is likewise
 unknown to the sending module; the output exposes payload, valid, and ready
 according to the selected local realization.
 
-For internal values and explicitly realized outputs, the transport behaviours
+For internal signals and explicitly realized outputs, the transfer laws
 are:
 
-| Kind | valid / ready | Semantics |
+| Transfer type | valid / ready | Semantics |
 | --- | --- | --- |
-| `wire` | `1` / `0` | Always offered combinational value; not a transport destination. |
+| `wire` | `1` / `0` | Always offered combinational value; not a signal destination. |
 | `reg` | `1` / `1` | Persistent, always-available value; reads do not consume. |
+| `logic` | `1` / `1` | The SystemVerilog variable form of the `reg` static law. |
 | `buf` | occupancy / elastic readiness | One-entry elastic storage. |
 | `port` | one-cycle pulse / `1` | A directly written payload register with a one-cycle Pigen-valid pulse. |
 | `fifo` | nonempty / nonfull | Ordered depth-N storage and a combinational ready-chain break. |
 | `skid` | nonempty / nonfull | Exact two-entry skid buffer with registered backpressure. |
 
-Ordinary SystemVerilog `logic` variables have the same degenerate transfer
-behaviour as `reg` when used in a Pigen action. Generated RTL uses constants
-rather than private valid/ready state for degenerate values.
+Generated RTL uses constants rather than private valid/ready state for statics
+where the connection context permits.
 
 `wire`, `reg`, and `logic` are always valid. `validate(x)` on one of these
 types is accepted as a no-op and produces a compiler warning; no validity
 hardware is emitted. `invalidate(x)` is an error because an always-valid
-transport cannot be made invalid. `flush(x)` is also invalid because these
-types have no transport occupancy to empty.
+signal cannot be made invalid. `flush(x)` is also invalid because these
+types have no signal occupancy to empty.
 
 An output `port` is set-and-forget: it does not hold `valid` while downstream
 `ready` is low. If its one-cycle valid pulse ends without a cycle in which
@@ -307,7 +330,7 @@ When delivery must survive backpressure, the user must select an output `buf`,
 prefer low-contention routes for `port` outputs, but such a preference cannot
 replace storage and is not a delivery guarantee.
 
-## Transport actions
+## Transfers and signal actions
 
 All grammar in this section is token-based. The tokenizer throws away spaces,
 tabs, comments, and newlines, so formatting shown in examples is never required
@@ -330,16 +353,16 @@ validate(x);
 flush(x);
 ```
 
-A transport assignment is atomic.  It fires only when its structured control
-path is enabled, its destination is ready, and every *distinct* transport RHS
+A transfer is atomic. It fires only when its structured control
+path is enabled, its destination is ready, and every *distinct* signal RHS
 operand is valid.  Buffered RHS operands are consumed together; their ready
 routes include all other buffered operand validities, so a join never partially
 consumes.  Repeated use of one operand consumes it once.
 
-The LHS may be one complete buffered transport destination, an ordinary
-SystemVerilog variable lvalue, or a concatenation mixing those forms. Buffered
-destinations must be written whole because their valid bit describes the whole
-packet. Degenerate `reg`/`logic` and ordinary state may use normal SV slices,
+The LHS may be one complete buffered signal destination, a static lvalue, or a
+concatenation mixing those forms. Buffered destinations must be written whole
+because their valid bit describes the whole packet. Static `reg`/`logic`
+signals may use normal SV slices,
 members, array elements, indexed part-selects, and nested lvalue
 concatenations. The RHS is one ordinary SystemVerilog value expression and may
 itself be a concatenation. Assignment uses the ordinary
@@ -347,7 +370,7 @@ concatenation bit stream: the leftmost destination receives the most
 significant portion and the rightmost destination receives the least
 significant portion.  Only the aggregate widths must match; top-level item
 counts and individual item widths need not match.  Thus all of these are the
-same kind of atomic transfer:
+same form of atomic transfer:
 
 ```systemverilog
 x <= {a, b};
@@ -384,12 +407,12 @@ and arities may differ; only the two flattened aggregate widths must match.
 The first version permits only transfer members directly inside the block;
 control flow belongs around the block rather than inside it.
 
-Any transport read needed to evaluate a member participates in the block's
-validity and ownership calculation, including a transport projection used in
+Any signal read needed to evaluate a member participates in the block's
+validity and ownership calculation, including a signal projection used in
 an lvalue address or select. Thus `state_mem[handle]` requires `handle` to be
 valid. If `handle`, `result`, and `next_state` are projections of one packet,
 the block is one deduplicated consumer of that complete packet, not three
-consumers. Constants and degenerate values retain their normal rules.
+consumers. Constants and statics retain their normal rules.
 
 `transfer` is contextual: it introduces this extension only when followed by
 the complete `transfer begin ... end` form in a clocked procedural block.
@@ -397,12 +420,12 @@ Otherwise it remains an ordinary SystemVerilog identifier.
 
 The complete statement has one destination set and one consuming source set.
 It fires when every destination is ready and every distinct buffered base
-transport read anywhere in the RHS is valid.  Constants add no validity or
+signal read anywhere in the RHS is valid.  Constants add no validity or
 consumption dependency: as sources they behave like always-valid wires and
 have no readiness state.
 
-A select or member access projects bits from a transport payload; it does not
-create a smaller transport.  An unpeeked read such as `x <= a[7:0]` therefore
+A select or member access projects bits from a signal payload; it does not
+create a smaller signal. An unpeeked read such as `x <= a[7:0]` therefore
 consumes the complete token held by `a` when it fires.  Repeating projections
 of the same base in one statement still consumes that base once:
 
@@ -417,12 +440,12 @@ consumers and are rejected unless their guards are proven mutually exclusive.
 If a statement contains any buffered source or destination, its ordinary
 `reg`/`logic`/memory lvalue members participate in the same atomic event. They
 are always ready, add no validity state, and update only when the complete
-transfer fires. A pure degenerate statement containing no buffered transport is
+transfer fires. A purely static statement containing no buffered signal is
 ordinary SystemVerilog and retains normal procedural semantics, including
-source-ordered nonblocking assignments to the same variable. The transport
-single-consumer and producer-exclusivity rules apply only to non-degenerate
-storage. A procedural `wire` destination is rejected, consistently with normal
-SystemVerilog variable-assignment rules.
+source-ordered nonblocking assignments to the same variable. The
+single-consumer and producer-exclusivity rules apply only where a transfer
+type's law requires them. A procedural `wire` destination is rejected,
+consistently with normal SystemVerilog variable-assignment rules.
 
 Concatenated and projected transfers require equal aggregate LHS and RHS
 widths. Pigen emits a constant `$bits` elaboration check alongside the lowered
@@ -436,7 +459,7 @@ its corresponding RHS atomically with the real destinations, for example
 `{acc_3, _} <= {acc_2 + x2 * B2, x2};`.
 
 `accepts(y, x)` is exactly `ready(y) && valid(x)`.  Both arguments must be
-transport identifiers.  `valid` and `ready` also require one transport
+signal identifiers. `valid` and `ready` also require one signal
 identifier.
 
 A write to an internal `port` validates that payload for the next cycle, but
@@ -455,7 +478,7 @@ lowers to an unconditional `bram_port <= mem[address];` clocked assignment;
 `bram_port` is valid on the next cycle only when `read_enable` was true.  A
 port has one Pigen producer.
 
-An ordinary sequential storage write can consume a transport source directly:
+An ordinary sequential storage write can consume a signal source directly:
 
 ```systemverilog
 input uint[8] port data_in;
@@ -474,10 +497,10 @@ Inside a clocked `always` or `always_ff` block,
 `if (destination <= source)` is shorthand for
 `if (accepts(destination, source))`: it gates the then branch on that transfer
 and performs the transfer on the same accepted cycle.  Both sides must be
-transport identifiers.
+signal identifiers.
 
 `validate(x)` and `invalidate(x)` are synchronous next-state writes to a local
-stored transport's valid bit. They force `x` valid or invalid, respectively,
+stored signal's valid bit. They force `x` valid or invalid, respectively,
 on the next cycle without waiting for downstream readiness. Like non-blocking
 assignments, source order matters: a later accepted transfer to `x` overrides
 an earlier validity action, and a later validity action overrides an earlier
@@ -495,18 +518,18 @@ edge.  `validate` without a transfer preserves the storage's existing payload;
 use it only when that payload is intentional.  For a FIFO or skid, validation
 forces nonempty state (one head item when previously empty); invalidation
 forces its output invalid. `flush(x)` empties all buffered contents. These
-actions apply only to locally owned `buf`, `fifo`, `skid`, and `port` values.
+actions apply only to locally owned `buf`, `fifo`, `skid`, and `port` signals.
 Applying a validity action to a module input is an error because the producer,
 not the receiver, owns input validity. On an always-valid `wire`, `reg`, or
 `logic`, `validate` warns and does nothing, while `invalidate` and `flush` are
 errors.
 
-Buffered values have one consumer.  Multiple writes to one destination are
+Buffered signals have one consumer. Multiple writes to one destination are
 allowed only when semantic control analysis proves their paths mutually
 exclusive; all other fanout or producer ambiguity is an error.
 
 A consuming transfer group may not read one of its own buffered destinations.
-For example, `x <= x + 1;` is an error: lowering it as an ordinary transport
+For example, `x <= x + 1;` is an error: lowering it as an ordinary signal
 transfer would connect `x`'s output-ready route to its own input-ready route.
 The same rule applies when the self-consumption crosses members of a co-sliced
 group. Feedback must instead pass through a distinct element that breaks the
@@ -516,16 +539,16 @@ combinational ready-dependency cycle is invalid even when it spans several
 connections.
 
 A co-sliced assignment is one consuming transfer group. Every buffered LHS
-item is a distinct, complete transport destination; degenerate and ordinary
-lvalue items may be projected. The RHS is flattened and repartitioned by LHS
+item is a distinct, complete signal destination; static lvalue items may be
+projected. The RHS is flattened and repartitioned by LHS
 widths using ordinary SystemVerilog concatenation order;
 the two sides need equal aggregate width, not equal arity. The group fires only
-when every destination is ready and every distinct non-`peek` base transport
+when every destination is ready and every distinct non-`peek` base signal
 across the RHS is valid. All members update together and each buffered source
 is consumed once. A grouped conditional transfer,
 `if ({a, b} <= expression)`, tests that same all-member acceptance event.
 
-`peek(x)` takes exactly one transport identifier and lowers to its payload
+`peek(x)` takes exactly one signal identifier and lowers to its payload
 without adding validity, readiness, or ownership.  It is therefore a raw
 observation, including when `x` is invalid; guard it when token freshness is
 required.  It binds `x` to the enclosing synchronous Pigen domain.
@@ -550,12 +573,12 @@ begin
 end
 ```
 
-The event control defines a domain. A transport value binds to the domain of
+The event control defines a domain. A signal binds to the domain of
 its first Pigen use, and all later uses must match. A conventional top-level
 `if (reset) ... else ...` branch is preserved and naturally gates actions to
 the non-reset path, but it is optional. When a module declares `reset`,
 generated storage connects to it; otherwise generated storage uses an inactive
-reset. Unbound storage, cross-domain transport use, multiple event edges, and
+reset. Unbound storage, cross-domain signal use, multiple event edges, and
 asynchronous reset event controls are errors. `if`/`else` and standard `case`, `casez`, `casex`, `unique`, and
 `priority` controls containing Pigen actions are parsed and retain their normal
 SystemVerilog matching semantics.
@@ -584,7 +607,7 @@ state.  State-block actions run while their state is active.  `goto` is terminal
 on its syntactic path and changes state only under its explicit enclosing
 guard; otherwise state holds.  Overlapping transitions are errors unless their
 paths are structurally exclusive.  A `goto` never implicitly waits for a
-transport transfer; use `accepts` when it must.
+signal transfer; use `accepts` when it must.
 
 ## Lowering requirements
 

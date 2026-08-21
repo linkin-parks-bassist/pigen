@@ -77,7 +77,7 @@
   <text class="port" x="1588.267" y="1779.091" text-anchor="middle">r15.p0 ↔ r16.p2</text>
   <line class="edge " data-kind="router-link" data-from="r16" data-to="r17" x1="1409.673" y1="1670.408" x2="1076.806" y2="1684.654"/>
   <text class="port" x="1243.240" y="1672.531" text-anchor="middle">r16.p0 ↔ r17.p1</text>
-  <line class="edge direct" data-kind="direct-link" data-from="recorder" data-to="storage" data-source="recorder.control.transport" data-destination="storage.command" x1="1318.305" y1="349.755" x2="1105.339" y2="226.120"/>
+  <line class="edge direct" data-kind="direct-link" data-from="recorder" data-to="storage" data-source="recorder.control.request" data-destination="storage.command" x1="1318.305" y1="349.755" x2="1105.339" y2="226.120"/>
   <text class="port" x="1211.822" y="282.937" text-anchor="middle">direct &gt;</text>
   <line class="edge direct" data-kind="direct-link" data-from="storage" data-to="recorder" data-source="storage.status.position" data-destination="recorder.position" x1="1105.339" y1="226.120" x2="1318.305" y2="349.755"/>
   <text class="port" x="1211.822" y="282.937" text-anchor="middle">direct &gt;</text>
@@ -129,8 +129,8 @@
   <text class="port" data-endpoint="destination:recorder.position" x="1306.198" y="346.726" text-anchor="end">in position</text>
   <circle data-kind="destination-port" data-endpoint="destination:recorder.samples" cx="1383.031" cy="435.016" r="4" fill="#1d4ed8"/>
   <text class="port" data-endpoint="destination:recorder.samples" x="1386.547" y="452.567" text-anchor="start">in samples</text>
-  <circle data-kind="source-port" data-endpoint="source:recorder.control.transport" cx="1318.305" cy="349.755" r="4" fill="#1d4ed8"/>
-  <text class="port" data-endpoint="source:recorder.control.transport" x="1280.253" y="331.664" text-anchor="end">out control.transport</text>
+  <circle data-kind="source-port" data-endpoint="source:recorder.control.request" cx="1318.305" cy="349.755" r="4" fill="#1d4ed8"/>
+  <text class="port" data-endpoint="source:recorder.control.request" x="1280.253" y="331.664" text-anchor="end">out control.request</text>
   <circle class="unit" data-kind="unit" data-unit="sequencer" cx="210.079" cy="1765.083" r="58.000"/>
   <text class="label" x="210.079" y="1770.083" text-anchor="middle">sequencer</text>
   <circle data-kind="source-port" data-endpoint="source:sequencer.control.mixer" cx="251.132" cy="1724.112" r="4" fill="#1d4ed8"/>
@@ -197,7 +197,7 @@
   <text class="legend" x="45" y="2932">mixer.output.metering -&gt; meter.samples (hops=7 path=0b1001010)</text>
   <text class="legend" x="45" y="2952">mixer.output.monitor -&gt; monitor.samples (hops=7 path=0b0011001)</text>
   <text class="legend" x="45" y="2972">mixer.output.recorder --&gt; recorder.samples (hops=7 path=0b1011000)</text>
-  <text class="legend" x="45" y="2992">recorder.control.transport &gt; storage.command (direct)</text>
+  <text class="legend" x="45" y="2992">recorder.control.request &gt; storage.command (direct)</text>
   <text class="legend" x="45" y="3012">sequencer.control.mixer ---&gt; mixer.command (hops=7 path=0b0100111)</text>
   <text class="legend" x="45" y="3032">storage.status.position &gt; recorder.position (direct)</text>
   <text class="legend" x="45" y="3052">synthesizer.samples.main --&gt; mixer.samples (hops=7 path=0b1100110)</text>
