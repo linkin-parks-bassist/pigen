@@ -63,10 +63,13 @@ not yet fully modeled. `data_type.h` and `data_type.c` now own canonical type
 construction, aliases, packed layout, projection, width, state domain,
 concatenation, sized-logic construction, integral capability, and current
 operator-result typing. The general semantic and predicate layers consume that
-interface without enumerating primitives. Primitive spelling/resolution,
+interface without enumerating primitives. Primitive spelling/resolution is now
+routed through that owner: syntax retains the written base token without
+classifying it, and resolution asks the data-type subsystem before considering
+a typedef. The target `int`, `uint`, and `byte` catalogue, data-first syntax,
 conversion insertion, contextual sizing, numerical interpretation, and
-lowering remain to be brought through the boundary. There is no elastic RTL IR
-or terminal structured emitter.
+lowering remain incomplete. There is no elastic RTL IR or terminal structured
+emitter.
 
 ## Architecture cutover
 

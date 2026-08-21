@@ -357,6 +357,12 @@ lowering. This keeps experimental additions, renames, and removals local
 instead of distributing primitive-specific cases through unrelated compiler
 passes.
 
+The structured parser deliberately retains a written base-type token without
+classifying it as a primitive or typedef. During resolution, the data-type
+subsystem alone recognizes primitive spellings; only an unrecognized spelling
+is looked up as a typedef. Thus the parser knows the grammar's shape without
+knowing the language's current primitive catalogue.
+
 That work is in progress. The current compiler is useful, but Pigen should be
 treated as an experimental language whose syntax and generated implementation
 will continue to change.

@@ -81,30 +81,12 @@ static pigen_expr_id resolve_constant(resolver *resolver, pigen_scope_id scope,
 static pigen_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 	const pigen_syntax_type *syntax_type)
 {
-	pigen_semantic_type_kind kind;
 	pigen_signedness signedness;
-	pigen_symbol_id named_symbol = INVALID_ID(pigen_symbol_id);
 	pigen_packed_dimension *dimensions = NULL;
 	const pigen_syntax_dimension *syntax_dimensions;
 	pigen_type_id result;
 	size_t i;
 
-	if (syntax_type->base == PIGEN_SYNTAX_TYPE_NAMED)
-	{
-		const pigen_symbol *symbol;
-		named_symbol = pigen_symbol_lookup(resolver->model, scope,
-			token_spelling(resolver, syntax_type->base_name));
-		symbol = pigen_symbol_get(resolver->model, named_symbol);
-		if (!symbol || symbol->kind != PIGEN_SYMBOL_TYPEDEF)
-		{
-			fail_token(resolver, syntax_type->base_name, "unknown type name");
-			return INVALID_ID(pigen_type_id);
-		}
-		kind = PIGEN_TYPE_NAMED;
-	}
-	else
-		kind = syntax_type->base == PIGEN_SYNTAX_TYPE_BIT ?
-			PIGEN_TYPE_BIT : PIGEN_TYPE_LOGIC;
 	if (syntax_type->signedness == PIGEN_SYNTAX_SIGN_SIGNED)
 		signedness = PIGEN_SIGN_SIGNED;
 	else if (syntax_type->signedness == PIGEN_SYNTAX_SIGN_UNSIGNED)
@@ -140,8 +122,27 @@ static pigen_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 			dimensions[i].right = pigen_expr_constant(resolver->model, right);
 		}
 	}
-	result = pigen_type_intern(resolver->model, kind, signedness,
-		named_symbol, dimensions, syntax_type->dimension_count);
+	if (syntax_type->base.index == PIGEN_INVALID_ID)
+		result = pigen_data_type_implicit(resolver->model, signedness,
+			dimensions, syntax_type->dimension_count);
+	else
+	{
+		pigen_source_span spelling = token_spelling(resolver,
+			syntax_type->base);
+		result = pigen_data_type_primitive_from_spelling(resolver->model,
+			spelling, signedness, dimensions, syntax_type->dimension_count);
+		if (result.index == PIGEN_INVALID_ID)
+		{
+			pigen_symbol_id alias = pigen_symbol_lookup(resolver->model, scope,
+				spelling);
+			const pigen_symbol *symbol = pigen_symbol_get(resolver->model, alias);
+			if (!symbol || symbol->kind != PIGEN_SYMBOL_TYPEDEF)
+				fail_token(resolver, syntax_type->base, "unknown type name");
+			else
+				result = pigen_data_type_alias(resolver->model, alias, signedness,
+					dimensions, syntax_type->dimension_count);
+		}
+	}
 	free(dimensions);
 	return result;
 }

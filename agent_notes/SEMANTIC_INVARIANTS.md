@@ -107,6 +107,10 @@ contract stated in `SPEC.md`.
   state domain, and concatenation are owned by the same data-type subsystem.
   General semantic objects may carry and query `pigen_type_id`; they do not
   inspect the primitive catalogue.
+- Structured syntax stores the written base-type token, or absence for an
+  implicit base. It does not classify primitive versus typedef. Primitive
+  spelling is recognized only by the data-type subsystem during resolution;
+  typedef lookup handles spellings that are not primitives.
 - A resolved conditional expression owns condition, true-alternative, and
   false-alternative expression identities. Identically typed alternatives
   yield that type directly; mixed alternatives remain unresolved until their

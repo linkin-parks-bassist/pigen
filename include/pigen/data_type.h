@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "pigen/ids.h"
+#include "pigen/source.h"
 
 typedef struct pigen_semantic_model pigen_semantic_model;
 
@@ -93,6 +94,16 @@ pigen_type_id pigen_type_intern(pigen_semantic_model *model,
 	pigen_semantic_type_kind kind, pigen_signedness signedness,
 	pigen_symbol_id named_symbol, const pigen_packed_dimension *dimensions,
 	size_t dimension_count);
+pigen_type_id pigen_data_type_primitive_from_spelling(
+	pigen_semantic_model *model, pigen_source_span spelling,
+	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
+	size_t dimension_count);
+pigen_type_id pigen_data_type_implicit(pigen_semantic_model *model,
+	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
+	size_t dimension_count);
+pigen_type_id pigen_data_type_alias(pigen_semantic_model *model,
+	pigen_symbol_id alias, pigen_signedness signedness,
+	const pigen_packed_dimension *dimensions, size_t dimension_count);
 const pigen_semantic_type *pigen_type_get(const pigen_semantic_model *model,
 	pigen_type_id type);
 const pigen_packed_dimension *pigen_type_dimensions(

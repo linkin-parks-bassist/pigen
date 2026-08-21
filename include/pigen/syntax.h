@@ -40,13 +40,6 @@ typedef enum {
 	PIGEN_SYNTAX_SIGN_SIGNED
 } pigen_syntax_signedness;
 
-typedef enum {
-	PIGEN_SYNTAX_TYPE_IMPLICIT_LOGIC,
-	PIGEN_SYNTAX_TYPE_LOGIC,
-	PIGEN_SYNTAX_TYPE_BIT,
-	PIGEN_SYNTAX_TYPE_NAMED
-} pigen_syntax_type_base;
-
 typedef struct {
 	pigen_syntax_location location;
 	pigen_syntax_expr_id left;
@@ -77,10 +70,9 @@ typedef struct {
 } pigen_syntax_signal_declarator;
 
 typedef struct {
-	pigen_syntax_type_base base;
+	pigen_token_id base;
 	pigen_syntax_signedness signedness;
 	pigen_syntax_location location;
-	pigen_token_id base_name;
 	size_t first_dimension;
 	size_t dimension_count;
 } pigen_syntax_type;

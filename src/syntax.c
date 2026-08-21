@@ -230,8 +230,7 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	*type = (pigen_syntax_type){0};
 	*depth = INVALID_ID(pigen_syntax_expr_id);
 	type->signedness = PIGEN_SYNTAX_SIGN_IMPLICIT;
-	type->base = PIGEN_SYNTAX_TYPE_IMPLICIT_LOGIC;
-	type->base_name = INVALID_ID(pigen_token_id);
+	type->base = INVALID_ID(pigen_token_id);
 	if (token_is(parser, at, "signed"))
 	{
 		type->signedness = PIGEN_SYNTAX_SIGN_SIGNED;
@@ -246,13 +245,7 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 		!token_is(parser, at, "signed") &&
 		!token_is(parser, at, "unsigned"))
 	{
-		if (token_is(parser, at, "logic")) type->base = PIGEN_SYNTAX_TYPE_LOGIC;
-		else if (token_is(parser, at, "bit")) type->base = PIGEN_SYNTAX_TYPE_BIT;
-		else
-		{
-			type->base = PIGEN_SYNTAX_TYPE_NAMED;
-			type->base_name = (pigen_token_id){(uint32_t)at};
-		}
+		type->base = (pigen_token_id){(uint32_t)at};
 		at++;
 		if (token_is(parser, at, "signed"))
 		{
@@ -294,7 +287,7 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	else
 		payload_groups = group_count;
 	if (final_group_is_depth && !payload_groups &&
-		type->base == PIGEN_SYNTAX_TYPE_IMPLICIT_LOGIC)
+		type->base.index == PIGEN_INVALID_ID)
 		return fail(parser, *name_at,
 			"fifo declaration requires a data type before its depth");
 	type->first_dimension = parser->tree->dimension_count;
@@ -308,7 +301,7 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	}
 	if (payload_groups)
 		type->location = range_location(parser, start, at);
-	else if (type->base != PIGEN_SYNTAX_TYPE_IMPLICIT_LOGIC)
+	else if (type->base.index != PIGEN_INVALID_ID)
 	{
 		size_t type_end = final_group_is_depth ? last_group_open : *name_at;
 		type->location = range_location(parser, start, type_end);

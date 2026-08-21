@@ -82,11 +82,12 @@ catalogue, canonical interning, builtin identities, alias unwrapping, packed
 layout, projection, width, state domain, concatenation, sized-logic
 construction, integral capability, and current unary, binary, and conditional
 result rules. The general semantic implementation, expression resolution, and
-predicate construction no longer enumerate primitive constructors. Primitive
-spelling/resolution remains an explicit frontend boundary mapping; contextual
-conversion insertion, richer numerical interpretation, and lowering still
-need consolidation. Do not extend unrelated passes when adding `int`, `uint`,
-or `byte`.
+predicate construction no longer enumerate primitive constructors. Syntax
+retains an optional written base token without classifying it. Resolution asks
+the data-type subsystem to recognize primitive spelling, then considers typedef
+lookup only when no primitive matches. Contextual conversion insertion, richer
+numerical interpretation, and lowering still need consolidation. Do not extend
+unrelated passes when adding `int`, `uint`, or `byte`.
 
 The practical architecture test is a hypothetical primitive change. Its
 necessary edits should be confined to the data-type subsystem, source-spelling
@@ -142,6 +143,9 @@ The unlinked replacement modules already provide:
 - a dedicated data-type interface and implementation owning canonical type
   construction, aliases, packed layout, projection, width, state domain,
   concatenation, and current operator-result typing;
+- syntax-level base-type spellings which remain unclassified until the
+  data-type owner resolves primitive spelling or semantic resolution finds a
+  typedef;
 - typed expression and recursive lvalue resolution;
 - expression-use analysis with projections, contexts, and predicates;
 - canonical conjunctive predicates and structural branch exclusion;

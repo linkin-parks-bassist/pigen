@@ -189,8 +189,8 @@ int main(void)
 				}
 				declarator_id = declarator->next_sibling;
 			}
-			assert(node->as.static_signal_declaration.type.base ==
-				PIGEN_SYNTAX_TYPE_LOGIC);
+			assert(token_is(&preprocessed.expanded,
+				node->as.static_signal_declaration.type.base, "logic"));
 			static_declarations++;
 			continue;
 		}
@@ -259,10 +259,8 @@ int main(void)
 				declarator->as.signal_declarator.name, "queue"))
 			{
 				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_FIFO);
-				assert(node->as.signal_declaration.payload.base ==
-					PIGEN_SYNTAX_TYPE_NAMED);
 				assert(token_is(&preprocessed.expanded,
-					node->as.signal_declaration.payload.base_name, "packet_t"));
+					node->as.signal_declaration.payload.base, "packet_t"));
 				assert(expression_is(&sources, &tree,
 					node->as.signal_declaration.fifo_depth, "DEPTH"));
 			}
@@ -270,8 +268,8 @@ int main(void)
 				declarator->as.signal_declarator.name, "pulse"))
 			{
 				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_PORT);
-				assert(node->as.signal_declaration.payload.base ==
-					PIGEN_SYNTAX_TYPE_LOGIC);
+				assert(token_is(&preprocessed.expanded,
+					node->as.signal_declaration.payload.base, "logic"));
 				assert(node->as.signal_declaration.payload.signedness ==
 					PIGEN_SYNTAX_SIGN_UNSIGNED);
 			}

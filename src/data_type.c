@@ -7,6 +7,16 @@
 
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
 
+static int spelling_is(const pigen_semantic_model *model,
+	pigen_source_span spelling, const char *expected)
+{
+	size_t length;
+	const char *text = pigen_source_span_text(model->sources, spelling, &length);
+	size_t expected_length = strlen(expected);
+
+	return text && length == expected_length && !memcmp(text, expected, length);
+}
+
 static int dimensions_equal(const pigen_semantic_model *model,
 	const pigen_semantic_type *type, const pigen_packed_dimension *dimensions,
 	size_t count)
@@ -85,6 +95,37 @@ pigen_type_id pigen_type_intern(pigen_semantic_model *model,
 			dimension_count * sizeof(*dimensions));
 	model->dimension_count += dimension_count;
 	return result;
+}
+
+pigen_type_id pigen_data_type_primitive_from_spelling(
+	pigen_semantic_model *model, pigen_source_span spelling,
+	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
+	size_t dimension_count)
+{
+	pigen_semantic_type_kind constructor;
+
+	if (!model || !model->sources) return INVALID_ID(pigen_type_id);
+	if (spelling_is(model, spelling, "logic")) constructor = PIGEN_TYPE_LOGIC;
+	else if (spelling_is(model, spelling, "bit")) constructor = PIGEN_TYPE_BIT;
+	else return INVALID_ID(pigen_type_id);
+	return pigen_type_intern(model, constructor, signedness,
+		INVALID_ID(pigen_symbol_id), dimensions, dimension_count);
+}
+
+pigen_type_id pigen_data_type_implicit(pigen_semantic_model *model,
+	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
+	size_t dimension_count)
+{
+	return pigen_type_intern(model, PIGEN_TYPE_LOGIC, signedness,
+		INVALID_ID(pigen_symbol_id), dimensions, dimension_count);
+}
+
+pigen_type_id pigen_data_type_alias(pigen_semantic_model *model,
+	pigen_symbol_id alias, pigen_signedness signedness,
+	const pigen_packed_dimension *dimensions, size_t dimension_count)
+{
+	return pigen_type_intern(model, PIGEN_TYPE_NAMED, signedness, alias,
+		dimensions, dimension_count);
 }
 
 pigen_type_id pigen_semantic_integer_type(pigen_semantic_model *model)
