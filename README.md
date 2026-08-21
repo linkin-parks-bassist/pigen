@@ -348,11 +348,13 @@ consumes syntax objects, lowering consumes semantic identities, and emission
 consumes RTL IR; no later pass reparses source fragments or compiler-generated
 SystemVerilog to recover meaning.
 
-Primitive data-type behavior will likewise be centralized. Expression typing
-resolves width, signedness, conversions, and numerical operation semantics once
-and carries those decisions into lowering. This keeps experimental additions,
-renames, and removals local instead of distributing primitive-specific cases
-through unrelated compiler passes.
+Primitive data-type behavior is likewise being centralized. Integral
+capability and the current unary, binary, and conditional result rules already
+have one alias-aware semantic owner. The completed form will resolve width,
+signedness, conversions, and numerical operation semantics once and carry those
+decisions into lowering. This keeps experimental additions, renames, and
+removals local instead of distributing primitive-specific cases through
+unrelated compiler passes.
 
 That work is in progress. The current compiler is useful, but Pigen should be
 treated as an experimental language whose syntax and generated implementation

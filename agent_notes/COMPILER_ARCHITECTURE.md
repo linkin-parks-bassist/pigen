@@ -76,12 +76,15 @@ the resolved result type, conversions, and operation semantics. Later passes
 consume those decisions; they do not switch independently over `int`, `uint`,
 `byte`, or future fixed-point constructors.
 
-The current replacement implementation does not yet meet this criterion. Its
-syntax enum, semantic enum, integral predicates, packed-width logic, selection
-logic, and concatenation state-domain logic contain duplicated concrete-type
-knowledge. Treat these as scaffolding to consolidate before implementing the
-target primitive set. Do not extend every existing switch when adding `int`,
-`uint`, or `byte`.
+The current replacement implementation does not yet fully meet this criterion.
+`src/data_type.c` now owns alias unwrapping, integral capability, and current
+unary, binary, and conditional result rules. Expression resolution and
+predicate construction no longer enumerate primitive constructors. Primitive
+spelling/resolution, literal construction, packed-width and selection logic,
+concatenation state-domain logic, contextual conversions, and lowering remain
+to be consolidated. Treat those as scaffolding to replace before implementing
+the target primitive set. Do not extend every existing switch when adding
+`int`, `uint`, or `byte`.
 
 The practical architecture test is a hypothetical primitive change. Its
 necessary edits should be confined to the data-type subsystem, source-spelling
@@ -134,6 +137,8 @@ The unlinked replacement modules already provide:
   indexing, and part selects; unpacked indexing consumes canonical shape
   dimensions before packed indexing applies;
 - canonical constant-expression DAGs and symbolic width sums/products;
+- alias-aware centralized integral capability and unary, binary, and
+  conditional result typing;
 - typed expression and recursive lvalue resolution;
 - expression-use analysis with projections, contexts, and predicates;
 - canonical conjunctive predicates and structural branch exclusion;

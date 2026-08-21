@@ -98,6 +98,11 @@ contract stated in `SPEC.md`.
 - Relational, equality, logical, and reduction expressions have an unsigned
   scalar-logic result type. Their operands remain typed structural expressions;
   constant analysis does not replace parameter references with copied values.
+- Data-type capability and operator-result decisions have one semantic owner.
+  Expression resolution and predicate construction query that owner and never
+  enumerate primitive constructors. Typedef identity is transparent to
+  capability checks while remaining available as the result identity when an
+  operation preserves an operand's exact type.
 - A resolved conditional expression owns condition, true-alternative, and
   false-alternative expression identities. Identically typed alternatives
   yield that type directly; mixed alternatives remain unresolved until their
