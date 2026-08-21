@@ -1,16 +1,16 @@
 CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
-SEMANTIC_SOURCES = src/operation.c src/data_type.c src/semantic.c
+SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/data_type.c src/semantic.c
 
-.PHONY: all clean test source-test preprocess-test syntax-model-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test verify coslice-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
+.PHONY: all clean test source-test preprocess-test transfer-type-test syntax-model-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test verify coslice-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test
 
 all: pigen
 
 pigen: src/pigen.c src/blocks.c src/fabric_svg.inc src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/transfer.h include/pigen/pipeline.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
 	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/lexer.c src/util.c $(LDLIBS)
 
-test: pigen source-test preprocess-test syntax-model-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test fabric-test core-language-test pipeline-test
+test: pigen source-test preprocess-test transfer-type-test syntax-model-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen
 
 source-test:
@@ -21,8 +21,12 @@ preprocess-test:
 	$(CC) $(CFLAGS) -o /tmp/pigen-preprocess-test tests/preprocess_test.c src/preprocess.c src/lexer.c src/source.c src/util.c
 	/tmp/pigen-preprocess-test
 
+transfer-type-test:
+	$(CC) $(CFLAGS) -o /tmp/pigen-transfer-type-test tests/transfer_type_test.c src/transfer_type.c
+	/tmp/pigen-transfer-type-test
+
 syntax-model-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-syntax-model-test tests/syntax_test.c src/syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-syntax-model-test tests/syntax_test.c src/syntax.c src/transfer_type.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 	/tmp/pigen-syntax-model-test
 
 semantic-test:

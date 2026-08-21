@@ -94,9 +94,9 @@ int main(void)
 	pigen_signal_id first_local_signal;
 	pigen_symbol_id shadowed;
 	pigen_symbol_id found;
-	const pigen_transfer_type_laws *wire_laws;
-	const pigen_transfer_type_laws *logic_laws;
-	const pigen_transfer_type_laws *fifo_laws;
+	const pigen_transfer_type_descriptor *wire_descriptor;
+	const pigen_transfer_type_descriptor *logic_descriptor;
+	const pigen_transfer_type_descriptor *fifo_descriptor;
 	size_t i;
 
 	pigen_semantic_init(&model, &sources);
@@ -105,21 +105,31 @@ int main(void)
 	assert(scalar_shape.index ==
 		pigen_semantic_scalar_shape(&model).index);
 	assert(pigen_shape_get(&model, scalar_shape)->dimension_count == 0);
-	wire_laws = pigen_transfer_type_get(PIGEN_TRANSFER_TYPE_WIRE);
-	logic_laws = pigen_transfer_type_get(PIGEN_TRANSFER_TYPE_LOGIC);
-	fifo_laws = pigen_transfer_type_get(PIGEN_TRANSFER_TYPE_FIFO);
-	assert(wire_laws && wire_laws->is_static &&
-		wire_laws->valid_constant == 1 && wire_laws->ready_constant == 0 &&
-		!wire_laws->consumes_on_read && !wire_laws->produces_on_write &&
-		!wire_laws->requires_ownership && !wire_laws->binds_domain);
-	assert(logic_laws && logic_laws->is_static &&
-		logic_laws->valid_constant == 1 && logic_laws->ready_constant == 1 &&
-		!logic_laws->consumes_on_read && !logic_laws->produces_on_write &&
-		!logic_laws->requires_ownership && !logic_laws->binds_domain);
-	assert(fifo_laws && !fifo_laws->is_static &&
-		fifo_laws->valid_constant < 0 && fifo_laws->ready_constant < 0 &&
-		fifo_laws->consumes_on_read && fifo_laws->produces_on_write &&
-		fifo_laws->requires_ownership && fifo_laws->binds_domain);
+	wire_descriptor = pigen_transfer_type_descriptor_get(
+		PIGEN_TRANSFER_TYPE_WIRE);
+	logic_descriptor = pigen_transfer_type_descriptor_get(
+		PIGEN_TRANSFER_TYPE_LOGIC);
+	fifo_descriptor = pigen_transfer_type_descriptor_get(
+		PIGEN_TRANSFER_TYPE_FIFO);
+	assert(wire_descriptor && wire_descriptor->is_static &&
+		wire_descriptor->valid_constant == 1 &&
+		wire_descriptor->ready_constant == 0 &&
+		!wire_descriptor->consumes_on_read &&
+		!wire_descriptor->produces_on_write &&
+		!wire_descriptor->requires_ownership && !wire_descriptor->binds_domain);
+	assert(logic_descriptor && logic_descriptor->is_static &&
+		logic_descriptor->valid_constant == 1 &&
+		logic_descriptor->ready_constant == 1 &&
+		!logic_descriptor->consumes_on_read &&
+		!logic_descriptor->produces_on_write &&
+		!logic_descriptor->requires_ownership &&
+		!logic_descriptor->binds_domain);
+	assert(fifo_descriptor && !fifo_descriptor->is_static &&
+		fifo_descriptor->valid_constant < 0 &&
+		fifo_descriptor->ready_constant < 0 &&
+		fifo_descriptor->consumes_on_read &&
+		fifo_descriptor->produces_on_write &&
+		fifo_descriptor->requires_ownership && fifo_descriptor->binds_domain);
 	unsized_integer_data_type = pigen_data_type_unsized_integer(&model);
 	boolean_type = pigen_data_type_boolean(&model);
 	assert(unsized_integer_data_type.index ==

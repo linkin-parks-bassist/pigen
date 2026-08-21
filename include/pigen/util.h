@@ -14,7 +14,8 @@ void pigen_append_format(pigen_string *string, const char *format, ...);
 char *pigen_copy_range(const char *src, size_t length);
 int pigen_is_identifier_char(int c);
 int pigen_is_word(const char *src, size_t length, const char *word);
-const pigen_transfer_type_descriptor *pigen_transfer_type_descriptor_get(char transfer_type);
+const pigen_prototype_transfer_descriptor *
+pigen_prototype_transfer_descriptor_get(char transfer_type);
 char pigen_transfer_type_for_keyword(const char *word, size_t length);
 const char *pigen_skip_spaces(const char *src, const char *end);
 const char *pigen_trim_end(const char *start, const char *end);

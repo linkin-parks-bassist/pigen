@@ -539,9 +539,9 @@ int main(void)
 		alternate->domain.index == 0 && gate->domain.index == 0);
 	assert(queue->transfer_type == PIGEN_TRANSFER_TYPE_FIFO);
 	assert(queue->domain.index == PIGEN_INVALID_ID);
-	assert(queue->fifo_depth.index != PIGEN_INVALID_ID);
+	assert(queue->transfer_argument.index != PIGEN_INVALID_ID);
 	bound = pigen_const_expr_get(&model,
-		pigen_expr_constant(&model, queue->fifo_depth));
+		pigen_expr_constant(&model, queue->transfer_argument));
 	assert(bound && bound->kind == PIGEN_CONST_EXPR_SYMBOL &&
 		bound->as.symbol.index == mask_depth->symbol.index);
 	left_type = left->data_type;

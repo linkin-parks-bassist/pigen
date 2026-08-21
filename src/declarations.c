@@ -76,7 +76,8 @@ char pigen_declaration_transfer_type(const char *start, const char *end, const c
 
 int pigen_transfer_type_has_storage(char transfer_type)
 {
-	const pigen_transfer_type_descriptor *descriptor = pigen_transfer_type_descriptor_get(transfer_type);
+	const pigen_prototype_transfer_descriptor *descriptor =
+		pigen_prototype_transfer_descriptor_get(transfer_type);
 
 	return descriptor && descriptor->is_storage;
 }
@@ -382,7 +383,7 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 	const char *payload_end;
 	const char *fifo_payload_end = NULL;
 	const char *primitive_module;
-	const pigen_transfer_type_descriptor *descriptor;
+	const pigen_prototype_transfer_descriptor *descriptor;
 	const char *fifo_depth = NULL;
 	size_t fifo_depth_length = 0;
 	size_t name_length;
@@ -466,7 +467,7 @@ void pigen_emit_internal_declaration(pigen_string *output, const char *start, co
 				(size_t)(payload_end - after_keyword), NULL, 0, 0);
 			return;
 		}
-		descriptor = pigen_transfer_type_descriptor_get(transfer_type);
+		descriptor = pigen_prototype_transfer_descriptor_get(transfer_type);
 		primitive_module = descriptor->primitive_module;
 		pigen_append(output, "\ttypedef ");
 		append_data_type(output, after_keyword, payload_end);
@@ -663,7 +664,7 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 	for (i = 0; i < primitives->count; i++)
 	{
 		pigen_primitive *primitive = &primitives->items[i];
-		const pigen_transfer_type_descriptor *descriptor;
+		const pigen_prototype_transfer_descriptor *descriptor;
 		const char *module_name;
 		size_t name_length;
 
@@ -709,7 +710,8 @@ void pigen_emit_port_adapters(pigen_string *output, pigen_primitives *primitives
 			continue;
 		}
 
-		descriptor = pigen_transfer_type_descriptor_get(primitive->transfer_type);
+		descriptor = pigen_prototype_transfer_descriptor_get(
+			primitive->transfer_type);
 		module_name = descriptor->primitive_module;
 
 		pigen_append(output, "\ttypedef ");

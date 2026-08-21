@@ -207,8 +207,16 @@ contract stated in `SPEC.md`.
   connections; it never changes consumption semantics inside the receiving
   module. Static laws may lower to constant ties without disappearing from the
   semantic model.
-- A transfer-type descriptor owns transfer-type-specific validity, readiness,
-  storage, consumption, production, ownership, domain, and lowering behavior.
+- One transfer-type descriptor catalogue owns source spelling,
+  concrete/static classification, parameter form, write eligibility,
+  validity/readiness constants, consumption, production, ownership, and domain
+  binding. Syntax and general semantic passes query it; they do not enumerate
+  concrete transfer types.
+- A signal carries a generic transfer-argument identity. The descriptor defines
+  whether it is absent or a constant depth expression; no general signal API
+  exposes a FIFO-specific field. Precise storage and lowering realization must
+  join this same owner without reducing distinct transfer types to a vague
+  boolean.
 - An atomic transfer owns an ordered destination bit stream, one value bit
   stream, a guard predicate, a clock domain, and its source span.
 - A direct whole-expression transfer requires identical source and destination

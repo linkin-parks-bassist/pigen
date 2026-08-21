@@ -7,24 +7,6 @@
 
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
 
-const pigen_transfer_type_laws *pigen_transfer_type_get(
-	pigen_transfer_type transfer_type)
-{
-	static const pigen_transfer_type_laws laws[] = {
-		[PIGEN_TRANSFER_TYPE_ABSTRACT] = {0, -1, -1, -1, -1, -1, -1},
-		[PIGEN_TRANSFER_TYPE_WIRE] = {1, 1, 0, 0, 0, 0, 0},
-		[PIGEN_TRANSFER_TYPE_REG] = {1, 1, 1, 0, 0, 0, 0},
-		[PIGEN_TRANSFER_TYPE_LOGIC] = {1, 1, 1, 0, 0, 0, 0},
-		[PIGEN_TRANSFER_TYPE_BUF] = {0, -1, -1, 1, 1, 1, 1},
-		[PIGEN_TRANSFER_TYPE_PORT] = {0, -1, -1, 1, 1, 1, 1},
-		[PIGEN_TRANSFER_TYPE_FIFO] = {0, -1, -1, 1, 1, 1, 1},
-		[PIGEN_TRANSFER_TYPE_SKID] = {0, -1, -1, 1, 1, 1, 1}
-	};
-
-	if ((size_t)transfer_type >= sizeof(laws) / sizeof(laws[0])) return NULL;
-	return &laws[transfer_type];
-}
-
 static int id_capacity_available(size_t count)
 {
 	return count < PIGEN_INVALID_ID;
@@ -1587,15 +1569,16 @@ static int scope_is_within(const pigen_semantic_model *model,
 pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module_id,
 	pigen_symbol_id symbol_id, pigen_data_type_id data_type,
-	pigen_shape_id shape, pigen_expr_id fifo_depth,
+	pigen_shape_id shape, pigen_expr_id transfer_argument,
 	pigen_transfer_type transfer_type,
 	pigen_semantic_direction direction, pigen_source_span span)
 {
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	pigen_symbol *symbol = symbol_id.index < model->symbol_count ?
 		&model->symbols[symbol_id.index] : NULL;
+	const pigen_transfer_type_descriptor *descriptor =
+		pigen_transfer_type_descriptor_get(transfer_type);
 	pigen_signal_id result;
-	int fifo = transfer_type == PIGEN_TRANSFER_TYPE_FIFO;
 
 	if (!module || !symbol || symbol->kind != PIGEN_SYMBOL_SIGNAL ||
 		symbol->object.signal.index != PIGEN_INVALID_ID ||
@@ -1604,13 +1587,16 @@ pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 		!spans_equal(symbol->declaration, span) ||
 		!pigen_data_type_exists(model, data_type) ||
 		!pigen_shape_get(model, shape) ||
-		transfer_type < PIGEN_TRANSFER_TYPE_ABSTRACT ||
-		transfer_type > PIGEN_TRANSFER_TYPE_SKID ||
+		!descriptor ||
+		(!descriptor->is_concrete && direction != PIGEN_SEMANTIC_INPUT) ||
 		direction < PIGEN_SEMANTIC_INTERNAL ||
 		direction > PIGEN_SEMANTIC_INOUT ||
-		(fifo && (!pigen_expr_get(model, fifo_depth) ||
-			pigen_expr_constant(model, fifo_depth).index == PIGEN_INVALID_ID)) ||
-		(!fifo && fifo_depth.index != PIGEN_INVALID_ID) ||
+		(descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH &&
+			(!pigen_expr_get(model, transfer_argument) ||
+			pigen_expr_constant(model, transfer_argument).index ==
+				PIGEN_INVALID_ID)) ||
+		(descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
+			transfer_argument.index != PIGEN_INVALID_ID) ||
 		syntax.index == PIGEN_INVALID_ID ||
 		!pigen_source_span_valid(model->sources, span) ||
 		!id_capacity_available(model->signal_count))
@@ -1624,7 +1610,8 @@ pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 	}
 	result = (pigen_signal_id){(uint32_t)model->signal_count};
 	model->signals[model->signal_count++] = (pigen_semantic_signal){
-		syntax, module_id, symbol_id, data_type, shape, fifo_depth, transfer_type,
+		syntax, module_id, symbol_id, data_type, shape, transfer_argument,
+		transfer_type,
 		direction, INVALID_ID(pigen_clock_domain_id), span};
 	symbol->object.signal = result;
 	return result;
@@ -1635,11 +1622,11 @@ int pigen_signal_bind_domain(pigen_semantic_model *model,
 {
 	pigen_semantic_signal *signal = signal_id.index <
 		model->signal_count ? &model->signals[signal_id.index] : NULL;
-	const pigen_transfer_type_laws *laws = signal ?
-		pigen_transfer_type_get(signal->transfer_type) : NULL;
+	const pigen_transfer_type_descriptor *descriptor = signal ?
+		pigen_transfer_type_descriptor_get(signal->transfer_type) : NULL;
 
-	if (!signal || !laws || !pigen_clock_domain_get(model, domain)) return 0;
-	if (!laws->binds_domain) return 1;
+	if (!signal || !descriptor || !pigen_clock_domain_get(model, domain)) return 0;
+	if (!descriptor->binds_domain) return 1;
 	if (signal->domain.index == PIGEN_INVALID_ID)
 	{
 		signal->domain = domain;

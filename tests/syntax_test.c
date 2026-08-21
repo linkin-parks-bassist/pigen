@@ -262,7 +262,8 @@ int main(void)
 				assert(token_is(&preprocessed.expanded,
 					node->as.signal_declaration.payload.base, "packet_t"));
 				assert(expression_is(&sources, &tree,
-					node->as.signal_declaration.fifo_depth, "DEPTH"));
+					node->as.signal_declaration.transfer_argument,
+					"DEPTH"));
 			}
 			else if (token_is(&preprocessed.expanded,
 				declarator->as.signal_declarator.name, "pulse"))

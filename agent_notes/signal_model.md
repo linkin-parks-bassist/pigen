@@ -55,7 +55,8 @@ no arithmetic signedness.
 - There is one signal identity space and one signal arena. Ordinary
   SystemVerilog nets and variables do not occupy a parallel semantic species.
 - Each resolved signal owns its data type, transfer type, shape, direction,
-  provenance, and any transfer-type parameters.
+  provenance, and generic transfer argument. The transfer-type descriptor owns
+  the argument's meaning; `fifo` currently interprets it as a constant depth.
 - A transfer type may be concrete or abstract; it is never absent.
 - Expression-use analysis records signal identities for statics as well as
   stateful signals. Transfer incidence likewise includes all participating
@@ -103,14 +104,18 @@ unpacked shape dimension while preserving the data type; packed indexing begins
 only at scalar shape. Unpacked slices and concatenations currently reject
 shaped operands rather than silently flattening them.
 
-The descriptor still needs a precise storage/lowering representation; do not hide
+The canonical descriptor catalogue now owns spelling, classification, parameter
+form, write eligibility, constant valid/ready laws, consumption, production,
+ownership, and domain binding. Syntax recognition, resolution, signal
+validation, assignability, incidence, and domain binding query it. The
+descriptor still needs a precise storage/lowering representation; do not hide
 the distinct `buf`, `port`, `fifo`, and `skid` realizations behind a vague
-boolean merely to tick the plan item. Those are the remaining parts of phase 1,
-not reasons to recreate parallel signal APIs.
+boolean merely to tick the plan item. That is the remaining part of phase 1,
+not a reason to recreate parallel signal APIs.
 
-After the one-arena, canonical-shape, and structured declarator-shape cutovers,
-terminology audit, and ownership-law integration, `make verify` completed
-successfully on 2026-08-21.
+After the one-arena, canonical-shape, structured declarator-shape, and canonical
+transfer-descriptor cutovers, `make verify` completed successfully on
+2026-08-21.
 This proves the current
 replacement-middle tests and production behavioral suite still pass; it does
 not prove the architecture cutover complete. In particular, the complete

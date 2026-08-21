@@ -48,8 +48,16 @@ clock domains, direct transfers, and a transfer-incidence ownership graph. Its
 focused unit tests pass. Static and general declarations now resolve into one
 signal arena and one symbol binding; every direct-transfer incidence is
 recorded, with transfer-type laws deciding semantic roles and domain behavior.
-The full `make verify` suite passed after the unified-signal, canonical-shape,
-and structured declarator-shape cutovers on 2026-08-21.
+One canonical transfer-type descriptor catalogue now owns source spelling,
+concrete/static classification, parameter form, write eligibility, constant
+valid/ready laws, consumption, production, ownership, and domain binding. The
+syntax and semantic layers query it rather than enumerating transfer types.
+Signals carry a generic transfer argument whose meaning comes from that
+descriptor; `fifo` currently interprets it as depth. The production compiler's
+older character catalogue is explicitly named as a prototype and remains
+quarantined until cutover.
+The full `make verify` suite most recently passed after the canonical
+transfer-type descriptor cutover on 2026-08-21.
 
 It is not linked into the production executable. The production compiler still
 uses rewritten source, generated names, marker comments, rescanning, and
@@ -100,8 +108,11 @@ operation semantics remain incomplete.
   signal arena and one symbol binding.
 - [x] Represent data type, concrete or abstract transfer type, declarator shape,
   direction, provenance, and transfer-type parameters independently.
-- [ ] Centralize transfer-type laws for validity, readiness, storage,
-  consumption, production, ownership, domain binding, and lowering constants.
+- [x] Centralize the transfer-type catalogue, source spelling, parameter form,
+  write eligibility, validity/readiness constants, consumption, production,
+  ownership, and domain binding.
+- [ ] Give each transfer type a precise storage and lowering representation;
+  do not collapse the distinct realizations into a vague stateful flag.
 - [x] Make expression-use and transfer-incidence analysis record every signal,
   including statics, and apply behavior through transfer-type laws.
 - [x] Remove the superseded terminology from source, tests, filenames,

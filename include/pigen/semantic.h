@@ -257,7 +257,7 @@ typedef struct {
 	pigen_symbol_id symbol;
 	pigen_data_type_id data_type;
 	pigen_shape_id shape;
-	pigen_expr_id fifo_depth;
+	pigen_expr_id transfer_argument;
 	pigen_transfer_type transfer_type;
 	pigen_semantic_direction direction;
 	pigen_clock_domain_id domain;
@@ -493,7 +493,8 @@ pigen_parameter_id pigen_parameter_add(pigen_semantic_model *model,
 	pigen_expr_id value, int is_local, pigen_source_span span);
 pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
-	pigen_data_type_id data_type, pigen_shape_id shape, pigen_expr_id fifo_depth,
+	pigen_data_type_id data_type, pigen_shape_id shape,
+	pigen_expr_id transfer_argument,
 	pigen_transfer_type transfer_type, pigen_semantic_direction direction,
 	pigen_source_span span);
 int pigen_signal_bind_domain(pigen_semantic_model *model,

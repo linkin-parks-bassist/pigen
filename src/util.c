@@ -7,7 +7,7 @@
 
 #include "pigen/util.h"
 
-const pigen_transfer_type_descriptor pigen_transfer_types[] =
+static const pigen_prototype_transfer_descriptor prototype_transfer_types[] =
 {
 	{ "wire", 'w', 0, NULL },
 	{ "reg",  'r', 0, NULL },
@@ -150,14 +150,16 @@ int pigen_is_word(const char *src, size_t length, const char *word)
 	return length == strlen(word) && !memcmp(src, word, length);
 }
 
-const pigen_transfer_type_descriptor *pigen_transfer_type_descriptor_get(char transfer_type)
+const pigen_prototype_transfer_descriptor *
+pigen_prototype_transfer_descriptor_get(char transfer_type)
 {
 	size_t i;
 
-	for (i = 0; i < sizeof(pigen_transfer_types) / sizeof(pigen_transfer_types[0]); i++)
+	for (i = 0; i < sizeof(prototype_transfer_types) /
+		sizeof(prototype_transfer_types[0]); i++)
 	{
-		if (pigen_transfer_types[i].transfer_type == transfer_type)
-			return &pigen_transfer_types[i];
+		if (prototype_transfer_types[i].transfer_type == transfer_type)
+			return &prototype_transfer_types[i];
 	}
 
 	return NULL;
@@ -167,10 +169,11 @@ char pigen_transfer_type_for_keyword(const char *word, size_t length)
 {
 	size_t i;
 
-	for (i = 0; i < sizeof(pigen_transfer_types) / sizeof(pigen_transfer_types[0]); i++)
+	for (i = 0; i < sizeof(prototype_transfer_types) /
+		sizeof(prototype_transfer_types[0]); i++)
 	{
-		if (pigen_is_word(word, length, pigen_transfer_types[i].keyword))
-			return pigen_transfer_types[i].transfer_type;
+		if (pigen_is_word(word, length, prototype_transfer_types[i].keyword))
+			return prototype_transfer_types[i].transfer_type;
 	}
 
 	return 0;

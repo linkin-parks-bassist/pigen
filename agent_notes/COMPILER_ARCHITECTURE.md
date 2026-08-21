@@ -192,6 +192,12 @@ The unlinked replacement modules already provide:
 - resolved unary, binary, and conditional operation records shared by runtime
   and canonical constant expressions, with effective operand and result types
   supplied once by the data-type owner;
+- one canonical transfer-type descriptor catalogue owning source spelling,
+  concrete/static classification, parameter form, write eligibility,
+  valid/ready constants, consumption, production, ownership, and domain
+  binding;
+- generic transfer-argument identities on syntax and semantic signals, with
+  descriptor-owned interpretation (`fifo` currently uses a depth expression);
 - syntax-level base-type spellings which remain unclassified until the
   data-type owner resolves primitive spelling or semantic resolution finds a
   typedef;
@@ -205,21 +211,22 @@ The focused source, preprocessing, syntax, semantic, predicate, expression,
 use-analysis, and resolution tests pass. These modules are not linked into the
 production executable.
 
-The 2026-08-21 consistency cutover established one transfer-type enum in the
-replacement middle, including the abstract input type and the static constant
-laws, and removed the discarded vocabulary from current source, diagnostics,
-tests, filenames, and documentation. The production prototype's compact
-character representation now calls the axis `transfer_type`, but remains a
-quarantined duplicate until production cutover; generic AST and token variant
+The 2026-08-21 consistency cutover established one transfer-type enum and one
+descriptor catalogue in the replacement middle, including the abstract input
+type and the static constant laws. Syntax recognition, parameter parsing,
+signal validation, assignability, incidence roles, ownership, and domain
+binding now query that owner rather than carrying independent catalogues or
+special-casing `fifo`. The production prototype's compact character catalogue
+is explicitly named `pigen_prototype_transfer_descriptor`; it remains a
+quarantined duplicate until production cutover. Generic AST and token variant
 tags remain ordinary implementation discriminators.
 
 The replacement middle now has one signal identity arena and one symbol
 binding for statics and the other transfer types. Expression-use analysis and
-direct-transfer incidence retain every participating signal; the central
-transfer-type descriptor supplies consumption, production, ownership, and
-domain behavior. Canonical shape identities and recognized declarator shapes
-are explicit as well; the full storage/lowering laws remain before this phase
-is complete.
+direct-transfer incidence retain every participating signal. Canonical shape
+identities and recognized declarator shapes are explicit as well. The
+descriptor does not yet encode precise storage or lowering realizations; those
+remain before this phase is complete.
 
 As a rough architecture estimate, the replacement effort is about **25%**
 complete overall: the reusable frontend and semantic foundation is around

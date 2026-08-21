@@ -105,7 +105,7 @@ typedef struct {
 			pigen_transfer_type transfer_type;
 			pigen_syntax_direction direction;
 			pigen_syntax_type payload;
-			pigen_syntax_expr_id fifo_depth;
+			pigen_syntax_expr_id transfer_argument;
 		} signal_declaration;
 		pigen_syntax_signal_declarator signal_declarator;
 		struct {
