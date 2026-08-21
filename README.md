@@ -43,6 +43,29 @@ laws are the trivial cases of the same transfer algebra, not exceptions to it.
 The compiler folds their constant handshake behavior out of generated hardware
 where the connection context permits.
 
+## Data types
+
+The data type says what bits a signal carries and how operations interpret
+them; the transfer type says how that value exists in time. Pigen's initial
+data types are signed `int[n]`, unsigned `uint[n]`, one-bit `bit`, and unsigned
+eight-bit `byte`. A width after a data type is compact packed-width notation,
+so `bit[32]` is a neutral 32-bit value.
+
+Declarations put the data type first and the transfer type immediately before
+the signal name:
+
+```systemverilog
+bit[32] wire address;
+int[16] buf sample;
+uint[24] port result;
+byte logic tag;
+```
+
+Every signal has both types. An unqualified module input has an abstract
+transfer type specialized by its connection; an explicit transfer type
+constrains what may connect to it. The precise grammar is in
+[`SPEC.md`](SPEC.md).
+
 ## The transfer is the fundamental unit
 
 In Pigen, `<=` means **transfer this value**.
@@ -180,9 +203,9 @@ source. Stalls propagate through the pipeline automatically; a stage only
 advances when all of the values it needs are present and the next stage can
 accept them.
 
-The example uses Pigen's intended data-first declaration syntax, described
-below. The current compiler's pipeline syntax uses ordinary SystemVerilog types
-inside the block.
+Pipeline fields are necessarily `buf`, so their declarations normally omit the
+redundant transfer type. Writing `int[16] buf sample;` is also legal; writing any
+other transfer type for a pipeline field is an error.
 
 ## Fabric blocks
 
@@ -264,31 +287,6 @@ There is a strict compatibility contract: accepted non-Pigen SystemVerilog
 retains its widths, signedness, scheduling, reset and cycle behaviour when
 processed by Pigen. Pigen syntax may change freely while the project is young;
 unrelated SystemVerilog does not.
-
-## Declaration syntax
-
-The intended syntax places the transfer type immediately before the signal
-name:
-
-```systemverilog
-int[16] buf  x;
-int[16] buf  arr[8];
-uint[24] fifo samples[64];
-bit     port finished;
-byte    logic tag;
-```
-
-Every signal has a transfer type. An unqualified module input has an abstract
-transfer type which its connection context specializes; an explicit transfer
-type constrains compatible connections. Either way, the input always has
-payload, valid, and ready, so its body need not know whether the caller
-connected a wire, register, buffer, or queue. This generic-input form is
-planned rather than implemented today.
-
-The precise declaration grammar is in [`SPEC.md`](SPEC.md). The current compiler
-still uses transfer-type-first declarations such as `buf [31:0] packet`; see
-[`USER_GUIDE.md`](USER_GUIDE.md) for the currently implemented syntax. Pigen is
-pre-release, so the intended syntax will replace the prototype outright.
 
 ## Build and try it
 

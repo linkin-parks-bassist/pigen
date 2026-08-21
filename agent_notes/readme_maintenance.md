@@ -10,6 +10,15 @@ SystemVerilog signals and elastic storage elements share one ready/valid
 transfer interface, and `<=` performs that transfer. Examples should make the
 resulting uniformity and removal of handshake bookkeeping concrete.
 
+The README's large-scale order should nevertheless reveal that Pigen extends
+Verilog's type system before it introduces the higher-level syntax built from
+those types. Give data types a short section after the main transfer-type
+explanation and before pipelines, fabrics, and FSMs. Roughly four-fifths of the
+type-system emphasis belongs to transfer types; data types need only establish
+`int[n]`, `uint[n]`, `bit`, `byte`, and the `[n]` width shorthand. Explain a
+surface rule once before examples need it rather than interrupting a later
+feature section with a backward reference.
+
 Assume readers already know that Verilog has data types. Mention declaration
 syntax only as much as examples require, and leave primitive rules, signedness,
 packing, arrays, and other exact language semantics to `SPEC.md`. Never expose

@@ -70,7 +70,7 @@ specified contextual forms.
 pipeline       ::= "pipeline" identifier "begin"
                       pipeline-declaration* stage+ "yield" expression ";"
                     "endpipeline"
-pipeline-declaration ::= data-type identifier-list ";"
+pipeline-declaration ::= data-type "buf"? identifier-list ";"
 stage           ::= "stage" identifier?
                     (":" stage-item | "begin" stage-item* "end")
 stage-item      ::= declaration | assignment
@@ -79,10 +79,14 @@ pipeline-reset  ::= ("pipe_reset" | "pipeline_reset") "(" identifier ");"
 
 This is procedural surface syntax for an elaborated elastic pipeline, not an
 untimed sequential program. Pipeline-local declarations create mutable
-travelling packet fields. A stage's `field <= expression;` computes its next
-packet field, while every pipeline-field read observes that stage's immutable
-incoming packet. A transfer becomes observable only in the following stage; it
-does not introduce a cycle beyond the elastic stage boundary.
+travelling packet fields. Every such field has transfer type `buf`. The
+canonical spelling omits that already-determined transfer type, as in
+`int[16] product;`; explicitly writing `int[16] buf product;` is equivalent and
+legal. Any other explicit transfer type is an error. A stage's
+`field <= expression;` computes its next packet field, while every
+pipeline-field read observes that stage's immutable incoming packet. A transfer
+becomes observable only in the following stage; it does not introduce a cycle
+beyond the elastic stage boundary.
 Like a C control statement, a stage with exactly one item may omit its block:
 `stage: x <= x * coefficient;`. A named single-item stage places its name before
 the colon. Multiple items use `begin`/`end`, in the same role that braces play
