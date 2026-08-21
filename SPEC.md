@@ -71,7 +71,8 @@ pipeline       ::= "pipeline" identifier "begin"
                       pipeline-declaration* stage+ "yield" expression ";"
                     "endpipeline"
 pipeline-declaration ::= data-type identifier-list ";"
-stage           ::= "stage" identifier? "begin" stage-item* "end"
+stage           ::= "stage" identifier?
+                    (":" stage-item | "begin" stage-item* "end")
 stage-item      ::= declaration | assignment
 pipeline-reset  ::= ("pipe_reset" | "pipeline_reset") "(" identifier ");"
 ```
@@ -82,6 +83,10 @@ travelling packet fields. A stage's `field <= expression;` computes its next
 packet field, while every pipeline-field read observes that stage's immutable
 incoming packet. A transfer becomes observable only in the following stage; it
 does not introduce a cycle beyond the elastic stage boundary.
+Like a C control statement, a stage with exactly one item may omit its block:
+`stage: x <= x * coefficient;`. A named single-item stage places its name before
+the colon. Multiple items use `begin`/`end`, in the same role that braces play
+in C. The two forms have identical scope and elastic-boundary semantics.
 Each stage has a private local scope. Lookup is stage-local, then
 pipeline-local, then enclosing module scope; a shadowing declaration is warned.
 The first stage takes only enclosing module signals and stage-local

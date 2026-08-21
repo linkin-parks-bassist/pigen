@@ -146,6 +146,8 @@ operand-dependent meaning remains local to the data-type subsystem.
 - [ ] Reproduce guarded execution, private stage scopes, shadow diagnostics,
   external atomic inputs, reset behavior, stage repartitioning, and one-item-per-
   cycle operation.
+- [ ] Accept the specified single-item `stage: statement;` form and the
+  equivalent multi-item `stage begin ... end` form in the shared parser.
 - [ ] Replace prototype pipeline syntax and tests with the target data-first
   surface in one clean break.
 - [ ] Verify the biquad bank as the decisive pipeline integration target, then

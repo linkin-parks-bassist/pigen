@@ -164,15 +164,9 @@ A `pipeline` block describes a sequence of elastic packet transformations:
 pipeline filter begin
     int[16] sample, product, result;
 
-    stage begin
-        sample <= input_sample;
-    end
-    stage begin
-        product <= sample * coefficient;
-    end
-    stage begin
-        result <= product + bias;
-    end
+    stage: sample <= input_sample;
+    stage: product <= sample * coefficient;
+    stage: result <= product + bias;
 
     yield result;
 endpipeline
