@@ -29,11 +29,10 @@ The important separation is therefore:
 - transport identity and payload shape remain explicit semantic data even when
   the surface declaration omits a transport kind.
 
-This is a clean replacement for the present model in `SPEC.md`, where an ANSI
-input port's kind selects kind-dependent local ready/valid behaviour and where
-`wire` and `logic`/`reg` endpoints emit degenerate constants as properties of
-that port.  Do not preserve both interpretations when this direction is
-specified and implemented: update syntax, semantic invariants, emitted
+This contract is now normative in `SPEC.md`. The production compiler still
+implements the earlier model, where an ANSI input port's kind selects
+kind-dependent local ready/valid behaviour. Do not preserve both
+interpretations during cutover: update syntax, semantic invariants, emitted
 interfaces, examples, and tests together.
 
 ## Architectural consequence

@@ -8,10 +8,11 @@ fabric is not conceptually a separate generated design unit with flattened
 endpoint names; it is structured hookup and interconnect inside the module
 which owns the instances.
 
-The current top-level `fabric` grammar and required shared `PAYLOAD_W` parameter
-in `SPEC.md` are implementation-era syntax, not the intended endpoint.  When
-the structured compiler reaches fabrics, replace that grammar and lowering
-cleanly.  Do not retain top-level and inline fabric dialects together.
+The production compiler's top-level `fabric` grammar and required shared
+`PAYLOAD_W` parameter are implementation-era syntax, not the intended endpoint.
+`SPEC.md` now defines the inline, width-inferred target. When the structured
+compiler reaches fabrics, replace the old grammar and lowering cleanly. Do not
+retain top-level and inline fabric dialects together.
 
 ## Endpoint and width semantics
 

@@ -62,12 +62,11 @@ count syntax is additive convenience, not a reinterpretation of explicit
 ranges.
 
 David is willing to make the clean language break that an otherwise accepted
-colonless `[X]` denotes this count shorthand.  The eventual specification must
-state the precise syntactic boundary of that rule.  In particular, decide
-whether it applies throughout ordinary SystemVerilog or only inside declaration
-forms claimed by Pigen.  The latter preserves the stronger ordinary-SV
-compatibility contract; the former is a deliberate documented exception to
-it.  Do not choose silently during implementation.
+colonless declaration dimension `[X]` denotes this count shorthand. `SPEC.md`
+now fixes the syntactic boundary: the rule applies to declaration-dimension
+positions, including array extents, but never to expression indexing. It is an
+explicit exception to ordinary-SystemVerilog declaration compatibility;
+colon-bearing ranges retain their ordinary meaning.
 
 ## Initial data-type vocabulary
 

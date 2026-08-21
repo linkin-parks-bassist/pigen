@@ -1,11 +1,13 @@
 # Semantic invariants for the replacement compiler middle
 
 This document fixes the meaning that the new compiler architecture must
-represent directly. `SPEC.md` is the current language authority and the test
-suite is executable coverage of that language. Pigen is pre-release: a language
-change updates the specification, implementation, examples, and tests together.
-No prior Pigen form or implementation path has compatibility status. Ordinary
-SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
+represent directly. `SPEC.md` is the target v1 language authority. The test
+suite covers the production compiler and the settled behavioural semantics,
+but prototype-syntax tests are replaced as clean-break cutovers land. Pigen is
+pre-release: a language change updates the specification, implementation,
+examples, and tests together. No prior Pigen form or implementation path has
+compatibility status. Ordinary SystemVerilog compatibility remains the distinct
+contract stated in `SPEC.md`.
 
 ## Cross-cutting invariants
 
@@ -141,6 +143,12 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 
 ## Transports and transfers
 
+- Data type, transport kind, and declarator shape are independent semantic
+  identities. A rendered SystemVerilog declaration never stands in for that
+  product.
+- A module input is a boundary endpoint with one uniform payload/valid/ready
+  contract. Its optional written transport kind selects boundary realization;
+  it never changes consumption semantics inside the receiving module.
 - A transport descriptor owns kind-dependent validity, readiness, storage,
   consumption, and production behavior.
 - An atomic transfer owns an ordered destination bit stream, one value bit
@@ -214,6 +222,8 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
 
 ## Fabrics
 
+- A fabric belongs to one parent module and connects ports of child instances
+  owned by that module. It is never a separate public semantic design unit.
 - A fabric endpoint resolves to a module-instance port identity, never merely
   an `instance.port` string after resolution.
 - Each output endpoint has exactly one connection. A direct destination has
@@ -222,8 +232,9 @@ SystemVerilog compatibility remains the distinct contract stated in `SPEC.md`.
   topology data and never public endpoint metadata.
 - Topology, routes, reachability proofs, RTL, route manifests, and SVGs derive
   from one fabric model.
-- Fabric payload compatibility is a type constraint at each connection, even
-  while the current surface requires one `PAYLOAD_W`.
+- Fabric payload compatibility and internal link width are derived from the
+  resolved endpoint types at each connection; there is no fabric-wide payload
+  type parameter in the target language.
 
 ## Lowering boundary
 

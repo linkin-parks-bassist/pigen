@@ -5,8 +5,9 @@ the datapath itself. Name the places data may wait, connect those places with
 `<=`, and keep the surrounding control logic as normal SystemVerilog. Pigen
 generates the valid, ready, payload muxing, storage, and backpressure routes.
 
-This guide is the practical starting point. [`SPEC.md`](SPEC.md) is the
-precise language contract.
+This guide is the practical starting point for the current pre-release
+compiler. [`SPEC.md`](SPEC.md) is the target v1 language contract; where the
+compiler still uses prototype syntax, this guide describes what runs today.
 
 ## Start here
 
@@ -23,8 +24,8 @@ The generated module is ordinary synthesizable SV. Compile it with
 [`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv), which contains the small
 storage primitives Pigen instantiates.
 
-A `.pigen` file can also declare stage-oriented `pipeline` declarations and routed
-`fabric` units.
+A `.pigen` file can also contain inline elastic pipelines and the current
+prototype top-level routed-fabric units.
 
 ## The central idea
 
@@ -436,7 +437,7 @@ nonblocking assignment behavior remains intact.
 ## Where to look next
 
 - [`README.md`](README.md) is the short overview and waveform index.
-- [`SPEC.md`](SPEC.md) is the authoritative syntax and semantic contract.
+- [`SPEC.md`](SPEC.md) is the authoritative target syntax and semantic contract.
 - [`examples/`](examples) contains complete runnable pipelines and testbenches.
 - [`tests/`](tests) contains focused language and lowering regressions.
 - [`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv) shows the exact storage

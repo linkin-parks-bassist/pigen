@@ -74,9 +74,12 @@ already exist:
 - the examples, especially the biquad bank;
 - positive, negative, backpressure, atomicity, and full-throughput tests.
 
-These tests are now an executable specification for a replacement compiler.
-They are more valuable as rewrite acceptance criteria than the current lowering
-code is as a foundation.
+The behavioural tests are executable evidence for the replacement compiler,
+especially for ready/valid timing, atomicity, stalls, and throughput. Syntax
+tests for prototype forms are migration inputs, not language authority:
+`SPEC.md` now describes the target v1 surface and those tests must be replaced
+as each clean-break syntax cutover lands. The tests remain more valuable as
+rewrite acceptance criteria than the current lowering code is as a foundation.
 
 The lexer may also be reusable, provided it becomes the entrance to one
 coherent syntax tree rather than a utility repeatedly invoked by independent

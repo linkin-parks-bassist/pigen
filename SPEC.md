@@ -2,12 +2,20 @@
 
 ## Purpose
 
-Pigen is a source-to-source compiler. Its input language extends
-SystemVerilog with ready/valid transport values and `pipeline` and `fabric`
-top-level design units. A compiler invocation consumes `.pigen` source and
-writes readable, synthesizable SystemVerilog, using the
-explicit primitives in `rtl/pigen_primitives.sv` where required. It does not
-change SystemVerilog simulation timing.
+Pigen is a source-to-source compiler. Its input language extends SystemVerilog
+with first-class ready/valid transfers, explicit data and transport types, and
+inline `pipeline`, `transfer`, `fabric`, and `fsm` blocks. A compiler invocation
+consumes `.pigen` source and writes readable, synthesizable SystemVerilog, using
+the explicit primitives in `rtl/pigen_primitives.sv` where required. It does
+not change SystemVerilog simulation timing.
+
+This document specifies the intended v1 language. The compiler is pre-release
+and is being moved onto a structured implementation; it does not yet accept
+every form specified here. In particular, data-first declarations, generic
+input endpoints, and inline width-inferred fabrics are not implemented. The
+currently accepted transport-first declarations and top-level fixed-width
+fabric blocks are prototype syntax to be replaced, not alternate language
+forms. Implementation lag does not change the language contract.
 
 ## SystemVerilog compatibility contract
 
@@ -37,19 +45,24 @@ particular:
 This compatibility contract is an overarching design and release requirement.
 New Pigen features and syntax decisions are subordinate to it.
 
-## Top-level design units
+There is one deliberate declaration-syntax exception: a colonless bracket in a
+declaration-dimension position is Pigen count notation, as specified below.
+This intentionally changes the meaning which ordinary SystemVerilog would give
+that declaration dimension. Explicit colon-bearing SystemVerilog ranges and
+all expression selects retain their ordinary meaning.
 
-A `.pigen` source may contain ordinary SystemVerilog design units and `fabric`
-units together and in any top-level order. A pipeline is a declaration inside
-an enclosing clocked `always` block; it elaborates to storage and logic in the
-parent module, never to a generated child module.
+## Design-unit and contextual syntax
 
-`fabric` begins a new construct only at source top level. Inside ordinary
-`module`, `interface`, `package`, `program`, `class`, and `checker` units those
-words remain ordinary SystemVerilog tokens and identifiers. Inside a module,
-`pipeline name begin` begins a pipeline declaration only inside a supported
-clocked `always`/`always_ff` block; all other uses of `pipeline` retain their
-ordinary SystemVerilog meaning.
+A `.pigen` source contains ordinary SystemVerilog design units. Pipelines,
+transfers, fabrics, and FSMs elaborate inside their owning module rather than
+becoming separate public design units.
+
+A pipeline is declared inside a supported clocked `always`/`always_ff` block
+and elaborates to storage and logic in its parent module. A fabric is a module
+item and connects ports of child instances owned by that module. `transfer`
+introduces an atomic statement block only in a supported clocked process. These
+words remain ordinary SystemVerilog identifiers outside their complete
+specified contextual forms.
 
 ### Pipelines
 
@@ -57,7 +70,7 @@ ordinary SystemVerilog meaning.
 pipeline       ::= "pipeline" identifier "begin"
                       pipeline-declaration* stage+ "yield" expression ";"
                     "endpipeline"
-pipeline-declaration ::= packed-type identifier-list ";"
+pipeline-declaration ::= data-type identifier-list ";"
 stage           ::= "stage" identifier? "begin" stage-item* "end"
 stage-item      ::= declaration | assignment
 pipeline-reset  ::= ("pipe_reset" | "pipeline_reset") "(" identifier ");"
@@ -113,15 +126,10 @@ an explicitly typed pipeline name before such repartitioning.
 
 ### Fabric blocks
 
-The fabric grammar is:
+The intended fabric grammar is:
 
 ```text
-fabric         ::= "fabric" identifier parameters? "begin"
-                     (fabric-option | connection)+
-                   "endfabric"
-fabric-option  ::= "option" ("router_buffer_depth" |
-                              "endpoint_fifo_depth" |
-                              "objective") "=" expression ";"
+fabric         ::= "fabric" identifier "begin" connection+ "endfabric"
 connection     ::= source (">" | routed-arrow) destination ";"
 source         ::= identifier "." identifier
 destination    ::= identifier "." identifier
@@ -129,116 +137,160 @@ routed-arrow   ::= "->" | "-->" | "--->" | ...
 ```
 
 ```systemverilog
-fabric system_bus #(
-    parameter integer PAYLOAD_W = 32
-) begin
-    dma.tx > memory.dma_rx;
-    cpu.tx -> memory.rx;
-    debug.tx --> memory.rx;
+fabric sample_path begin
+    adc.samples       -> filter.samples;
+    filter.results    >  dma.sample_data;
+    cpu.mem_requests  -> memory.requests;
+    dma.mem_requests  --> memory.requests;
+    memory.responses  -> cpu.mem_responses;
 endfabric
 ```
 
-A source is one module output transport, `instance.output_port`. A destination
-is one module input transport, `instance.input_port`. Ports carry no fabric
-source name, destination name, route selector, address, or origin metadata.
-Each output transport occurs in exactly one fabric connection and therefore
-has exactly one destination. Several routed outputs may target the same input;
-the fabric arbitrates them and the input remains source-blind. `>` creates an
-exclusive direct link, so its destination cannot appear in another
-connection. One or more dashes before `>` create a routed connection; the dash
-count is retained as the connection's tier. A fabric requires at least one
-connection.
+The block is a module item. A source resolves to one output-port identity on a
+child instance of the enclosing module; a destination resolves to one input-port
+identity on another child instance. The complete payload types of the two ports
+must be transfer-compatible. Pigen infers and checks those types and widths per
+connection; there is no fabric-wide payload-width parameter.
 
-One-to-many routing is represented by an explicit splitter component. The
-splitter has one input transport and several distinct output transports, reads
-any address or selection field from the payload, and drives exactly one output
-for a unicast token. Each splitter output is then connected once by the fabric.
-The fabric itself does not interpret payload addresses. Protocol-specific
-addressing, including a future AXI fabric, is outside this fabric contract.
+Ordinary SystemVerilog child instantiation remains accepted. A cleaner
+struct-like Pigen instantiation surface is planned but not yet specified.
+Fabric semantics depend only on resolved instance and port identities, so that
+surface choice cannot alter routing or require fabric-specific name parsing.
 
-Every fabric parameter list must define `parameter integer PAYLOAD_W = ...`.
-Its generated module has `clk`, `reset`, and `enable`, plus flattened
-ready/valid/payload ports named by joining each endpoint's instance and port
-with `__`. Each source exposes input payload/valid and output ready. Each
-destination exposes output payload/valid and input ready. Route bits are
-internal fabric state and are not part of either endpoint interface.
+Ports carry no fabric source name, destination name, route selector, address,
+or origin metadata. Each output endpoint occurs in exactly one fabric
+connection and therefore has exactly one destination. Several routed outputs
+may target the same input; the fabric arbitrates them and the input remains
+source-blind. `>` creates an exclusive direct link which bypasses the routed
+network, so its destination cannot occur in another connection. One or more
+dashes before `>` create a routed connection. The dash count is retained as a
+connection tier for planned priority and topology controls; until those
+controls are specified, routed arbitration is round-robin.
+
+One-to-many routing is represented by an explicit splitter child. The splitter
+has one input and several distinct outputs, reads any protocol-specific address
+or selection field from the payload, and drives exactly one output for a
+unicast token. Each output is then connected once by the fabric. The fabric
+itself does not interpret payload addresses; protocol-specific addressing,
+including a future AXI fabric, is outside this contract.
 
 The compiler deterministically constructs a pruned balanced tree of blind
 three-port routers, computes the fixed route from each output endpoint to its
-connected input endpoint, and verifies forward and reverse reachability. A
-readable route manifest is a comment in the same generated SystemVerilog file.
+connected input endpoint, and verifies forward and reverse reachability. The
+balanced topology gives logarithmic router depth in the number of endpoints.
 
-The compiler also renders the elaborated topology directly from the topology
+The three-port shape is deliberate. Once a packet arrives on one port, a
+U-turn is excluded and exactly two onward ports remain. One bit therefore
+specifies the next relative direction. A route is a compact shifting bitstring:
+each router inspects and advances one bit rather than comparing a global
+destination address. Route bits are internal fabric state and never appear in
+child-module interfaces.
+
+The compiler renders the elaborated topology directly from the same topology
 model used for RTL emission. The SVG identifies every module instance,
 transport endpoint, generated router, router port, routed physical link, direct
 link, and declared connection. Output is deterministic for identical source
 and compiler options. Layout is seeded from the generated router tree, relaxed
-with the topology-aware spring and angular forces, separated with
-footprint-aware collision passes, and refined to reduce crossings while
-protecting direct links. Ports are placed on each unit toward their actual
-peers, with deterministic fan-out and label-collision adjustment. With one
-fabric block, its default path is the SV output
-path plus `.svg`. With several fabric blocks, each path is the SV output path
-plus `.` followed by the fabric name and `.svg`. `--diagram PATH` selects an
-explicit path when the source has exactly one fabric; `--no-diagram` suppresses
-SVG generation.
+with topology-aware forces, separated with footprint-aware collision passes,
+and refined to reduce crossings while protecting direct links. With one fabric
+block, its default path is the SV output path plus `.svg`. With several fabric
+blocks, each path is the SV output path plus `.` followed by the fabric name
+and `.svg`. `--diagram PATH` selects an explicit path when the source has
+exactly one fabric; `--no-diagram` suppresses SVG generation.
 
-Routers inspect only the low route bit, rotate the path at each hop, buffer two
-packets per ingress, and arbitrate competing inputs round robin. Every endpoint
-has a two-entry queue, breaking ready timing paths while sustaining one
-accepted replacement per cycle. Direct-only fabrics emit no router state.
-
-In v0, `router_buffer_depth` and `endpoint_fifo_depth` default to two and only
-the value two is accepted. `objective` accepts a nonempty expression, and
-routed-arrow tiers are preserved, but both are currently topology hints only:
-the emitted topology remains the deterministic balanced tree. All links in a
-fabric share its `PAYLOAD_W` payload width.
+Every routed endpoint and router ingress has two-entry skid-like storage.
+Ready therefore depends on registered occupancy rather than propagating through
+the complete network, while each hop can accept one replacement packet per
+cycle. Backpressure, route progression, and round-robin contention arbitration
+are generated automatically. Direct-only fabrics emit no router state.
 
 ## Transport declarations
 
-Whitespace is insignificant.  Draft v1 transport payloads are packed ranges:
+Data type and transport kind are independent axes. Their declaration order is:
 
-```systemverilog
-wire [7:0] combinational;
-reg [15:0] saved;
-buf signed [7:0] stage;
-skid packet_t queue;
-port [31:0] pulse;
-fifo [7:0][4] queue4;
-fifo packet_t[8] messages;
+```text
+data-type  transport-kind  declarator
 ```
 
-Packed-range payloads may use the usual `signed` or `unsigned` modifier, as in
-`buf signed [15:0] sample` and `fifo signed [15:0][8] samples`.  The modifier
-is preserved in generated payload declarations and primitive type parameters.
+The initial Pigen data types are:
 
-`fifo` always spells payload before depth: its final bracket group is the
-depth expression. The reversed order is invalid. ANSI transport ports
-use the same spelling, for example `input buf[7:0] in_packet` and
-`output fifo[15:0][4] out_queue`; they expand to payload, `_valid`, and
-`_ready` ports.
+- `int[n]`: an `n`-bit signed integer;
+- `uint[n]`: an `n`-bit unsigned integer;
+- `bit`: a one-bit value;
+- `byte`: an eight-bit value.
 
-A module input transport is source-blind and a module output transport is
-destination-blind. The receiving module sees only its declared payload and the
-transport's ready/valid behavior. The sending module sees only its payload and
-whether its output was accepted. A port does not receive the peer's transport
-kind: `wire`, `logic`/`reg`, `buf`, `skid`, `fifo`, and `port` affect the local
-handshake implementation, not fabric addressing or endpoint identity. The
-compiler emits the degenerate valid/ready constants for `wire` and
-`logic`/`reg`; a fabric connection still obeys the resulting handshake.
+The two-state/four-state policy of these types and the arithmetic signedness of
+`byte` are not yet fixed. Until they are, programs whose meaning depends on
+those properties are outside the accepted v1 subset. The type algebra is open
+to later scalar, aggregate, enum, and user-defined types.
+
+The transport kinds are `wire`, `reg`, `buf`, `port`, `fifo`, and `skid`.
+`transport` is the current name for this movement/storage axis, not a semantic
+commitment to that terminology. FIFO capacity requires a transport parameter;
+its new data-first surface spelling remains to be specified and the old
+payload-final bracket convention is not part of v1.
+
+Examples of the declaration order are:
+
+```systemverilog
+int[16] buf sample;
+uint[24] skid response;
+bit port finished;
+int[16] buf lanes[8];
+```
+
+A colonless bracket in a declaration-dimension position is a count. It lowers
+structurally as `[X]` to the SystemVerilog range `[X-1:0]`. On a data type it
+sets packed value width; after a declarator it sets array extent. This rule does
+not apply to expression indexing: `value[3]` remains a one-bit select. An
+explicit colon-bearing range retains ordinary SystemVerilog direction and
+meaning, including `logic [21:0] h[0:12];`.
+
+Ordinary SystemVerilog declarations continue to coexist with Pigen
+declarations. Pigen declarations are parsed into separate data-type,
+transport-kind, and declarator-shape objects; their meaning is never recovered
+by rewriting or reparsing emitted ranges.
+
+### Module input endpoints
+
+A Pigen module input declares a payload type and may optionally request a
+transport kind:
+
+```systemverilog
+input int[16] sample;
+input int[16] buf queued_sample;
+output int[16] buf result;
+```
+
+Whether qualified or not, every Pigen input has the same semantic contract:
+payload and valid enter the module, ready leaves it, and the module consumes a
+value only on their handshake. The body does not know whether the producer is
+a wire, register, port, buffer, FIFO, or skid. An explicit kind selects or
+constrains boundary realization; it does not change the receiving body's
+transfer semantics. A kindless input still emits the complete ready/valid
+interface. Degenerate producers are connected by tying or adapting handshake
+signals at the connection boundary, not by changing the receiver's contract.
+
+The kindless-output contract has not yet been chosen. Until it is specified,
+Pigen outputs require an explicit transport kind. Their consumer is likewise
+unknown to the sending module; the output exposes payload, valid, and ready
+according to the selected local realization.
+
+For internal values and explicitly realized outputs, the transport behaviours
+are:
 
 | Kind | valid / ready | Semantics |
 | --- | --- | --- |
-| `logic`, `reg` | `1` / `1` | Persistent, always-available values; reads do not consume. |
 | `wire` | `1` / `0` | Always offered combinational value; not a transport destination. |
+| `reg` | `1` / `1` | Persistent, always-available value; reads do not consume. |
 | `buf` | occupancy / elastic readiness | One-entry elastic storage. |
+| `port` | one-cycle pulse / `1` | A directly written payload register with a one-cycle Pigen-valid pulse. |
 | `fifo` | nonempty / nonfull | Ordered depth-N storage and a combinational ready-chain break. |
 | `skid` | nonempty / nonfull | Exact two-entry skid buffer with registered backpressure. |
-| `port` | one-cycle pulse / `1` | A directly written payload register with a one-cycle Pigen-valid pulse. |
 
-`logic` remains ordinary SystemVerilog syntax but has degenerate transport
-semantics whenever it participates in a Pigen action.  Generated RTL uses
-constants rather than private valid/ready nets for degenerate types.
+Ordinary SystemVerilog `logic` variables have the same degenerate transfer
+behaviour as `reg` when used in a Pigen action. Generated RTL uses constants
+rather than private valid/ready state for degenerate values.
 
 `wire`, `reg`, and `logic` are always valid. `validate(x)` on one of these
 types is accepted as a no-op and produces a compiler warning; no validity
@@ -406,7 +458,7 @@ port has one Pigen producer.
 An ordinary sequential storage write can consume a transport source directly:
 
 ```systemverilog
-input port [7:0] data_in;
+input uint[8] port data_in;
 reg [7:0] mem [0:15];
 
 always @(posedge clk)
@@ -442,11 +494,12 @@ The emitted primitive sets both its stored payload and valid flag in that reset
 edge.  `validate` without a transfer preserves the storage's existing payload;
 use it only when that payload is intentional.  For a FIFO or skid, validation
 forces nonempty state (one head item when previously empty); invalidation
-forces its output invalid.  `flush(x)` empties all buffered contents.  These
-actions apply to local `buf`, `fifo`, `skid`, and `port` values; applying one
-to an input-owned port is accepted but has no useful local effect. On an
-always-valid `wire`, `reg`, or `logic`, `validate` warns and does nothing,
-while `invalidate` and `flush` are errors.
+forces its output invalid. `flush(x)` empties all buffered contents. These
+actions apply only to locally owned `buf`, `fifo`, `skid`, and `port` values.
+Applying a validity action to a module input is an error because the producer,
+not the receiver, owns input validity. On an always-valid `wire`, `reg`, or
+`logic`, `validate` warns and does nothing, while `invalidate` and `flush` are
+errors.
 
 Buffered values have one consumer.  Multiple writes to one destination are
 allowed only when semantic control analysis proves their paths mutually

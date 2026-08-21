@@ -10,9 +10,10 @@ speeds:
 1. The semantic idea: atomic ready/valid transfer and explicit movement/storage
    policy.
 2. The syntax and features accepted by the production compiler, for which
-   `SPEC.md` is authoritative.
-3. The intended language surface and structured compiler architecture, which
-   may be described as direction but must not be presented as already accepted.
+   `USER_GUIDE.md` and the tests are the practical references during migration.
+3. The intended v1 language surface and structured compiler architecture, for
+   which `SPEC.md` is authoritative but which must not be presented as already
+   implemented.
 
 Update the README whenever a planned syntax becomes authoritative, the
 production compiler changes architecture, or a major feature changes the
