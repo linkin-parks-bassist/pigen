@@ -375,6 +375,12 @@ and the underlying data-type identity established during resolution. Width,
 projection, state-domain, and operation queries therefore follow resolved
 structure directly instead of looking the typedef up again.
 
+Semantic operation identity is a separate shared algebra. Expressions retain
+which unary, binary, or select operation was written after syntax resolution;
+the data-type subsystem determines what that operation means for its operands.
+This keeps operation vocabulary independent from both source spelling and the
+primitive catalogue.
+
 That work is in progress. The current compiler is useful, but Pigen should be
 treated as an experimental language whose syntax and generated implementation
 will continue to change.

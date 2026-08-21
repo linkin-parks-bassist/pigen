@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "pigen/data_type.h"
+#include "pigen/operation.h"
 #include "pigen/source.h"
 #include "pigen/transfer_type.h"
 

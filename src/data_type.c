@@ -288,12 +288,6 @@ pigen_data_type_id pigen_data_type_packed_element(pigen_semantic_model *model,
 	return result;
 }
 
-int pigen_select_kind_is_valid(pigen_select_kind kind)
-{
-	return kind >= PIGEN_SEMANTIC_SELECT_RANGE &&
-		kind <= PIGEN_SEMANTIC_SELECT_INDEXED_DOWN;
-}
-
 static pigen_data_type_id packed_select_with_dimension(
 	pigen_semantic_model *model, pigen_data_type_id type,
 	pigen_packed_dimension selected)

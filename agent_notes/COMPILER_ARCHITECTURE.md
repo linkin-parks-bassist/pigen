@@ -109,6 +109,12 @@ small compile-time tables, tagged structural records, and centralized functions
 where they express actual variation. The goal is the right abstraction level:
 global structure, contained detail, and no duplicated self-knowledge.
 
+Semantic operation identity is another shared axis. `operation.h` and
+`operation.c` own the unary, binary, and select-operation vocabulary. Syntax
+resolution maps written operators into that algebra; semantic expressions carry
+it; the data-type subsystem supplies operand-dependent meaning. Neither source
+spelling nor primitive constructors own the shared operation vocabulary.
+
 Pipelines, transfers, FSMs, and fabrics consume these services and produce
 common semantic objects. No feature privately reparses names, expressions,
 types, guards, or generated text.
@@ -154,6 +160,8 @@ The unlinked replacement modules already provide:
   interning, and concrete canonical records are not public compiler vocabulary;
 - resolved alias targets carried in canonical alias records, avoiding later
   symbol-table lookup or reinterpretation;
+- a shared semantic operation algebra, distinct from syntax spelling and from
+  operand-dependent data-type rules;
 - syntax-level base-type spellings which remain unclassified until the
   data-type owner resolves primitive spelling or semantic resolution finds a
   typedef;

@@ -75,6 +75,11 @@ conversion insertion, contextual sizing, numerical interpretation, and
 lowering remain incomplete. There is no elastic RTL IR or terminal structured
 emitter.
 
+The semantic unary, binary, and select-operation vocabulary is owned by
+`operation.h` and `operation.c`. Expression records and data-type rules consume
+that shared algebra independently: operation identity is global structure;
+operand-dependent meaning remains local to the data-type subsystem.
+
 ## Architecture cutover
 
 ### 1. Unify the semantic signal model

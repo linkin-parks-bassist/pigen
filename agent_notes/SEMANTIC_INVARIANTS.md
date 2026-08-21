@@ -116,6 +116,9 @@ contract stated in `SPEC.md`.
   data-type identity. Alias-aware width, projection, state-domain, and
   operation queries follow the stored target; they do not query the symbol
   table again.
+- Semantic unary, binary, and select-operation identities are owned by the
+  operation subsystem. Syntax resolution maps source operators into them;
+  expressions carry them; data-type rules interpret them for resolved operands.
 - A resolved conditional expression owns condition, true-alternative, and
   false-alternative expression identities. Identically typed alternatives
   yield that type directly; mixed alternatives remain unresolved until their
