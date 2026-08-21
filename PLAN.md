@@ -84,7 +84,13 @@ emitter.
 The semantic unary, binary, and select-operation vocabulary is owned by
 `operation.h` and `operation.c`. Expression records and data-type rules consume
 that shared algebra independently: operation identity is global structure;
-operand-dependent meaning remains local to the data-type subsystem.
+operand-dependent meaning remains local to the data-type subsystem. That owner
+now resolves each unary, binary, and conditional application into an explicit
+operation record containing its operator where applicable and its effective
+operand and result data-type identities. Semantic and canonical constant
+expressions carry the record directly; they no longer pair a raw operator with
+a caller-supplied result type. Conversion insertion and richer lowering-facing
+operation semantics remain incomplete.
 
 ## Architecture cutover
 
@@ -148,8 +154,9 @@ operand-dependent meaning remains local to the data-type subsystem.
   cycle operation.
 - [ ] Accept the specified single-item `stage: statement;` form and the
   equivalent multi-item `stage begin ... end` form in the shared parser.
-- [ ] Replace prototype pipeline syntax and tests with the target data-first
-  surface in one clean break.
+- [ ] Replace prototype pipeline declarations with the target data-first
+  surface: pipeline fields implicitly have transfer type `buf`, explicit `buf`
+  remains legal, and every other explicit transfer type is rejected.
 - [ ] Verify the biquad bank as the decisive pipeline integration target, then
   delete the pipeline rewriting subsystem.
 

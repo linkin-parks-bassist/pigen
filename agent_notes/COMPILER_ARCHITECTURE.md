@@ -129,6 +129,17 @@ resolution maps written operators into that algebra; semantic expressions carry
 it; the data-type subsystem supplies operand-dependent meaning. Neither source
 spelling nor primitive constructors own the shared operation vocabulary.
 
+An operator is only the shared algebraic symbol. An operation is that operator
+resolved for concrete operand data types. The data-type subsystem constructs
+unary, binary, and conditional operation records containing the effective
+operand and result data-type identities. Both runtime expressions and canonical
+constant expressions carry those same records, so no downstream pass receives a
+raw operator plus an independently asserted result type. When conversion nodes
+are introduced, they must be inserted before operation construction; the
+operation's effective operand identities must match the converted children.
+Fixed-point scaling and other lowering-facing decisions can extend this record
+without making expression walkers enumerate primitive constructors.
+
 Pipelines, transfers, FSMs, and fabrics consume these services and produce
 common semantic objects. No feature privately reparses names, expressions,
 types, guards, or generated text.
@@ -178,6 +189,9 @@ The unlinked replacement modules already provide:
   symbol-table lookup or reinterpretation;
 - a shared semantic operation algebra, distinct from syntax spelling and from
   operand-dependent data-type rules;
+- resolved unary, binary, and conditional operation records shared by runtime
+  and canonical constant expressions, with effective operand and result types
+  supplied once by the data-type owner;
 - syntax-level base-type spellings which remain unclassified until the
   data-type owner resolves primitive spelling or semantic resolution finds a
   typedef;

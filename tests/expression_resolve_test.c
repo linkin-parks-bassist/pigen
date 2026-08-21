@@ -172,7 +172,13 @@ int main(void)
 	known = pigen_expr_get(&model, runtime);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
 	assert(known->data_type.index == unsized_integer_data_type.index);
-	assert(known->as.binary.operator == PIGEN_BINARY_ADD);
+	assert(known->as.binary.operation.operator == PIGEN_BINARY_ADD);
+	assert(known->as.binary.operation.left_data_type.index ==
+		unsized_integer_data_type.index);
+	assert(known->as.binary.operation.right_data_type.index ==
+		unsized_integer_data_type.index);
+	assert(known->as.binary.operation.result_data_type.index ==
+		unsized_integer_data_type.index);
 	left_read = pigen_expr_get(&model, known->as.binary.left);
 	width_read = pigen_expr_get(&model, known->as.binary.right);
 	assert(left_read && left_read->kind == PIGEN_EXPR_SYMBOL);
@@ -192,7 +198,9 @@ int main(void)
 	known = pigen_expr_get(&model, comparison);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
 	assert(known->data_type.index == boolean_type.index);
-	assert(known->as.binary.operator == PIGEN_BINARY_EQUAL);
+	assert(known->as.binary.operation.operator == PIGEN_BINARY_EQUAL);
+	assert(known->as.binary.operation.result_data_type.index ==
+		boolean_type.index);
 	assert(pigen_expr_constant(&model, comparison).index == PIGEN_INVALID_ID);
 
 	constant = pigen_resolve_constant_expression(&syntax, &model, scope,
@@ -200,8 +208,20 @@ int main(void)
 	known = pigen_expr_get(&model, constant);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
 	assert(known->data_type.index == unsized_integer_data_type.index);
-	assert(pigen_const_expr_get(&model,
-		pigen_expr_constant(&model, constant)) != NULL);
+	{
+		const pigen_const_expr *constant_known = pigen_const_expr_get(&model,
+			pigen_expr_constant(&model, constant));
+		assert(constant_known &&
+			constant_known->kind == PIGEN_CONST_EXPR_BINARY);
+		assert(constant_known->as.binary.operation.operator ==
+			PIGEN_BINARY_ADD);
+		assert(constant_known->as.binary.operation.left_data_type.index ==
+			known->as.binary.operation.left_data_type.index);
+		assert(constant_known->as.binary.operation.right_data_type.index ==
+			known->as.binary.operation.right_data_type.index);
+		assert(constant_known->as.binary.operation.result_data_type.index ==
+			known->as.binary.operation.result_data_type.index);
+	}
 
 	constant_index = pigen_resolve_constant_expression(&syntax, &model, scope,
 		constant_index_syntax);

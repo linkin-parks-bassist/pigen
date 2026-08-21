@@ -436,14 +436,16 @@ int main(void)
 	assert(enabled_value && enabled_value->kind == PIGEN_EXPR_BINARY);
 	assert(enabled_constant &&
 		enabled_constant->kind == PIGEN_CONST_EXPR_BINARY &&
-		enabled_constant->as.binary.operator == PIGEN_BINARY_LOGICAL_AND);
+		enabled_constant->as.binary.operation.operator ==
+			PIGEN_BINARY_LOGICAL_AND);
 	nonzero_value = pigen_expr_get(&model, nonzero->value);
 	nonzero_constant = pigen_const_expr_get(&model,
 		pigen_expr_constant(&model, nonzero->value));
 	assert(nonzero_value && nonzero_value->kind == PIGEN_EXPR_UNARY);
 	assert(nonzero_constant &&
 		nonzero_constant->kind == PIGEN_CONST_EXPR_UNARY &&
-		nonzero_constant->as.unary.operator == PIGEN_UNARY_REDUCTION_OR);
+		nonzero_constant->as.unary.operation.operator ==
+			PIGEN_UNARY_REDUCTION_OR);
 	assert(enabled_value->data_type.index == nonzero_value->data_type.index);
 	boolean_type = enabled_value->data_type;
 	assert(pigen_data_type_exists(&model, boolean_type) &&

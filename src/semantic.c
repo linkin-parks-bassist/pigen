@@ -207,14 +207,34 @@ static int const_expressions_equal(const pigen_semantic_model *model,
 		case PIGEN_CONST_EXPR_SYMBOL:
 			return left->as.symbol.index == right->as.symbol.index;
 		case PIGEN_CONST_EXPR_UNARY:
-			return left->as.unary.operator == right->as.unary.operator &&
+			return left->as.unary.operation.operator ==
+					right->as.unary.operation.operator &&
+				left->as.unary.operation.operand_data_type.index ==
+					right->as.unary.operation.operand_data_type.index &&
+				left->as.unary.operation.result_data_type.index ==
+					right->as.unary.operation.result_data_type.index &&
 				left->as.unary.operand.index == right->as.unary.operand.index;
 		case PIGEN_CONST_EXPR_BINARY:
-			return left->as.binary.operator == right->as.binary.operator &&
+			return left->as.binary.operation.operator ==
+					right->as.binary.operation.operator &&
+				left->as.binary.operation.left_data_type.index ==
+					right->as.binary.operation.left_data_type.index &&
+				left->as.binary.operation.right_data_type.index ==
+					right->as.binary.operation.right_data_type.index &&
+				left->as.binary.operation.result_data_type.index ==
+					right->as.binary.operation.result_data_type.index &&
 				left->as.binary.left.index == right->as.binary.left.index &&
 				left->as.binary.right.index == right->as.binary.right.index;
 		case PIGEN_CONST_EXPR_CONDITIONAL:
-			return left->as.conditional.condition.index ==
+			return left->as.conditional.operation.condition_data_type.index ==
+					right->as.conditional.operation.condition_data_type.index &&
+				left->as.conditional.operation.when_true_data_type.index ==
+					right->as.conditional.operation.when_true_data_type.index &&
+				left->as.conditional.operation.when_false_data_type.index ==
+					right->as.conditional.operation.when_false_data_type.index &&
+				left->as.conditional.operation.result_data_type.index ==
+					right->as.conditional.operation.result_data_type.index &&
+				left->as.conditional.condition.index ==
 					right->as.conditional.condition.index &&
 				left->as.conditional.when_true.index ==
 					right->as.conditional.when_true.index &&
@@ -352,45 +372,49 @@ pigen_const_expr_id pigen_const_expr_intern_symbol(
 }
 
 pigen_const_expr_id pigen_const_expr_intern_unary(
-	pigen_semantic_model *model, pigen_unary_operator operator,
-	pigen_const_expr_id operand, pigen_data_type_id type)
+	pigen_semantic_model *model, pigen_unary_operation operation,
+	pigen_const_expr_id operand)
 {
+	const pigen_const_expr *known = pigen_const_expr_get(model, operand);
 	pigen_const_expr expression = {0};
 
-	if (operator < PIGEN_UNARY_POSITIVE ||
-		operator > PIGEN_UNARY_REDUCTION_XNOR ||
-		!pigen_const_expr_get(model, operand))
+	if (!known || !pigen_unary_operator_is_valid(operation.operator) ||
+		known->data_type.index != operation.operand_data_type.index ||
+		!pigen_data_type_exists(model, operation.result_data_type))
 		return INVALID_ID(pigen_const_expr_id);
 	expression.kind = PIGEN_CONST_EXPR_UNARY;
-	expression.data_type = type;
-	expression.as.unary.operator = operator;
+	expression.data_type = operation.result_data_type;
+	expression.as.unary.operation = operation;
 	expression.as.unary.operand = operand;
 	return intern_const_expression(model, expression);
 }
 
 pigen_const_expr_id pigen_const_expr_intern_binary(
-	pigen_semantic_model *model, pigen_binary_operator operator,
-	pigen_const_expr_id left, pigen_const_expr_id right, pigen_data_type_id type)
+	pigen_semantic_model *model, pigen_binary_operation operation,
+	pigen_const_expr_id left, pigen_const_expr_id right)
 {
+	const pigen_const_expr *left_expression = pigen_const_expr_get(model, left);
+	const pigen_const_expr *right_expression = pigen_const_expr_get(model, right);
 	pigen_const_expr expression = {0};
 
-	if (operator < PIGEN_BINARY_ADD ||
-		operator > PIGEN_BINARY_LOGICAL_OR ||
-		!pigen_const_expr_get(model, left) ||
-		!pigen_const_expr_get(model, right))
+	if (!left_expression || !right_expression ||
+		!pigen_binary_operator_is_valid(operation.operator) ||
+		left_expression->data_type.index != operation.left_data_type.index ||
+		right_expression->data_type.index != operation.right_data_type.index ||
+		!pigen_data_type_exists(model, operation.result_data_type))
 		return INVALID_ID(pigen_const_expr_id);
 	expression.kind = PIGEN_CONST_EXPR_BINARY;
-	expression.data_type = type;
-	expression.as.binary.operator = operator;
+	expression.data_type = operation.result_data_type;
+	expression.as.binary.operation = operation;
 	expression.as.binary.left = left;
 	expression.as.binary.right = right;
 	return intern_const_expression(model, expression);
 }
 
 pigen_const_expr_id pigen_const_expr_intern_conditional(
-	pigen_semantic_model *model, pigen_const_expr_id condition,
-	pigen_const_expr_id when_true, pigen_const_expr_id when_false,
-	pigen_data_type_id type)
+	pigen_semantic_model *model, pigen_conditional_operation operation,
+	pigen_const_expr_id condition, pigen_const_expr_id when_true,
+	pigen_const_expr_id when_false)
 {
 	const pigen_const_expr *condition_expression =
 		pigen_const_expr_get(model, condition);
@@ -401,11 +425,17 @@ pigen_const_expr_id pigen_const_expr_intern_conditional(
 	pigen_const_expr expression = {0};
 
 	if (!condition_expression || !true_expression || !false_expression ||
-		true_expression->data_type.index != type.index ||
-		false_expression->data_type.index != type.index)
+		condition_expression->data_type.index !=
+			operation.condition_data_type.index ||
+		true_expression->data_type.index !=
+			operation.when_true_data_type.index ||
+		false_expression->data_type.index !=
+			operation.when_false_data_type.index ||
+		!pigen_data_type_exists(model, operation.result_data_type))
 		return INVALID_ID(pigen_const_expr_id);
 	expression.kind = PIGEN_CONST_EXPR_CONDITIONAL;
-	expression.data_type = type;
+	expression.data_type = operation.result_data_type;
+	expression.as.conditional.operation = operation;
 	expression.as.conditional.condition = condition;
 	expression.as.conditional.when_true = when_true;
 	expression.as.conditional.when_false = when_false;
@@ -816,62 +846,66 @@ pigen_expr_id pigen_expr_add_group(pigen_semantic_model *model,
 }
 
 pigen_expr_id pigen_expr_add_unary(pigen_semantic_model *model,
-	pigen_unary_operator operator, pigen_expr_id operand,
-	pigen_data_type_id type, pigen_source_span span)
+	pigen_unary_operation operation, pigen_expr_id operand,
+	pigen_source_span span)
 {
 	const pigen_semantic_expr *known = pigen_expr_get(model, operand);
 	pigen_semantic_expr expression = {0};
-	if (!known || operator < PIGEN_UNARY_POSITIVE ||
-		operator > PIGEN_UNARY_REDUCTION_XNOR)
+	if (!known || !pigen_unary_operator_is_valid(operation.operator) ||
+		known->data_type.index != operation.operand_data_type.index ||
+		!pigen_data_type_exists(model, operation.result_data_type))
 		return INVALID_ID(pigen_expr_id);
 	expression.kind = PIGEN_EXPR_UNARY;
-	expression.data_type = type;
+	expression.data_type = operation.result_data_type;
 	expression.shape = known->shape;
 	expression.span = span;
 	expression.constant = known->constant.index == PIGEN_INVALID_ID ?
 		INVALID_ID(pigen_const_expr_id) :
-		pigen_const_expr_intern_unary(model, operator, known->constant, type);
+		pigen_const_expr_intern_unary(model, operation, known->constant);
 	if (known->constant.index != PIGEN_INVALID_ID &&
 		expression.constant.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
-	expression.as.unary.operator = operator;
+	expression.as.unary.operation = operation;
 	expression.as.unary.operand = operand;
 	return add_expression(model, expression);
 }
 
 pigen_expr_id pigen_expr_add_binary(pigen_semantic_model *model,
-	pigen_binary_operator operator, pigen_expr_id left,
-	pigen_expr_id right, pigen_data_type_id type, pigen_source_span span)
+	pigen_binary_operation operation, pigen_expr_id left,
+	pigen_expr_id right, pigen_source_span span)
 {
 	const pigen_semantic_expr *left_expression = pigen_expr_get(model, left);
 	const pigen_semantic_expr *right_expression = pigen_expr_get(model, right);
 	pigen_semantic_expr expression = {0};
 	if (!left_expression || !right_expression ||
 		left_expression->shape.index != right_expression->shape.index ||
-		operator < PIGEN_BINARY_ADD || operator > PIGEN_BINARY_LOGICAL_OR)
+		!pigen_binary_operator_is_valid(operation.operator) ||
+		left_expression->data_type.index != operation.left_data_type.index ||
+		right_expression->data_type.index != operation.right_data_type.index ||
+		!pigen_data_type_exists(model, operation.result_data_type))
 		return INVALID_ID(pigen_expr_id);
 	expression.kind = PIGEN_EXPR_BINARY;
-	expression.data_type = type;
+	expression.data_type = operation.result_data_type;
 	expression.shape = left_expression->shape;
 	expression.span = span;
 	expression.constant = left_expression->constant.index == PIGEN_INVALID_ID ||
 		right_expression->constant.index == PIGEN_INVALID_ID ?
 		INVALID_ID(pigen_const_expr_id) :
-		pigen_const_expr_intern_binary(model, operator,
-			left_expression->constant, right_expression->constant, type);
+		pigen_const_expr_intern_binary(model, operation,
+			left_expression->constant, right_expression->constant);
 	if (left_expression->constant.index != PIGEN_INVALID_ID &&
 		right_expression->constant.index != PIGEN_INVALID_ID &&
 		expression.constant.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
-	expression.as.binary.operator = operator;
+	expression.as.binary.operation = operation;
 	expression.as.binary.left = left;
 	expression.as.binary.right = right;
 	return add_expression(model, expression);
 }
 
 pigen_expr_id pigen_expr_add_conditional(pigen_semantic_model *model,
-	pigen_expr_id condition, pigen_expr_id when_true, pigen_expr_id when_false,
-	pigen_data_type_id type, pigen_source_span span)
+	pigen_conditional_operation operation, pigen_expr_id condition,
+	pigen_expr_id when_true, pigen_expr_id when_false, pigen_source_span span)
 {
 	const pigen_semantic_expr *condition_expression =
 		pigen_expr_get(model, condition);
@@ -882,12 +916,17 @@ pigen_expr_id pigen_expr_add_conditional(pigen_semantic_model *model,
 	pigen_semantic_expr expression = {0};
 
 	if (!condition_expression || !true_expression || !false_expression ||
-		true_expression->data_type.index != type.index ||
-		false_expression->data_type.index != type.index ||
+		condition_expression->data_type.index !=
+			operation.condition_data_type.index ||
+		true_expression->data_type.index !=
+			operation.when_true_data_type.index ||
+		false_expression->data_type.index !=
+			operation.when_false_data_type.index ||
+		!pigen_data_type_exists(model, operation.result_data_type) ||
 		true_expression->shape.index != false_expression->shape.index)
 		return INVALID_ID(pigen_expr_id);
 	expression.kind = PIGEN_EXPR_CONDITIONAL;
-	expression.data_type = type;
+	expression.data_type = operation.result_data_type;
 	expression.shape = true_expression->shape;
 	expression.span = span;
 	expression.constant =
@@ -895,14 +934,15 @@ pigen_expr_id pigen_expr_add_conditional(pigen_semantic_model *model,
 		true_expression->constant.index == PIGEN_INVALID_ID ||
 		false_expression->constant.index == PIGEN_INVALID_ID ?
 		INVALID_ID(pigen_const_expr_id) :
-		pigen_const_expr_intern_conditional(model,
+		pigen_const_expr_intern_conditional(model, operation,
 			condition_expression->constant, true_expression->constant,
-			false_expression->constant, type);
+			false_expression->constant);
 	if (condition_expression->constant.index != PIGEN_INVALID_ID &&
 		true_expression->constant.index != PIGEN_INVALID_ID &&
 		false_expression->constant.index != PIGEN_INVALID_ID &&
 		expression.constant.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
+	expression.as.conditional.operation = operation;
 	expression.as.conditional.condition = condition;
 	expression.as.conditional.when_true = when_true;
 	expression.as.conditional.when_false = when_false;

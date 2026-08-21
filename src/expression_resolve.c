@@ -390,8 +390,8 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 		case PIGEN_SYNTAX_EXPR_UNARY:
 		{
 			pigen_unary_operator operator;
+			pigen_unary_operation operation;
 			const pigen_semantic_expr *known;
-			pigen_data_type_id result_type;
 
 			if (!unary_operator(syntax->as.unary.operator, &operator))
 				return INVALID_ID(pigen_expr_id);
@@ -400,19 +400,18 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 			known = pigen_expr_get(resolver->model, operand);
 			if (!known)
 				return INVALID_ID(pigen_expr_id);
-			result_type = pigen_data_type_unary_result(resolver->model,
-				operator, known->data_type);
-			if (result_type.index == PIGEN_INVALID_ID)
+			if (!pigen_data_type_resolve_unary_operation(resolver->model,
+				operator, known->data_type, &operation))
 				return INVALID_ID(pigen_expr_id);
-			return pigen_expr_add_unary(resolver->model, operator, operand,
-				result_type, syntax->location.source_span);
+			return pigen_expr_add_unary(resolver->model, operation, operand,
+				syntax->location.source_span);
 		}
 		case PIGEN_SYNTAX_EXPR_BINARY:
 		{
 			pigen_binary_operator operator;
+			pigen_binary_operation operation;
 			const pigen_semantic_expr *left_known;
 			const pigen_semantic_expr *right_known;
-			pigen_data_type_id result_type;
 
 			if (!binary_operator(syntax->as.binary.operator, &operator))
 				return INVALID_ID(pigen_expr_id);
@@ -424,19 +423,19 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 			right_known = pigen_expr_get(resolver->model, right);
 			if (!left_known || !right_known)
 				return INVALID_ID(pigen_expr_id);
-			result_type = pigen_data_type_binary_result(resolver->model,
-				operator, left_known->data_type, right_known->data_type);
-			if (result_type.index == PIGEN_INVALID_ID)
+			if (!pigen_data_type_resolve_binary_operation(resolver->model,
+				operator, left_known->data_type, right_known->data_type,
+				&operation))
 				return INVALID_ID(pigen_expr_id);
-			return pigen_expr_add_binary(resolver->model, operator, left,
-				right, result_type, syntax->location.source_span);
+			return pigen_expr_add_binary(resolver->model, operation, left,
+				right, syntax->location.source_span);
 		}
 		case PIGEN_SYNTAX_EXPR_CONDITIONAL:
 		{
+			pigen_conditional_operation operation;
 			const pigen_semantic_expr *condition_known;
 			const pigen_semantic_expr *true_known;
 			const pigen_semantic_expr *false_known;
-			pigen_data_type_id result_type;
 
 			condition = resolve_expression(resolver, scope,
 				syntax->as.conditional.condition);
@@ -449,12 +448,12 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 			false_known = pigen_expr_get(resolver->model, when_false);
 			if (!condition_known || !true_known || !false_known)
 				return INVALID_ID(pigen_expr_id);
-			result_type = pigen_data_type_conditional_result(resolver->model,
-				condition_known->data_type, true_known->data_type, false_known->data_type);
-			if (result_type.index == PIGEN_INVALID_ID)
+			if (!pigen_data_type_resolve_conditional_operation(resolver->model,
+				condition_known->data_type, true_known->data_type,
+				false_known->data_type, &operation))
 				return INVALID_ID(pigen_expr_id);
-			return pigen_expr_add_conditional(resolver->model, condition,
-				when_true, when_false, result_type,
+			return pigen_expr_add_conditional(resolver->model, operation,
+				condition, when_true, when_false,
 				syntax->location.source_span);
 		}
 		case PIGEN_SYNTAX_EXPR_INDEX:

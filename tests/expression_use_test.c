@@ -300,7 +300,8 @@ int main(void)
 			select_lvalue_root->data_type) == 1);
 	select_upper = pigen_const_expr_get(&model, select_dimensions->left);
 	assert(select_upper && select_upper->kind == PIGEN_CONST_EXPR_BINARY &&
-		select_upper->as.binary.operator == PIGEN_BINARY_SUBTRACT);
+		select_upper->as.binary.operation.operator ==
+			PIGEN_BINARY_SUBTRACT);
 	select_width = pigen_const_expr_get(&model,
 		select_upper->as.binary.left);
 	assert(select_width &&

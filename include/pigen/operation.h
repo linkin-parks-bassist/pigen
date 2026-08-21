@@ -1,6 +1,8 @@
 #ifndef PIGEN_OPERATION_H
 #define PIGEN_OPERATION_H
 
+#include "pigen/ids.h"
+
 typedef enum {
 	PIGEN_UNARY_POSITIVE,
 	PIGEN_UNARY_NEGATE,
@@ -13,6 +15,12 @@ typedef enum {
 	PIGEN_UNARY_REDUCTION_XOR,
 	PIGEN_UNARY_REDUCTION_XNOR
 } pigen_unary_operator;
+
+typedef struct {
+	pigen_unary_operator operator;
+	pigen_data_type_id operand_data_type;
+	pigen_data_type_id result_data_type;
+} pigen_unary_operation;
 
 typedef enum {
 	PIGEN_BINARY_ADD,
@@ -43,6 +51,20 @@ typedef enum {
 	PIGEN_BINARY_LOGICAL_OR
 } pigen_binary_operator;
 
+typedef struct {
+	pigen_binary_operator operator;
+	pigen_data_type_id left_data_type;
+	pigen_data_type_id right_data_type;
+	pigen_data_type_id result_data_type;
+} pigen_binary_operation;
+
+typedef struct {
+	pigen_data_type_id condition_data_type;
+	pigen_data_type_id when_true_data_type;
+	pigen_data_type_id when_false_data_type;
+	pigen_data_type_id result_data_type;
+} pigen_conditional_operation;
+
 typedef enum {
 	PIGEN_SEMANTIC_SELECT_RANGE,
 	PIGEN_SEMANTIC_SELECT_INDEXED_UP,
@@ -50,5 +72,7 @@ typedef enum {
 } pigen_select_kind;
 
 int pigen_select_kind_is_valid(pigen_select_kind kind);
+int pigen_unary_operator_is_valid(pigen_unary_operator operator);
+int pigen_binary_operator_is_valid(pigen_binary_operator operator);
 
 #endif

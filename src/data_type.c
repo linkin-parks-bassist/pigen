@@ -402,6 +402,19 @@ static pigen_data_type_id packed_select_with_dimension(
 	return result;
 }
 
+static pigen_const_expr_id intern_unsized_integer_binary(
+	pigen_semantic_model *model, pigen_binary_operator operator,
+	pigen_const_expr_id left, pigen_const_expr_id right)
+{
+	pigen_data_type_id data_type = pigen_data_type_unsized_integer(model);
+	pigen_binary_operation operation;
+
+	if (!pigen_data_type_resolve_binary_operation(model, operator, data_type,
+		data_type, &operation))
+		return INVALID_ID(pigen_const_expr_id);
+	return pigen_const_expr_intern_binary(model, operation, left, right);
+}
+
 pigen_data_type_id pigen_data_type_packed_select(pigen_semantic_model *model,
 	pigen_data_type_id type, pigen_const_expr_id left,
 	pigen_const_expr_id right, pigen_select_kind kind)
@@ -422,8 +435,8 @@ pigen_data_type_id pigen_data_type_packed_select(pigen_semantic_model *model,
 	width = pigen_const_expr_intern_select_width(model, left, right, kind);
 	one = pigen_const_expr_intern_integer(model, 1, unsized_integer_data_type);
 	zero = pigen_const_expr_intern_integer(model, 0, unsized_integer_data_type);
-	upper = pigen_const_expr_intern_binary(model, PIGEN_BINARY_SUBTRACT,
-		width, one, unsized_integer_data_type);
+	upper = intern_unsized_integer_binary(model, PIGEN_BINARY_SUBTRACT,
+		width, one);
 	if (width.index == PIGEN_INVALID_ID ||
 		one.index == PIGEN_INVALID_ID || zero.index == PIGEN_INVALID_ID ||
 		upper.index == PIGEN_INVALID_ID)
@@ -508,15 +521,17 @@ static int unary_boolean_result(pigen_unary_operator operator)
 		operator <= PIGEN_UNARY_REDUCTION_XNOR);
 }
 
-pigen_data_type_id pigen_data_type_unary_result(pigen_semantic_model *model,
-	pigen_unary_operator operator, pigen_data_type_id operand)
+int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
+	pigen_unary_operator operator, pigen_data_type_id operand,
+	pigen_unary_operation *operation)
 {
 	if (!pigen_data_type_is_integral(model, operand) ||
-		operator < PIGEN_UNARY_POSITIVE ||
-		operator > PIGEN_UNARY_REDUCTION_XNOR)
-		return INVALID_ID(pigen_data_type_id);
-	return unary_boolean_result(operator) ?
-		pigen_data_type_boolean(model) : operand;
+		!pigen_unary_operator_is_valid(operator) || !operation)
+		return 0;
+	*operation = (pigen_unary_operation){operator, operand,
+		unary_boolean_result(operator) ?
+			pigen_data_type_boolean(model) : operand};
+	return operation->result_data_type.index != PIGEN_INVALID_ID;
 }
 
 static int binary_boolean_result(pigen_binary_operator operator)
@@ -527,27 +542,34 @@ static int binary_boolean_result(pigen_binary_operator operator)
 		operator == PIGEN_BINARY_LOGICAL_OR;
 }
 
-pigen_data_type_id pigen_data_type_binary_result(pigen_semantic_model *model,
-	pigen_binary_operator operator, pigen_data_type_id left, pigen_data_type_id right)
+int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
+	pigen_binary_operator operator, pigen_data_type_id left,
+	pigen_data_type_id right, pigen_binary_operation *operation)
 {
+	pigen_data_type_id result;
+
 	if (!pigen_data_type_is_integral(model, left) ||
 		!pigen_data_type_is_integral(model, right) ||
-		operator < PIGEN_BINARY_ADD || operator > PIGEN_BINARY_LOGICAL_OR)
-		return INVALID_ID(pigen_data_type_id);
-	if (binary_boolean_result(operator))
-		return pigen_data_type_boolean(model);
-	return left.index == right.index ? left : INVALID_ID(pigen_data_type_id);
+		!pigen_binary_operator_is_valid(operator) || !operation)
+		return 0;
+	result = binary_boolean_result(operator) ? pigen_data_type_boolean(model) :
+		left.index == right.index ? left : INVALID_ID(pigen_data_type_id);
+	if (result.index == PIGEN_INVALID_ID) return 0;
+	*operation = (pigen_binary_operation){operator, left, right, result};
+	return 1;
 }
 
-pigen_data_type_id pigen_data_type_conditional_result(pigen_semantic_model *model,
+int pigen_data_type_resolve_conditional_operation(pigen_semantic_model *model,
 	pigen_data_type_id condition, pigen_data_type_id when_true,
-	pigen_data_type_id when_false)
+	pigen_data_type_id when_false, pigen_conditional_operation *operation)
 {
 	if (!pigen_data_type_is_integral(model, condition) ||
 		when_true.index != when_false.index ||
-		!data_type_get(model, when_true))
-		return INVALID_ID(pigen_data_type_id);
-	return when_true;
+		!data_type_get(model, when_true) || !operation)
+		return 0;
+	*operation = (pigen_conditional_operation){condition, when_true,
+		when_false, when_true};
+	return 1;
 }
 
 static pigen_const_expr_id packed_width(
@@ -661,8 +683,8 @@ pigen_data_type_id pigen_data_type_concatenation(pigen_semantic_model *model,
 	unsized_integer_data_type = pigen_data_type_unsized_integer(model);
 	one = pigen_const_expr_intern_integer(model, 1, unsized_integer_data_type);
 	zero = pigen_const_expr_intern_integer(model, 0, unsized_integer_data_type);
-	upper = pigen_const_expr_intern_binary(model, PIGEN_BINARY_SUBTRACT,
-		width, one, unsized_integer_data_type);
+	upper = intern_unsized_integer_binary(model, PIGEN_BINARY_SUBTRACT,
+		width, one);
 	if (upper.index == PIGEN_INVALID_ID || zero.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_data_type_id);
 	dimension = (pigen_packed_dimension){upper, zero};

@@ -68,12 +68,14 @@ pigen_state_domain pigen_data_type_state_domain(
 	const pigen_semantic_model *model, pigen_data_type_id type);
 pigen_data_type_id pigen_data_type_sized_logic(pigen_semantic_model *model,
 	size_t width, pigen_signedness signedness);
-pigen_data_type_id pigen_data_type_unary_result(pigen_semantic_model *model,
-	pigen_unary_operator operator, pigen_data_type_id operand);
-pigen_data_type_id pigen_data_type_binary_result(pigen_semantic_model *model,
-	pigen_binary_operator operator, pigen_data_type_id left, pigen_data_type_id right);
-pigen_data_type_id pigen_data_type_conditional_result(pigen_semantic_model *model,
+int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
+	pigen_unary_operator operator, pigen_data_type_id operand,
+	pigen_unary_operation *operation);
+int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
+	pigen_binary_operator operator, pigen_data_type_id left,
+	pigen_data_type_id right, pigen_binary_operation *operation);
+int pigen_data_type_resolve_conditional_operation(pigen_semantic_model *model,
 	pigen_data_type_id condition, pigen_data_type_id when_true,
-	pigen_data_type_id when_false);
+	pigen_data_type_id when_false, pigen_conditional_operation *operation);
 
 #endif

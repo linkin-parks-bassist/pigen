@@ -127,15 +127,16 @@ typedef struct {
 		pigen_symbol_id symbol;
 		struct { pigen_expr_id operand; } group;
 		struct {
-			pigen_unary_operator operator;
+			pigen_unary_operation operation;
 			pigen_expr_id operand;
 		} unary;
 		struct {
-			pigen_binary_operator operator;
+			pigen_binary_operation operation;
 			pigen_expr_id left;
 			pigen_expr_id right;
 		} binary;
 		struct {
+			pigen_conditional_operation operation;
 			pigen_expr_id condition;
 			pigen_expr_id when_true;
 			pigen_expr_id when_false;
@@ -165,15 +166,16 @@ typedef struct {
 		struct { size_t first_state; size_t state_count; } bits;
 		pigen_symbol_id symbol;
 		struct {
-			pigen_unary_operator operator;
+			pigen_unary_operation operation;
 			pigen_const_expr_id operand;
 		} unary;
 		struct {
-			pigen_binary_operator operator;
+			pigen_binary_operation operation;
 			pigen_const_expr_id left;
 			pigen_const_expr_id right;
 		} binary;
 		struct {
+			pigen_conditional_operation operation;
 			pigen_const_expr_id condition;
 			pigen_const_expr_id when_true;
 			pigen_const_expr_id when_false;
@@ -400,15 +402,15 @@ pigen_const_expr_id pigen_const_expr_intern_bits(pigen_semantic_model *model,
 pigen_const_expr_id pigen_const_expr_intern_symbol(
 	pigen_semantic_model *model, pigen_symbol_id symbol, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_unary(
-	pigen_semantic_model *model, pigen_unary_operator operator,
-	pigen_const_expr_id operand, pigen_data_type_id type);
+	pigen_semantic_model *model, pigen_unary_operation operation,
+	pigen_const_expr_id operand);
 pigen_const_expr_id pigen_const_expr_intern_binary(
-	pigen_semantic_model *model, pigen_binary_operator operator,
-	pigen_const_expr_id left, pigen_const_expr_id right, pigen_data_type_id type);
+	pigen_semantic_model *model, pigen_binary_operation operation,
+	pigen_const_expr_id left, pigen_const_expr_id right);
 pigen_const_expr_id pigen_const_expr_intern_conditional(
-	pigen_semantic_model *model, pigen_const_expr_id condition,
-	pigen_const_expr_id when_true, pigen_const_expr_id when_false,
-	pigen_data_type_id type);
+	pigen_semantic_model *model, pigen_conditional_operation operation,
+	pigen_const_expr_id condition,
+	pigen_const_expr_id when_true, pigen_const_expr_id when_false);
 pigen_const_expr_id pigen_const_expr_intern_index(
 	pigen_semantic_model *model, pigen_const_expr_id base,
 	pigen_const_expr_id index, pigen_data_type_id type);
@@ -444,14 +446,14 @@ pigen_expr_id pigen_expr_add_symbol(pigen_semantic_model *model,
 pigen_expr_id pigen_expr_add_group(pigen_semantic_model *model,
 	pigen_expr_id operand, pigen_source_span span);
 pigen_expr_id pigen_expr_add_unary(pigen_semantic_model *model,
-	pigen_unary_operator operator, pigen_expr_id operand,
-	pigen_data_type_id type, pigen_source_span span);
+	pigen_unary_operation operation, pigen_expr_id operand,
+	pigen_source_span span);
 pigen_expr_id pigen_expr_add_binary(pigen_semantic_model *model,
-	pigen_binary_operator operator, pigen_expr_id left,
-	pigen_expr_id right, pigen_data_type_id type, pigen_source_span span);
+	pigen_binary_operation operation, pigen_expr_id left,
+	pigen_expr_id right, pigen_source_span span);
 pigen_expr_id pigen_expr_add_conditional(pigen_semantic_model *model,
-	pigen_expr_id condition, pigen_expr_id when_true, pigen_expr_id when_false,
-	pigen_data_type_id type, pigen_source_span span);
+	pigen_conditional_operation operation, pigen_expr_id condition,
+	pigen_expr_id when_true, pigen_expr_id when_false, pigen_source_span span);
 pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 	pigen_expr_id base, pigen_expr_id index, pigen_source_span span);
 pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,

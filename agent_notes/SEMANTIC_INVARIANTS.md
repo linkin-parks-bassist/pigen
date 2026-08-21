@@ -127,7 +127,13 @@ contract stated in `SPEC.md`.
   table again.
 - Semantic unary, binary, and select-operation identities are owned by the
   operation subsystem. Syntax resolution maps source operators into them;
-  expressions carry them; data-type rules interpret them for resolved operands.
+  data-type rules interpret them for resolved operands.
+- A raw operator is not a resolved semantic operation. The data-type subsystem
+  resolves unary, binary, and conditional applications into records containing
+  their effective operand and result data-type identities. Runtime expressions
+  and canonical constant expressions carry those records directly. Their
+  construction APIs do not accept a separately asserted result type, and later
+  passes do not repeat operation-result resolution.
 - A resolved conditional expression owns condition, true-alternative, and
   false-alternative expression identities. Identically typed alternatives
   yield that type directly; mixed alternatives remain unresolved until their
@@ -251,6 +257,9 @@ contract stated in `SPEC.md`.
 
 - A pipeline is declared in one supported enclosing clocked process and is
   structurally inlined into its parent module.
+- Every pipeline field has transfer type `buf`. Its canonical declaration omits
+  the transfer type; an explicit `buf` is equivalent and legal, while any other
+  explicit transfer type is rejected during declaration resolution.
 - Pipeline fields are travelling packet state. Every stage reads an immutable
   incoming field set and jointly defines a mutable outgoing field set.
 - Stage-local combinational declarations are not packet storage. A nonblocking
