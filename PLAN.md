@@ -70,7 +70,13 @@ so later data-type operations do not re-enter the symbol table. Primitive
 spelling/resolution is now
 routed through that owner: syntax retains the written base token without
 classifying it, and resolution asks the data-type subsystem before considering
-a typedef. The target `int`, `uint`, and `byte` catalogue, data-first syntax,
+a typedef. One compile-time primitive descriptor table now owns each existing
+primitive's source spelling, fixed base width, state domain, and capability
+flags. Width, packed projection, concatenation, and capability queries consume
+those descriptors rather than rediscovering the primitive catalogue. The
+compiler's private type for unsized integer expressions is explicitly named
+`unsized_integer`; it is not the future source-level `int[n]` primitive. The
+target `int`, `uint`, and `byte` catalogue, data-first syntax,
 conversion insertion, contextual sizing, numerical interpretation, and
 lowering remain incomplete. There is no elastic RTL IR or terminal structured
 emitter.
@@ -97,8 +103,10 @@ operand-dependent meaning remains local to the data-type subsystem.
 
 ### 2. Complete the shared frontend
 
-- [ ] Establish one centralized primitive data-type algebra. Canonical data types
-  must expose representation, signedness, state domain, numerical
+- [ ] Complete the centralized primitive data-type algebra. A compile-time
+  descriptor table now owns spelling, fixed base width, state domain, and
+  capability flags; canonical data types must additionally expose complete
+  representation, signedness, numerical
   interpretation, compatibility, conversion, and operator-result semantics
   through shared APIs; unrelated passes must not enumerate primitive types.
 - [ ] Route expression typing and lowering through resolved type decisions so

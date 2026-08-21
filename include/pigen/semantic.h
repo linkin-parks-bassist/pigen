@@ -369,7 +369,7 @@ struct pigen_semantic_model {
 	size_t transfer_signal_use_count;
 	size_t transfer_signal_use_capacity;
 	pigen_scope_id compilation_scope;
-	pigen_data_type_id integer_data_type;
+	pigen_data_type_id unsized_integer_data_type;
 	pigen_data_type_id boolean_data_type;
 	pigen_shape_id scalar_shape;
 	pigen_predicate_id true_predicate;

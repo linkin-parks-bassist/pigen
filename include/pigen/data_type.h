@@ -60,7 +60,7 @@ pigen_const_expr_id pigen_data_type_packed_width(pigen_semantic_model *model,
 	pigen_data_type_id type);
 pigen_data_type_id pigen_data_type_concatenation(pigen_semantic_model *model,
 	const pigen_data_type_id *data_types, size_t count);
-pigen_data_type_id pigen_data_type_integer(pigen_semantic_model *model);
+pigen_data_type_id pigen_data_type_unsized_integer(pigen_semantic_model *model);
 pigen_data_type_id pigen_data_type_boolean(pigen_semantic_model *model);
 int pigen_data_type_is_integral(const pigen_semantic_model *model,
 	pigen_data_type_id type);

@@ -62,7 +62,7 @@ void pigen_semantic_init(pigen_semantic_model *model,
 	*model = (pigen_semantic_model){0};
 	model->sources = sources;
 	model->compilation_scope = INVALID_ID(pigen_scope_id);
-	model->integer_data_type = INVALID_ID(pigen_data_type_id);
+	model->unsized_integer_data_type = INVALID_ID(pigen_data_type_id);
 	model->boolean_data_type = INVALID_ID(pigen_data_type_id);
 	model->scalar_shape = INVALID_ID(pigen_shape_id);
 	model->true_predicate = INVALID_ID(pigen_predicate_id);
@@ -455,7 +455,7 @@ pigen_const_expr_id pigen_const_expr_intern_select_width(
 	else if (kind != PIGEN_SEMANTIC_SELECT_RANGE)
 		kind = PIGEN_SEMANTIC_SELECT_INDEXED_UP;
 	expression.kind = PIGEN_CONST_EXPR_SELECT_WIDTH;
-	expression.data_type = pigen_data_type_integer(model);
+	expression.data_type = pigen_data_type_unsized_integer(model);
 	expression.as.select_width.left = left;
 	expression.as.select_width.right = right;
 	expression.as.select_width.kind = kind;
@@ -606,7 +606,8 @@ static pigen_const_expr_id intern_width_sequence(
 {
 	pigen_const_expr_id *terms = NULL;
 	pigen_const_expr_id result;
-	pigen_data_type_id integer_type = pigen_data_type_integer(model);
+	pigen_data_type_id unsized_integer_data_type =
+		pigen_data_type_unsized_integer(model);
 	size_t term_count = 0;
 	size_t capacity = 0;
 	size_t i;
@@ -624,14 +625,15 @@ static pigen_const_expr_id intern_width_sequence(
 		}
 	if (!term_count)
 		result = pigen_const_expr_intern_integer(model,
-			kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ? 1 : 0, integer_type);
+			kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ? 1 : 0,
+			unsized_integer_data_type);
 	else if (term_count == 1)
 		result = terms[0];
 	else
 	{
 		qsort(terms, term_count, sizeof(*terms), const_id_compare);
 		result = intern_const_sequence(model, kind, terms, term_count,
-			integer_type);
+			unsized_integer_data_type);
 	}
 	free(terms);
 	return result;

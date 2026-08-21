@@ -81,9 +81,12 @@ The current replacement implementation does not yet fully meet this criterion.
 catalogue, canonical interning, builtin identities, alias unwrapping, packed
 layout, projection, width, state domain, concatenation, sized-logic
 construction, integral capability, and current unary, binary, and conditional
-result rules. Constructor tags, raw interning, and the canonical record are
-private to `src/data_type.c`; the public boundary exposes opaque
-`pigen_data_type_id` identities and focused semantic queries. Semantic symbols,
+result rules. A single compile-time descriptor table owns the immutable facts
+shared by the current primitives: source spelling, fixed base width, state
+domain, and capability flags. Constructor tags, raw interning, descriptors,
+and the canonical record are private to `src/data_type.c`; the public boundary
+exposes opaque `pigen_data_type_id` identities and focused semantic queries.
+Semantic symbols,
 expressions, constant expressions, lvalues, and signals name their data-type
 field explicitly. The general semantic implementation, expression resolution,
 and predicate construction no longer enumerate primitive constructors. Syntax
@@ -95,6 +98,17 @@ layout and capability operations follow that identity and never re-enter the
 symbol table. Contextual conversion insertion, richer
 numerical interpretation, and lowering still need consolidation. Do not extend
 unrelated passes when adding `int`, `uint`, or `byte`.
+
+The descriptor table is a catalogue, not a promise that all primitive meaning
+is tabular. Operation-specific rules remain ordinary code inside the data-type
+owner. Parameterized families such as `int[n]`, `uint[n]`, and future
+fixed-point types will need constructor-specific representation and arithmetic
+rules there, while unrelated expression walkers and feature passes continue to
+consume the same opaque queries and resolved decisions. Adding a fixed-width
+primitive should normally add one descriptor plus only the semantics genuinely
+unique to that primitive. The internal 32-bit type used for unsized integer
+expressions is named `unsized_integer` specifically to keep it distinct from
+the planned source-level `int[n]` family.
 
 The practical architecture test is a hypothetical primitive change. Its
 necessary edits should be confined to the data-type subsystem, source-spelling
@@ -156,6 +170,8 @@ The unlinked replacement modules already provide:
 - a dedicated data-type interface and implementation owning canonical type
   construction, aliases, packed layout, projection, width, state domain,
   concatenation, and current operator-result typing;
+- one private compile-time primitive descriptor table supplying source
+  spelling, fixed base width, state domain, and capabilities to those queries;
 - opaque `pigen_data_type_id` values outside that owner; constructor tags, raw
   interning, and concrete canonical records are not public compiler vocabulary;
 - resolved alias targets carried in canonical alias records, avoiding later
@@ -199,8 +215,8 @@ estimate, not line-count progress.
 
 ## Remaining cutover boundary
 
-The structured frontend still lacks complete target declarations, abstract
-input transfer types, the complete target data-first declaration grammar,
+The structured frontend still lacks complete target declarations, generic
+input specialization, the complete target data-first declaration grammar,
 cases, atomic blocks, signal actions,
 pipelines, FSMs, instances, and fabrics. Expression typing still lacks several
 SystemVerilog contextual and aggregate forms. Preprocessing still lacks token

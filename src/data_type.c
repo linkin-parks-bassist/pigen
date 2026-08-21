@@ -8,11 +8,33 @@
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
 
 typedef enum {
+	PIGEN_DATA_TYPE_INVALID,
 	PIGEN_DATA_TYPE_LOGIC,
 	PIGEN_DATA_TYPE_BIT,
-	PIGEN_DATA_TYPE_INTEGER,
+	PIGEN_DATA_TYPE_UNSIZED_INTEGER,
 	PIGEN_DATA_TYPE_ALIAS
 } data_type_constructor;
+
+enum {
+	PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL = 1u << 0
+};
+
+typedef struct {
+	data_type_constructor constructor;
+	const char *spelling;
+	size_t base_width;
+	pigen_state_domain state_domain;
+	unsigned capabilities;
+} primitive_data_type_descriptor;
+
+static const primitive_data_type_descriptor primitive_data_types[] = {
+	{PIGEN_DATA_TYPE_LOGIC, "logic", 1, PIGEN_DATA_TYPE_STATE_FOUR,
+		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
+	{PIGEN_DATA_TYPE_BIT, "bit", 1, PIGEN_DATA_TYPE_STATE_TWO,
+		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
+	{PIGEN_DATA_TYPE_UNSIZED_INTEGER, NULL, 32, PIGEN_DATA_TYPE_STATE_FOUR,
+		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL}
+};
 
 struct pigen_data_type {
 	data_type_constructor constructor;
@@ -31,6 +53,38 @@ static int spelling_is(const pigen_semantic_model *model,
 	size_t expected_length = strlen(expected);
 
 	return text && length == expected_length && !memcmp(text, expected, length);
+}
+
+static const primitive_data_type_descriptor *primitive_descriptor(
+	data_type_constructor constructor)
+{
+	size_t i;
+
+	for (i = 0; i < sizeof(primitive_data_types) /
+		sizeof(*primitive_data_types); i++)
+		if (primitive_data_types[i].constructor == constructor)
+			return &primitive_data_types[i];
+	return NULL;
+}
+
+static const primitive_data_type_descriptor *primitive_from_spelling(
+	const pigen_semantic_model *model, pigen_source_span spelling)
+{
+	size_t i;
+
+	for (i = 0; i < sizeof(primitive_data_types) /
+		sizeof(*primitive_data_types); i++)
+		if (primitive_data_types[i].spelling && spelling_is(model, spelling,
+			primitive_data_types[i].spelling))
+			return &primitive_data_types[i];
+	return NULL;
+}
+
+static data_type_constructor scalar_constructor(pigen_state_domain state_domain)
+{
+	return state_domain == PIGEN_DATA_TYPE_STATE_TWO ? PIGEN_DATA_TYPE_BIT :
+		state_domain == PIGEN_DATA_TYPE_STATE_FOUR ? PIGEN_DATA_TYPE_LOGIC :
+		PIGEN_DATA_TYPE_INVALID;
 }
 
 static int dimensions_equal(const pigen_semantic_model *model,
@@ -63,8 +117,8 @@ static pigen_data_type_id data_type_intern(pigen_semantic_model *model,
 	pigen_data_type_id result;
 
 	if (!model || !model->sources ||
-		constructor < PIGEN_DATA_TYPE_LOGIC ||
-		constructor > PIGEN_DATA_TYPE_ALIAS ||
+		(constructor != PIGEN_DATA_TYPE_ALIAS &&
+			!primitive_descriptor(constructor)) ||
 		signedness < PIGEN_SIGN_IMPLICIT || signedness > PIGEN_SIGN_SIGNED ||
 		(dimension_count && !dimensions) ||
 		model->data_type_count >= PIGEN_INVALID_ID)
@@ -123,18 +177,28 @@ static pigen_data_type_id data_type_intern(pigen_semantic_model *model,
 	return result;
 }
 
+static pigen_data_type_id scalar_data_type(pigen_semantic_model *model,
+	pigen_state_domain state_domain)
+{
+	data_type_constructor constructor = scalar_constructor(state_domain);
+
+	if (constructor == PIGEN_DATA_TYPE_INVALID)
+		return INVALID_ID(pigen_data_type_id);
+	return data_type_intern(model, constructor, PIGEN_SIGN_UNSIGNED,
+		INVALID_ID(pigen_symbol_id), INVALID_ID(pigen_data_type_id), NULL, 0);
+}
+
 pigen_data_type_id pigen_data_type_primitive_from_spelling(
 	pigen_semantic_model *model, pigen_source_span spelling,
 	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
 	size_t dimension_count)
 {
-	data_type_constructor constructor;
+	const primitive_data_type_descriptor *descriptor;
 
 	if (!model || !model->sources) return INVALID_ID(pigen_data_type_id);
-	if (spelling_is(model, spelling, "logic")) constructor = PIGEN_DATA_TYPE_LOGIC;
-	else if (spelling_is(model, spelling, "bit")) constructor = PIGEN_DATA_TYPE_BIT;
-	else return INVALID_ID(pigen_data_type_id);
-	return data_type_intern(model, constructor, signedness,
+	descriptor = primitive_from_spelling(model, spelling);
+	if (!descriptor) return INVALID_ID(pigen_data_type_id);
+	return data_type_intern(model, descriptor->constructor, signedness,
 		INVALID_ID(pigen_symbol_id), INVALID_ID(pigen_data_type_id),
 		dimensions, dimension_count);
 }
@@ -157,14 +221,14 @@ pigen_data_type_id pigen_data_type_alias(pigen_semantic_model *model,
 		target, dimensions, dimension_count);
 }
 
-pigen_data_type_id pigen_data_type_integer(pigen_semantic_model *model)
+pigen_data_type_id pigen_data_type_unsized_integer(pigen_semantic_model *model)
 {
-	if (model->integer_data_type.index == PIGEN_INVALID_ID)
-		model->integer_data_type = data_type_intern(model,
-			PIGEN_DATA_TYPE_INTEGER,
+	if (model->unsized_integer_data_type.index == PIGEN_INVALID_ID)
+		model->unsized_integer_data_type = data_type_intern(model,
+			PIGEN_DATA_TYPE_UNSIZED_INTEGER,
 			PIGEN_SIGN_SIGNED, INVALID_ID(pigen_symbol_id),
 			INVALID_ID(pigen_data_type_id), NULL, 0);
-	return model->integer_data_type;
+	return model->unsized_integer_data_type;
 }
 
 pigen_data_type_id pigen_data_type_boolean(pigen_semantic_model *model)
@@ -264,8 +328,10 @@ pigen_data_type_id pigen_data_type_packed_element(pigen_semantic_model *model,
 	if (!known) return INVALID_ID(pigen_data_type_id);
 	if (!known->dimension_count)
 	{
-		if (known->constructor == PIGEN_DATA_TYPE_INTEGER)
-			return pigen_data_type_boolean(model);
+		const primitive_data_type_descriptor *descriptor =
+			primitive_descriptor(known->constructor);
+		if (descriptor && descriptor->base_width > 1)
+			return scalar_data_type(model, descriptor->state_domain);
 		return INVALID_ID(pigen_data_type_id);
 	}
 	constructor = known->constructor;
@@ -304,9 +370,13 @@ static pigen_data_type_id packed_select_with_dimension(
 	if (!known) return INVALID_ID(pigen_data_type_id);
 	if (!known->dimension_count)
 	{
-		if (known->constructor != PIGEN_DATA_TYPE_INTEGER)
+		const primitive_data_type_descriptor *descriptor =
+			primitive_descriptor(known->constructor);
+		if (!descriptor || descriptor->base_width <= 1)
 			return INVALID_ID(pigen_data_type_id);
-		constructor = PIGEN_DATA_TYPE_LOGIC;
+		constructor = scalar_constructor(descriptor->state_domain);
+		if (constructor == PIGEN_DATA_TYPE_INVALID)
+			return INVALID_ID(pigen_data_type_id);
 		alias = INVALID_ID(pigen_symbol_id);
 		dimension_count = 1;
 		dimensions = pigen_resize(NULL, sizeof(*dimensions));
@@ -336,7 +406,7 @@ pigen_data_type_id pigen_data_type_packed_select(pigen_semantic_model *model,
 	pigen_data_type_id type, pigen_const_expr_id left,
 	pigen_const_expr_id right, pigen_select_kind kind)
 {
-	pigen_data_type_id integer_type;
+	pigen_data_type_id unsized_integer_data_type;
 	pigen_const_expr_id width;
 	pigen_const_expr_id one;
 	pigen_const_expr_id zero;
@@ -348,12 +418,12 @@ pigen_data_type_id pigen_data_type_packed_select(pigen_semantic_model *model,
 		(kind == PIGEN_SEMANTIC_SELECT_RANGE) !=
 			(left.index != PIGEN_INVALID_ID))
 		return INVALID_ID(pigen_data_type_id);
-	integer_type = pigen_data_type_integer(model);
+	unsized_integer_data_type = pigen_data_type_unsized_integer(model);
 	width = pigen_const_expr_intern_select_width(model, left, right, kind);
-	one = pigen_const_expr_intern_integer(model, 1, integer_type);
-	zero = pigen_const_expr_intern_integer(model, 0, integer_type);
+	one = pigen_const_expr_intern_integer(model, 1, unsized_integer_data_type);
+	zero = pigen_const_expr_intern_integer(model, 0, unsized_integer_data_type);
 	upper = pigen_const_expr_intern_binary(model, PIGEN_BINARY_SUBTRACT,
-		width, one, integer_type);
+		width, one, unsized_integer_data_type);
 	if (width.index == PIGEN_INVALID_ID ||
 		one.index == PIGEN_INVALID_ID || zero.index == PIGEN_INVALID_ID ||
 		upper.index == PIGEN_INVALID_ID)
@@ -386,9 +456,11 @@ int pigen_data_type_is_integral(const pigen_semantic_model *model,
 {
 	const pigen_data_type *known = data_type_get(model,
 		underlying_data_type(model, type));
+	const primitive_data_type_descriptor *descriptor = known ?
+		primitive_descriptor(known->constructor) : NULL;
 
-	return known && (known->constructor == PIGEN_DATA_TYPE_INTEGER ||
-		known->constructor == PIGEN_DATA_TYPE_LOGIC || known->constructor == PIGEN_DATA_TYPE_BIT);
+	return descriptor &&
+		(descriptor->capabilities & PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL) != 0;
 }
 
 pigen_state_domain pigen_data_type_state_domain(
@@ -396,12 +468,10 @@ pigen_state_domain pigen_data_type_state_domain(
 {
 	const pigen_data_type *known = data_type_get(model,
 		underlying_data_type(model, type));
+	const primitive_data_type_descriptor *descriptor = known ?
+		primitive_descriptor(known->constructor) : NULL;
 
-	if (!known) return PIGEN_DATA_TYPE_STATE_INVALID;
-	if (known->constructor == PIGEN_DATA_TYPE_BIT) return PIGEN_DATA_TYPE_STATE_TWO;
-	if (known->constructor == PIGEN_DATA_TYPE_LOGIC || known->constructor == PIGEN_DATA_TYPE_INTEGER)
-		return PIGEN_DATA_TYPE_STATE_FOUR;
-	return PIGEN_DATA_TYPE_STATE_INVALID;
+	return descriptor ? descriptor->state_domain : PIGEN_DATA_TYPE_STATE_INVALID;
 }
 
 pigen_data_type_id pigen_data_type_sized_logic(pigen_semantic_model *model,
@@ -410,7 +480,7 @@ pigen_data_type_id pigen_data_type_sized_logic(pigen_semantic_model *model,
 	pigen_packed_dimension dimension;
 	pigen_const_expr_id left;
 	pigen_const_expr_id right;
-	pigen_data_type_id integer_type;
+	pigen_data_type_id unsized_integer_data_type;
 
 	if (!model || !width || (signedness != PIGEN_SIGN_SIGNED &&
 		signedness != PIGEN_SIGN_UNSIGNED))
@@ -419,10 +489,10 @@ pigen_data_type_id pigen_data_type_sized_logic(pigen_semantic_model *model,
 		return data_type_intern(model, PIGEN_DATA_TYPE_LOGIC, signedness,
 			INVALID_ID(pigen_symbol_id), INVALID_ID(pigen_data_type_id),
 			NULL, 0);
-	integer_type = pigen_data_type_integer(model);
+	unsized_integer_data_type = pigen_data_type_unsized_integer(model);
 	left = pigen_const_expr_intern_integer(model, (uint64_t)(width - 1),
-		integer_type);
-	right = pigen_const_expr_intern_integer(model, 0, integer_type);
+		unsized_integer_data_type);
+	right = pigen_const_expr_intern_integer(model, 0, unsized_integer_data_type);
 	if (left.index == PIGEN_INVALID_ID || right.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_data_type_id);
 	dimension = (pigen_packed_dimension){left, right};
@@ -510,9 +580,18 @@ static pigen_const_expr_id packed_width(
 		factors[factor_count] = packed_width(model, known->alias_target,
 			remaining - 1);
 	else
+	{
+		const primitive_data_type_descriptor *descriptor =
+			primitive_descriptor(known->constructor);
+		if (!descriptor)
+		{
+			free(factors);
+			return INVALID_ID(pigen_const_expr_id);
+		}
 		factors[factor_count] = pigen_const_expr_intern_integer(model,
-			known->constructor == PIGEN_DATA_TYPE_INTEGER ? 32 : 1,
-			pigen_data_type_integer(model));
+			descriptor->base_width,
+			pigen_data_type_unsized_integer(model));
+	}
 	if (factors[factor_count].index == PIGEN_INVALID_ID)
 	{
 		free(factors);
@@ -540,8 +619,9 @@ pigen_data_type_id pigen_data_type_concatenation(pigen_semantic_model *model,
 	pigen_const_expr_id one;
 	pigen_const_expr_id zero;
 	pigen_const_expr_id upper;
-	pigen_data_type_id integer_type;
-	data_type_constructor constructor = PIGEN_DATA_TYPE_BIT;
+	pigen_data_type_id unsized_integer_data_type;
+	data_type_constructor constructor;
+	pigen_state_domain result_state = PIGEN_DATA_TYPE_STATE_TWO;
 	pigen_packed_dimension dimension;
 	const pigen_const_expr *known_width;
 	pigen_data_type_id result;
@@ -560,7 +640,7 @@ pigen_data_type_id pigen_data_type_concatenation(pigen_semantic_model *model,
 			return INVALID_ID(pigen_data_type_id);
 		}
 		if (state == PIGEN_DATA_TYPE_STATE_FOUR)
-			constructor = PIGEN_DATA_TYPE_LOGIC;
+			result_state = PIGEN_DATA_TYPE_STATE_FOUR;
 		widths[i] = pigen_data_type_packed_width(model, data_types[i]);
 		if (widths[i].index == PIGEN_INVALID_ID)
 		{
@@ -574,14 +654,15 @@ pigen_data_type_id pigen_data_type_concatenation(pigen_semantic_model *model,
 	if (!known_width) return INVALID_ID(pigen_data_type_id);
 	if (known_width->kind == PIGEN_CONST_EXPR_INTEGER &&
 		known_width->as.integer == 1)
-		return data_type_intern(model, constructor, PIGEN_SIGN_UNSIGNED,
-			INVALID_ID(pigen_symbol_id), INVALID_ID(pigen_data_type_id),
-			NULL, 0);
-	integer_type = pigen_data_type_integer(model);
-	one = pigen_const_expr_intern_integer(model, 1, integer_type);
-	zero = pigen_const_expr_intern_integer(model, 0, integer_type);
+		return scalar_data_type(model, result_state);
+	constructor = scalar_constructor(result_state);
+	if (constructor == PIGEN_DATA_TYPE_INVALID)
+		return INVALID_ID(pigen_data_type_id);
+	unsized_integer_data_type = pigen_data_type_unsized_integer(model);
+	one = pigen_const_expr_intern_integer(model, 1, unsized_integer_data_type);
+	zero = pigen_const_expr_intern_integer(model, 0, unsized_integer_data_type);
 	upper = pigen_const_expr_intern_binary(model, PIGEN_BINARY_SUBTRACT,
-		width, one, integer_type);
+		width, one, unsized_integer_data_type);
 	if (upper.index == PIGEN_INVALID_ID || zero.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_data_type_id);
 	dimension = (pigen_packed_dimension){upper, zero};

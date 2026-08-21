@@ -45,7 +45,7 @@ int main(void)
 	pigen_semantic_model model;
 	pigen_scope_id scope;
 	pigen_module_id module;
-	pigen_data_type_id integer_type;
+	pigen_data_type_id unsized_integer_data_type;
 	pigen_data_type_id boolean_type;
 	pigen_data_type_id aliased_type;
 	pigen_symbol_id module_symbol;
@@ -105,23 +105,23 @@ int main(void)
 	module = pigen_module_add(&model, (pigen_syntax_id){0}, module_symbol,
 		scope, (pigen_source_span){source, 0, strlen(text)});
 	assert(module.index != PIGEN_INVALID_ID);
-	integer_type = pigen_data_type_integer(&model);
+	unsized_integer_data_type = pigen_data_type_unsized_integer(&model);
 	boolean_type = pigen_data_type_boolean(&model);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_PARAMETER,
-		integer_type, (pigen_source_span){source, 0, 5},
+		unsized_integer_data_type, (pigen_source_span){source, 0, 5},
 		(pigen_source_span){source, 0, 5}, &width, &shadowed) ==
 		PIGEN_DECLARE_OK);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_SIGNAL,
-		integer_type, (pigen_source_span){source, 6, 10},
+		unsized_integer_data_type, (pigen_source_span){source, 6, 10},
 		(pigen_source_span){source, 6, 10}, &left, &shadowed) ==
 		PIGEN_DECLARE_OK);
 	left_signal = pigen_signal_add(&model, (pigen_syntax_id){1}, module, left,
-		integer_type, pigen_semantic_scalar_shape(&model),
+		unsized_integer_data_type, pigen_semantic_scalar_shape(&model),
 		INVALID_ID(pigen_expr_id), PIGEN_TRANSFER_TYPE_LOGIC,
 		PIGEN_SEMANTIC_INTERNAL, (pigen_source_span){source, 6, 10});
 	assert(left_signal.index != PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_TYPEDEF,
-		integer_type,
+		unsized_integer_data_type,
 		(pigen_source_span){source,
 			(size_t)(strstr(text, "word_t") - text),
 			(size_t)(strstr(text, "word_t") - text) + strlen("word_t")},
@@ -129,8 +129,8 @@ int main(void)
 			(size_t)(strstr(text, "word_t") - text),
 			(size_t)(strstr(text, "word_t") - text) + strlen("word_t")},
 		&word_type_symbol, &shadowed) == PIGEN_DECLARE_OK);
-	aliased_type = pigen_data_type_alias(&model, word_type_symbol, integer_type,
-		PIGEN_SIGN_IMPLICIT, NULL, 0);
+	aliased_type = pigen_data_type_alias(&model, word_type_symbol,
+		unsized_integer_data_type, PIGEN_SIGN_IMPLICIT, NULL, 0);
 	assert(aliased_type.index != PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_SIGNAL,
 		aliased_type,
@@ -171,7 +171,7 @@ int main(void)
 		runtime_syntax);
 	known = pigen_expr_get(&model, runtime);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
-	assert(known->data_type.index == integer_type.index);
+	assert(known->data_type.index == unsized_integer_data_type.index);
 	assert(known->as.binary.operator == PIGEN_BINARY_ADD);
 	left_read = pigen_expr_get(&model, known->as.binary.left);
 	width_read = pigen_expr_get(&model, known->as.binary.right);
@@ -199,7 +199,7 @@ int main(void)
 		constant_syntax);
 	known = pigen_expr_get(&model, constant);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
-	assert(known->data_type.index == integer_type.index);
+	assert(known->data_type.index == unsized_integer_data_type.index);
 	assert(pigen_const_expr_get(&model,
 		pigen_expr_constant(&model, constant)) != NULL);
 

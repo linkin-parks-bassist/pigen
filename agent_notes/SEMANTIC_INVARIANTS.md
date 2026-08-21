@@ -108,6 +108,15 @@ contract stated in `SPEC.md`.
   General semantic objects carry explicitly named `pigen_data_type_id` fields
   and use focused queries; they cannot inspect the private constructor tag,
   canonical record, raw interning operation, or primitive catalogue.
+- Immutable facts common to fixed primitive data types—source spelling, base
+  width, state domain, and capabilities—have one compile-time descriptor table
+  inside the data-type subsystem. Operation-specific and parameterized
+  semantics remain local code in that same owner rather than being forced into
+  an all-purpose registry. No unrelated pass enumerates the descriptor table's
+  members.
+- The compiler's private 32-bit type for unsized integer expressions is
+  `unsized_integer`. It is infrastructure for literal and width-expression
+  semantics, not the planned source-level `int[n]` primitive.
 - Structured syntax stores the written base-type token, or absence for an
   implicit base. It does not classify primitive versus typedef. Primitive
   spelling is recognized only by the data-type subsystem during resolution;

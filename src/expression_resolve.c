@@ -11,7 +11,7 @@
 typedef struct {
 	const pigen_syntax_tree *syntax;
 	pigen_semantic_model *model;
-	pigen_data_type_id integer_type;
+	pigen_data_type_id unsized_integer_data_type;
 	int constant_only;
 } expression_resolver;
 
@@ -350,7 +350,8 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 		case PIGEN_SYNTAX_EXPR_LITERAL:
 			if (literal_value(resolver, syntax, &value))
 				return pigen_expr_add_integer(resolver->model, value,
-					resolver->integer_type, syntax->location.source_span);
+					resolver->unsized_integer_data_type,
+					syntax->location.source_span);
 			else
 			{
 				pigen_bit_state *states;
@@ -527,8 +528,8 @@ static pigen_expr_id resolve_with_policy(
 	resolver.syntax = syntax;
 	resolver.model = model;
 	resolver.constant_only = constant_only;
-	resolver.integer_type = pigen_data_type_integer(model);
-	if (resolver.integer_type.index == PIGEN_INVALID_ID ||
+	resolver.unsized_integer_data_type = pigen_data_type_unsized_integer(model);
+	if (resolver.unsized_integer_data_type.index == PIGEN_INVALID_ID ||
 		pigen_data_type_boolean(model).index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
 	return resolve_expression(&resolver, scope, expression);
