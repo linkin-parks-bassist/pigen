@@ -112,6 +112,10 @@ contract stated in `SPEC.md`.
   implicit base. It does not classify primitive versus typedef. Primitive
   spelling is recognized only by the data-type subsystem during resolution;
   typedef lookup handles spellings that are not primitives.
+- A canonical alias stores its typedef symbol identity and its resolved target
+  data-type identity. Alias-aware width, projection, state-domain, and
+  operation queries follow the stored target; they do not query the symbol
+  table again.
 - A resolved conditional expression owns condition, true-alternative, and
   false-alternative expression identities. Identically typed alternatives
   yield that type directly; mixed alternatives remain unresolved until their

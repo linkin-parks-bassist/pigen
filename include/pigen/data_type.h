@@ -85,7 +85,8 @@ pigen_data_type_id pigen_data_type_implicit(pigen_semantic_model *model,
 	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
 	size_t dimension_count);
 pigen_data_type_id pigen_data_type_alias(pigen_semantic_model *model,
-	pigen_symbol_id alias, pigen_signedness signedness,
+	pigen_symbol_id alias, pigen_data_type_id target,
+	pigen_signedness signedness,
 	const pigen_packed_dimension *dimensions, size_t dimension_count);
 int pigen_data_type_exists(const pigen_semantic_model *model,
 	pigen_data_type_id data_type);
@@ -94,6 +95,8 @@ pigen_signedness pigen_data_type_signedness(
 size_t pigen_data_type_dimension_count(const pigen_semantic_model *model,
 	pigen_data_type_id data_type);
 pigen_symbol_id pigen_data_type_alias_symbol(
+	const pigen_semantic_model *model, pigen_data_type_id data_type);
+pigen_data_type_id pigen_data_type_alias_target(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
 const pigen_packed_dimension *pigen_data_type_dimensions(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);

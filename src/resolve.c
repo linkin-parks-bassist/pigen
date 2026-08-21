@@ -139,8 +139,9 @@ static pigen_data_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 			if (!symbol || symbol->kind != PIGEN_SYMBOL_TYPEDEF)
 				fail_token(resolver, syntax_type->base, "unknown type name");
 			else
-				result = pigen_data_type_alias(resolver->model, alias, signedness,
-					dimensions, syntax_type->dimension_count);
+				result = pigen_data_type_alias(resolver->model, alias,
+					symbol->data_type, signedness, dimensions,
+					syntax_type->dimension_count);
 		}
 	}
 	free(dimensions);

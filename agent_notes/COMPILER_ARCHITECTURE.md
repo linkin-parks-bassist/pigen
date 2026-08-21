@@ -89,7 +89,10 @@ field explicitly. The general semantic implementation, expression resolution,
 and predicate construction no longer enumerate primitive constructors. Syntax
 retains an optional written base token without classifying it. Resolution asks
 the data-type subsystem to recognize primitive spelling, then considers typedef
-lookup only when no primitive matches. Contextual conversion insertion, richer
+lookup only when no primitive matches. Alias construction records both the
+typedef symbol identity and its already-resolved target data type. Subsequent
+layout and capability operations follow that identity and never re-enter the
+symbol table. Contextual conversion insertion, richer
 numerical interpretation, and lowering still need consolidation. Do not extend
 unrelated passes when adding `int`, `uint`, or `byte`.
 
@@ -149,6 +152,8 @@ The unlinked replacement modules already provide:
   concatenation, and current operator-result typing;
 - opaque `pigen_data_type_id` values outside that owner; constructor tags, raw
   interning, and concrete canonical records are not public compiler vocabulary;
+- resolved alias targets carried in canonical alias records, avoiding later
+  symbol-table lookup or reinterpretation;
 - syntax-level base-type spellings which remain unclassified until the
   data-type owner resolves primitive spelling or semantic resolution finds a
   typedef;

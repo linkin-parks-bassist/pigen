@@ -129,7 +129,7 @@ int main(void)
 			(size_t)(strstr(text, "word_t") - text),
 			(size_t)(strstr(text, "word_t") - text) + strlen("word_t")},
 		&word_type_symbol, &shadowed) == PIGEN_DECLARE_OK);
-	aliased_type = pigen_data_type_alias(&model, word_type_symbol,
+	aliased_type = pigen_data_type_alias(&model, word_type_symbol, integer_type,
 		PIGEN_SIGN_IMPLICIT, NULL, 0);
 	assert(aliased_type.index != PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_SIGNAL,

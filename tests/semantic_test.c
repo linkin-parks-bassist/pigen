@@ -271,8 +271,10 @@ int main(void)
 		occurrence(source, text, "pipe", 0), whole,
 		&integer_alias_symbol, NULL) == PIGEN_DECLARE_OK);
 	aliased_integer_type = pigen_data_type_alias(&model, integer_alias_symbol,
-		PIGEN_SIGN_IMPLICIT, NULL, 0);
+		integer_type, PIGEN_SIGN_IMPLICIT, NULL, 0);
 	assert(aliased_integer_type.index != PIGEN_INVALID_ID);
+	assert(pigen_data_type_alias_target(&model, aliased_integer_type).index ==
+		integer_type.index);
 	assert(pigen_data_type_is_integral(&model, aliased_integer_type));
 	assert(pigen_data_type_unary_result(&model, PIGEN_UNARY_NEGATE,
 		aliased_integer_type).index == aliased_integer_type.index);

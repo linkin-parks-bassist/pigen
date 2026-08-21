@@ -370,6 +370,11 @@ carry data-type identities and ask focused questions about signedness, state
 domain, packed layout, aliases, or operation results instead of inspecting the
 catalogue.
 
+An alias record carries both the typedef symbol identity needed for provenance
+and the underlying data-type identity established during resolution. Width,
+projection, state-domain, and operation queries therefore follow resolved
+structure directly instead of looking the typedef up again.
+
 That work is in progress. The current compiler is useful, but Pigen should be
 treated as an experimental language whose syntax and generated implementation
 will continue to change.

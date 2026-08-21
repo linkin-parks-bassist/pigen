@@ -65,7 +65,9 @@ concatenation, sized-logic construction, integral capability, and current
 operator-result typing. The general semantic and predicate layers consume that
 opaque interface without enumerating or inspecting primitive constructors.
 Semantic records carry explicit `pigen_data_type_id` fields rather than a
-generic type identity. Primitive spelling/resolution is now
+generic type identity. Canonical aliases store their resolved target identity,
+so later data-type operations do not re-enter the symbol table. Primitive
+spelling/resolution is now
 routed through that owner: syntax retains the written base token without
 classifying it, and resolution asks the data-type subsystem before considering
 a typedef. The target `int`, `uint`, and `byte` catalogue, data-first syntax,
