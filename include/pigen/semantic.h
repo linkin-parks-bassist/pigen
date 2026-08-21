@@ -484,6 +484,15 @@ pigen_type_id pigen_type_concatenation(pigen_semantic_model *model,
 	const pigen_type_id *types, size_t count);
 pigen_type_id pigen_semantic_integer_type(pigen_semantic_model *model);
 pigen_type_id pigen_semantic_boolean_result_type(pigen_semantic_model *model);
+int pigen_data_type_is_integral(const pigen_semantic_model *model,
+	pigen_type_id type);
+pigen_type_id pigen_data_type_unary_result(pigen_semantic_model *model,
+	pigen_unary_operator operator, pigen_type_id operand);
+pigen_type_id pigen_data_type_binary_result(pigen_semantic_model *model,
+	pigen_binary_operator operator, pigen_type_id left, pigen_type_id right);
+pigen_type_id pigen_data_type_conditional_result(pigen_semantic_model *model,
+	pigen_type_id condition, pigen_type_id when_true,
+	pigen_type_id when_false);
 pigen_const_expr_id pigen_const_expr_intern_integer(
 	pigen_semantic_model *model, uint64_t value, pigen_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_bits(pigen_semantic_model *model,

@@ -25,23 +25,23 @@ syntax-model-test:
 	/tmp/pigen-syntax-model-test
 
 semantic-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-semantic-test tests/semantic_test.c src/semantic.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-semantic-test tests/semantic_test.c src/data_type.c src/semantic.c src/source.c src/util.c
 	/tmp/pigen-semantic-test
 
 predicate-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-predicate-test tests/predicate_test.c src/predicate.c src/semantic.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-predicate-test tests/predicate_test.c src/predicate.c src/data_type.c src/semantic.c src/source.c src/util.c
 	/tmp/pigen-predicate-test
 
 expression-resolve-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-expression-resolve-test tests/expression_resolve_test.c src/expression_resolve.c src/semantic.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-expression-resolve-test tests/expression_resolve_test.c src/expression_resolve.c src/data_type.c src/semantic.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 	/tmp/pigen-expression-resolve-test
 
 expression-use-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-expression-use-test tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/expression_resolve.c src/semantic.c src/syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-expression-use-test tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/expression_resolve.c src/data_type.c src/semantic.c src/syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 	/tmp/pigen-expression-use-test
 
 resolve-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-resolve-test tests/resolve_test.c src/resolve.c src/expression_resolve.c src/expression_use.c src/predicate.c src/semantic.c src/syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-resolve-test tests/resolve_test.c src/resolve.c src/expression_resolve.c src/expression_use.c src/predicate.c src/data_type.c src/semantic.c src/syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 	/tmp/pigen-resolve-test
 
 fabric-test: pigen

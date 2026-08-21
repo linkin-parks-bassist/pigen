@@ -32,7 +32,10 @@ int main(void)
 		"left[width +: left]\n"
 		"{8'hA5, 8'h5A}\n"
 		"{left, width}\n"
-		"{width, left}\n";
+		"{width, left}\n"
+		"word_t aliased\n"
+		"aliased + aliased\n"
+		"aliased == aliased\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "expressions.pigen",
 		text, strlen(text));
@@ -44,10 +47,14 @@ int main(void)
 	pigen_module_id module;
 	pigen_type_id integer_type;
 	pigen_type_id boolean_type;
+	pigen_type_id aliased_type;
 	pigen_symbol_id module_symbol;
 	pigen_symbol_id width;
 	pigen_symbol_id left;
+	pigen_symbol_id word_type_symbol;
+	pigen_symbol_id aliased;
 	pigen_signal_id left_signal;
+	pigen_signal_id aliased_signal;
 	pigen_symbol_id shadowed;
 	pigen_syntax_expr_id runtime_syntax;
 	pigen_syntax_expr_id comparison_syntax;
@@ -62,6 +69,8 @@ int main(void)
 	pigen_syntax_expr_id constant_concat_syntax;
 	pigen_syntax_expr_id runtime_concat_syntax;
 	pigen_syntax_expr_id swapped_concat_syntax;
+	pigen_syntax_expr_id aliased_add_syntax;
+	pigen_syntax_expr_id aliased_compare_syntax;
 	pigen_expr_id runtime;
 	pigen_expr_id comparison;
 	pigen_expr_id constant;
@@ -73,6 +82,8 @@ int main(void)
 	pigen_expr_id constant_concat;
 	pigen_expr_id runtime_concat;
 	pigen_expr_id swapped_concat;
+	pigen_expr_id aliased_add;
+	pigen_expr_id aliased_compare;
 	const pigen_semantic_expr *known;
 	const pigen_semantic_expr *left_read;
 	const pigen_semantic_expr *width_read;
@@ -109,6 +120,35 @@ int main(void)
 		INVALID_ID(pigen_expr_id), PIGEN_TRANSFER_TYPE_LOGIC,
 		PIGEN_SEMANTIC_INTERNAL, (pigen_source_span){source, 6, 10});
 	assert(left_signal.index != PIGEN_INVALID_ID);
+	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_TYPEDEF,
+		integer_type,
+		(pigen_source_span){source,
+			(size_t)(strstr(text, "word_t") - text),
+			(size_t)(strstr(text, "word_t") - text) + strlen("word_t")},
+		(pigen_source_span){source,
+			(size_t)(strstr(text, "word_t") - text),
+			(size_t)(strstr(text, "word_t") - text) + strlen("word_t")},
+		&word_type_symbol, &shadowed) == PIGEN_DECLARE_OK);
+	aliased_type = pigen_type_intern(&model, PIGEN_TYPE_NAMED,
+		PIGEN_SIGN_IMPLICIT, word_type_symbol, NULL, 0);
+	assert(aliased_type.index != PIGEN_INVALID_ID);
+	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_SIGNAL,
+		aliased_type,
+		(pigen_source_span){source,
+			(size_t)(strstr(text, "aliased") - text),
+			(size_t)(strstr(text, "aliased") - text) + strlen("aliased")},
+		(pigen_source_span){source,
+			(size_t)(strstr(text, "aliased") - text),
+			(size_t)(strstr(text, "aliased") - text) + strlen("aliased")},
+		&aliased, &shadowed) == PIGEN_DECLARE_OK);
+	aliased_signal = pigen_signal_add(&model, (pigen_syntax_id){2}, module,
+		aliased, aliased_type, pigen_semantic_scalar_shape(&model),
+		INVALID_ID(pigen_expr_id), PIGEN_TRANSFER_TYPE_LOGIC,
+		PIGEN_SEMANTIC_INTERNAL,
+		(pigen_source_span){source,
+			(size_t)(strstr(text, "aliased") - text),
+			(size_t)(strstr(text, "aliased") - text) + strlen("aliased")});
+	assert(aliased_signal.index != PIGEN_INVALID_ID);
 
 	/* Expanded token extents exclude the EOF token. */
 	runtime_syntax = parse(&preprocessed, &syntax, 2, 5);
@@ -124,6 +164,8 @@ int main(void)
 	constant_concat_syntax = parse(&preprocessed, &syntax, 49, 54);
 	runtime_concat_syntax = parse(&preprocessed, &syntax, 54, 59);
 	swapped_concat_syntax = parse(&preprocessed, &syntax, 59, 64);
+	aliased_add_syntax = parse(&preprocessed, &syntax, 66, 69);
+	aliased_compare_syntax = parse(&preprocessed, &syntax, 69, 72);
 
 	runtime = pigen_resolve_expression(&syntax, &model, scope,
 		runtime_syntax);
@@ -236,6 +278,17 @@ int main(void)
 		assert(pigen_expr_get(&model, children[1])->as.symbol.index ==
 			width.index);
 	}
+
+	aliased_add = pigen_resolve_expression(&syntax, &model, scope,
+		aliased_add_syntax);
+	known = pigen_expr_get(&model, aliased_add);
+	assert(known && known->kind == PIGEN_EXPR_BINARY);
+	assert(known->type.index == aliased_type.index);
+	aliased_compare = pigen_resolve_expression(&syntax, &model, scope,
+		aliased_compare_syntax);
+	known = pigen_expr_get(&model, aliased_compare);
+	assert(known && known->kind == PIGEN_EXPR_BINARY);
+	assert(known->type.index == boolean_type.index);
 
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_expr_arena(&syntax.expressions);

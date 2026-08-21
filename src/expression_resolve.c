@@ -12,7 +12,6 @@ typedef struct {
 	const pigen_syntax_tree *syntax;
 	pigen_semantic_model *model;
 	pigen_type_id integer_type;
-	pigen_type_id boolean_type;
 	int constant_only;
 } expression_resolver;
 
@@ -339,21 +338,6 @@ static int binary_operator(pigen_syntax_operator syntax,
 	return 1;
 }
 
-static int unary_boolean_result(pigen_syntax_operator operator)
-{
-	return operator == PIGEN_SYNTAX_OP_LOGICAL_NOT ||
-		(operator >= PIGEN_SYNTAX_OP_REDUCTION_AND &&
-		operator <= PIGEN_SYNTAX_OP_REDUCTION_XNOR);
-}
-
-static int binary_boolean_result(pigen_syntax_operator operator)
-{
-	return (operator >= PIGEN_SYNTAX_OP_LESS &&
-		operator <= PIGEN_SYNTAX_OP_WILDCARD_NOT_EQUAL) ||
-		operator == PIGEN_SYNTAX_OP_LOGICAL_AND ||
-		operator == PIGEN_SYNTAX_OP_LOGICAL_OR;
-}
-
 static pigen_select_kind select_kind(pigen_syntax_select_kind kind)
 {
 	switch (kind)
@@ -367,14 +351,6 @@ static pigen_select_kind select_kind(pigen_syntax_select_kind kind)
 	}
 	pigen_fail("invalid syntax select kind");
 	return PIGEN_SEMANTIC_SELECT_RANGE;
-}
-
-static int supported_integral_type(const expression_resolver *resolver,
-	pigen_type_id type)
-{
-	const pigen_semantic_type *known = pigen_type_get(resolver->model, type);
-	return known && (known->kind == PIGEN_TYPE_INTEGER ||
-		known->kind == PIGEN_TYPE_LOGIC || known->kind == PIGEN_TYPE_BIT);
 }
 
 static pigen_expr_id resolve_expression(expression_resolver *resolver,
@@ -443,10 +419,12 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 			operand = resolve_expression(resolver, scope,
 				syntax->as.unary.operand);
 			known = pigen_expr_get(resolver->model, operand);
-			if (!known || !supported_integral_type(resolver, known->type))
+			if (!known)
 				return INVALID_ID(pigen_expr_id);
-			result_type = unary_boolean_result(syntax->as.unary.operator) ?
-				resolver->boolean_type : known->type;
+			result_type = pigen_data_type_unary_result(resolver->model,
+				operator, known->type);
+			if (result_type.index == PIGEN_INVALID_ID)
+				return INVALID_ID(pigen_expr_id);
 			return pigen_expr_add_unary(resolver->model, operator, operand,
 				result_type, syntax->location.source_span);
 		}
@@ -465,15 +443,12 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 				syntax->as.binary.right);
 			left_known = pigen_expr_get(resolver->model, left);
 			right_known = pigen_expr_get(resolver->model, right);
-			if (!left_known || !right_known ||
-				!supported_integral_type(resolver, left_known->type) ||
-				!supported_integral_type(resolver, right_known->type))
+			if (!left_known || !right_known)
 				return INVALID_ID(pigen_expr_id);
-			if (!binary_boolean_result(syntax->as.binary.operator) &&
-				left_known->type.index != right_known->type.index)
+			result_type = pigen_data_type_binary_result(resolver->model,
+				operator, left_known->type, right_known->type);
+			if (result_type.index == PIGEN_INVALID_ID)
 				return INVALID_ID(pigen_expr_id);
-			result_type = binary_boolean_result(syntax->as.binary.operator) ?
-				resolver->boolean_type : left_known->type;
 			return pigen_expr_add_binary(resolver->model, operator, left,
 				right, result_type, syntax->location.source_span);
 		}
@@ -482,6 +457,7 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 			const pigen_semantic_expr *condition_known;
 			const pigen_semantic_expr *true_known;
 			const pigen_semantic_expr *false_known;
+			pigen_type_id result_type;
 
 			condition = resolve_expression(resolver, scope,
 				syntax->as.conditional.condition);
@@ -492,12 +468,14 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 			condition_known = pigen_expr_get(resolver->model, condition);
 			true_known = pigen_expr_get(resolver->model, when_true);
 			false_known = pigen_expr_get(resolver->model, when_false);
-			if (!condition_known || !true_known || !false_known ||
-				!supported_integral_type(resolver, condition_known->type) ||
-				true_known->type.index != false_known->type.index)
+			if (!condition_known || !true_known || !false_known)
+				return INVALID_ID(pigen_expr_id);
+			result_type = pigen_data_type_conditional_result(resolver->model,
+				condition_known->type, true_known->type, false_known->type);
+			if (result_type.index == PIGEN_INVALID_ID)
 				return INVALID_ID(pigen_expr_id);
 			return pigen_expr_add_conditional(resolver->model, condition,
-				when_true, when_false, true_known->type,
+				when_true, when_false, result_type,
 				syntax->location.source_span);
 		}
 		case PIGEN_SYNTAX_EXPR_INDEX:
@@ -572,9 +550,8 @@ static pigen_expr_id resolve_with_policy(
 	resolver.model = model;
 	resolver.constant_only = constant_only;
 	resolver.integer_type = pigen_semantic_integer_type(model);
-	resolver.boolean_type = pigen_semantic_boolean_result_type(model);
 	if (resolver.integer_type.index == PIGEN_INVALID_ID ||
-		resolver.boolean_type.index == PIGEN_INVALID_ID)
+		pigen_semantic_boolean_result_type(model).index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
 	return resolve_expression(&resolver, scope, expression);
 }

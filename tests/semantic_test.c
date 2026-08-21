@@ -56,6 +56,7 @@ int main(void)
 	pigen_expr_id second_shape_index;
 	pigen_lvalue_id module_value_lvalue;
 	pigen_type_id integer_type;
+	pigen_type_id aliased_integer_type;
 	pigen_type_id boolean_type;
 	pigen_type_id byte_type;
 	pigen_type_id same_byte_type;
@@ -79,6 +80,7 @@ int main(void)
 	pigen_scope_id second_stage;
 	pigen_module_id module;
 	pigen_symbol_id module_symbol;
+	pigen_symbol_id integer_alias_symbol;
 	pigen_symbol_id module_value;
 	pigen_symbol_id pipeline_value;
 	pigen_symbol_id first_local;
@@ -258,6 +260,28 @@ int main(void)
 		PIGEN_SYMBOL_MODULE, INVALID_ID(pigen_type_id),
 		occurrence(source, text, "sample", 0), whole, &module_symbol,
 		NULL) == PIGEN_DECLARE_OK);
+	assert(pigen_symbol_declare(&model, model.compilation_scope,
+		PIGEN_SYMBOL_TYPEDEF, integer_type,
+		occurrence(source, text, "pipe", 0), whole,
+		&integer_alias_symbol, NULL) == PIGEN_DECLARE_OK);
+	aliased_integer_type = pigen_type_intern(&model, PIGEN_TYPE_NAMED,
+		PIGEN_SIGN_IMPLICIT, integer_alias_symbol, NULL, 0);
+	assert(aliased_integer_type.index != PIGEN_INVALID_ID);
+	assert(pigen_data_type_is_integral(&model, aliased_integer_type));
+	assert(pigen_data_type_unary_result(&model, PIGEN_UNARY_NEGATE,
+		aliased_integer_type).index == aliased_integer_type.index);
+	assert(pigen_data_type_unary_result(&model, PIGEN_UNARY_LOGICAL_NOT,
+		aliased_integer_type).index == boolean_type.index);
+	assert(pigen_data_type_binary_result(&model, PIGEN_BINARY_MULTIPLY,
+		aliased_integer_type, aliased_integer_type).index ==
+		aliased_integer_type.index);
+	assert(pigen_data_type_binary_result(&model, PIGEN_BINARY_EQUAL,
+		aliased_integer_type, integer_type).index == boolean_type.index);
+	assert(pigen_data_type_conditional_result(&model, aliased_integer_type,
+		aliased_integer_type, aliased_integer_type).index ==
+		aliased_integer_type.index);
+	assert(!pigen_data_type_is_integral(&model,
+		INVALID_ID(pigen_type_id)));
 	module_scope = pigen_scope_add(&model, model.compilation_scope, whole);
 	module = pigen_module_add(&model, (pigen_syntax_id){0}, module_symbol,
 		module_scope, whole);
@@ -335,7 +359,7 @@ int main(void)
 	assert(pigen_symbol_declare(&model, pipeline_scope, PIGEN_SYMBOL_SIGNAL,
 		byte_type, third_value, whole, &found, NULL) == PIGEN_DECLARE_DUPLICATE);
 	assert(found.index == pipeline_value.index);
-	assert(model.symbol_count == 4);
+	assert(model.symbol_count == 5);
 	assert(model.signal_count == 3);
 
 	for (i = 0; i < 64; i++)
