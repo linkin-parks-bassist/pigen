@@ -12,20 +12,6 @@ static int span_is(const pigen_source_manager *sources, pigen_source_span span,
 	return text && length == strlen(expected) && !memcmp(text, expected, length);
 }
 
-static int span_contains(const pigen_source_manager *sources,
-	pigen_source_span span, const char *needle)
-{
-	size_t length;
-	size_t needle_length = strlen(needle);
-	const char *text = pigen_source_span_text(sources, span, &length);
-	size_t i;
-
-	if (!text || needle_length > length) return 0;
-	for (i = 0; i + needle_length <= length; i++)
-		if (!memcmp(text + i, needle, needle_length)) return 1;
-	return 0;
-}
-
 static int token_is(const pigen_expanded_source *source,
 	pigen_token_id token, const char *expected)
 {
@@ -52,13 +38,13 @@ int main(void)
 	const char text[] =
 		"package prefix; localparam module = 1; endpackage\n"
 		"typedef logic [31:0] global_word_t;\n"
-		"module signals #(parameter WIDTH = 8, DEPTH = WIDTH + 1) (input logic clk);\n"
+		"module signals #(parameter WIDTH = 8, DEPTH = WIDTH + 1) (input logic clk, input logic [7:0] samples[0:3], masks[4]);\n"
 		"  localparam PULSE_W = WIDTH * 2;\n"
 		"  typedef bit [3:0] nibble_t;\n"
 		"  buf signed [WIDTH-1:0] left, right;\n"
 		"  fifo packet_t[DEPTH] queue;\n"
 		"  port logic unsigned [15:0] pulse;\n"
-		"  logic [7:0] memory [0:3];\n"
+		"  logic [7:0] memory [0:3][4];\n"
 		"  always @(posedge clk) begin\n"
 		"    if (clk)\n"
 		"      if (clk)\n"
@@ -105,10 +91,12 @@ int main(void)
 	size_t opaques = 0;
 	size_t typedefs = 0;
 	size_t parameters = 0;
-	size_t static_signals = 0;
+	size_t static_declarations = 0;
 	size_t clocked_processes = 0;
 	size_t assignments = 0;
-	int unpacked_is_opaque = 0;
+	int found_memory = 0;
+	int found_samples = 0;
+	int found_masks = 0;
 
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
@@ -136,8 +124,6 @@ int main(void)
 		if (node->kind == PIGEN_SYNTAX_OPAQUE)
 		{
 			opaques++;
-			if (span_contains(&sources, node->location.source_span, "memory"))
-				unpacked_is_opaque = 1;
 			continue;
 		}
 		if (node->kind == PIGEN_SYNTAX_TYPEDEF)
@@ -163,16 +149,49 @@ int main(void)
 		}
 		if (node->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATION)
 		{
-			const pigen_syntax_node *declarator = pigen_syntax_get(&tree,
-				node->first_child);
-			assert(declarator &&
-				declarator->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR);
-			assert(token_is(&preprocessed.expanded,
-				declarator->as.static_signal_declarator.name, "clk"));
-			assert(node->as.static_signal_declaration.direction == PIGEN_DIRECTION_INPUT);
-			assert(node->as.static_signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_WIRE);
-			assert(node->as.static_signal_declaration.type.base == PIGEN_SYNTAX_TYPE_LOGIC);
-			static_signals++;
+			for (pigen_syntax_id declarator_id = node->first_child;
+				declarator_id.index != PIGEN_INVALID_ID; )
+			{
+				const pigen_syntax_node *declarator = pigen_syntax_get(&tree,
+					declarator_id);
+				const pigen_syntax_shape_dimension *shape_dimensions =
+					pigen_syntax_declarator_shape_dimensions(&tree, declarator);
+				assert(declarator && declarator->kind ==
+					PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR);
+				if (token_is(&preprocessed.expanded,
+					declarator->as.static_signal_declarator.name, "clk"))
+					assert(!shape_dimensions);
+				else if (token_is(&preprocessed.expanded,
+					declarator->as.static_signal_declarator.name, "memory"))
+				{
+					assert(shape_dimensions && declarator->as.
+						static_signal_declarator.dimension_count == 2);
+					assert(shape_dimensions[0].form ==
+						PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE);
+					assert(shape_dimensions[1].form ==
+						PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT);
+					found_memory = 1;
+				}
+				else if (token_is(&preprocessed.expanded,
+					declarator->as.static_signal_declarator.name, "samples"))
+				{
+					assert(shape_dimensions && shape_dimensions[0].form ==
+						PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE);
+					found_samples = 1;
+				}
+				else
+				{
+					assert(token_is(&preprocessed.expanded,
+						declarator->as.static_signal_declarator.name, "masks"));
+					assert(shape_dimensions && shape_dimensions[0].form ==
+						PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT);
+					found_masks = 1;
+				}
+				declarator_id = declarator->next_sibling;
+			}
+			assert(node->as.static_signal_declaration.type.base ==
+				PIGEN_SYNTAX_TYPE_LOGIC);
+			static_declarations++;
 			continue;
 		}
 		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS)
@@ -262,11 +281,11 @@ int main(void)
 	assert(signals == 4);
 	assert(typedefs == 2);
 	assert(parameters == 3);
-	assert(static_signals == 1);
+	assert(static_declarations == 3);
+	assert(found_memory && found_samples && found_masks);
 	assert(clocked_processes == 1);
 	assert(assignments == 2);
-	assert(unpacked_is_opaque);
-	assert(opaques >= 2);
+	assert(opaques >= 1);
 
 	assert(pigen_preprocess(&sources, bad_source, NULL, &bad_preprocessed,
 		&preprocess_error));

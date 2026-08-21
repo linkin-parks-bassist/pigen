@@ -471,6 +471,8 @@ const pigen_semantic_shape *pigen_shape_get(
 	const pigen_semantic_model *model, pigen_shape_id shape);
 const pigen_shape_dimension *pigen_shape_dimensions(
 	const pigen_semantic_model *model, pigen_shape_id shape);
+pigen_shape_id pigen_shape_element(pigen_semantic_model *model,
+	pigen_shape_id shape);
 pigen_type_id pigen_type_packed_element(pigen_semantic_model *model,
 	pigen_type_id type);
 pigen_type_id pigen_type_packed_select(pigen_semantic_model *model,

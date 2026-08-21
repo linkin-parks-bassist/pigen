@@ -53,6 +53,29 @@ typedef struct {
 	pigen_syntax_expr_id right;
 } pigen_syntax_dimension;
 
+typedef enum {
+	PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT,
+	PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE
+} pigen_syntax_shape_dimension_form;
+
+typedef struct {
+	pigen_syntax_location location;
+	pigen_syntax_shape_dimension_form form;
+	union {
+		pigen_syntax_expr_id count;
+		struct {
+			pigen_syntax_expr_id left;
+			pigen_syntax_expr_id right;
+		} range;
+	} as;
+} pigen_syntax_shape_dimension;
+
+typedef struct {
+	pigen_token_id name;
+	size_t first_shape_dimension;
+	size_t dimension_count;
+} pigen_syntax_signal_declarator;
+
 typedef struct {
 	pigen_syntax_type_base base;
 	pigen_syntax_signedness signedness;
@@ -85,14 +108,14 @@ typedef struct {
 			pigen_transfer_type transfer_type;
 			pigen_syntax_type type;
 		} static_signal_declaration;
-		struct { pigen_token_id name; } static_signal_declarator;
+		pigen_syntax_signal_declarator static_signal_declarator;
 		struct {
 			pigen_transfer_type transfer_type;
 			pigen_syntax_direction direction;
 			pigen_syntax_type payload;
 			pigen_syntax_expr_id fifo_depth;
 		} signal_declaration;
-		struct { pigen_token_id name; } signal_declarator;
+		pigen_syntax_signal_declarator signal_declarator;
 		struct {
 			pigen_syntax_edge edge;
 			pigen_syntax_expr_id clock;
@@ -116,6 +139,9 @@ typedef struct {
 	pigen_syntax_dimension *dimensions;
 	size_t dimension_count;
 	size_t dimension_capacity;
+	pigen_syntax_shape_dimension *shape_dimensions;
+	size_t shape_dimension_count;
+	size_t shape_dimension_capacity;
 	pigen_syntax_expr_arena expressions;
 } pigen_syntax_tree;
 
@@ -125,6 +151,8 @@ const pigen_syntax_node *pigen_syntax_get(const pigen_syntax_tree *tree,
 	pigen_syntax_id node);
 const pigen_syntax_dimension *pigen_syntax_type_dimensions(
 	const pigen_syntax_tree *tree, const pigen_syntax_type *type);
+const pigen_syntax_shape_dimension *pigen_syntax_declarator_shape_dimensions(
+	const pigen_syntax_tree *tree, const pigen_syntax_node *declarator);
 void pigen_free_syntax_tree(pigen_syntax_tree *tree);
 
 #endif

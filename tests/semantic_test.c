@@ -51,6 +51,9 @@ int main(void)
 	pigen_expr_id conditional;
 	pigen_expr_id same_conditional;
 	pigen_expr_id module_value_expression;
+	pigen_expr_id shaped_concatenation_children[1];
+	pigen_expr_id first_shape_index;
+	pigen_expr_id second_shape_index;
 	pigen_lvalue_id module_value_lvalue;
 	pigen_type_id integer_type;
 	pigen_type_id boolean_type;
@@ -68,6 +71,7 @@ int main(void)
 	pigen_shape_id scalar_shape;
 	pigen_shape_id signal_shape;
 	pigen_shape_id same_signal_shape;
+	pigen_shape_id tail_shape;
 	pigen_type_id concat_types[2];
 	pigen_scope_id module_scope;
 	pigen_scope_id pipeline_scope;
@@ -126,6 +130,7 @@ int main(void)
 		{.range = {pigen_expr_constant(&model, right_bound),
 			pigen_expr_constant(&model, left_bound)}}};
 	signal_shape = pigen_shape_intern(&model, signal_dimensions, 2);
+	tail_shape = pigen_shape_intern(&model, signal_dimensions + 1, 1);
 	same_signal_shape = pigen_shape_intern(&model, signal_dimensions, 2);
 	assert(signal_shape.index != PIGEN_INVALID_ID);
 	assert(signal_shape.index == same_signal_shape.index);
@@ -277,6 +282,25 @@ int main(void)
 		byte_type, first_value);
 	assert(pigen_expr_get(&model, module_value_expression)->shape.index ==
 		signal_shape.index);
+	shaped_concatenation_children[0] = module_value_expression;
+	assert(pigen_expr_add_concatenation(&model,
+		shaped_concatenation_children, 1, first_value).index ==
+		PIGEN_INVALID_ID);
+	first_shape_index = pigen_expr_add_index(&model, module_value_expression,
+		right_bound, first_value);
+	assert(pigen_expr_get(&model, first_shape_index)->type.index ==
+		byte_type.index);
+	assert(pigen_expr_get(&model, first_shape_index)->shape.index ==
+		tail_shape.index);
+	second_shape_index = pigen_expr_add_index(&model, first_shape_index,
+		right_bound, first_value);
+	assert(pigen_expr_get(&model, second_shape_index)->type.index ==
+		byte_type.index);
+	assert(pigen_expr_get(&model, second_shape_index)->shape.index ==
+		scalar_shape.index);
+	assert(pigen_expr_add_select(&model, module_value_expression, left_bound,
+		right_bound, PIGEN_SEMANTIC_SELECT_RANGE, first_value).index ==
+		PIGEN_INVALID_ID);
 	module_value_lvalue = pigen_lvalue_resolve(&model, module_value_expression);
 	assert(module_value_lvalue.index != PIGEN_INVALID_ID);
 	assert(pigen_lvalue_get(&model, module_value_lvalue)->kind ==

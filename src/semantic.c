@@ -291,6 +291,19 @@ const pigen_shape_dimension *pigen_shape_dimensions(
 	return model->shape_dimensions + known->first_dimension;
 }
 
+pigen_shape_id pigen_shape_element(pigen_semantic_model *model,
+	pigen_shape_id shape)
+{
+	const pigen_semantic_shape *known = pigen_shape_get(model, shape);
+	const pigen_shape_dimension *dimensions = pigen_shape_dimensions(model,
+		shape);
+
+	if (!known || !known->dimension_count || !dimensions)
+		return INVALID_ID(pigen_shape_id);
+	return pigen_shape_intern(model, dimensions + 1,
+		known->dimension_count - 1);
+}
+
 static pigen_type_id packed_projection_base(
 	const pigen_semantic_model *model, pigen_type_id type)
 {
@@ -1278,18 +1291,34 @@ pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 	pigen_const_expr_id base_constant;
 	pigen_const_expr_id index_constant;
 	pigen_semantic_expr expression = {0};
+	const pigen_semantic_shape *base_shape;
+	const pigen_semantic_shape *index_shape;
 
 	if (!base_expression || !index_expression)
+		return INVALID_ID(pigen_expr_id);
+	base_shape = pigen_shape_get(model, base_expression->shape);
+	index_shape = pigen_shape_get(model, index_expression->shape);
+	if (!base_shape || !index_shape || index_shape->dimension_count)
 		return INVALID_ID(pigen_expr_id);
 	base_constant = base_expression->constant;
 	index_constant = index_expression->constant;
 	expression.kind = PIGEN_EXPR_INDEX;
-	expression.type = pigen_type_packed_element(model, base_expression->type);
-	expression.shape = base_expression->shape;
+	if (base_shape->dimension_count)
+	{
+		expression.type = base_expression->type;
+		expression.shape = pigen_shape_element(model, base_expression->shape);
+	}
+	else
+	{
+		expression.type = pigen_type_packed_element(model,
+			base_expression->type);
+		expression.shape = base_expression->shape;
+	}
 	if (expression.type.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
 	expression.span = span;
-	expression.constant =
+	expression.constant = base_shape->dimension_count ?
+		INVALID_ID(pigen_const_expr_id) :
 		base_constant.index == PIGEN_INVALID_ID ||
 		index_constant.index == PIGEN_INVALID_ID ?
 		INVALID_ID(pigen_const_expr_id) :
@@ -1311,6 +1340,9 @@ pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 	const pigen_semantic_expr *base_expression = pigen_expr_get(model, base);
 	const pigen_semantic_expr *left_expression = pigen_expr_get(model, left);
 	const pigen_semantic_expr *right_expression = pigen_expr_get(model, right);
+	const pigen_semantic_shape *base_shape;
+	const pigen_semantic_shape *left_shape;
+	const pigen_semantic_shape *right_shape;
 	pigen_const_expr_id base_constant;
 	pigen_const_expr_id left_constant;
 	pigen_const_expr_id right_constant;
@@ -1319,6 +1351,13 @@ pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 
 	if (!base_expression || !left_expression || !right_expression ||
 		!select_kind_valid(kind))
+		return INVALID_ID(pigen_expr_id);
+	base_shape = pigen_shape_get(model, base_expression->shape);
+	left_shape = pigen_shape_get(model, left_expression->shape);
+	right_shape = pigen_shape_get(model, right_expression->shape);
+	if (!base_shape || !left_shape || !right_shape ||
+		base_shape->dimension_count || left_shape->dimension_count ||
+		right_shape->dimension_count)
 		return INVALID_ID(pigen_expr_id);
 	base_constant = base_expression->constant;
 	left_constant = left_expression->constant;
@@ -1404,7 +1443,9 @@ pigen_expr_id pigen_expr_add_concatenation(pigen_semantic_model *model,
 	for (i = 0; i < count; i++)
 	{
 		const pigen_semantic_expr *child = pigen_expr_get(model, children[i]);
-		if (!child)
+		const pigen_semantic_shape *shape;
+		if (!child || !(shape = pigen_shape_get(model, child->shape)) ||
+			shape->dimension_count)
 		{
 			free(types);
 			free(constants);

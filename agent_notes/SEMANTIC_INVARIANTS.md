@@ -105,6 +105,11 @@ contract stated in `SPEC.md`.
 - Identifier reads, lvalues, concatenations, casts, member selections, bit
   selections, indexed selections, calls, and conditional evaluation are
   distinct expression/use forms.
+- Indexing an expression with non-scalar shape removes the leading unpacked
+  dimension and preserves its data type. Only a scalar-shaped base may be
+  indexed as a packed value. Selectors must themselves be scalar-shaped;
+  unsupported unpacked slicing and concatenation are rejected instead of
+  collapsing or reinterpreting shape.
 - A concatenation expression owns an ordered child range.  Its value and
   constant identities preserve that order.  Its packed result type is unsigned;
   state domain is two-state exactly when every child is two-state, and its
@@ -153,6 +158,9 @@ contract stated in `SPEC.md`.
 - Data type, transfer type, and declarator shape are independent semantic
   identities. A rendered SystemVerilog declaration never stands in for that
   product.
+- A parsed declarator owns an ordered syntax-shape list whose dimensions are
+  either colonless counts or explicit ranges. Resolution requires constant
+  dimension expressions and interns the list as one canonical `ShapeId`.
 - Every signal has a transfer type. The concrete transfer types are `wire`,
   `reg`, `logic`, `buf`, `port`, `fifo`, and `skid`; an unqualified input has
   an abstract transfer type constrained by its connection. `wire`, `reg`, and
@@ -167,6 +175,9 @@ contract stated in `SPEC.md`.
   storage, consumption, production, ownership, domain, and lowering behavior.
 - An atomic transfer owns an ordered destination bit stream, one value bit
   stream, a guard predicate, a clock domain, and its source span.
+- A direct whole-expression transfer requires identical source and destination
+  shape identities. A mismatch is diagnosed from semantic objects; bracket
+  text is never rendered and compared.
 - Each transfer also owns one deduplicated incidence entry per participating
   signal.  The entry records producer and consumer roles independently;
   destination-index reads are consumers even though they occur syntactically

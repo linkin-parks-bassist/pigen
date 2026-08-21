@@ -170,6 +170,51 @@ static int add_dimension(syntax_parser *parser, size_t open, size_t close)
 	return 1;
 }
 
+static int add_shape_dimension(syntax_parser *parser, size_t open,
+	size_t close)
+{
+	pigen_syntax_tree *tree = parser->tree;
+	pigen_syntax_shape_dimension dimension = {0};
+	size_t colon = open + 1;
+	size_t depth = 0;
+
+	for (; colon < close; colon++)
+	{
+		if (token_is(parser, colon, "(") || token_is(parser, colon, "[") ||
+			token_is(parser, colon, "{")) depth++;
+		else if (token_is(parser, colon, ")") ||
+			token_is(parser, colon, "]") || token_is(parser, colon, "}")) depth--;
+		else if (!depth && token_is(parser, colon, ":")) break;
+	}
+	if (colon == open + 1 || colon + 1 == close)
+		return fail(parser, open, "signal dimension requires an expression");
+	dimension.location = range_location(parser, open, close + 1);
+	if (colon == close)
+	{
+		dimension.form = PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT;
+		if (!pigen_parse_expression(parser->expanded, open + 1, close,
+			&tree->expressions, &dimension.as.count, parser->error)) return 0;
+	}
+	else
+	{
+		dimension.form = PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE;
+		if (!pigen_parse_expression(parser->expanded, open + 1, colon,
+			&tree->expressions, &dimension.as.range.left, parser->error) ||
+			!pigen_parse_expression(parser->expanded, colon + 1, close,
+				&tree->expressions, &dimension.as.range.right, parser->error))
+			return 0;
+	}
+	if (tree->shape_dimension_count == tree->shape_dimension_capacity)
+	{
+		tree->shape_dimension_capacity = tree->shape_dimension_capacity ?
+			tree->shape_dimension_capacity * 2 : 16;
+		tree->shape_dimensions = pigen_resize(tree->shape_dimensions,
+			tree->shape_dimension_capacity * sizeof(*tree->shape_dimensions));
+	}
+	tree->shape_dimensions[tree->shape_dimension_count++] = dimension;
+	return 1;
+}
+
 static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	int final_group_is_depth, int allow_implicit_scalar,
 	pigen_syntax_type *type, size_t *name_at,
@@ -276,35 +321,83 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 }
 
 static pigen_syntax_id add_signal_declarator(syntax_parser *parser,
-	pigen_syntax_id declaration, size_t name)
+	pigen_syntax_id declaration, size_t name, size_t limit, size_t *after)
 {
 	pigen_syntax_node node = {0};
 	pigen_syntax_id id;
+	size_t at = name + 1;
 
 	node.kind = PIGEN_SYNTAX_SIGNAL_DECLARATOR;
-	node.location = range_location(parser, name, name + 1);
+	node.as.signal_declarator.first_shape_dimension =
+		parser->tree->shape_dimension_count;
+	while (at < limit && token_is(parser, at, "["))
+	{
+		size_t close = matching_bracket(parser, at, limit);
+		if (close == limit)
+		{
+			fail(parser, at, "unterminated signal dimension");
+			return INVALID_SYNTAX;
+		}
+		if (!add_shape_dimension(parser, at, close)) return INVALID_SYNTAX;
+		node.as.signal_declarator.dimension_count++;
+		at = close + 1;
+	}
+	node.location = range_location(parser, name, at);
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
 	node.as.signal_declarator.name = (pigen_token_id){(uint32_t)name};
 	id = add_node(parser, node);
 	add_child(parser, declaration, id);
+	*after = at;
 	return id;
 }
 
 static pigen_syntax_id add_static_signal_declarator(syntax_parser *parser,
-	pigen_syntax_id declaration, size_t name)
+	pigen_syntax_id declaration, size_t name, size_t limit, size_t *after)
 {
 	pigen_syntax_node node = {0};
 	pigen_syntax_id id;
+	size_t at = name + 1;
 
 	node.kind = PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR;
-	node.location = range_location(parser, name, name + 1);
+	node.as.static_signal_declarator.first_shape_dimension =
+		parser->tree->shape_dimension_count;
+	while (at < limit && token_is(parser, at, "["))
+	{
+		size_t close = matching_bracket(parser, at, limit);
+		if (close == limit)
+		{
+			fail(parser, at, "unterminated signal dimension");
+			return INVALID_SYNTAX;
+		}
+		if (!add_shape_dimension(parser, at, close)) return INVALID_SYNTAX;
+		node.as.static_signal_declarator.dimension_count++;
+		at = close + 1;
+	}
+	node.location = range_location(parser, name, at);
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
 	node.as.static_signal_declarator.name = (pigen_token_id){(uint32_t)name};
 	id = add_node(parser, node);
 	add_child(parser, declaration, id);
+	*after = at;
 	return id;
+}
+
+static int declarator_candidate(const syntax_parser *parser, size_t start,
+	size_t after)
+{
+	size_t at = start;
+
+	if (!identifier(parser, at)) return 0;
+	at++;
+	while (at < after && token_is(parser, at, "["))
+	{
+		size_t close = matching_bracket(parser, at, after);
+		if (close == after) return 0;
+		at = close + 1;
+	}
+	return at == after;
 }
 
 static int value_candidate(const syntax_parser *parser, size_t start,
@@ -333,11 +426,23 @@ static int value_candidate(const syntax_parser *parser, size_t start,
 	}
 	if (at == after || !identifier(parser, at)) return 0;
 	at++;
+	while (at < after && token_is(parser, at, "["))
+	{
+		size_t close = matching_bracket(parser, at, after);
+		if (close == after) return 0;
+		at = close + 1;
+	}
 	while (at < after)
 	{
 		if (!token_is(parser, at, ",") || at + 1 == after ||
 			!identifier(parser, at + 1)) return 0;
 		at += 2;
+		while (at < after && token_is(parser, at, "["))
+		{
+			size_t close = matching_bracket(parser, at, after);
+			if (close == after) return 0;
+			at = close + 1;
+		}
 	}
 	return 1;
 }
@@ -395,7 +500,8 @@ static int parse_value(syntax_parser *parser, pigen_syntax_id module,
 	{
 		if (!identifier(parser, at))
 			return fail(parser, at, "expected signal name");
-		add_static_signal_declarator(parser, declaration_id, at++);
+		if (add_static_signal_declarator(parser, declaration_id, at,
+			type_limit, &at).index == PIGEN_INVALID_ID) return 0;
 		if (at == type_limit) break;
 		if (!token_is(parser, at, ","))
 			return fail(parser, at, "unsupported signal declarator");
@@ -445,7 +551,8 @@ static int parse_signal(syntax_parser *parser, pigen_syntax_id module,
 	{
 		if (!identifier(parser, at))
 			return fail(parser, at, "expected signal name");
-		add_signal_declarator(parser, declaration_id, at++);
+		if (add_signal_declarator(parser, declaration_id, at,
+			type_limit, &at).index == PIGEN_INVALID_ID) return 0;
 		if (at == type_limit) break;
 		if (!token_is(parser, at, ","))
 			return fail(parser, at, "expected `,` or `;` after signal name");
@@ -665,7 +772,7 @@ static int parse_ansi_ports(syntax_parser *parser,
 			{
 				size_t next = continuation + 1;
 				size_t next_end = ansi_item_end(parser, next, after);
-				if (next + 1 != next_end || !identifier(parser, next)) break;
+				if (!declarator_candidate(parser, next, next_end)) break;
 				declaration_after = next_end;
 				continuation = next_end;
 			}
@@ -675,8 +782,11 @@ static int parse_ansi_ports(syntax_parser *parser,
 			while (continuation < declaration_after)
 			{
 				size_t next = continuation + 1;
-				add_signal_declarator(parser, declaration, next);
-				continuation = ansi_item_end(parser, next, after);
+				size_t next_end = ansi_item_end(parser, next, after);
+				size_t declarator_after;
+				if (add_signal_declarator(parser, declaration, next, next_end,
+					&declarator_after).index == PIGEN_INVALID_ID) return 0;
+				continuation = next_end;
 			}
 			item_end = declaration_after;
 		}
@@ -690,7 +800,7 @@ static int parse_ansi_ports(syntax_parser *parser,
 			{
 				size_t next = continuation + 1;
 				size_t next_end = ansi_item_end(parser, next, after);
-				if (next + 1 != next_end || !identifier(parser, next)) break;
+				if (!declarator_candidate(parser, next, next_end)) break;
 				declaration_after = next_end;
 				continuation = next_end;
 			}
@@ -700,8 +810,12 @@ static int parse_ansi_ports(syntax_parser *parser,
 			while (continuation < declaration_after)
 			{
 				size_t next = continuation + 1;
-				add_static_signal_declarator(parser, declaration, next);
-				continuation = ansi_item_end(parser, next, after);
+				size_t next_end = ansi_item_end(parser, next, after);
+				size_t declarator_after;
+				if (add_static_signal_declarator(parser, declaration, next,
+					next_end, &declarator_after).index == PIGEN_INVALID_ID)
+					return 0;
+				continuation = next_end;
 			}
 			item_end = declaration_after;
 		}
@@ -1122,10 +1236,29 @@ const pigen_syntax_dimension *pigen_syntax_type_dimensions(
 	return tree->dimensions + type->first_dimension;
 }
 
+const pigen_syntax_shape_dimension *pigen_syntax_declarator_shape_dimensions(
+	const pigen_syntax_tree *tree, const pigen_syntax_node *declarator)
+{
+	const pigen_syntax_signal_declarator *known;
+
+	if (!tree || !declarator) return NULL;
+	if (declarator->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR)
+		known = &declarator->as.signal_declarator;
+	else if (declarator->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR)
+		known = &declarator->as.static_signal_declarator;
+	else
+		return NULL;
+	if (!known->dimension_count ||
+		known->first_shape_dimension + known->dimension_count >
+			tree->shape_dimension_count) return NULL;
+	return tree->shape_dimensions + known->first_shape_dimension;
+}
+
 void pigen_free_syntax_tree(pigen_syntax_tree *tree)
 {
 	free(tree->nodes);
 	free(tree->dimensions);
+	free(tree->shape_dimensions);
 	pigen_free_syntax_expr_arena(&tree->expressions);
 	*tree = (pigen_syntax_tree){0};
 }

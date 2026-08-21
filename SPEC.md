@@ -257,7 +257,11 @@ declarator. The scalar shape is the empty list. A colonless count and an
 explicit range remain distinct structural forms even when they describe the
 same number of elements. Whole-signal expressions carry the same shape as the
 signal they reference, so shape compatibility between signals and expressions
-is structural and never inferred from rendered bracket text.
+is structural and never inferred from rendered bracket text. Indexing a
+non-scalar shape selects its leading unpacked dimension and preserves the data
+type; only after the shape is scalar does indexing select from the packed data
+type. Unpacked array slicing and concatenation are not accepted until their
+semantics have an explicit structural representation.
 
 The declared entity is a **signal**. Thus `sample` above is a signal whose data
 type is `int[16]` and whose transfer type is `buf`. Ordinary SystemVerilog nets

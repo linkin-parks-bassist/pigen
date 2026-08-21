@@ -48,15 +48,19 @@ clock domains, direct transfers, and a transfer-incidence ownership graph. Its
 focused unit tests pass. Static and general declarations now resolve into one
 signal arena and one symbol binding; every direct-transfer incidence is
 recorded, with transfer-type laws deciding semantic roles and domain behavior.
-The full `make verify` suite passed after the unified-signal and canonical-shape
-cutovers on 2026-08-21.
+The full `make verify` suite passed after the unified-signal, canonical-shape,
+and structured declarator-shape cutovers on 2026-08-21.
 
 It is not linked into the production executable. The production compiler still
 uses rewritten source, generated names, marker comments, rescanning, and
-feature-local models. Canonical structural shape identities are now shared by
-signals and expressions, but declaration-shape syntax is not yet parsed by the
-replacement frontend. Storage/lowering laws are not yet fully modeled. There
-is no elastic RTL IR or terminal structured emitter.
+feature-local models. Canonical structural shape identities are shared by
+signals and expressions, and recognized declarations now parse ordered count
+and range dimensions directly into those identities. Expression indexing
+consumes unpacked dimensions before packed dimensions; unsupported unpacked
+slices and concatenations are rejected rather than reinterpreted. The target
+data-first declaration grammar remains incomplete. Storage/lowering laws are
+not yet fully modeled. There is no elastic RTL IR or terminal structured
+emitter.
 
 ## Architecture cutover
 

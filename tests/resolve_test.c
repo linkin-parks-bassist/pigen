@@ -106,13 +106,13 @@ int main(void)
 {
 	const char text[] =
 		"typedef logic [31:0] word_t;\n"
-		"module first #(parameter WIDTH = 8, DEPTH = WIDTH / 2, ENABLED = DEPTH >= 4 && !(WIDTH == 0), SELECTED = ENABLED ? DEPTH : WIDTH, HEX = 8'hff, BINARY = 8'b1111_1111, SIGNED_VALUE = 18'sd8192, UNKNOWN_VALUE = 12'hx3z, MASK_DEPTH = HEX == BINARY ? 8'd4 : 8'd2, WIDE_HEX = 80'hffff_ffff_ffff_ffff_ffff, WIDE_DECIMAL = 80'd1208925819614629174706175) (input logic clk, reset, select, output reg [7:0] count);\n"
+		"module first #(parameter WIDTH = 8, DEPTH = WIDTH / 2, ENABLED = DEPTH >= 4 && !(WIDTH == 0), SELECTED = ENABLED ? DEPTH : WIDTH, HEX = 8'hff, BINARY = 8'b1111_1111, SIGNED_VALUE = 18'sd8192, UNKNOWN_VALUE = 12'hx3z, MASK_DEPTH = HEX == BINARY ? 8'd4 : 8'd2, WIDE_HEX = 80'hffff_ffff_ffff_ffff_ffff, WIDE_DECIMAL = 80'd1208925819614629174706175) (input logic clk, reset, select, input logic [7:0] samples[0:3], masks[4], output reg [7:0] count);\n"
 		"  localparam LAST = WIDTH - 1;\n"
 		"  localparam NONZERO = |WIDTH;\n"
 		"  typedef logic unsigned [LAST:NONZERO] byte_t;\n"
 		"  wire ready;\n"
 		"  logic [WIDTH-1:0] state, next_state;\n"
-		"  logic [7:0] memory [0:3];\n"
+		"  logic [7:0] memory [0:3][4];\n"
 		"  buf byte_t left, right, alternate;\n"
 		"  buf bit gate;\n"
 		"  fifo word_t[MASK_DEPTH] queue;\n"
@@ -169,6 +169,9 @@ int main(void)
 	const pigen_semantic_signal *ready;
 	const pigen_semantic_signal *state;
 	const pigen_semantic_signal *next_state;
+	const pigen_semantic_signal *memory;
+	const pigen_semantic_signal *samples;
+	const pigen_semantic_signal *masks;
 	const pigen_semantic_module *first_module;
 	const pigen_semantic_clock_domain *clock_domain;
 	const pigen_semantic_process *first_process;
@@ -190,6 +193,7 @@ int main(void)
 	const pigen_packed_dimension *queue_dimension;
 	const pigen_packed_dimension *left_dimension;
 	const pigen_packed_dimension *signed_dimension;
+	const pigen_shape_dimension *memory_dimensions;
 	const pigen_const_expr *bound;
 	const pigen_const_expr *hex_constant;
 	const pigen_const_expr *binary_constant;
@@ -230,7 +234,7 @@ int main(void)
 	assert(model.compilation_scope.index != PIGEN_INVALID_ID);
 	assert(model.module_count == 2);
 	assert(model.parameter_count == 13);
-	assert(model.signal_count == 13);
+	assert(model.signal_count == 16);
 	assert(model.clock_domain_count == 1);
 	assert(model.process_count == 2);
 	assert(model.transfer_count == 4);
@@ -253,7 +257,31 @@ int main(void)
 	ready = find_signal(&sources, &model, "ready");
 	state = find_signal(&sources, &model, "state");
 	next_state = find_signal(&sources, &model, "next_state");
-	assert(clk && reset && select && count && ready && state && next_state);
+	memory = find_signal(&sources, &model, "memory");
+	samples = find_signal(&sources, &model, "samples");
+	masks = find_signal(&sources, &model, "masks");
+	assert(clk && reset && select && count && ready && state && next_state &&
+		memory && samples && masks);
+	assert(pigen_shape_dimensions(&model, samples->shape)[0].form ==
+		PIGEN_SHAPE_DIMENSION_RANGE);
+	assert(pigen_shape_dimensions(&model, masks->shape)[0].form ==
+		PIGEN_SHAPE_DIMENSION_COUNT);
+	memory_dimensions = pigen_shape_dimensions(&model, memory->shape);
+	assert(memory_dimensions &&
+		pigen_shape_get(&model, memory->shape)->dimension_count == 2);
+	assert(memory_dimensions[0].form == PIGEN_SHAPE_DIMENSION_RANGE);
+	bound = pigen_const_expr_get(&model,
+		memory_dimensions[0].as.range.left);
+	assert(bound && bound->kind == PIGEN_CONST_EXPR_INTEGER &&
+		bound->as.integer == 0);
+	bound = pigen_const_expr_get(&model,
+		memory_dimensions[0].as.range.right);
+	assert(bound && bound->kind == PIGEN_CONST_EXPR_INTEGER &&
+		bound->as.integer == 3);
+	assert(memory_dimensions[1].form == PIGEN_SHAPE_DIMENSION_COUNT);
+	bound = pigen_const_expr_get(&model, memory_dimensions[1].as.count);
+	assert(bound && bound->kind == PIGEN_CONST_EXPR_INTEGER &&
+		bound->as.integer == 4);
 	assert(clk->direction == PIGEN_SEMANTIC_INPUT &&
 		clk->transfer_type == PIGEN_TRANSFER_TYPE_WIRE);
 	assert(reset->data_type.index == clk->data_type.index);
@@ -607,6 +635,10 @@ int main(void)
 		"module bad(input logic clk); buf [7:0] x, y, z; "
 		"always @(posedge clk) begin y <= x; y <= z; end endmodule\n",
 		"nonexclusive producers");
+	expect_resolve_error(
+		"module bad(input logic clk); buf bit x[2]; buf bit y[3]; "
+		"always @(posedge clk) y <= x; endmodule\n",
+		"shape mismatch");
 
 	pigen_free_semantic_model(&inout_model);
 	pigen_free_semantic_model(&unknown_model);

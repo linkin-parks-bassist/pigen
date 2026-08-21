@@ -146,6 +146,70 @@ static pigen_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 	return result;
 }
 
+static pigen_shape_id resolve_shape(resolver *resolver, pigen_scope_id scope,
+	const pigen_syntax_node *declarator)
+{
+	const pigen_syntax_signal_declarator *syntax_declarator;
+	const pigen_syntax_shape_dimension *syntax_dimensions;
+	pigen_shape_dimension *dimensions;
+	pigen_shape_id result;
+	size_t i;
+
+	if (declarator->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR)
+		syntax_declarator = &declarator->as.signal_declarator;
+	else if (declarator->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR)
+		syntax_declarator = &declarator->as.static_signal_declarator;
+	else
+		return INVALID_ID(pigen_shape_id);
+	if (!syntax_declarator->dimension_count)
+		return pigen_semantic_scalar_shape(resolver->model);
+	syntax_dimensions = pigen_syntax_declarator_shape_dimensions(
+		resolver->syntax, declarator);
+	if (!syntax_dimensions) return INVALID_ID(pigen_shape_id);
+	dimensions = pigen_resize(NULL,
+		syntax_declarator->dimension_count * sizeof(*dimensions));
+	for (i = 0; i < syntax_declarator->dimension_count; i++)
+	{
+		pigen_expr_id left;
+		pigen_expr_id right = INVALID_ID(pigen_expr_id);
+
+		dimensions[i].form = syntax_dimensions[i].form ==
+			PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT ?
+			PIGEN_SHAPE_DIMENSION_COUNT : PIGEN_SHAPE_DIMENSION_RANGE;
+		left = resolve_constant(resolver, scope,
+			syntax_dimensions[i].form == PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT ?
+				syntax_dimensions[i].as.count :
+				syntax_dimensions[i].as.range.left);
+		if (syntax_dimensions[i].form == PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE)
+			right = resolve_constant(resolver, scope,
+				syntax_dimensions[i].as.range.right);
+		if (left.index == PIGEN_INVALID_ID ||
+			(syntax_dimensions[i].form == PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE &&
+			right.index == PIGEN_INVALID_ID))
+		{
+			free(dimensions);
+			fail_location(resolver, syntax_dimensions[i].location,
+				"signal dimension requires constant expressions");
+			return INVALID_ID(pigen_shape_id);
+		}
+		if (dimensions[i].form == PIGEN_SHAPE_DIMENSION_COUNT)
+			dimensions[i].as.count = pigen_expr_constant(resolver->model, left);
+		else
+		{
+			dimensions[i].as.range.left =
+				pigen_expr_constant(resolver->model, left);
+			dimensions[i].as.range.right =
+				pigen_expr_constant(resolver->model, right);
+		}
+	}
+	result = pigen_shape_intern(resolver->model, dimensions,
+		syntax_declarator->dimension_count);
+	free(dimensions);
+	if (result.index == PIGEN_INVALID_ID)
+		fail_location(resolver, declarator->location, "invalid signal shape");
+	return result;
+}
+
 static pigen_transfer_type semantic_transfer_type(
 	pigen_transfer_type transfer_type)
 {
@@ -168,7 +232,7 @@ static pigen_semantic_direction semantic_direction(pigen_syntax_direction direct
 	return PIGEN_SEMANTIC_INTERNAL;
 }
 
-static pigen_transfer_type semantic_static_transfer_type(
+static pigen_transfer_type resolve_static_transfer_type(
 	pigen_transfer_type transfer_type)
 {
 	if (transfer_type != PIGEN_TRANSFER_TYPE_WIRE &&
@@ -247,12 +311,15 @@ static int add_signal_declaration(resolver *resolver,
 			declarator_id);
 		pigen_symbol_id symbol;
 		pigen_signal_id signal;
+		pigen_shape_id shape;
 		pigen_declare_result declared;
 
 		if (!declarator ||
 			declarator->kind != PIGEN_SYNTAX_SIGNAL_DECLARATOR)
 			return fail_location(resolver, syntax_node->location,
 				"invalid signal declarator");
+		shape = resolve_shape(resolver, module->scope, declarator);
+		if (shape.index == PIGEN_INVALID_ID) return 0;
 		declared = pigen_symbol_declare(model, module->scope,
 			PIGEN_SYMBOL_SIGNAL, data_type,
 			token_spelling(resolver,
@@ -267,7 +334,7 @@ static int add_signal_declaration(resolver *resolver,
 			return fail_location(resolver, syntax_node->location,
 				"invalid signal declaration");
 		signal = pigen_signal_add(model, declarator_id, module_id, symbol,
-			data_type, pigen_semantic_scalar_shape(model), depth,
+			data_type, shape, depth,
 			semantic_transfer_type(
 				syntax_node->as.signal_declaration.transfer_type),
 			semantic_direction(
@@ -298,11 +365,14 @@ static int add_static_signal_declaration(resolver *resolver,
 			declarator_id);
 		pigen_symbol_id symbol;
 		pigen_signal_id signal;
+		pigen_shape_id shape;
 		pigen_declare_result declared;
 
 		if (!declarator || declarator->kind != PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR)
 			return fail_location(resolver, syntax_node->location,
 				"invalid signal declarator");
+		shape = resolve_shape(resolver, module->scope, declarator);
+		if (shape.index == PIGEN_INVALID_ID) return 0;
 		declared = pigen_symbol_declare(model, module->scope,
 			PIGEN_SYMBOL_SIGNAL, type,
 			token_spelling(resolver, declarator->as.static_signal_declarator.name),
@@ -314,8 +384,8 @@ static int add_static_signal_declaration(resolver *resolver,
 			return fail_location(resolver, syntax_node->location,
 				"invalid signal declaration");
 		signal = pigen_signal_add(model, declarator_id, module_id, symbol, type,
-			pigen_semantic_scalar_shape(model), INVALID_ID(pigen_expr_id),
-			semantic_static_transfer_type(syntax_node->as.static_signal_declaration.transfer_type),
+			shape, INVALID_ID(pigen_expr_id),
+			resolve_static_transfer_type(syntax_node->as.static_signal_declaration.transfer_type),
 			semantic_direction(syntax_node->as.static_signal_declaration.direction),
 			syntax_node->location.source_span);
 		if (signal.index == PIGEN_INVALID_ID)
@@ -508,6 +578,8 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	pigen_lvalue_id destination = pigen_lvalue_resolve(model,
 		destination_expression);
 	pigen_expr_id value;
+	const pigen_semantic_expr *destination_value;
+	const pigen_semantic_expr *source_value;
 	pigen_transfer_id transfer;
 	pigen_transfer_signal_use *signal_uses = NULL;
 	size_t signal_use_count = 0;
@@ -520,6 +592,12 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	if (value.index == PIGEN_INVALID_ID)
 		return fail_location(resolver, assignment->location,
 			"transfer value requires a supported expression");
+	destination_value = pigen_expr_get(model, destination_expression);
+	source_value = pigen_expr_get(model, value);
+	if (!destination_value || !source_value ||
+		destination_value->shape.index != source_value->shape.index)
+		return fail_location(resolver, assignment->location,
+			"transfer shape mismatch");
 	if (!lvalue_is_assignable(model, destination))
 		return fail_location(resolver, assignment->location,
 			"transfer destination is not a writable variable or signal");

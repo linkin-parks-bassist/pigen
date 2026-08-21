@@ -338,8 +338,10 @@ structured frontend and semantic middle. Source, syntax, names, types,
 shapes, expressions, clock domains, transfers and ownership are represented
 explicitly. Canonical shape identities are shared by signals and expressions,
 so array compatibility is structural rather than a comparison of rendered
-brackets. Pipelines, FSMs and fabrics will all lower through those shared
-semantics to an elastic RTL representation and then SystemVerilog.
+brackets. Recognized post-name dimensions are already parsed once into that
+structure; indexing an unpacked shape removes its leading dimension before any
+packed bit indexing applies. Pipelines, FSMs and fabrics will all lower through
+those shared semantics to an elastic RTL representation and then SystemVerilog.
 
 The target compiler parses each source construct once. Semantic resolution
 consumes syntax objects, lowering consumes semantic identities, and emission

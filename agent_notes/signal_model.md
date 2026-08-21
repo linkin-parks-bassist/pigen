@@ -94,15 +94,25 @@ Packed dimensions remain in the data type; unpacked declarator dimensions form
 the shape. This preserves locality through one direct ID while avoiding
 duplicated dimension lists across signals and expressions.
 
+Recognized declarators now parse their post-name brackets once into ordered
+syntax-shape dimensions. Semantic resolution requires constant expressions,
+interns the resulting shape, and attaches its ID to the signal. A symbol
+expression inherits that same ID, and direct transfers reject unequal shape
+IDs without rendering either shape back to text. Indexing consumes the leading
+unpacked shape dimension while preserving the data type; packed indexing begins
+only at scalar shape. Unpacked slices and concatenations currently reject
+shaped operands rather than silently flattening them.
+
 The descriptor still needs a precise storage/lowering representation; do not hide
 the distinct `buf`, `port`, `fifo`, and `skid` realizations behind a vague
 boolean merely to tick the plan item. Those are the remaining parts of phase 1,
 not reasons to recreate parallel signal APIs.
 
-After the one-arena and canonical-shape cutovers, terminology audit, and
-ownership-law integration, `make verify` completed successfully on 2026-08-21.
+After the one-arena, canonical-shape, and structured declarator-shape cutovers,
+terminology audit, and ownership-law integration, `make verify` completed
+successfully on 2026-08-21.
 This proves the current
 replacement-middle tests and production behavioral suite still pass; it does
-not prove the architecture cutover complete. In particular,
-declaration-shape parsing, storage/lowering laws, generic input specialization,
-RTL IR, and production integration remain open.
+not prove the architecture cutover complete. In particular, the complete
+target data-first declaration grammar, storage/lowering laws, generic input
+specialization, RTL IR, and production integration remain open.

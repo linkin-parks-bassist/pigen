@@ -88,12 +88,14 @@ The unlinked replacement modules already provide:
 - macro invocation, definition, formal, and actual-token origin chains;
 - conditional compilation and recursive include provenance;
 - a partial hierarchical syntax tree with explicit opaque nodes;
+- ordered declarator count/range dimensions resolved to canonical shapes;
 - source-order parameters, typedefs, ordinary declarations, and prototype
   `buf`/`port`/`fifo`/`skid` declarations;
 - scopes, symbols, stable identities, and structural packed data types;
 - canonical structural shape identities shared by signals and expressions;
 - a shared expression parser with structural operators, concatenations,
-  indexing, and part selects;
+  indexing, and part selects; unpacked indexing consumes canonical shape
+  dimensions before packed indexing applies;
 - canonical constant-expression DAGs and symbolic width sums/products;
 - typed expression and recursive lvalue resolution;
 - expression-use analysis with projections, contexts, and predicates;
@@ -117,9 +119,9 @@ The replacement middle now has one signal identity arena and one symbol
 binding for statics and the other transfer types. Expression-use analysis and
 direct-transfer incidence retain every participating signal; the central
 transfer-type descriptor supplies consumption, production, ownership, and
-domain behavior. Canonical shape identities are explicit as well; declaration
-shape parsing and the full storage/lowering laws remain before this phase is
-complete.
+domain behavior. Canonical shape identities and recognized declarator shapes
+are explicit as well; the full storage/lowering laws remain before this phase
+is complete.
 
 As a rough architecture estimate, the replacement effort is about **25%**
 complete overall: the reusable frontend and semantic foundation is around
@@ -130,7 +132,8 @@ estimate, not line-count progress.
 ## Remaining cutover boundary
 
 The structured frontend still lacks complete target declarations, abstract
-input transfer types, declaration-shape parsing, cases, atomic blocks, signal actions,
+input transfer types, the complete target data-first declaration grammar,
+cases, atomic blocks, signal actions,
 pipelines, FSMs, instances, and fabrics. Expression typing still lacks several
 SystemVerilog contextual and aggregate forms. Preprocessing still lacks token
 concatenation, stringification, and required advanced macro arguments.
