@@ -1,48 +1,48 @@
 # Pigen
 
 Pigen (short for **pi**peline **gen**erator) is a SystemVerilog extension for
-building synchronous, flow-controlled hardware. It adds values that carry data
-together with the flow control needed to move it, and makes transfer between
-those values a first-class part of the language.
+building synchronous, flow-controlled hardware. It adds `buf`, `port`, `fifo`
+and `skid` types alongside SystemVerilog's `wire`, `reg` and `logic`. These new
+types bundle a data payload with automatically generated ready/valid flow
+control. Pigen extends non-blocking assignment to them, so
+`destination <= source` performs the appropriate handshake as part of the
+assignment.
 
 The aim is an ennicening of Verilog. The hardware is still there: widths,
 clocks, storage, timing boundaries and cycle behaviour remain explicit. What
 Pigen takes away is the repeated flow-control bookkeeping that tends to bury the
 actual design.
 
-Pigen compiles `.pigen` files to readable, synthesizable SystemVerilog. It is
-pre-release, but already implements transfers, elastic pipelines, queues,
-state machines and routed fabrics.
+Pigen compiles `.pigen` files to readable, synthesizable SystemVerilog.
 
-## Transport values: data with its handshake
+## Types with built-in flow control
 
-A Pigen transport value is one logical value in the source language. In the
-emitted RTL, the compiler represents it as a bundle: a data payload and a
-`valid` signal travel from producer to consumer, while a `ready` signal travels
-back from consumer to producer. Pigen creates and connects that bundle
-automatically, along with any storage and control state required by the
-declaration.
+Each of Pigen's new types represents one logical value in the source language.
+In the emitted RTL, the compiler represents it as a bundle: a data payload and
+a `valid` signal travel from producer to consumer, while a `ready` signal
+travels back from consumer to producer. Pigen creates and connects that bundle
+automatically, along with the storage and control state required by the type.
 
 `valid` means that the producer is offering a value. `ready` means that the
 consumer can accept it. When both are high on a clock edge, the consumer
 accepts the offered value. That event is a *transfer*.
 
-The data type says what the payload is. The *transport kind* says how the value
-is stored and how its handshake behaves. The name is not especially sacred;
-the distinction it describes is important.
+The type determines how the value is stored and how its handshake behaves.
+Existing Verilog values fit the same model as degenerate cases, so all of these
+types participate in the same operation.
 
-| Kind | Valid behaviour | Ready behaviour | What it is |
+| Type | Valid behaviour | Ready behaviour | What it is |
 | --- | --- | --- | --- |
 | `wire` | Always valid | Never a destination | An always-offered combinational value |
-| `reg` | Always valid | Always ready | A persistent registered value; reading it does not consume it |
+| `reg`, `logic` | Always valid | Always ready | A persistent registered value; reading it does not consume it |
 | `buf` | Valid when occupied | Ready when it can accept | A one-entry elastic register |
 | `port` | A one-cycle pulse | Always ready | A registered result offered for one cycle |
 | `fifo` | Valid when non-empty | Ready when non-full | An ordered, depth-N queue |
 | `skid` | Valid when non-empty | Ready when non-full | A two-entry skid buffer with registered backpressure |
 
-Ordinary SystemVerilog `logic` behaves like `reg` in this model. `wire` and
-`reg` are the degenerate cases: neither needs flow-control state, but both take
-part in the same transfer language as `buf`, `port`, `fifo` and `skid`.
+`wire`, `reg` and `logic` do not need flow-control state, but they take part in
+the same transfer language as `buf`, `port`, `fifo` and `skid`. Their constant
+handshake behaviour is simply folded away in the generated hardware.
 
 ## The transfer is the fundamental unit
 
@@ -66,13 +66,6 @@ This is the central idea of Pigen. A wire and a FIFO are very different pieces
 of hardware, but a transfer involving either means the same thing. The
 handshake may be tied high, last one cycle, or remain stalled for ten cycles;
 the surrounding logic does not need a special case.
-
-The transport kind is therefore a local implementation choice. Pigen's
-intended module interface reflects that: an input may optionally request a
-particular kind, but an unqualified input is still emitted with payload, valid
-and ready. The module does not need to know whether its caller connected a
-wire, a register or a queue. It sees the same transfer interface in every case.
-This generic-input form is planned rather than implemented today.
 
 Here is a complete elastic path:
 
@@ -296,6 +289,13 @@ byte         tag;
 means an `n`-bit value and lowers to SystemVerilog's `[n-1:0]`; array dimensions
 remain after the name. Ordinary declarations such as
 `logic [21:0] h[0:12];` keep their usual SystemVerilog meaning.
+
+The transport kind is a local implementation choice. Pigen's intended module
+interface reflects that: an input may optionally request a particular kind,
+but an unqualified input is still emitted with payload, valid and ready. The
+module does not need to know whether its caller connected a wire, a register or
+a queue. It sees the same transfer interface in every case. This generic-input
+form is planned rather than implemented today.
 
 The current compiler still uses transport-first declarations such as
 `buf [31:0] packet`. The data-first syntax and generic module inputs will
