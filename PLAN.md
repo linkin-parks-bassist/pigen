@@ -79,6 +79,13 @@ emitter.
 
 ### 2. Complete the shared frontend
 
+- [ ] Establish one centralized primitive data-type algebra. Canonical types
+  must expose representation, signedness, state domain, numerical
+  interpretation, compatibility, conversion, and operator-result semantics
+  through shared APIs; unrelated passes must not enumerate primitive types.
+- [ ] Route expression typing and lowering through resolved type decisions so
+  signed and unsigned arithmetic, shifts, widening, and future fixed-point
+  scaling are decided once and carried forward structurally.
 - [ ] Parse target data-first declarations and declaration shapes structurally.
 - [ ] Preserve ordinary SystemVerilog declarations without reinterpreting
   explicit ranges or unrelated expression indexing.
@@ -198,5 +205,8 @@ to `SPEC.md` where language-visible:
   backpressure, atomicity, and throughput coverage appropriate to it.
 - [ ] Every deliberate SystemVerilog restriction is specified and diagnosed at
   its original source location.
+- [ ] Adding, renaming, or deleting a primitive data type is localized to the
+  data-type subsystem, its syntax/emission boundary mappings, specification,
+  and focused tests; unrelated semantic and feature passes remain unchanged.
 - [ ] Generated SystemVerilog and fabric SVGs are deterministic for identical
   inputs and options.

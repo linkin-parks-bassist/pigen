@@ -59,6 +59,43 @@ The compiler middle owns one implementation of each concern:
 - clock domains, ownership, and ready-dependency validation;
 - collision-safe generated names and terminal emission.
 
+## Global shape, local knowledge
+
+David's architectural criterion is ease of coherent experimentation. Pigen's
+primitive catalogue and language surface will change repeatedly; the compiler
+must make those changes local without pretending that genuinely new semantics
+are free. A subsystem knows the global shape of its inputs and outputs while
+remaining ignorant of concrete cases owned elsewhere.
+
+For data types, canonical `pigen_type_id` values are the link between
+layers, but identity alone is insufficient. One data-type subsystem must own
+representation, width, signedness, state domain, numerical interpretation,
+compatibility, conversion, operator typing, and lowering-facing semantics.
+Expression resolution asks that subsystem what an operation means and stores
+the resolved result type, conversions, and operation semantics. Later passes
+consume those decisions; they do not switch independently over `int`, `uint`,
+`byte`, or future fixed-point constructors.
+
+The current replacement implementation does not yet meet this criterion. Its
+syntax enum, semantic enum, integral predicates, packed-width logic, selection
+logic, and concatenation state-domain logic contain duplicated concrete-type
+knowledge. Treat these as scaffolding to consolidate before implementing the
+target primitive set. Do not extend every existing switch when adding `int`,
+`uint`, or `byte`.
+
+The practical architecture test is a hypothetical primitive change. Its
+necessary edits should be confined to the data-type subsystem, source-spelling
+and backend boundary mappings where applicable, specification, and focused
+tests. If predicates, expression walkers, transfers, pipelines, FSMs, or
+fabrics require primitive-specific branches, stop and repair the boundary.
+This rule generalizes: every varying catalogue should have one owner, and other
+layers should depend on its laws or capabilities rather than its members.
+
+This is deliberately not a runtime registry or a universal plugin system. Use
+small compile-time tables, tagged structural records, and centralized functions
+where they express actual variation. The goal is the right abstraction level:
+global structure, contained detail, and no duplicated self-knowledge.
+
 Pipelines, transfers, FSMs, and fabrics consume these services and produce
 common semantic objects. No feature privately reparses names, expressions,
 types, guards, or generated text.
