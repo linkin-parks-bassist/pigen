@@ -74,6 +74,8 @@ typedef enum {
 	PIGEN_SEMANTIC_SELECT_INDEXED_DOWN
 } pigen_select_kind;
 
+int pigen_select_kind_is_valid(pigen_select_kind kind);
+
 typedef struct {
 	pigen_const_expr_id left;
 	pigen_const_expr_id right;

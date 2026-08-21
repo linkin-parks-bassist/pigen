@@ -421,6 +421,12 @@ pigen_const_expr_id pigen_const_expr_intern_select_width(
 pigen_const_expr_id pigen_const_expr_intern_concatenation(
 	pigen_semantic_model *model, const pigen_const_expr_id *children,
 	size_t count, pigen_type_id type);
+pigen_const_expr_id pigen_const_expr_intern_width_sum(
+	pigen_semantic_model *model, const pigen_const_expr_id *terms,
+	size_t count);
+pigen_const_expr_id pigen_const_expr_intern_width_product(
+	pigen_semantic_model *model, const pigen_const_expr_id *factors,
+	size_t count);
 const pigen_const_expr_id *pigen_const_expr_children(
 	const pigen_semantic_model *model, size_t first, size_t count);
 const pigen_const_expr *pigen_const_expr_get(
