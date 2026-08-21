@@ -1,26 +1,27 @@
 # README maintenance
 
-`README.md` is the public statement of what Pigen is and where it is going. Keep
-it readable as an introduction rather than turning it into a changelog or an
-exhaustive specification.
+`README.md` is the short public introduction to Pigen. Its job is to explain
+why the project exists and make the central idea legible to a hardware designer,
+not to summarize the compiler architecture, specification, plan, or development
+process.
 
-The README must distinguish three layers which currently evolve at different
-speeds:
+Front-load transfer types. They are Pigen's defining feature: ordinary
+SystemVerilog signals and elastic storage elements share one ready/valid
+transfer interface, and `<=` performs that transfer. Examples should make the
+resulting uniformity and removal of handshake bookkeeping concrete.
 
-1. The semantic idea: atomic ready/valid transfer and explicit transfer-type
-   policy.
-2. The syntax and features accepted by the production compiler, for which
-   `USER_GUIDE.md` and the tests are the practical references during migration.
-3. The intended v1 language surface and structured compiler architecture, for
-   which `SPEC.md` is authoritative but which must not be presented as already
-   implemented.
+Assume readers already know that Verilog has data types. Mention declaration
+syntax only as much as examples require, and leave primitive rules, signedness,
+packing, arrays, and other exact language semantics to `SPEC.md`. Never expose
+compiler terms such as canonical identity, declarator shape, alias record, or
+semantic lowering in the opening pitch. Syntactic sugar must not compete with
+the transfer-type idea for attention.
 
-Update the README whenever a planned syntax becomes authoritative, the
-production compiler changes architecture, or a major feature changes the
-project-level story. Runnable snippets must use syntax accepted by the current
-compiler unless a snippet is plainly labelled as intended syntax.
+Keep the tone direct and technical without becoming exhaustive or promotional.
+Architecture status belongs in `PLAN.md` and `agent_notes/`; currently accepted
+syntax belongs in `USER_GUIDE.md`. The README may link to those documents rather
+than reproducing them. Do not add AI acknowledgements or development-process
+copy unless David explicitly wants it there.
 
-Keep the AI acknowledgement factual. David directs the project; agents are
-used throughout engineering and documentation. Avoid unverifiable authorship
-claims and avoid turning the acknowledgement into either marketing or an
-apology.
+Runnable snippets must use syntax accepted by the current compiler unless they
+are plainly labelled as intended syntax.
