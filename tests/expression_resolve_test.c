@@ -45,9 +45,9 @@ int main(void)
 	pigen_semantic_model model;
 	pigen_scope_id scope;
 	pigen_module_id module;
-	pigen_type_id integer_type;
-	pigen_type_id boolean_type;
-	pigen_type_id aliased_type;
+	pigen_data_type_id integer_type;
+	pigen_data_type_id boolean_type;
+	pigen_data_type_id aliased_type;
 	pigen_symbol_id module_symbol;
 	pigen_symbol_id width;
 	pigen_symbol_id left;
@@ -96,7 +96,7 @@ int main(void)
 		INVALID_ID(pigen_scope_id),
 		(pigen_source_span){INVALID_ID(pigen_source_id), 0, 0});
 	assert(pigen_symbol_declare(&model, model.compilation_scope,
-		PIGEN_SYMBOL_MODULE, INVALID_ID(pigen_type_id),
+		PIGEN_SYMBOL_MODULE, INVALID_ID(pigen_data_type_id),
 		(pigen_source_span){source, 0, 5},
 		(pigen_source_span){source, 0, strlen(text)}, &module_symbol, NULL) ==
 		PIGEN_DECLARE_OK);
@@ -105,8 +105,8 @@ int main(void)
 	module = pigen_module_add(&model, (pigen_syntax_id){0}, module_symbol,
 		scope, (pigen_source_span){source, 0, strlen(text)});
 	assert(module.index != PIGEN_INVALID_ID);
-	integer_type = pigen_semantic_integer_type(&model);
-	boolean_type = pigen_semantic_boolean_result_type(&model);
+	integer_type = pigen_data_type_integer(&model);
+	boolean_type = pigen_data_type_boolean(&model);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_PARAMETER,
 		integer_type, (pigen_source_span){source, 0, 5},
 		(pigen_source_span){source, 0, 5}, &width, &shadowed) ==
@@ -129,8 +129,8 @@ int main(void)
 			(size_t)(strstr(text, "word_t") - text),
 			(size_t)(strstr(text, "word_t") - text) + strlen("word_t")},
 		&word_type_symbol, &shadowed) == PIGEN_DECLARE_OK);
-	aliased_type = pigen_type_intern(&model, PIGEN_TYPE_NAMED,
-		PIGEN_SIGN_IMPLICIT, word_type_symbol, NULL, 0);
+	aliased_type = pigen_data_type_alias(&model, word_type_symbol,
+		PIGEN_SIGN_IMPLICIT, NULL, 0);
 	assert(aliased_type.index != PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_SIGNAL,
 		aliased_type,
@@ -171,7 +171,7 @@ int main(void)
 		runtime_syntax);
 	known = pigen_expr_get(&model, runtime);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
-	assert(known->type.index == integer_type.index);
+	assert(known->data_type.index == integer_type.index);
 	assert(known->as.binary.operator == PIGEN_BINARY_ADD);
 	left_read = pigen_expr_get(&model, known->as.binary.left);
 	width_read = pigen_expr_get(&model, known->as.binary.right);
@@ -191,7 +191,7 @@ int main(void)
 		comparison_syntax);
 	known = pigen_expr_get(&model, comparison);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
-	assert(known->type.index == boolean_type.index);
+	assert(known->data_type.index == boolean_type.index);
 	assert(known->as.binary.operator == PIGEN_BINARY_EQUAL);
 	assert(pigen_expr_constant(&model, comparison).index == PIGEN_INVALID_ID);
 
@@ -199,7 +199,7 @@ int main(void)
 		constant_syntax);
 	known = pigen_expr_get(&model, constant);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
-	assert(known->type.index == integer_type.index);
+	assert(known->data_type.index == integer_type.index);
 	assert(pigen_const_expr_get(&model,
 		pigen_expr_constant(&model, constant)) != NULL);
 
@@ -207,7 +207,7 @@ int main(void)
 		constant_index_syntax);
 	known = pigen_expr_get(&model, constant_index);
 	assert(known && known->kind == PIGEN_EXPR_INDEX);
-	assert(known->type.index == boolean_type.index);
+	assert(known->data_type.index == boolean_type.index);
 	assert(pigen_const_expr_get(&model,
 		pigen_expr_constant(&model, constant_index))->kind ==
 		PIGEN_CONST_EXPR_INDEX);
@@ -216,7 +216,7 @@ int main(void)
 		runtime_index_syntax);
 	known = pigen_expr_get(&model, runtime_index);
 	assert(known && known->kind == PIGEN_EXPR_INDEX);
-	assert(known->type.index == boolean_type.index);
+	assert(known->data_type.index == boolean_type.index);
 	assert(pigen_expr_constant(&model, runtime_index).index ==
 		PIGEN_INVALID_ID);
 
@@ -265,8 +265,8 @@ int main(void)
 		swapped_concat_syntax);
 	known = pigen_expr_get(&model, runtime_concat);
 	assert(known && known->kind == PIGEN_EXPR_CONCATENATION);
-	assert(known->type.index ==
-		pigen_expr_get(&model, swapped_concat)->type.index);
+	assert(known->data_type.index ==
+		pigen_expr_get(&model, swapped_concat)->data_type.index);
 	assert(pigen_expr_constant(&model, runtime_concat).index ==
 		PIGEN_INVALID_ID);
 	{
@@ -283,12 +283,12 @@ int main(void)
 		aliased_add_syntax);
 	known = pigen_expr_get(&model, aliased_add);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
-	assert(known->type.index == aliased_type.index);
+	assert(known->data_type.index == aliased_type.index);
 	aliased_compare = pigen_resolve_expression(&syntax, &model, scope,
 		aliased_compare_syntax);
 	known = pigen_expr_get(&model, aliased_compare);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
-	assert(known->type.index == boolean_type.index);
+	assert(known->data_type.index == boolean_type.index);
 
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_expr_arena(&syntax.expressions);

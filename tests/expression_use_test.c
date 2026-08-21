@@ -232,8 +232,8 @@ int main(void)
 		(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_LVALUE));
 
 	pigen_free_expression_use_analysis(&analysis);
-	assert(indexed->type.index ==
-		pigen_semantic_boolean_result_type(&model).index);
+	assert(indexed->data_type.index ==
+		pigen_data_type_boolean(&model).index);
 	assert(pigen_analyze_expression_uses(&model, index_expression, always,
 		PIGEN_EXPRESSION_USE_READ, &analysis));
 	assert(analysis.use_count == 2);
@@ -254,8 +254,8 @@ int main(void)
 	assert(index_lvalue.index != PIGEN_INVALID_ID);
 	assert(pigen_lvalue_get(&model, index_lvalue)->expression.index ==
 		index_lvalue_expression.index);
-	assert(pigen_lvalue_get(&model, index_lvalue)->type.index ==
-		pigen_semantic_boolean_result_type(&model).index);
+	assert(pigen_lvalue_get(&model, index_lvalue)->data_type.index ==
+		pigen_data_type_boolean(&model).index);
 	assert(pigen_lvalue_get(&model, index_lvalue)->kind ==
 		PIGEN_LVALUE_PROJECTION);
 	assert(pigen_lvalue_get(&model,
@@ -293,10 +293,11 @@ int main(void)
 		select_lvalue_projection->kind == PIGEN_EXPR_SELECT);
 	assert(select_lvalue_projection->as.select.kind ==
 		PIGEN_SEMANTIC_SELECT_INDEXED_UP);
-	select_dimensions = pigen_type_dimensions(&model,
-		select_lvalue_root->type);
+	select_dimensions = pigen_data_type_dimensions(&model,
+		select_lvalue_root->data_type);
 	assert(select_dimensions &&
-		pigen_type_get(&model, select_lvalue_root->type)->dimension_count == 1);
+		pigen_data_type_dimension_count(&model,
+			select_lvalue_root->data_type) == 1);
 	select_upper = pigen_const_expr_get(&model, select_dimensions->left);
 	assert(select_upper && select_upper->kind == PIGEN_CONST_EXPR_BINARY &&
 		select_upper->as.binary.operator == PIGEN_BINARY_SUBTRACT);

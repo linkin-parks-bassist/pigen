@@ -363,6 +363,13 @@ subsystem alone recognizes primitive spellings; only an unrecognized spelling
 is looked up as a typedef. Thus the parser knows the grammar's shape without
 knowing the language's current primitive catalogue.
 
+Canonical data types cross subsystem boundaries only as opaque
+`pigen_data_type_id` values. Their constructor tags, interning representation,
+and alias encoding remain private to the data-type implementation. Other layers
+carry data-type identities and ask focused questions about signedness, state
+domain, packed layout, aliases, or operation results instead of inspecting the
+catalogue.
+
 That work is in progress. The current compiler is useful, but Pigen should be
 treated as an experimental language whose syntax and generated implementation
 will continue to change.

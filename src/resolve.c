@@ -78,13 +78,13 @@ static pigen_expr_id resolve_constant(resolver *resolver, pigen_scope_id scope,
 		scope, syntax_id);
 }
 
-static pigen_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
+static pigen_data_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 	const pigen_syntax_type *syntax_type)
 {
 	pigen_signedness signedness;
 	pigen_packed_dimension *dimensions = NULL;
 	const pigen_syntax_dimension *syntax_dimensions;
-	pigen_type_id result;
+	pigen_data_type_id result;
 	size_t i;
 
 	if (syntax_type->signedness == PIGEN_SYNTAX_SIGN_SIGNED)
@@ -102,7 +102,7 @@ static pigen_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 		if (!syntax_dimensions)
 		{
 			free(dimensions);
-			return INVALID_ID(pigen_type_id);
+			return INVALID_ID(pigen_data_type_id);
 		}
 		for (i = 0; i < syntax_type->dimension_count; i++)
 		{
@@ -116,7 +116,7 @@ static pigen_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
 				fail_location(resolver, syntax_dimensions[i].location,
 					"packed bounds require constant expressions");
 				free(dimensions);
-				return INVALID_ID(pigen_type_id);
+				return INVALID_ID(pigen_data_type_id);
 			}
 			dimensions[i].left = pigen_expr_constant(resolver->model, left);
 			dimensions[i].right = pigen_expr_constant(resolver->model, right);
@@ -261,7 +261,7 @@ static int add_parameter(resolver *resolver, pigen_module_id module_id,
 		return fail_location(resolver, syntax_node->location,
 			"parameter value requires a supported constant integer expression");
 	declared = pigen_symbol_declare(model, module->scope,
-		PIGEN_SYMBOL_PARAMETER, expression->type,
+		PIGEN_SYMBOL_PARAMETER, expression->data_type,
 		token_spelling(resolver, syntax_node->as.parameter.name),
 		syntax_node->location.source_span, &symbol, NULL);
 	if (declared == PIGEN_DECLARE_DUPLICATE)
@@ -283,7 +283,7 @@ static int add_signal_declaration(resolver *resolver,
 {
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
-	pigen_type_id data_type;
+	pigen_data_type_id data_type;
 	pigen_expr_id depth = INVALID_ID(pigen_expr_id);
 	pigen_syntax_id declarator_id;
 
@@ -354,7 +354,7 @@ static int add_static_signal_declaration(resolver *resolver,
 {
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
-	pigen_type_id type = resolve_type(resolver, module->scope,
+	pigen_data_type_id type = resolve_type(resolver, module->scope,
 		&syntax_node->as.static_signal_declaration.type);
 	pigen_syntax_id declarator_id;
 
@@ -400,7 +400,7 @@ static int add_static_signal_declaration(resolver *resolver,
 static int add_typedef(resolver *resolver, pigen_scope_id scope,
 	const pigen_syntax_node *syntax_node)
 {
-	pigen_type_id underlying = resolve_type(resolver, scope,
+	pigen_data_type_id underlying = resolve_type(resolver, scope,
 		&syntax_node->as.type_definition.type);
 	pigen_symbol_id symbol;
 	pigen_declare_result declared;
@@ -741,7 +741,7 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	pigen_syntax_id child;
 
 	declared = pigen_symbol_declare(model, model->compilation_scope,
-		PIGEN_SYMBOL_MODULE, INVALID_ID(pigen_type_id),
+		PIGEN_SYMBOL_MODULE, INVALID_ID(pigen_data_type_id),
 		token_spelling(resolver, syntax_node->as.module.name),
 		syntax_node->location.source_span, &symbol, NULL);
 	if (declared == PIGEN_DECLARE_DUPLICATE)

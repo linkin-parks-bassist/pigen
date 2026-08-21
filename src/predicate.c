@@ -11,7 +11,7 @@ static int integral_condition(const pigen_semantic_model *model,
 	pigen_expr_id expression)
 {
 	const pigen_semantic_expr *known = pigen_expr_get(model, expression);
-	return known && pigen_data_type_is_integral(model, known->type);
+	return known && pigen_data_type_is_integral(model, known->data_type);
 }
 
 static int same_atoms(const pigen_semantic_model *model,

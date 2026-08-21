@@ -67,7 +67,7 @@ must make those changes local without pretending that genuinely new semantics
 are free. A subsystem knows the global shape of its inputs and outputs while
 remaining ignorant of concrete cases owned elsewhere.
 
-For data types, canonical `pigen_type_id` values are the link between
+For data types, canonical `pigen_data_type_id` values are the link between
 layers, but identity alone is insufficient. One data-type subsystem must own
 representation, width, signedness, state domain, numerical interpretation,
 compatibility, conversion, operator typing, and lowering-facing semantics.
@@ -81,8 +81,12 @@ The current replacement implementation does not yet fully meet this criterion.
 catalogue, canonical interning, builtin identities, alias unwrapping, packed
 layout, projection, width, state domain, concatenation, sized-logic
 construction, integral capability, and current unary, binary, and conditional
-result rules. The general semantic implementation, expression resolution, and
-predicate construction no longer enumerate primitive constructors. Syntax
+result rules. Constructor tags, raw interning, and the canonical record are
+private to `src/data_type.c`; the public boundary exposes opaque
+`pigen_data_type_id` identities and focused semantic queries. Semantic symbols,
+expressions, constant expressions, lvalues, and signals name their data-type
+field explicitly. The general semantic implementation, expression resolution,
+and predicate construction no longer enumerate primitive constructors. Syntax
 retains an optional written base token without classifying it. Resolution asks
 the data-type subsystem to recognize primitive spelling, then considers typedef
 lookup only when no primitive matches. Contextual conversion insertion, richer
@@ -143,6 +147,8 @@ The unlinked replacement modules already provide:
 - a dedicated data-type interface and implementation owning canonical type
   construction, aliases, packed layout, projection, width, state domain,
   concatenation, and current operator-result typing;
+- opaque `pigen_data_type_id` values outside that owner; constructor tags, raw
+  interning, and concrete canonical records are not public compiler vocabulary;
 - syntax-level base-type spellings which remain unclassified until the
   data-type owner resolves primitive spelling or semantic resolution finds a
   typedef;

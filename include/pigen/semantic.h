@@ -99,7 +99,7 @@ typedef struct {
 	pigen_symbol_kind kind;
 	pigen_scope_id scope;
 	pigen_symbol_id previous_in_scope;
-	pigen_type_id type;
+	pigen_data_type_id data_type;
 	pigen_source_span name;
 	pigen_source_span declaration;
 	union {
@@ -115,7 +115,7 @@ typedef struct {
 
 typedef struct {
 	pigen_semantic_expr_kind kind;
-	pigen_type_id type;
+	pigen_data_type_id data_type;
 	pigen_shape_id shape;
 	pigen_source_span span;
 	pigen_const_expr_id constant;
@@ -158,7 +158,7 @@ typedef struct {
 
 typedef struct {
 	pigen_const_expr_kind kind;
-	pigen_type_id type;
+	pigen_data_type_id data_type;
 	union {
 		uint64_t integer;
 		struct { size_t first_state; size_t state_count; } bits;
@@ -218,7 +218,7 @@ typedef enum {
 typedef struct {
 	pigen_lvalue_kind kind;
 	pigen_expr_id expression;
-	pigen_type_id type;
+	pigen_data_type_id data_type;
 	pigen_source_span span;
 	union {
 		struct {
@@ -252,7 +252,7 @@ typedef struct {
 	pigen_syntax_id syntax;
 	pigen_module_id module;
 	pigen_symbol_id symbol;
-	pigen_type_id data_type;
+	pigen_data_type_id data_type;
 	pigen_shape_id shape;
 	pigen_expr_id fifo_depth;
 	pigen_transfer_type transfer_type;
@@ -301,12 +301,12 @@ typedef struct {
 
 struct pigen_semantic_model {
 	const pigen_source_manager *sources;
-	pigen_semantic_type *types;
-	size_t type_count;
-	size_t type_capacity;
-	pigen_packed_dimension *dimensions;
-	size_t dimension_count;
-	size_t dimension_capacity;
+	pigen_data_type *data_types;
+	size_t data_type_count;
+	size_t data_type_capacity;
+	pigen_packed_dimension *data_type_dimensions;
+	size_t data_type_dimension_count;
+	size_t data_type_dimension_capacity;
 	pigen_semantic_shape *shapes;
 	size_t shape_count;
 	size_t shape_capacity;
@@ -368,8 +368,8 @@ struct pigen_semantic_model {
 	size_t transfer_signal_use_count;
 	size_t transfer_signal_use_capacity;
 	pigen_scope_id compilation_scope;
-	pigen_type_id integer_type;
-	pigen_type_id boolean_result_type;
+	pigen_data_type_id integer_data_type;
+	pigen_data_type_id boolean_data_type;
 	pigen_shape_id scalar_shape;
 	pigen_predicate_id true_predicate;
 	pigen_predicate_id false_predicate;
@@ -393,34 +393,34 @@ const pigen_shape_dimension *pigen_shape_dimensions(
 pigen_shape_id pigen_shape_element(pigen_semantic_model *model,
 	pigen_shape_id shape);
 pigen_const_expr_id pigen_const_expr_intern_integer(
-	pigen_semantic_model *model, uint64_t value, pigen_type_id type);
+	pigen_semantic_model *model, uint64_t value, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_bits(pigen_semantic_model *model,
-	const pigen_bit_state *states, size_t state_count, pigen_type_id type);
+	const pigen_bit_state *states, size_t state_count, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_symbol(
-	pigen_semantic_model *model, pigen_symbol_id symbol, pigen_type_id type);
+	pigen_semantic_model *model, pigen_symbol_id symbol, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_unary(
 	pigen_semantic_model *model, pigen_unary_operator operator,
-	pigen_const_expr_id operand, pigen_type_id type);
+	pigen_const_expr_id operand, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_binary(
 	pigen_semantic_model *model, pigen_binary_operator operator,
-	pigen_const_expr_id left, pigen_const_expr_id right, pigen_type_id type);
+	pigen_const_expr_id left, pigen_const_expr_id right, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_conditional(
 	pigen_semantic_model *model, pigen_const_expr_id condition,
 	pigen_const_expr_id when_true, pigen_const_expr_id when_false,
-	pigen_type_id type);
+	pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_index(
 	pigen_semantic_model *model, pigen_const_expr_id base,
-	pigen_const_expr_id index, pigen_type_id type);
+	pigen_const_expr_id index, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_select(
 	pigen_semantic_model *model, pigen_const_expr_id base,
 	pigen_const_expr_id left, pigen_const_expr_id right,
-	pigen_select_kind kind, pigen_type_id type);
+	pigen_select_kind kind, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_select_width(
 	pigen_semantic_model *model, pigen_const_expr_id left,
 	pigen_const_expr_id right, pigen_select_kind kind);
 pigen_const_expr_id pigen_const_expr_intern_concatenation(
 	pigen_semantic_model *model, const pigen_const_expr_id *children,
-	size_t count, pigen_type_id type);
+	size_t count, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_width_sum(
 	pigen_semantic_model *model, const pigen_const_expr_id *terms,
 	size_t count);
@@ -434,23 +434,23 @@ const pigen_const_expr *pigen_const_expr_get(
 const pigen_bit_state *pigen_const_expr_bits(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
 pigen_expr_id pigen_expr_add_integer(pigen_semantic_model *model,
-	uint64_t value, pigen_type_id type, pigen_source_span span);
+	uint64_t value, pigen_data_type_id type, pigen_source_span span);
 pigen_expr_id pigen_expr_add_bits(pigen_semantic_model *model,
-	const pigen_bit_state *states, size_t state_count, pigen_type_id type,
+	const pigen_bit_state *states, size_t state_count, pigen_data_type_id type,
 	pigen_source_span span);
 pigen_expr_id pigen_expr_add_symbol(pigen_semantic_model *model,
-	pigen_symbol_id symbol, pigen_type_id type, pigen_source_span span);
+	pigen_symbol_id symbol, pigen_data_type_id type, pigen_source_span span);
 pigen_expr_id pigen_expr_add_group(pigen_semantic_model *model,
 	pigen_expr_id operand, pigen_source_span span);
 pigen_expr_id pigen_expr_add_unary(pigen_semantic_model *model,
 	pigen_unary_operator operator, pigen_expr_id operand,
-	pigen_type_id type, pigen_source_span span);
+	pigen_data_type_id type, pigen_source_span span);
 pigen_expr_id pigen_expr_add_binary(pigen_semantic_model *model,
 	pigen_binary_operator operator, pigen_expr_id left,
-	pigen_expr_id right, pigen_type_id type, pigen_source_span span);
+	pigen_expr_id right, pigen_data_type_id type, pigen_source_span span);
 pigen_expr_id pigen_expr_add_conditional(pigen_semantic_model *model,
 	pigen_expr_id condition, pigen_expr_id when_true, pigen_expr_id when_false,
-	pigen_type_id type, pigen_source_span span);
+	pigen_data_type_id type, pigen_source_span span);
 pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 	pigen_expr_id base, pigen_expr_id index, pigen_source_span span);
 pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
@@ -475,7 +475,7 @@ pigen_scope_id pigen_scope_add(pigen_semantic_model *model,
 const pigen_scope *pigen_scope_get(const pigen_semantic_model *model,
 	pigen_scope_id scope);
 pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
-	pigen_scope_id scope, pigen_symbol_kind kind, pigen_type_id type,
+	pigen_scope_id scope, pigen_symbol_kind kind, pigen_data_type_id type,
 	pigen_source_span name, pigen_source_span declaration,
 	pigen_symbol_id *declared, pigen_symbol_id *shadowed);
 pigen_symbol_id pigen_symbol_lookup(const pigen_semantic_model *model,
@@ -490,7 +490,7 @@ pigen_parameter_id pigen_parameter_add(pigen_semantic_model *model,
 	pigen_expr_id value, int is_local, pigen_source_span span);
 pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
-	pigen_type_id data_type, pigen_shape_id shape, pigen_expr_id fifo_depth,
+	pigen_data_type_id data_type, pigen_shape_id shape, pigen_expr_id fifo_depth,
 	pigen_transfer_type transfer_type, pigen_semantic_direction direction,
 	pigen_source_span span);
 int pigen_signal_bind_domain(pigen_semantic_model *model,

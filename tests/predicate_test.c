@@ -13,7 +13,7 @@ int main(void)
 	pigen_source_span a_span = {source, 0, 1};
 	pigen_source_span b_span = {source, 2, 3};
 	pigen_semantic_model model;
-	pigen_type_id integer_type;
+	pigen_data_type_id integer_type;
 	pigen_expr_id a;
 	pigen_expr_id b;
 	pigen_predicate_id true_predicate;
@@ -26,7 +26,7 @@ int main(void)
 	const pigen_predicate_atom *atoms;
 
 	pigen_semantic_init(&model, &sources);
-	integer_type = pigen_semantic_integer_type(&model);
+	integer_type = pigen_data_type_integer(&model);
 	a = pigen_expr_add_integer(&model, 1, integer_type, a_span);
 	b = pigen_expr_add_integer(&model, 2, integer_type, b_span);
 	true_predicate = pigen_predicate_true(&model);

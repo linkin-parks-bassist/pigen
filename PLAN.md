@@ -59,11 +59,13 @@ and range dimensions directly into those identities. Expression indexing
 consumes unpacked dimensions before packed dimensions; unsupported unpacked
 slices and concatenations are rejected rather than reinterpreted. The target
 data-first declaration grammar remains incomplete. Storage/lowering laws are
-not yet fully modeled. `data_type.h` and `data_type.c` now own canonical type
-construction, aliases, packed layout, projection, width, state domain,
+not yet fully modeled. `data_type.h` and `data_type.c` now own canonical
+data-type construction, aliases, packed layout, projection, width, state domain,
 concatenation, sized-logic construction, integral capability, and current
 operator-result typing. The general semantic and predicate layers consume that
-interface without enumerating primitives. Primitive spelling/resolution is now
+opaque interface without enumerating or inspecting primitive constructors.
+Semantic records carry explicit `pigen_data_type_id` fields rather than a
+generic type identity. Primitive spelling/resolution is now
 routed through that owner: syntax retains the written base token without
 classifying it, and resolution asks the data-type subsystem before considering
 a typedef. The target `int`, `uint`, and `byte` catalogue, data-first syntax,
@@ -88,7 +90,7 @@ emitter.
 
 ### 2. Complete the shared frontend
 
-- [ ] Establish one centralized primitive data-type algebra. Canonical types
+- [ ] Establish one centralized primitive data-type algebra. Canonical data types
   must expose representation, signedness, state domain, numerical
   interpretation, compatibility, conversion, and operator-result semantics
   through shared APIs; unrelated passes must not enumerate primitive types.

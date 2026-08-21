@@ -105,8 +105,9 @@ contract stated in `SPEC.md`.
   operation preserves an operand's exact type.
 - Canonical type construction, builtin identities, packed projection, width,
   state domain, and concatenation are owned by the same data-type subsystem.
-  General semantic objects may carry and query `pigen_type_id`; they do not
-  inspect the primitive catalogue.
+  General semantic objects carry explicitly named `pigen_data_type_id` fields
+  and use focused queries; they cannot inspect the private constructor tag,
+  canonical record, raw interning operation, or primitive catalogue.
 - Structured syntax stores the written base-type token, or absence for an
   implicit base. It does not classify primitive versus typedef. Primitive
   spelling is recognized only by the data-type subsystem during resolution;

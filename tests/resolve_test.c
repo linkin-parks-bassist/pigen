@@ -183,12 +183,12 @@ int main(void)
 	const pigen_semantic_lvalue *transfer_destination;
 	const pigen_semantic_expr *transfer_value;
 	const pigen_transfer_signal_use *transfer_uses;
-	const pigen_semantic_type *queue_type;
-	const pigen_semantic_type *left_type;
-	const pigen_semantic_type *boolean_type;
-	const pigen_semantic_type *signed_type;
-	const pigen_semantic_type *element_type;
-	const pigen_semantic_type *selected_type;
+	pigen_data_type_id queue_type;
+	pigen_data_type_id left_type;
+	pigen_data_type_id boolean_type;
+	pigen_data_type_id signed_type;
+	pigen_data_type_id element_type;
+	pigen_data_type_id selected_type;
 	pigen_symbol_id left_typedef;
 	const pigen_packed_dimension *queue_dimension;
 	const pigen_packed_dimension *left_dimension;
@@ -444,11 +444,12 @@ int main(void)
 	assert(nonzero_constant &&
 		nonzero_constant->kind == PIGEN_CONST_EXPR_UNARY &&
 		nonzero_constant->as.unary.operator == PIGEN_UNARY_REDUCTION_OR);
-	assert(enabled_value->type.index == nonzero_value->type.index);
-	boolean_type = pigen_type_get(&model, enabled_value->type);
-	assert(boolean_type && boolean_type->kind == PIGEN_TYPE_LOGIC &&
-		boolean_type->signedness == PIGEN_SIGN_UNSIGNED &&
-		boolean_type->dimension_count == 0);
+	assert(enabled_value->data_type.index == nonzero_value->data_type.index);
+	boolean_type = enabled_value->data_type;
+	assert(pigen_data_type_exists(&model, boolean_type) &&
+		pigen_data_type_signedness(&model, boolean_type) ==
+			PIGEN_SIGN_UNSIGNED &&
+		pigen_data_type_dimension_count(&model, boolean_type) == 0);
 	selected_value = pigen_expr_get(&model, selected->value);
 	selected_constant = pigen_const_expr_get(&model,
 		pigen_expr_constant(&model, selected->value));
@@ -461,7 +462,7 @@ int main(void)
 	assert(pigen_const_expr_get(&model,
 		selected_constant->as.conditional.when_true)->kind ==
 		PIGEN_CONST_EXPR_SYMBOL);
-	assert(selected_value->type.index == depth_value->type.index);
+	assert(selected_value->data_type.index == depth_value->data_type.index);
 	hex_value = pigen_expr_get(&model, hex->value);
 	binary_value = pigen_expr_get(&model, binary->value);
 	hex_constant = pigen_const_expr_get(&model,
@@ -472,7 +473,7 @@ int main(void)
 		binary_value->kind == PIGEN_EXPR_BITS);
 	assert(hex->value.index != binary->value.index);
 	assert(hex_value->constant.index == binary_value->constant.index);
-	assert(hex_value->type.index == binary_value->type.index);
+	assert(hex_value->data_type.index == binary_value->data_type.index);
 	assert(hex_constant && binary_constant &&
 		hex_constant->kind == PIGEN_CONST_EXPR_BITS &&
 		binary_constant->kind == PIGEN_CONST_EXPR_BITS);
@@ -487,11 +488,11 @@ int main(void)
 	assert(states && signed_constant->as.bits.state_count == 18);
 	for (size_t i = 0; i < 18; i++)
 		assert(states[i] == (i == 13 ? PIGEN_BIT_ONE : PIGEN_BIT_ZERO));
-	signed_type = pigen_type_get(&model, signed_constant->type);
-	assert(signed_type && signed_type->kind == PIGEN_TYPE_LOGIC &&
-		signed_type->signedness == PIGEN_SIGN_SIGNED &&
-		signed_type->dimension_count == 1);
-	signed_dimension = pigen_type_dimensions(&model, signed_constant->type);
+	signed_type = signed_constant->data_type;
+	assert(pigen_data_type_exists(&model, signed_type) &&
+		pigen_data_type_signedness(&model, signed_type) == PIGEN_SIGN_SIGNED &&
+		pigen_data_type_dimension_count(&model, signed_type) == 1);
+	signed_dimension = pigen_data_type_dimensions(&model, signed_constant->data_type);
 	assert(signed_dimension);
 	bound = pigen_const_expr_get(&model, signed_dimension->left);
 	assert(bound && bound->kind == PIGEN_CONST_EXPR_INTEGER &&
@@ -524,7 +525,7 @@ int main(void)
 	mask_depth_value = pigen_expr_get(&model, mask_depth->value);
 	assert(mask_depth_value &&
 		mask_depth_value->kind == PIGEN_EXPR_CONDITIONAL &&
-		mask_depth_value->type.index == hex_value->type.index);
+		mask_depth_value->data_type.index == hex_value->data_type.index);
 	assert(left->data_type.index == right->data_type.index);
 	assert(pigen_signal_get(&model,
 		pigen_symbol_signal(&model, left->symbol)) == left);
@@ -541,31 +542,32 @@ int main(void)
 		pigen_expr_constant(&model, queue->fifo_depth));
 	assert(bound && bound->kind == PIGEN_CONST_EXPR_SYMBOL &&
 		bound->as.symbol.index == mask_depth->symbol.index);
-	left_type = pigen_type_get(&model, left->data_type);
-	assert(left_type && left_type->kind == PIGEN_TYPE_NAMED);
-	left_typedef = left_type->named_symbol;
-	assert(pigen_type_packed_width(&model, left->data_type).index ==
-		pigen_type_packed_width(&model,
-			pigen_symbol_get(&model, left_typedef)->type).index);
-	element_type = pigen_type_get(&model,
-		pigen_type_packed_element(&model, left->data_type));
-	assert(element_type && element_type->kind == PIGEN_TYPE_LOGIC &&
-		element_type->signedness == PIGEN_SIGN_UNSIGNED &&
-		element_type->dimension_count == 0);
-	left_type = pigen_type_get(&model, left->data_type);
-	selected_type = pigen_type_get(&model,
-		pigen_type_packed_select(&model, left->data_type,
-			pigen_type_dimensions(&model,
-				pigen_symbol_get(&model, left_typedef)->type)->left,
-			pigen_type_dimensions(&model,
-				pigen_symbol_get(&model, left_typedef)->type)->right,
-			PIGEN_SEMANTIC_SELECT_RANGE));
-	assert(selected_type && selected_type->kind == PIGEN_TYPE_LOGIC &&
-		selected_type->signedness == PIGEN_SIGN_UNSIGNED &&
-		selected_type->dimension_count == 1);
-	left_type = pigen_type_get(&model, left->data_type);
-	left_dimension = pigen_type_dimensions(&model,
-		pigen_symbol_get(&model, left_type->named_symbol)->type);
+	left_type = left->data_type;
+	left_typedef = pigen_data_type_alias_symbol(&model, left_type);
+	assert(left_typedef.index != PIGEN_INVALID_ID);
+	assert(pigen_data_type_packed_width(&model, left->data_type).index ==
+		pigen_data_type_packed_width(&model,
+			pigen_symbol_get(&model, left_typedef)->data_type).index);
+	element_type = pigen_data_type_packed_element(&model, left->data_type);
+	assert(pigen_data_type_exists(&model, element_type) &&
+		pigen_data_type_signedness(&model, element_type) ==
+			PIGEN_SIGN_UNSIGNED &&
+		pigen_data_type_dimension_count(&model, element_type) == 0);
+	left_type = left->data_type;
+	selected_type = pigen_data_type_packed_select(&model, left->data_type,
+			pigen_data_type_dimensions(&model,
+				pigen_symbol_get(&model, left_typedef)->data_type)->left,
+			pigen_data_type_dimensions(&model,
+				pigen_symbol_get(&model, left_typedef)->data_type)->right,
+			PIGEN_SEMANTIC_SELECT_RANGE);
+	assert(pigen_data_type_exists(&model, selected_type) &&
+		pigen_data_type_signedness(&model, selected_type) ==
+			PIGEN_SIGN_UNSIGNED &&
+		pigen_data_type_dimension_count(&model, selected_type) == 1);
+	left_type = left->data_type;
+	left_dimension = pigen_data_type_dimensions(&model,
+		pigen_symbol_get(&model,
+			pigen_data_type_alias_symbol(&model, left_type))->data_type);
 	assert(left_dimension);
 	bound = pigen_const_expr_get(&model, left_dimension->left);
 	assert(bound && bound->kind == PIGEN_CONST_EXPR_SYMBOL &&
@@ -573,14 +575,15 @@ int main(void)
 	bound = pigen_const_expr_get(&model, left_dimension->right);
 	assert(bound && bound->kind == PIGEN_CONST_EXPR_SYMBOL &&
 		bound->as.symbol.index == nonzero->symbol.index);
-	queue_type = pigen_type_get(&model, queue->data_type);
-	assert(queue_type && queue_type->kind == PIGEN_TYPE_NAMED);
-	queue_type = pigen_type_get(&model,
-		pigen_symbol_get(&model, queue_type->named_symbol)->type);
-	assert(queue_type && queue_type->kind == PIGEN_TYPE_LOGIC);
-	queue_dimension = pigen_type_dimensions(&model,
+	queue_type = queue->data_type;
+	assert(pigen_data_type_alias_symbol(&model, queue_type).index !=
+		PIGEN_INVALID_ID);
+	queue_type = pigen_symbol_get(&model,
+		pigen_data_type_alias_symbol(&model, queue_type))->data_type;
+	assert(pigen_data_type_exists(&model, queue_type));
+	queue_dimension = pigen_data_type_dimensions(&model,
 		pigen_symbol_get(&model,
-			pigen_type_get(&model, queue->data_type)->named_symbol)->type);
+			pigen_data_type_alias_symbol(&model, queue->data_type))->data_type);
 	assert(queue_dimension);
 	bound = pigen_const_expr_get(&model, queue_dimension->left);
 	assert(bound && bound->as.integer == 31);
