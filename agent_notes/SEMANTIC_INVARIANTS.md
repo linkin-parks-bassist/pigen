@@ -103,6 +103,10 @@ contract stated in `SPEC.md`.
   enumerate primitive constructors. Typedef identity is transparent to
   capability checks while remaining available as the result identity when an
   operation preserves an operand's exact type.
+- Canonical type construction, builtin identities, packed projection, width,
+  state domain, and concatenation are owned by the same data-type subsystem.
+  General semantic objects may carry and query `pigen_type_id`; they do not
+  inspect the primitive catalogue.
 - A resolved conditional expression owns condition, true-alternative, and
   false-alternative expression identities. Identically typed alternatives
   yield that type directly; mixed alternatives remain unresolved until their

@@ -59,12 +59,14 @@ and range dimensions directly into those identities. Expression indexing
 consumes unpacked dimensions before packed dimensions; unsupported unpacked
 slices and concatenations are rejected rather than reinterpreted. The target
 data-first declaration grammar remains incomplete. Storage/lowering laws are
-not yet fully modeled. Integral capability and current unary, binary, and
-conditional result typing now have one alias-aware data-type owner; primitive
-spelling, literal construction, packed layout/state-domain behavior,
-conversion insertion, contextual sizing, and lowering remain to be brought
-through that boundary. There is no elastic RTL IR or terminal structured
-emitter.
+not yet fully modeled. `data_type.h` and `data_type.c` now own canonical type
+construction, aliases, packed layout, projection, width, state domain,
+concatenation, sized-logic construction, integral capability, and current
+operator-result typing. The general semantic and predicate layers consume that
+interface without enumerating primitives. Primitive spelling/resolution,
+conversion insertion, contextual sizing, numerical interpretation, and
+lowering remain to be brought through the boundary. There is no elastic RTL IR
+or terminal structured emitter.
 
 ## Architecture cutover
 
