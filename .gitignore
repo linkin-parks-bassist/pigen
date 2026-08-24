@@ -1,5 +1,6 @@
 /pigen
 /a.out
+/.worktrees/
 *.vcd
 *.sv
 !rtl/*.sv
