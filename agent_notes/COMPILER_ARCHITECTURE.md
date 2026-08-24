@@ -228,6 +228,14 @@ identities and recognized declarator shapes are explicit as well. The
 descriptor does not yet encode precise storage or lowering realizations; those
 remain before this phase is complete.
 
+The next approved slice, designed by Ari with David on 2026-08-24, completes
+that boundary with backend-neutral realization identities and focused
+realization properties. A transfer type reusing an existing realization must
+require only a catalogue entry; a genuinely new realization may additionally
+extend the single semantic-to-RTL adapter. General semantic passes must not gain
+concrete transfer-type or realization branches. The approved design is in
+`docs/superpowers/specs/2026-08-24-transfer-realization-design.md`.
+
 As a rough architecture estimate, the replacement effort is about **25%**
 complete overall: the reusable frontend and semantic foundation is around
 **55%**, but authoritative production cutover is effectively **0%** and the
