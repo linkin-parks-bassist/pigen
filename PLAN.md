@@ -53,11 +53,15 @@ concrete/static classification, parameter form, write eligibility, constant
 valid/ready laws, consumption, production, ownership, and domain binding. The
 syntax and semantic layers query it rather than enumerating transfer types.
 Signals carry a generic transfer argument whose meaning comes from that
-descriptor; `fifo` currently interprets it as depth. The production compiler's
+descriptor; `fifo` currently interprets it as depth. The same owner now maps
+each transfer type to a backend-neutral realization identity with explicit
+capacity source, ready dependency, occupancy, and reset properties. Invalid
+zero-valued properties make incomplete catalogue entries fail closed. Backend
+spellings remain outside the semantic catalogue. The production compiler's
 older character catalogue is explicitly named as a prototype and remains
 quarantined until cutover.
-The full `make verify` suite most recently passed after the canonical
-transfer-type descriptor cutover on 2026-08-21.
+The full `make verify` suite most recently passed after the transfer-realization
+cutover on 2026-08-24.
 
 It is not linked into the production executable. The production compiler still
 uses rewritten source, generated names, marker comments, rescanning, and
@@ -66,12 +70,12 @@ signals and expressions, and recognized declarations now parse ordered count
 and range dimensions directly into those identities. Expression indexing
 consumes unpacked dimensions before packed dimensions; unsupported unpacked
 slices and concatenations are rejected rather than reinterpreted. The target
-data-first declaration grammar remains incomplete. Storage/lowering laws are
-not yet fully modeled. `data_type.h` and `data_type.c` now own canonical
-data-type construction, aliases, packed layout, projection, width, state domain,
-concatenation, sized-logic construction, integral capability, and current
-operator-result typing. The general semantic and predicate layers consume that
-opaque interface without enumerating or inspecting primitive constructors.
+data-first declaration grammar remains incomplete. `data_type.h` and
+`data_type.c` now own canonical data-type construction, aliases, packed layout,
+projection, width, state domain, concatenation, sized-logic construction,
+integral capability, and current operator-result typing. The general semantic
+and predicate layers consume that opaque interface without enumerating or
+inspecting primitive constructors.
 Semantic records carry explicit `pigen_data_type_id` fields rather than a
 generic type identity. Canonical aliases store their resolved target identity,
 so later data-type operations do not re-enter the symbol table. Primitive
@@ -111,8 +115,10 @@ operation semantics remain incomplete.
 - [x] Centralize the transfer-type catalogue, source spelling, parameter form,
   write eligibility, validity/readiness constants, consumption, production,
   ownership, and domain binding.
-- [ ] Give each transfer type a precise storage and lowering representation;
-  do not collapse the distinct realizations into a vague stateful flag.
+- [x] Give each transfer type a precise storage and lowering representation;
+  distinct backend-neutral realization identities describe boundaries, nets,
+  variables, elastic slots, pulse registers, parameterized queues, and skid
+  queues.
 - [x] Make expression-use and transfer-incidence analysis record every signal,
   including statics, and apply behavior through transfer-type laws.
 - [x] Remove the superseded terminology from source, tests, filenames,

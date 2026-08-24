@@ -104,20 +104,25 @@ unpacked shape dimension while preserving the data type; packed indexing begins
 only at scalar shape. Unpacked slices and concatenations currently reject
 shaped operands rather than silently flattening them.
 
-The canonical descriptor catalogue now owns spelling, classification, parameter
+The canonical descriptor catalogue owns spelling, classification, parameter
 form, write eligibility, constant valid/ready laws, consumption, production,
-ownership, and domain binding. Syntax recognition, resolution, signal
-validation, assignability, incidence, and domain binding query it. The
-descriptor still needs a precise storage/lowering representation; do not hide
-the distinct `buf`, `port`, `fifo`, and `skid` realizations behind a vague
-boolean merely to tick the plan item. That is the remaining part of phase 1,
-not a reason to recreate parallel signal APIs.
+ownership, domain binding, and the mapping from each transfer type to a
+backend-neutral realization identity. Boundaries, combinational nets,
+procedural variables, elastic slots, pulse registers, parameterized queues,
+and skid queues retain distinct structural meaning. Capacity source, ready
+dependency, occupancy, and reset behavior are explicit properties; backend
+module names and generated interfaces are not semantic data. Syntax
+recognition, resolution, signal validation, assignability, incidence, and
+domain binding query the catalogue.
 
-After the one-arena, canonical-shape, structured declarator-shape, and canonical
-transfer-descriptor cutovers, `make verify` completed successfully on
-2026-08-21.
-This proves the current
+After the realization cutover, phase 1 of `PLAN.md` is complete. The next work
+is the centralized primitive data-type algebra and the remaining shared
+frontend required by the first vertical RTL slice.
+
+After the one-arena, canonical-shape, structured declarator-shape, canonical
+transfer-descriptor, and realization cutovers, `make verify` completed
+successfully on 2026-08-24. This proves the current
 replacement-middle tests and production behavioral suite still pass; it does
 not prove the architecture cutover complete. In particular, the complete
-target data-first declaration grammar, storage/lowering laws, generic input
-specialization, RTL IR, and production integration remain open.
+target data-first declaration grammar, generic input specialization, RTL IR,
+and production integration remain open.

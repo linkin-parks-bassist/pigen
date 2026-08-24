@@ -224,16 +224,17 @@ tags remain ordinary implementation discriminators.
 The replacement middle now has one signal identity arena and one symbol
 binding for statics and the other transfer types. Expression-use analysis and
 direct-transfer incidence retain every participating signal. Canonical shape
-identities and recognized declarator shapes are explicit as well. The
-descriptor does not yet encode precise storage or lowering realizations; those
-remain before this phase is complete.
+identities and recognized declarator shapes are explicit as well.
 
-The next approved slice, designed by Ari with David on 2026-08-24, completes
-that boundary with backend-neutral realization identities and focused
-realization properties. A transfer type reusing an existing realization must
-require only a catalogue entry; a genuinely new realization may additionally
-extend the single semantic-to-RTL adapter. General semantic passes must not gain
-concrete transfer-type or realization branches. The approved design is in
+The transfer-type owner maps each source transfer type to a backend-neutral
+realization identity. Focused realization descriptors state capacity source,
+ready dependency, occupancy, and reset behavior without naming SystemVerilog
+primitives or generated interfaces. Reusing a realization requires only a new
+transfer-type catalogue entry; a genuinely new realization additionally
+extends the single future semantic-to-RTL adapter. General semantic passes do
+not enumerate either catalogue.
+
+The realization boundary is specified in
 `docs/superpowers/specs/2026-08-24-transfer-realization-design.md`.
 
 As a rough architecture estimate, the replacement effort is about **25%**

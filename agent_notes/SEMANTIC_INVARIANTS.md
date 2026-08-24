@@ -214,9 +214,12 @@ contract stated in `SPEC.md`.
   concrete transfer types.
 - A signal carries a generic transfer-argument identity. The descriptor defines
   whether it is absent or a constant depth expression; no general signal API
-  exposes a FIFO-specific field. Precise storage and lowering realization must
-  join this same owner without reducing distinct transfer types to a vague
-  boolean.
+  exposes a FIFO-specific field.
+- A signal's transfer-type descriptor names one backend-neutral realization.
+  The realization owner states capacity source, ready dependency, occupancy,
+  and reset behavior. General semantic passes do not enumerate realization
+  families, and the future RTL adapter does not switch on source transfer
+  types.
 - An atomic transfer owns an ordered destination bit stream, one value bit
   stream, a guard predicate, a clock domain, and its source span.
 - A direct whole-expression transfer requires identical source and destination
