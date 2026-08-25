@@ -703,6 +703,10 @@ int main(void)
 	{
 		pigen_const_expr_id very_wide = pigen_const_expr_intern_integer(&model,
 			1000000, unsized_integer_data_type);
+		pigen_integer_id large_exponent = pigen_integer_intern_u64(&model,
+			1000000000);
+		pigen_integer_id host_independent_exponent =
+			pigen_integer_intern_u64(&model, UINT64_C(1) << 32);
 		pigen_data_type_id very_wide_unsigned =
 			pigen_data_type_unsigned_integer(&model, very_wide);
 		pigen_data_type_id very_wide_signed =
@@ -740,6 +744,18 @@ int main(void)
 		assert(pigen_const_expr_evaluate_u64(&model, deferred_addition,
 			&deferred_value));
 		assert(deferred_value == 1000001);
+		assert(pigen_const_expr_evaluate_u64(&model,
+			pigen_const_expr_intern_numerical_range_width(&model,
+				(pigen_numerical_range_width){PIGEN_BINARY_POWER,
+					PIGEN_NUMERICAL_UNSIGNED_INTEGER, width_2,
+					large_exponent, 0, 0}), &deferred_value));
+		assert(deferred_value == 1584962501);
+		assert(pigen_const_expr_evaluate_u64(&model,
+			pigen_const_expr_intern_numerical_range_width(&model,
+				(pigen_numerical_range_width){PIGEN_BINARY_POWER,
+					PIGEN_NUMERICAL_SIGNED_INTEGER, width_2,
+					host_independent_exponent, 0, 0}), &deferred_value));
+		assert(deferred_value == UINT64_C(4294967297));
 		assert(model.integer_limb_count - limb_count < 16);
 	}
 	assert(pigen_data_type_resolve_binary_operation(&model,

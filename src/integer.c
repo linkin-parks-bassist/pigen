@@ -263,6 +263,40 @@ static uint32_t *magnitude_subtract(const uint32_t *larger,
 	return result;
 }
 
+static uint32_t *magnitude_multiply(const uint32_t *left, size_t left_count,
+	const uint32_t *right, size_t right_count, size_t *result_count)
+{
+	size_t count;
+	size_t i;
+	uint32_t *result;
+
+	if (!left_count || !right_count)
+	{
+		*result_count = 0;
+		return NULL;
+	}
+	if (left_count > SIZE_MAX - right_count ||
+		left_count + right_count > SIZE_MAX / sizeof(*result)) return NULL;
+	count = left_count + right_count;
+	result = pigen_resize(NULL, count * sizeof(*result));
+	memset(result, 0, count * sizeof(*result));
+	for (i = 0; i < left_count; i++)
+	{
+		uint64_t carry = 0;
+		size_t j;
+		for (j = 0; j < right_count; j++)
+		{
+			uint64_t product = (uint64_t)left[i] * right[j] +
+				result[i + j] + carry;
+			result[i + j] = (uint32_t)product;
+			carry = product >> LIMB_BITS;
+		}
+		result[i + right_count] = (uint32_t)carry;
+	}
+	*result_count = normalized_count(result, count);
+	return result;
+}
+
 pigen_integer_id pigen_integer_add(pigen_semantic_model *model,
 	pigen_integer_id left_id, pigen_integer_id right_id)
 {
@@ -327,7 +361,6 @@ static pigen_integer_id integer_multiply_bounded(pigen_semantic_model *model,
 	const uint32_t *right_limbs;
 	uint32_t *result_limbs;
 	size_t count;
-	size_t i;
 	pigen_integer_id result;
 
 	if (!left || !right || !maximum_bits) return INVALID_ID;
@@ -337,23 +370,9 @@ static pigen_integer_id integer_multiply_bounded(pigen_semantic_model *model,
 	left_limbs = integer_limbs(model, left);
 	right_limbs = integer_limbs(model, right);
 	if (!left_limbs || !right_limbs) return INVALID_ID;
-	count = left->limb_count + right->limb_count;
-	result_limbs = pigen_resize(NULL, count * sizeof(*result_limbs));
-	memset(result_limbs, 0, count * sizeof(*result_limbs));
-	for (i = 0; i < left->limb_count; i++)
-	{
-		uint64_t carry = 0;
-		size_t j;
-		for (j = 0; j < right->limb_count; j++)
-		{
-			uint64_t product = (uint64_t)left_limbs[i] * right_limbs[j] +
-				result_limbs[i + j] + carry;
-			result_limbs[i + j] = (uint32_t)product;
-			carry = product >> LIMB_BITS;
-		}
-		result_limbs[i + right->limb_count] = (uint32_t)carry;
-	}
-	count = normalized_count(result_limbs, count);
+	result_limbs = magnitude_multiply(left_limbs, left->limb_count,
+		right_limbs, right->limb_count, &count);
+	if (!result_limbs) return INVALID_ID;
 	if (count && ((count - 1) > (maximum_bits - 1) / LIMB_BITS ||
 		(count - 1) * LIMB_BITS +
 			(LIMB_BITS - (size_t)__builtin_clz(result_limbs[count - 1])) >
@@ -504,6 +523,217 @@ int pigen_integer_to_size(const pigen_semantic_model *model,
 	}
 	*value = result;
 	return 1;
+}
+
+int pigen_integer_to_u64(const pigen_semantic_model *model,
+	pigen_integer_id value_id, uint64_t *value)
+{
+	const pigen_integer *known = integer_get(model, value_id);
+	const uint32_t *limbs;
+	uint64_t result = 0;
+	size_t i;
+
+	if (!known || known->negative || !value) return 0;
+	limbs = integer_limbs(model, known);
+	if (known->limb_count && !limbs) return 0;
+	if (known->limb_count > 2) return 0;
+	for (i = known->limb_count; i-- > 0; )
+		result = (result << LIMB_BITS) | limbs[i];
+	*value = result;
+	return 1;
+}
+
+typedef struct {
+	uint32_t *lower;
+	size_t lower_count;
+	uint32_t *upper;
+	size_t upper_count;
+	uint64_t shift;
+} magnitude_interval;
+
+static void magnitude_interval_free(magnitude_interval *interval)
+{
+	free(interval->lower);
+	free(interval->upper);
+	*interval = (magnitude_interval){0};
+}
+
+static magnitude_interval magnitude_interval_u64(uint64_t value)
+{
+	magnitude_interval result = {0};
+	uint32_t limbs[2] = {(uint32_t)value, (uint32_t)(value >> LIMB_BITS)};
+	size_t count = limbs[1] ? 2 : value ? 1 : 0;
+
+	if (!count) return result;
+	result.lower = pigen_resize(NULL, count * sizeof(*result.lower));
+	result.upper = pigen_resize(NULL, count * sizeof(*result.upper));
+	memcpy(result.lower, limbs, count * sizeof(*limbs));
+	memcpy(result.upper, limbs, count * sizeof(*limbs));
+	result.lower_count = count;
+	result.upper_count = count;
+	return result;
+}
+
+static size_t magnitude_shift_right(uint32_t *limbs, size_t count,
+	size_t amount, int round_up)
+{
+	size_t word_shift = amount / LIMB_BITS;
+	unsigned bit_shift = (unsigned)(amount % LIMB_BITS);
+	int discarded = 0;
+	size_t i;
+	size_t result_count;
+
+	for (i = 0; i < word_shift && i < count; i++)
+		discarded |= limbs[i] != 0;
+	if (bit_shift && word_shift < count)
+		discarded |= (limbs[word_shift] &
+			(((uint32_t)1 << bit_shift) - 1)) != 0;
+	if (word_shift >= count)
+		result_count = 0;
+	else
+	{
+		result_count = count - word_shift;
+		for (i = 0; i < result_count; i++)
+		{
+			uint64_t value = limbs[i + word_shift];
+			if (bit_shift && i + word_shift + 1 < count)
+				value |= (uint64_t)limbs[i + word_shift + 1] << LIMB_BITS;
+			limbs[i] = (uint32_t)(value >> bit_shift);
+		}
+		result_count = normalized_count(limbs, result_count);
+	}
+	if (round_up && discarded)
+	{
+		uint64_t carry = 1;
+		for (i = 0; carry && i < result_count; i++)
+		{
+			uint64_t sum = (uint64_t)limbs[i] + carry;
+			limbs[i] = (uint32_t)sum;
+			carry = sum >> LIMB_BITS;
+		}
+		if (carry) limbs[result_count++] = (uint32_t)carry;
+		if (!result_count) limbs[result_count++] = 1;
+	}
+	return result_count;
+}
+
+static int magnitude_interval_multiply(const magnitude_interval *left,
+	const magnitude_interval *right, size_t precision,
+	magnitude_interval *result)
+{
+	size_t upper_width;
+	size_t drop = 0;
+	uint64_t shift;
+
+	*result = (magnitude_interval){0};
+	if (left->shift > UINT64_MAX - right->shift) return 0;
+	shift = left->shift + right->shift;
+	result->lower = magnitude_multiply(left->lower, left->lower_count,
+		right->lower, right->lower_count, &result->lower_count);
+	result->upper = magnitude_multiply(left->upper, left->upper_count,
+		right->upper, right->upper_count, &result->upper_count);
+	if (!result->lower || !result->upper)
+	{
+		magnitude_interval_free(result);
+		return 0;
+	}
+	upper_width = magnitude_width(result->upper, result->upper_count);
+	if (upper_width > precision) drop = upper_width - precision;
+	if (drop)
+	{
+		result->lower_count = magnitude_shift_right(result->lower,
+			result->lower_count, drop, 0);
+		result->upper_count = magnitude_shift_right(result->upper,
+			result->upper_count, drop, 1);
+		if (shift > UINT64_MAX - drop)
+		{
+			magnitude_interval_free(result);
+			return 0;
+		}
+		shift += (uint64_t)drop;
+	}
+	result->shift = shift;
+	return 1;
+}
+
+/* Calculates only the exact bit width.  Dyadic intervals retain bounded
+ * leading magnitudes while exponentiation by squaring discards irrelevant
+ * low bits; precision grows only when a power-of-two boundary is unresolved. */
+int pigen_integer_power_width_u64(uint64_t base, uint64_t exponent,
+	uint64_t *width)
+{
+	size_t precision = 128;
+
+	if (!width) return 0;
+	if (!exponent || base <= 1)
+	{
+		*width = 1;
+		return 1;
+	}
+	if (!(base & (base - 1)))
+	{
+		uint64_t base_log = 63u - (uint64_t)__builtin_clzll(base);
+		if (exponent > (UINT64_MAX - 1) / base_log) return 0;
+		*width = exponent * base_log + 1;
+		return 1;
+	}
+	for (;;)
+	{
+		magnitude_interval result = magnitude_interval_u64(1);
+		magnitude_interval factor = magnitude_interval_u64(base);
+		uint64_t power = exponent;
+		int valid = result.lower && result.upper && factor.lower && factor.upper;
+
+		while (valid && power)
+		{
+			magnitude_interval product;
+			if (power & 1)
+			{
+				valid = magnitude_interval_multiply(&result, &factor,
+					precision, &product);
+				magnitude_interval_free(&result);
+				result = product;
+			}
+			power >>= 1;
+			if (valid && power)
+			{
+				valid = magnitude_interval_multiply(&factor, &factor,
+					precision, &product);
+				magnitude_interval_free(&factor);
+				factor = product;
+			}
+		}
+		magnitude_interval_free(&factor);
+		if (valid)
+		{
+			uint64_t lower_width = result.shift;
+			uint64_t upper_width = result.shift;
+			size_t lower_magnitude_width = magnitude_width(result.lower,
+				result.lower_count);
+			size_t upper_magnitude_width = magnitude_width(result.upper,
+				result.upper_count);
+
+			if (lower_width > UINT64_MAX - lower_magnitude_width)
+				valid = 0;
+			else
+			{
+				lower_width += (uint64_t)lower_magnitude_width;
+				if (upper_width <= UINT64_MAX - upper_magnitude_width)
+				{
+					upper_width += (uint64_t)upper_magnitude_width;
+					if (lower_width == upper_width)
+					{
+						*width = lower_width;
+						magnitude_interval_free(&result);
+						return 1;
+					}
+				}
+			}
+		}
+		magnitude_interval_free(&result);
+		if (!valid || precision > SIZE_MAX / 2) return 0;
+		precision *= 2;
+	}
 }
 
 pigen_integer_id pigen_integer_power(pigen_semantic_model *model,

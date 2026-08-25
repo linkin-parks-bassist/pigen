@@ -176,7 +176,10 @@ contract stated in `SPEC.md`.
   over every valid positive width. A one-bit power never grows merely because
   its exact exponent exceeds host width. Proven dominant-width formulae avoid
   constructing endpoint integers proportional to a declared hardware width;
-  zero and identity operations canonicalize independently of symbolic width.
+  unresolved unsigned-power widths use refining leading-magnitude intervals,
+  not the full result integer. Width evaluation uses the fixed `uint64_t`
+  domain rather than host `size_t`. Zero and identity operations canonicalize
+  independently of symbolic width.
 - Expression resolution is two-stage. Temporary analyzed nodes retain syntax,
   provenance, shape, intrinsic data type, constant identity, children, and
   complete operation/conversion decisions. Analysis appends no semantic

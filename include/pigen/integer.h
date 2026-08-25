@@ -24,6 +24,8 @@ pigen_integer_id pigen_integer_shift_left(pigen_semantic_model *model,
 	pigen_integer_id value, size_t amount, size_t maximum_bits);
 pigen_integer_id pigen_integer_power(pigen_semantic_model *model,
 	pigen_integer_id base, pigen_integer_id exponent, size_t maximum_bits);
+int pigen_integer_power_width_u64(uint64_t base, uint64_t exponent,
+	uint64_t *width);
 int pigen_integer_compare(const pigen_semantic_model *model,
 	pigen_integer_id left, pigen_integer_id right);
 int pigen_integer_is_zero(const pigen_semantic_model *model,
@@ -34,6 +36,8 @@ int pigen_integer_is_odd(const pigen_semantic_model *model,
 	pigen_integer_id value);
 int pigen_integer_to_size(const pigen_semantic_model *model,
 	pigen_integer_id value, size_t *result);
+int pigen_integer_to_u64(const pigen_semantic_model *model,
+	pigen_integer_id value, uint64_t *result);
 size_t pigen_integer_unsigned_width(const pigen_semantic_model *model,
 	pigen_integer_id value);
 size_t pigen_integer_signed_width(const pigen_semantic_model *model,

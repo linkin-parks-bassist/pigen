@@ -168,6 +168,11 @@ result family. The node evaluates the same endpoint law once parameters are
 known instead of falling back to a magnitude approximation. Power keeps this
 law even when its exact exponent exceeds host `size_t`; one-bit bases resolve
 immediately from exponent parity, including after symbolic specialization.
+For unsigned powers whose result width is not closed by the dominant-width
+law, the integer owner computes the exact bit length with refining dyadic
+intervals: exponentiation retains only bounded leading magnitudes and never
+materializes the full power. Exponents enter this path through an explicit
+`uint64_t` conversion, so width semantics do not depend on host `size_t`.
 Width-independent identities such as `x + 0`, `x * 1`, and `x * 0` canonicalize
 before any parametric range node. Semantic conversion constructors call back
 into the data-type owner and symbolic unsigned-to-signed promotion is accepted

@@ -1483,9 +1483,10 @@ static int closed_power_range_width(pigen_semantic_model *model,
 	pigen_numerical_interpretation interpretation, uint64_t concrete_width,
 	pigen_integer_id exponent_value, uint64_t *result_width)
 {
-	size_t exponent;
+	uint64_t exponent;
 	size_t exponent_width;
 	uint64_t product;
+	uint64_t base;
 
 	if (!result_width || !concrete_width ||
 		!numerical_is_concrete(interpretation) ||
@@ -1496,7 +1497,7 @@ static int closed_power_range_width(pigen_semantic_model *model,
 		*result_width = 1;
 		return 1;
 	}
-	if (!pigen_integer_to_size(model, exponent_value, &exponent)) return -1;
+	if (!pigen_integer_to_u64(model, exponent_value, &exponent)) return -1;
 	if (!exponent)
 	{
 		*result_width = 1;
@@ -1517,9 +1518,12 @@ static int closed_power_range_width(pigen_semantic_model *model,
 	exponent_width = pigen_integer_unsigned_width(model, exponent_value);
 	if (!exponent_width) return -1;
 	if ((uint64_t)exponent_width < concrete_width)
-		return multiply_width(concrete_width, (uint64_t)exponent,
+		return multiply_width(concrete_width, exponent,
 			result_width) ? 1 : -1;
-	return 0;
+	if (concrete_width > 64) return -1;
+	base = concrete_width == 64 ? UINT64_MAX :
+		((uint64_t)1 << concrete_width) - 1;
+	return pigen_integer_power_width_u64(base, exponent, result_width) ? 1 : -1;
 }
 
 int pigen_data_type_evaluate_numerical_range_width(

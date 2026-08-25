@@ -34,6 +34,8 @@ int main(void)
 	pigen_integer_id powered;
 	pigen_integer_id beyond_size;
 	size_t size_value;
+	uint64_t u64_value;
+	uint64_t power_width;
 
 	pigen_semantic_init(&model, &sources);
 	zero = decimal(&model, "0");
@@ -94,6 +96,10 @@ int main(void)
 		sizeof(size_t) * 8, sizeof(size_t) * 8 + 1);
 	assert(beyond_size.index != PIGEN_INVALID_ID);
 	assert(!pigen_integer_to_size(&model, beyond_size, &size_value));
+	assert(pigen_integer_to_u64(&model,
+		pigen_integer_intern_u64(&model, UINT64_MAX), &u64_value));
+	assert(u64_value == UINT64_MAX);
+	assert(!pigen_integer_to_u64(&model, beyond_size, &u64_value));
 
 	shifted = pigen_integer_shift_left(&model, one, 127, 128);
 	assert(shifted.index != PIGEN_INVALID_ID);
@@ -112,6 +118,30 @@ int main(void)
 		PIGEN_INVALID_ID);
 	assert(pigen_integer_power(&model, decimal(&model, "2"),
 		pigen_integer_negate(&model, one), 128).index == PIGEN_INVALID_ID);
+	assert(pigen_integer_power_width_u64(3, 3, &power_width));
+	assert(power_width == 5);
+	assert(pigen_integer_power_width_u64(3, 1000000000, &power_width));
+	assert(power_width == 1584962501);
+	assert(pigen_integer_power_width_u64(UINT64_MAX, 2, &power_width));
+	assert(power_width == 128);
+	{
+		uint64_t base_value;
+		uint64_t exponent_value;
+
+		for (base_value = 0; base_value < 256; base_value++)
+			for (exponent_value = 0; exponent_value < 17; exponent_value++)
+			{
+				pigen_integer_id exact_power = pigen_integer_power(&model,
+					pigen_integer_intern_u64(&model, base_value),
+					pigen_integer_intern_u64(&model, exponent_value), 256);
+
+				assert(exact_power.index != PIGEN_INVALID_ID);
+				assert(pigen_integer_power_width_u64(base_value,
+					exponent_value, &power_width));
+				assert(power_width ==
+					pigen_integer_unsigned_width(&model, exact_power));
+			}
+	}
 	assert(pigen_integer_add(&model, INVALID_ID(pigen_integer_id), one).index ==
 		PIGEN_INVALID_ID);
 
