@@ -53,6 +53,21 @@ static void assert_integer_boolean_resolution(pigen_semantic_model *model,
 	assert(resolution.operation.result_data_type.index == boolean_type.index);
 }
 
+static void assert_integer_boolean_unary_resolution(pigen_semantic_model *model,
+	pigen_unary_operator operator, pigen_data_type_id operand,
+	pigen_data_type_id expected_result, pigen_data_type_id boolean_type)
+{
+	pigen_unary_resolution resolution;
+
+	assert(pigen_data_type_resolve_unary_operation(model, operator, operand,
+		expected_result, &resolution));
+	assert_conversion(resolution.operand_conversion, PIGEN_CONVERSION_IDENTITY,
+		operand, operand);
+	assert(resolution.operation.operator == operator);
+	assert(resolution.operation.operand_data_type.index == operand.index);
+	assert(resolution.operation.result_data_type.index == boolean_type.index);
+}
+
 int main(void)
 {
 	const char text[] =
@@ -447,6 +462,29 @@ int main(void)
 		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
 	assert(unary_resolution.operation.operand_data_type.index == signed_8.index);
 	assert(unary_resolution.operation.result_data_type.index == boolean_type.index);
+	assert_integer_boolean_unary_resolution(&model, PIGEN_UNARY_LOGICAL_NOT,
+		signed_8, signed_16, boolean_type);
+	assert_integer_boolean_unary_resolution(&model, PIGEN_UNARY_LOGICAL_NOT,
+		signed_8, unsigned_12, boolean_type);
+	assert_integer_boolean_unary_resolution(&model, PIGEN_UNARY_REDUCTION_XOR,
+		signed_8, signed_16, boolean_type);
+	assert_integer_boolean_unary_resolution(&model, PIGEN_UNARY_REDUCTION_XOR,
+		signed_8, unsigned_12, boolean_type);
+	unary_resolution = (pigen_unary_resolution){
+		{PIGEN_CONVERSION_INTEGER_REINTERPRET, signed_8, unsigned_8},
+		{PIGEN_UNARY_REDUCTION_NOR, signed_16, pigen_byte}};
+	assert(!pigen_data_type_resolve_unary_operation(&model,
+		PIGEN_UNARY_LOGICAL_NOT, signed_8,
+		(pigen_data_type_id){PIGEN_INVALID_ID - 1}, &unary_resolution));
+	assert(unary_resolution.operand_conversion.kind ==
+		PIGEN_CONVERSION_INTEGER_REINTERPRET);
+	assert(unary_resolution.operand_conversion.source_data_type.index ==
+		signed_8.index);
+	assert(unary_resolution.operand_conversion.target_data_type.index ==
+		unsigned_8.index);
+	assert(unary_resolution.operation.operator == PIGEN_UNARY_REDUCTION_NOR);
+	assert(unary_resolution.operation.operand_data_type.index == signed_16.index);
+	assert(unary_resolution.operation.result_data_type.index == pigen_byte.index);
 	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
 		signed_8, signed_8, unsigned_12, &binary_resolution));
 	binary_resolution = (pigen_binary_resolution){
@@ -552,6 +590,40 @@ int main(void)
 		pigen_byte.index);
 	assert(conditional_resolution.operation.result_data_type.index ==
 		pigen_byte.index);
+	conditional_resolution = (pigen_conditional_resolution){
+		{PIGEN_CONVERSION_INTEGER_REINTERPRET, signed_8, unsigned_8},
+		{PIGEN_CONVERSION_INTEGER_RESIZE, signed_12, signed_16},
+		{PIGEN_CONVERSION_INTEGER_TO_VECTOR, unsigned_12, pigen_byte},
+		{unsigned_8, signed_16, pigen_byte, boolean_type}};
+	assert(!pigen_data_type_resolve_conditional_operation(&model, signed_8,
+		signed_8, signed_12, (pigen_data_type_id){PIGEN_INVALID_ID - 1},
+		&conditional_resolution));
+	assert(conditional_resolution.condition_conversion.kind ==
+		PIGEN_CONVERSION_INTEGER_REINTERPRET);
+	assert(conditional_resolution.condition_conversion.source_data_type.index ==
+		signed_8.index);
+	assert(conditional_resolution.condition_conversion.target_data_type.index ==
+		unsigned_8.index);
+	assert(conditional_resolution.when_true_conversion.kind ==
+		PIGEN_CONVERSION_INTEGER_RESIZE);
+	assert(conditional_resolution.when_true_conversion.source_data_type.index ==
+		signed_12.index);
+	assert(conditional_resolution.when_true_conversion.target_data_type.index ==
+		signed_16.index);
+	assert(conditional_resolution.when_false_conversion.kind ==
+		PIGEN_CONVERSION_INTEGER_TO_VECTOR);
+	assert(conditional_resolution.when_false_conversion.source_data_type.index ==
+		unsigned_12.index);
+	assert(conditional_resolution.when_false_conversion.target_data_type.index ==
+		pigen_byte.index);
+	assert(conditional_resolution.operation.condition_data_type.index ==
+		unsigned_8.index);
+	assert(conditional_resolution.operation.when_true_data_type.index ==
+		signed_16.index);
+	assert(conditional_resolution.operation.when_false_data_type.index ==
+		pigen_byte.index);
+	assert(conditional_resolution.operation.result_data_type.index ==
+		boolean_type.index);
 	left_bound = pigen_expr_add_integer(&model, 7,
 		unsized_integer_data_type, range);
 	right_bound = pigen_expr_add_integer(&model, 0,

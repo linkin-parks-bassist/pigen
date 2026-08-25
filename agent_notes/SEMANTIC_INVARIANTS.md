@@ -157,11 +157,12 @@ contract stated in `SPEC.md`.
   initial integer-valued policy forms a canonical symbolic maximum from operand
   widths and a compatible expected width, so a narrower consumer cannot shrink
   the operation before final assignment conversion. Boolean-result operations
-  form their operand width only from their operands; result context never sizes
-  them. Shifts preserve the left family and width and require an unsigned-integer
-  count. Byte-valued operations preserve a shared exact alias identity and use
-  canonical `byte` when the operand identities differ. These policies may change
-  without changing the operation/conversion boundary.
+  form their operand width only from their operands; result context neither
+  sizes nor restricts their family. Shifts preserve the left family and width
+  and require an unsigned-integer count. Byte-valued operations preserve a
+  shared exact alias identity and use canonical `byte` when the operand
+  identities differ. These policies may change without changing the
+  operation/conversion boundary.
 - Until semantic conversion expression nodes exist, expression resolution
   passes exactly `INVALID_ID(pigen_data_type_id)` as the absent expectation and
   constructs an expression only when every recorded conversion is identity.

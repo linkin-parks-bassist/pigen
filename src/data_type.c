@@ -857,22 +857,14 @@ int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
 		return 0;
 	if (data_type_is_pigen_integer(model, operand))
 	{
-		pigen_numerical_interpretation interpretation =
-			pigen_data_type_numerical_interpretation(model, operand);
-
-		if (!integer_expected_is_compatible(model, interpretation,
-			expected_result))
-			return 0;
-		if (unary_arithmetic_operator(operator) ||
-			operator == PIGEN_UNARY_BITWISE_NOT)
+		if (!unary_boolean_result(operator))
 		{
-			if (!integer_common_data_type(model, operands, 1, expected_result,
+			if ((!unary_arithmetic_operator(operator) &&
+				operator != PIGEN_UNARY_BITWISE_NOT) ||
+				!integer_common_data_type(model, operands, 1, expected_result,
 				&effective_operand))
 				return 0;
 		}
-		else if (operator != PIGEN_UNARY_LOGICAL_NOT &&
-			!unary_reduction_operator(operator))
-			return 0;
 	}
 	else if (data_type_is_byte(model, operand))
 	{
