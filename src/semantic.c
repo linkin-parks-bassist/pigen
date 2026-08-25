@@ -1909,6 +1909,8 @@ const pigen_transfer_signal_use *pigen_transfer_signal_uses(
 
 void pigen_free_semantic_model(pigen_semantic_model *model)
 {
+	free(model->integers);
+	free(model->integer_limbs);
 	free(model->data_types);
 	free(model->data_type_dimensions);
 	free(model->shapes);

@@ -303,8 +303,20 @@ typedef struct {
 	unsigned roles;
 } pigen_transfer_signal_use;
 
+typedef struct {
+	int negative;
+	size_t first_limb;
+	size_t limb_count;
+} pigen_integer;
+
 struct pigen_semantic_model {
 	const pigen_source_manager *sources;
+	pigen_integer *integers;
+	size_t integer_count;
+	size_t integer_capacity;
+	uint32_t *integer_limbs;
+	size_t integer_limb_count;
+	size_t integer_limb_capacity;
 	pigen_data_type *data_types;
 	size_t data_type_count;
 	size_t data_type_capacity;
