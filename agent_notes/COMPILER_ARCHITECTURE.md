@@ -76,28 +76,24 @@ the resolved result type, conversions, and operation semantics. Later passes
 consume those decisions; they do not switch independently over `int`, `uint`,
 `byte`, or future fixed-point constructors.
 
-The current replacement implementation does not yet fully meet this criterion.
 `include/pigen/data_type.h` and `src/data_type.c` now own the primitive
-catalogue, canonical interning, builtin identities, alias unwrapping, packed
-layout, projection, width, state domain, concatenation, sized-logic
-construction, integral capability, and current unary, binary, and conditional
-result rules. A single compile-time descriptor table owns the immutable facts
-shared by the current primitives: source spelling, fixed base width, state
-domain, and capability flags. Constructor tags, raw interning, descriptors,
-and the canonical record are private to `src/data_type.c`; the public boundary
-exposes opaque `pigen_data_type_id` identities and focused semantic queries.
-Semantic symbols,
-expressions, constant expressions, lvalues, and signals name their data-type
-field explicitly. The general semantic implementation, expression resolution,
-and predicate construction no longer enumerate primitive constructors. Syntax
-retains an optional written base token without classifying it. Resolution asks
-the data-type subsystem to recognize primitive spelling, then considers typedef
-lookup only when no primitive matches. Alias construction records both the
-typedef symbol identity and its already-resolved target data type. Subsequent
-layout and capability operations follow that identity and never re-enter the
-symbol table. Contextual conversion insertion, richer
-numerical interpretation, and lowering still need consolidation. Do not extend
-unrelated passes when adding `int`, `uint`, or `byte`.
+catalogue, canonical interning, aliases, packed layout and projection, symbolic
+width algebra, state and numerical domains, conversion policy, and unary,
+binary, and conditional operation resolution. Semantic-only `int[n]`,
+`uint[n]`, and `byte` identities remain unavailable through source spelling.
+A compile-time descriptor table owns shared primitive facts; parameterized and
+operation-specific rules remain ordinary private code. Constructor tags, raw
+interning, descriptors, and canonical records are private to `src/data_type.c`;
+other layers carry opaque identities and conversion/operation records.
+
+Expression construction deliberately passes no expected result and accepts a
+resolution only when every required conversion is identity. This conspicuous
+incomplete boundary preserves current structured expressions until explicit
+conversion nodes and contextual expected-type plumbing exist; it is not a
+fallback or a second semantic path. Syntax still retains an unclassified base
+token, aliases retain resolved targets, and general semantic passes do not
+enumerate primitive constructors. Do not extend unrelated passes when changing
+`int`, `uint`, or `byte`.
 
 The descriptor table is a catalogue, not a promise that all primitive meaning
 is tabular. Operation-specific rules remain ordinary code inside the data-type
@@ -129,16 +125,14 @@ resolution maps written operators into that algebra; semantic expressions carry
 it; the data-type subsystem supplies operand-dependent meaning. Neither source
 spelling nor primitive constructors own the shared operation vocabulary.
 
-An operator is only the shared algebraic symbol. An operation is that operator
-resolved for concrete operand data types. The data-type subsystem constructs
-unary, binary, and conditional operation records containing the effective
-operand and result data-type identities. Both runtime expressions and canonical
-constant expressions carry those same records, so no downstream pass receives a
-raw operator plus an independently asserted result type. When conversion nodes
-are introduced, they must be inserted before operation construction; the
-operation's effective operand identities must match the converted children.
-Fixed-point scaling and other lowering-facing decisions can extend this record
-without making expression walkers enumerate primitive constructors.
+An operator is only the shared algebraic symbol. The data-type subsystem
+resolves it into required conversions plus an operation whose effective operand
+identities are exactly those conversion targets. Runtime and canonical constant
+expressions carry the operation record, never a raw operator plus an independently
+asserted result type. Future conversion nodes must materialize the recorded
+decisions before operation construction. Fixed-point scaling and other real
+lowering semantics may extend this boundary without teaching expression walkers
+the primitive catalogue.
 
 Pipelines, transfers, FSMs, and fabrics consume these services and produce
 common semantic objects. No feature privately reparses names, expressions,
@@ -177,10 +171,11 @@ The unlinked replacement modules already provide:
 - a shared expression parser with structural operators, concatenations,
   indexing, and part selects; unpacked indexing consumes canonical shape
   dimensions before packed indexing applies;
-- canonical constant-expression DAGs and symbolic width sums/products;
+- canonical constant-expression DAGs and symbolic width sums, products, and
+  maxima;
 - a dedicated data-type interface and implementation owning canonical type
-  construction, aliases, packed layout, projection, width, state domain,
-  concatenation, and current operator-result typing;
+  construction, aliases, packed layout, projection, width, state and numerical
+  domains, concatenation, conversions, and operation resolution;
 - one private compile-time primitive descriptor table supplying source
   spelling, fixed base width, state domain, and capabilities to those queries;
 - opaque `pigen_data_type_id` values outside that owner; constructor tags, raw
@@ -189,9 +184,9 @@ The unlinked replacement modules already provide:
   symbol-table lookup or reinterpretation;
 - a shared semantic operation algebra, distinct from syntax spelling and from
   operand-dependent data-type rules;
-- resolved unary, binary, and conditional operation records shared by runtime
-  and canonical constant expressions, with effective operand and result types
-  supplied once by the data-type owner;
+- resolved unary, binary, and conditional decisions containing conversions plus
+  operation records, with effective operand and result types supplied once by
+  the data-type owner;
 - one canonical transfer-type descriptor catalogue owning source spelling,
   concrete/static classification, parameter form, write eligibility,
   valid/ready constants, consumption, production, ownership, and domain
@@ -237,7 +232,7 @@ not enumerate either catalogue.
 The realization boundary is specified in
 `docs/superpowers/specs/2026-08-24-transfer-realization-design.md`.
 
-The next data-type boundary is specified in
+The data-type boundary is specified in
 `docs/superpowers/specs/2026-08-25-data-type-policy-design.md`. Pigen's initial
 `int[n]` and `uint[n]` families are two-state integers; implicit mixed-family
 arithmetic is rejected. `byte` is a two-state raw vector with no arithmetic
@@ -246,7 +241,9 @@ exact operands plus optional expected type; it returns effective operand
 types, conversions, and result type. Context may widen an integer operation
 but never narrows it before the final assignment conversion. These are
 replaceable policy choices, not rules to duplicate in expression or lowering
-passes.
+passes. Ada completed this semantic-only policy slice on 2026-08-25. Source
+spellings, conversion expression nodes, expected-type propagation, lowering,
+and production integration remain open.
 
 As a rough architecture estimate, the replacement effort is about **25%**
 complete overall: the reusable frontend and semantic foundation is around

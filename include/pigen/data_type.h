@@ -91,12 +91,15 @@ int pigen_data_type_resolve_explicit_conversion(
 	pigen_data_type_id target, pigen_conversion *conversion);
 int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
 	pigen_unary_operator operator, pigen_data_type_id operand,
-	pigen_unary_operation *operation);
+	pigen_data_type_id expected_result, pigen_unary_resolution *resolution);
 int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	pigen_binary_operator operator, pigen_data_type_id left,
-	pigen_data_type_id right, pigen_binary_operation *operation);
-int pigen_data_type_resolve_conditional_operation(pigen_semantic_model *model,
-	pigen_data_type_id condition, pigen_data_type_id when_true,
-	pigen_data_type_id when_false, pigen_conditional_operation *operation);
+	pigen_data_type_id right, pigen_data_type_id expected_result,
+	pigen_binary_resolution *resolution);
+int pigen_data_type_resolve_conditional_operation(
+	pigen_semantic_model *model, pigen_data_type_id condition,
+	pigen_data_type_id when_true, pigen_data_type_id when_false,
+	pigen_data_type_id expected_result,
+	pigen_conditional_resolution *resolution);
 
 #endif

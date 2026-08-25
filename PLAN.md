@@ -72,10 +72,10 @@ consumes unpacked dimensions before packed dimensions; unsupported unpacked
 slices and concatenations are rejected rather than reinterpreted. The target
 data-first declaration grammar remains incomplete. `data_type.h` and
 `data_type.c` now own canonical data-type construction, aliases, packed layout,
-projection, width, state domain, concatenation, sized-logic construction,
-integral capability, and current operator-result typing. The general semantic
-and predicate layers consume that opaque interface without enumerating or
-inspecting primitive constructors.
+projection, symbolic width sums/products/maxima, state and numerical domains,
+concatenation, sized-logic construction, conversion policy, and family-owned
+operation resolution. The general semantic and predicate layers consume that
+opaque interface without enumerating or inspecting primitive constructors.
 Semantic records carry explicit `pigen_data_type_id` fields rather than a
 generic type identity. Canonical aliases store their resolved target identity,
 so later data-type operations do not re-enter the symbol table. Primitive
@@ -87,22 +87,23 @@ primitive's source spelling, fixed base width, state domain, and capability
 flags. Width, packed projection, concatenation, and capability queries consume
 those descriptors rather than rediscovering the primitive catalogue. The
 compiler's private type for unsized integer expressions is explicitly named
-`unsized_integer`; it is not the future source-level `int[n]` primitive. The
-target `int`, `uint`, and `byte` catalogue, data-first syntax,
-conversion insertion, contextual sizing, numerical interpretation, and
-lowering remain incomplete. There is no elastic RTL IR or terminal structured
-emitter.
+`unsized_integer`; it is distinct from semantic-only two-state `int[n]` and
+`uint[n]` families. Those families and raw two-state `byte` have canonical
+identities and fail-closed conversion/operation decisions, but no source
+spellings yet. Data-first syntax, conversion expression nodes, contextual
+expected-type plumbing, lowering, and production integration remain incomplete.
+There is no elastic RTL IR or terminal structured emitter.
 
 The semantic unary, binary, and select-operation vocabulary is owned by
 `operation.h` and `operation.c`. Expression records and data-type rules consume
 that shared algebra independently: operation identity is global structure;
 operand-dependent meaning remains local to the data-type subsystem. That owner
-now resolves each unary, binary, and conditional application into an explicit
-operation record containing its operator where applicable and its effective
-operand and result data-type identities. Semantic and canonical constant
-expressions carry the record directly; they no longer pair a raw operator with
-a caller-supplied result type. Conversion insertion and richer lowering-facing
-operation semantics remain incomplete.
+now resolves each unary, binary, and conditional application into required
+conversion records plus an effective operation record. Semantic and canonical
+constant expressions carry the operation directly. Expression resolution
+currently passes no expected type and accepts only identity conversions at one
+explicit gate; conversion nodes and contextual plumbing will replace that
+incomplete boundary.
 
 ## Architecture cutover
 

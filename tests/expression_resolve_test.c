@@ -48,6 +48,7 @@ int main(void)
 	pigen_data_type_id unsized_integer_data_type;
 	pigen_data_type_id boolean_type;
 	pigen_data_type_id aliased_type;
+	pigen_binary_resolution binary_resolution;
 	pigen_symbol_id module_symbol;
 	pigen_symbol_id width;
 	pigen_symbol_id left;
@@ -107,6 +108,26 @@ int main(void)
 	assert(module.index != PIGEN_INVALID_ID);
 	unsized_integer_data_type = pigen_data_type_unsized_integer(&model);
 	boolean_type = pigen_data_type_boolean(&model);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		unsized_integer_data_type, unsized_integer_data_type,
+		INVALID_ID(pigen_data_type_id), &binary_resolution));
+	assert(binary_resolution.left_conversion.kind == PIGEN_CONVERSION_IDENTITY);
+	assert(binary_resolution.left_conversion.source_data_type.index ==
+		unsized_integer_data_type.index);
+	assert(binary_resolution.left_conversion.target_data_type.index ==
+		unsized_integer_data_type.index);
+	assert(binary_resolution.right_conversion.kind == PIGEN_CONVERSION_IDENTITY);
+	assert(binary_resolution.right_conversion.source_data_type.index ==
+		unsized_integer_data_type.index);
+	assert(binary_resolution.right_conversion.target_data_type.index ==
+		unsized_integer_data_type.index);
+	assert(binary_resolution.operation.operator == PIGEN_BINARY_ADD);
+	assert(binary_resolution.operation.left_data_type.index ==
+		unsized_integer_data_type.index);
+	assert(binary_resolution.operation.right_data_type.index ==
+		unsized_integer_data_type.index);
+	assert(binary_resolution.operation.result_data_type.index ==
+		unsized_integer_data_type.index);
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_PARAMETER,
 		unsized_integer_data_type, (pigen_source_span){source, 0, 5},
 		(pigen_source_span){source, 0, 5}, &width, &shadowed) ==

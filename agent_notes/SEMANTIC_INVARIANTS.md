@@ -145,16 +145,25 @@ contract stated in `SPEC.md`.
 - Pigen `byte` is initially a two-state eight-bit vector without numerical
   interpretation. It supports structural, bitwise, equality, and logical use,
   but arithmetic and ordered comparison require an explicit integer cast.
-- The data-type owner keeps Pigen integer-family widths as intrinsic canonical
-  constant-expression identities. It exposes alias-transparent numerical
-  interpretation and fail-closed assignment/explicit conversion records;
-  primitive constructors and spelling recognition remain private concerns of
-  that owner. Ari recorded this boundary on 2026-08-25.
+- The data-type owner keeps Pigen integer widths as intrinsic canonical
+  constant-expression identities and exposes alias-transparent numerical
+  interpretation, fail-closed conversions, and family-owned operation
+  resolutions. A resolution contains every required conversion plus an
+  operation whose effective operand identities equal the conversion targets;
+  failed resolution leaves the caller's record untouched. Primitive
+  constructors and source-spelling recognition remain private.
 - Operator and type family jointly determine effective operands and result.
   Optional expected type is policy input, not a universal coercion rule. The
-  initial integer policy uses a compatible wider expectation but never lets a
-  narrower consumer shrink the operation before final contextual conversion.
-  These policies may change without changing the operation/conversion boundary.
+  initial integer policy forms a canonical symbolic maximum from operand widths
+  and a compatible expected width, so a narrower consumer cannot shrink the
+  operation before final assignment conversion. Shifts preserve the left
+  family and width and require an unsigned-integer count. These policies may
+  change without changing the operation/conversion boundary.
+- Until semantic conversion expression nodes exist, expression resolution
+  passes exactly `INVALID_ID(pigen_data_type_id)` as the absent expectation and
+  constructs an expression only when every recorded conversion is identity.
+  This single fail-closed gate is deliberately incomplete, not a compatibility
+  path. Ada recorded the operation boundary on 2026-08-25.
 - Identifier reads, lvalues, concatenations, casts, member selections, bit
   selections, indexed selections, calls, and conditional evaluation are
   distinct expression/use forms.

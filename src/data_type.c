@@ -437,12 +437,15 @@ static pigen_const_expr_id intern_unsized_integer_binary(
 	pigen_const_expr_id left, pigen_const_expr_id right)
 {
 	pigen_data_type_id data_type = pigen_data_type_unsized_integer(model);
-	pigen_binary_operation operation;
+	pigen_binary_resolution resolution;
 
 	if (!pigen_data_type_resolve_binary_operation(model, operator, data_type,
-		data_type, &operation))
+		data_type, INVALID_ID(pigen_data_type_id), &resolution) ||
+		resolution.left_conversion.kind != PIGEN_CONVERSION_IDENTITY ||
+		resolution.right_conversion.kind != PIGEN_CONVERSION_IDENTITY)
 		return INVALID_ID(pigen_const_expr_id);
-	return pigen_const_expr_intern_binary(model, operation, left, right);
+	return pigen_const_expr_intern_binary(model, resolution.operation, left,
+		right);
 }
 
 pigen_data_type_id pigen_data_type_packed_select(pigen_semantic_model *model,
@@ -708,18 +711,188 @@ static int unary_boolean_result(pigen_unary_operator operator)
 		operator <= PIGEN_UNARY_REDUCTION_XNOR);
 }
 
+static int unary_arithmetic_operator(pigen_unary_operator operator)
+{
+	return operator == PIGEN_UNARY_POSITIVE ||
+		operator == PIGEN_UNARY_NEGATE;
+}
+
+static int unary_reduction_operator(pigen_unary_operator operator)
+{
+	return operator >= PIGEN_UNARY_REDUCTION_AND &&
+		operator <= PIGEN_UNARY_REDUCTION_XNOR;
+}
+
+static int binary_arithmetic_operator(pigen_binary_operator operator)
+{
+	return operator >= PIGEN_BINARY_ADD && operator <= PIGEN_BINARY_POWER;
+}
+
+static int binary_shift_operator(pigen_binary_operator operator)
+{
+	return operator >= PIGEN_BINARY_SHIFT_LEFT &&
+		operator <= PIGEN_BINARY_ARITH_SHIFT_RIGHT;
+}
+
+static int binary_ordered_operator(pigen_binary_operator operator)
+{
+	return operator >= PIGEN_BINARY_LESS &&
+		operator <= PIGEN_BINARY_GREATER_EQUAL;
+}
+
+static int binary_equality_operator(pigen_binary_operator operator)
+{
+	return operator >= PIGEN_BINARY_EQUAL &&
+		operator <= PIGEN_BINARY_WILDCARD_NOT_EQUAL;
+}
+
+static int binary_bitwise_operator(pigen_binary_operator operator)
+{
+	return operator >= PIGEN_BINARY_BITWISE_AND &&
+		operator <= PIGEN_BINARY_BITWISE_OR;
+}
+
+static int binary_logical_operator(pigen_binary_operator operator)
+{
+	return operator == PIGEN_BINARY_LOGICAL_AND ||
+		operator == PIGEN_BINARY_LOGICAL_OR;
+}
+
+static int expected_result_exists(const pigen_semantic_model *model,
+	pigen_data_type_id expected_result)
+{
+	return expected_result.index == PIGEN_INVALID_ID ||
+		data_type_get(model, expected_result) != NULL;
+}
+
+static int integer_expected_is_compatible(const pigen_semantic_model *model,
+	pigen_numerical_interpretation interpretation,
+	pigen_data_type_id expected_result)
+{
+	pigen_numerical_interpretation expected_interpretation;
+
+	if (expected_result.index == PIGEN_INVALID_ID) return 1;
+	expected_interpretation = pigen_data_type_numerical_interpretation(model,
+		expected_result);
+	return !data_type_is_pigen_integer(model, expected_result) ||
+		expected_interpretation == interpretation;
+}
+
+static int integer_common_data_type(pigen_semantic_model *model,
+	const pigen_data_type_id *operands, size_t operand_count,
+	pigen_data_type_id expected_result, pigen_data_type_id *common)
+{
+	pigen_const_expr_id widths[3];
+	pigen_const_expr_id common_width;
+	pigen_numerical_interpretation interpretation;
+	size_t width_count = 0;
+	size_t i;
+
+	if (!model || !operands || !operand_count || operand_count > 2 || !common)
+		return 0;
+	interpretation = pigen_data_type_numerical_interpretation(model,
+		operands[0]);
+	if (interpretation != PIGEN_NUMERICAL_SIGNED_INTEGER &&
+		interpretation != PIGEN_NUMERICAL_UNSIGNED_INTEGER)
+		return 0;
+	for (i = 0; i < operand_count; i++)
+	{
+		if (pigen_data_type_numerical_interpretation(model, operands[i]) !=
+			interpretation)
+			return 0;
+		widths[width_count] = pigen_data_type_packed_width(model, operands[i]);
+		if (widths[width_count].index == PIGEN_INVALID_ID) return 0;
+		width_count++;
+	}
+	if (!integer_expected_is_compatible(model, interpretation,
+		expected_result))
+		return 0;
+	if (expected_result.index != PIGEN_INVALID_ID &&
+		data_type_is_pigen_integer(model, expected_result))
+	{
+		widths[width_count] = pigen_data_type_packed_width(model,
+			expected_result);
+		if (widths[width_count].index == PIGEN_INVALID_ID) return 0;
+		width_count++;
+	}
+	common_width = pigen_const_expr_intern_width_maximum(model, widths,
+		width_count);
+	if (common_width.index == PIGEN_INVALID_ID) return 0;
+	if (operand_count == 1 || operands[0].index == operands[1].index)
+	{
+		pigen_const_expr_id operand_width = pigen_data_type_packed_width(model,
+			operands[0]);
+
+		if (operand_width.index == common_width.index)
+		{
+			*common = operands[0];
+			return 1;
+		}
+	}
+	*common = interpretation == PIGEN_NUMERICAL_SIGNED_INTEGER ?
+		pigen_data_type_signed_integer(model, common_width) :
+		pigen_data_type_unsigned_integer(model, common_width);
+	return common->index != PIGEN_INVALID_ID;
+}
+
+static int data_type_admits_logical_use(const pigen_semantic_model *model,
+	pigen_data_type_id data_type)
+{
+	return pigen_data_type_is_integral(model, data_type) ||
+		data_type_is_byte(model, data_type);
+}
+
 int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
 	pigen_unary_operator operator, pigen_data_type_id operand,
-	pigen_unary_operation *operation)
+	pigen_data_type_id expected_result, pigen_unary_resolution *resolution)
 {
-	if (data_type_is_pigen_integer(model, operand) ||
-		!pigen_data_type_is_integral(model, operand) ||
-		!pigen_unary_operator_is_valid(operator) || !operation)
+	pigen_unary_resolution resolved;
+	pigen_data_type_id effective_operand = operand;
+	pigen_data_type_id operands[1] = {operand};
+	pigen_data_type_id result;
+
+	if (!model || !resolution || !pigen_unary_operator_is_valid(operator) ||
+		!data_type_get(model, operand) ||
+		!expected_result_exists(model, expected_result))
 		return 0;
-	*operation = (pigen_unary_operation){operator, operand,
-		unary_boolean_result(operator) ?
-			pigen_data_type_boolean(model) : operand};
-	return operation->result_data_type.index != PIGEN_INVALID_ID;
+	if (data_type_is_pigen_integer(model, operand))
+	{
+		pigen_numerical_interpretation interpretation =
+			pigen_data_type_numerical_interpretation(model, operand);
+
+		if (!integer_expected_is_compatible(model, interpretation,
+			expected_result))
+			return 0;
+		if (unary_arithmetic_operator(operator) ||
+			operator == PIGEN_UNARY_BITWISE_NOT)
+		{
+			if (!integer_common_data_type(model, operands, 1, expected_result,
+				&effective_operand))
+				return 0;
+		}
+		else if (operator != PIGEN_UNARY_LOGICAL_NOT &&
+			!unary_reduction_operator(operator))
+			return 0;
+	}
+	else if (data_type_is_byte(model, operand))
+	{
+		if (operator != PIGEN_UNARY_BITWISE_NOT &&
+			operator != PIGEN_UNARY_LOGICAL_NOT &&
+			!unary_reduction_operator(operator))
+			return 0;
+	}
+	else if (!pigen_data_type_is_integral(model, operand))
+		return 0;
+	if (!pigen_data_type_resolve_assignment_conversion(model, operand,
+		effective_operand, &resolved.operand_conversion))
+		return 0;
+	result = unary_boolean_result(operator) ? pigen_data_type_boolean(model) :
+		effective_operand;
+	if (result.index == PIGEN_INVALID_ID) return 0;
+	resolved.operation = (pigen_unary_operation){operator,
+		resolved.operand_conversion.target_data_type, result};
+	*resolution = resolved;
+	return 1;
 }
 
 static int binary_boolean_result(pigen_binary_operator operator)
@@ -732,36 +905,132 @@ static int binary_boolean_result(pigen_binary_operator operator)
 
 int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	pigen_binary_operator operator, pigen_data_type_id left,
-	pigen_data_type_id right, pigen_binary_operation *operation)
+	pigen_data_type_id right, pigen_data_type_id expected_result,
+	pigen_binary_resolution *resolution)
 {
+	pigen_binary_resolution resolved;
+	pigen_data_type_id effective_left = left;
+	pigen_data_type_id effective_right = right;
+	pigen_data_type_id operands[2] = {left, right};
 	pigen_data_type_id result;
 
-	if (data_type_is_pigen_integer(model, left) ||
-		data_type_is_pigen_integer(model, right) ||
-		!pigen_data_type_is_integral(model, left) ||
-		!pigen_data_type_is_integral(model, right) ||
-		!pigen_binary_operator_is_valid(operator) || !operation)
+	if (!model || !resolution || !pigen_binary_operator_is_valid(operator) ||
+		!data_type_get(model, left) || !data_type_get(model, right) ||
+		!expected_result_exists(model, expected_result))
 		return 0;
-	result = binary_boolean_result(operator) ? pigen_data_type_boolean(model) :
-		left.index == right.index ? left : INVALID_ID(pigen_data_type_id);
+	if (binary_shift_operator(operator) && data_type_is_pigen_integer(model, left))
+	{
+		pigen_numerical_interpretation interpretation =
+			pigen_data_type_numerical_interpretation(model, left);
+
+		if (pigen_data_type_numerical_interpretation(model, right) !=
+			PIGEN_NUMERICAL_UNSIGNED_INTEGER ||
+			!integer_expected_is_compatible(model, interpretation,
+				expected_result))
+			return 0;
+		result = left;
+	}
+	else if (data_type_is_pigen_integer(model, left) ||
+		data_type_is_pigen_integer(model, right))
+	{
+		if (!binary_arithmetic_operator(operator) &&
+			!binary_ordered_operator(operator) &&
+			!binary_equality_operator(operator) &&
+			!binary_bitwise_operator(operator) &&
+			!binary_logical_operator(operator))
+			return 0;
+		if (!integer_common_data_type(model, operands, 2, expected_result,
+			&effective_left))
+			return 0;
+		effective_right = effective_left;
+		result = binary_boolean_result(operator) ?
+			pigen_data_type_boolean(model) : effective_left;
+	}
+	else if (data_type_is_byte(model, left) || data_type_is_byte(model, right))
+	{
+		if (!data_type_is_byte(model, left) || !data_type_is_byte(model, right) ||
+			left.index != right.index ||
+			(!binary_bitwise_operator(operator) &&
+			!binary_equality_operator(operator) &&
+			!binary_logical_operator(operator)))
+			return 0;
+		result = binary_boolean_result(operator) ?
+			pigen_data_type_boolean(model) : left;
+	}
+	else
+	{
+		if (!pigen_data_type_is_integral(model, left) ||
+			!pigen_data_type_is_integral(model, right))
+			return 0;
+		result = binary_boolean_result(operator) ?
+			pigen_data_type_boolean(model) :
+			left.index == right.index ? left : INVALID_ID(pigen_data_type_id);
+	}
 	if (result.index == PIGEN_INVALID_ID) return 0;
-	*operation = (pigen_binary_operation){operator, left, right, result};
+	if (!pigen_data_type_resolve_assignment_conversion(model, left,
+		effective_left, &resolved.left_conversion) ||
+		!pigen_data_type_resolve_assignment_conversion(model, right,
+			effective_right, &resolved.right_conversion))
+		return 0;
+	resolved.operation = (pigen_binary_operation){operator,
+		resolved.left_conversion.target_data_type,
+		resolved.right_conversion.target_data_type, result};
+	*resolution = resolved;
 	return 1;
 }
 
-int pigen_data_type_resolve_conditional_operation(pigen_semantic_model *model,
-	pigen_data_type_id condition, pigen_data_type_id when_true,
-	pigen_data_type_id when_false, pigen_conditional_operation *operation)
+int pigen_data_type_resolve_conditional_operation(
+	pigen_semantic_model *model, pigen_data_type_id condition,
+	pigen_data_type_id when_true, pigen_data_type_id when_false,
+	pigen_data_type_id expected_result,
+	pigen_conditional_resolution *resolution)
 {
-	if (data_type_is_pigen_integer(model, condition) ||
-		data_type_is_pigen_integer(model, when_true) ||
-		data_type_is_pigen_integer(model, when_false) ||
-		!pigen_data_type_is_integral(model, condition) ||
-		when_true.index != when_false.index ||
-		!data_type_get(model, when_true) || !operation)
+	pigen_conditional_resolution resolved;
+	pigen_data_type_id effective_true = when_true;
+	pigen_data_type_id effective_false = when_false;
+	pigen_data_type_id alternatives[2] = {when_true, when_false};
+	pigen_data_type_id result;
+
+	if (!model || !resolution || !data_type_get(model, condition) ||
+		!data_type_get(model, when_true) || !data_type_get(model, when_false) ||
+		!expected_result_exists(model, expected_result) ||
+		!data_type_admits_logical_use(model, condition))
 		return 0;
-	*operation = (pigen_conditional_operation){condition, when_true,
-		when_false, when_true};
+	if (data_type_is_pigen_integer(model, when_true) ||
+		data_type_is_pigen_integer(model, when_false))
+	{
+		if (!integer_common_data_type(model, alternatives, 2,
+			expected_result, &effective_true))
+			return 0;
+		effective_false = effective_true;
+		result = effective_true;
+	}
+	else if (data_type_is_byte(model, when_true) ||
+		data_type_is_byte(model, when_false))
+	{
+		if (!data_type_is_byte(model, when_true) ||
+			!data_type_is_byte(model, when_false) ||
+			when_true.index != when_false.index)
+			return 0;
+		result = when_true;
+	}
+	else
+	{
+		if (when_true.index != when_false.index) return 0;
+		result = when_true;
+	}
+	if (!pigen_data_type_resolve_assignment_conversion(model, condition,
+		condition, &resolved.condition_conversion) ||
+		!pigen_data_type_resolve_assignment_conversion(model, when_true,
+			effective_true, &resolved.when_true_conversion) ||
+		!pigen_data_type_resolve_assignment_conversion(model, when_false,
+			effective_false, &resolved.when_false_conversion))
+		return 0;
+	resolved.operation = (pigen_conditional_operation){
+		resolved.condition_conversion.target_data_type,
+		resolved.when_true_conversion.target_data_type,
+		resolved.when_false_conversion.target_data_type, result};
+	*resolution = resolved;
 	return 1;
 }
 

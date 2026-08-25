@@ -37,6 +37,11 @@ typedef struct {
 	pigen_data_type_id result_data_type;
 } pigen_unary_operation;
 
+typedef struct {
+	pigen_conversion operand_conversion;
+	pigen_unary_operation operation;
+} pigen_unary_resolution;
+
 typedef enum {
 	PIGEN_BINARY_ADD,
 	PIGEN_BINARY_SUBTRACT,
@@ -74,11 +79,24 @@ typedef struct {
 } pigen_binary_operation;
 
 typedef struct {
+	pigen_conversion left_conversion;
+	pigen_conversion right_conversion;
+	pigen_binary_operation operation;
+} pigen_binary_resolution;
+
+typedef struct {
 	pigen_data_type_id condition_data_type;
 	pigen_data_type_id when_true_data_type;
 	pigen_data_type_id when_false_data_type;
 	pigen_data_type_id result_data_type;
 } pigen_conditional_operation;
+
+typedef struct {
+	pigen_conversion condition_conversion;
+	pigen_conversion when_true_conversion;
+	pigen_conversion when_false_conversion;
+	pigen_conditional_operation operation;
+} pigen_conditional_resolution;
 
 typedef enum {
 	PIGEN_SEMANTIC_SELECT_RANGE,
