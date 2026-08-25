@@ -109,8 +109,7 @@ int main(void)
 	unsized_integer_data_type = pigen_data_type_unsized_integer(&model);
 	boolean_type = pigen_data_type_boolean(&model);
 	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
-		unsized_integer_data_type, unsized_integer_data_type,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
+		unsized_integer_data_type, unsized_integer_data_type, &binary_resolution));
 	assert(binary_resolution.left_conversion.kind == PIGEN_CONVERSION_IDENTITY);
 	assert(binary_resolution.left_conversion.source_data_type.index ==
 		unsized_integer_data_type.index);

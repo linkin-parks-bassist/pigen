@@ -401,8 +401,7 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 			if (!known)
 				return INVALID_ID(pigen_expr_id);
 			if (!pigen_data_type_resolve_unary_operation(resolver->model,
-				operator, known->data_type, INVALID_ID(pigen_data_type_id),
-				&resolution) ||
+				operator, known->data_type, &resolution) ||
 				resolution.operand_conversion.kind != PIGEN_CONVERSION_IDENTITY)
 				return INVALID_ID(pigen_expr_id);
 			return pigen_expr_add_unary(resolver->model, resolution.operation,
@@ -426,8 +425,7 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 			if (!left_known || !right_known)
 				return INVALID_ID(pigen_expr_id);
 			if (!pigen_data_type_resolve_binary_operation(resolver->model,
-				operator, left_known->data_type, right_known->data_type,
-				INVALID_ID(pigen_data_type_id), &resolution) ||
+				operator, left_known->data_type, right_known->data_type, &resolution) ||
 				resolution.left_conversion.kind != PIGEN_CONVERSION_IDENTITY ||
 				resolution.right_conversion.kind != PIGEN_CONVERSION_IDENTITY)
 				return INVALID_ID(pigen_expr_id);
@@ -454,8 +452,7 @@ static pigen_expr_id resolve_expression(expression_resolver *resolver,
 				return INVALID_ID(pigen_expr_id);
 			if (!pigen_data_type_resolve_conditional_operation(resolver->model,
 				condition_known->data_type, true_known->data_type,
-				false_known->data_type, INVALID_ID(pigen_data_type_id),
-				&resolution) ||
+				false_known->data_type, &resolution) ||
 				resolution.condition_conversion.kind !=
 					PIGEN_CONVERSION_IDENTITY ||
 				resolution.when_true_conversion.kind !=

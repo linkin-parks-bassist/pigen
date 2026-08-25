@@ -31,41 +31,42 @@ static void assert_conversion(pigen_conversion conversion,
 	assert(conversion.target_data_type.index == target.index);
 }
 
-static void assert_integer_boolean_resolution(pigen_semantic_model *model,
-	pigen_binary_operator operator, pigen_data_type_id left,
-	pigen_data_type_id right, pigen_data_type_id expected_result,
-	pigen_data_type_id effective_operand,
-	pigen_conversion_kind left_conversion_kind,
-	pigen_conversion_kind right_conversion_kind,
-	pigen_data_type_id boolean_type)
+static uint64_t evaluate_width(const pigen_semantic_model *model,
+	pigen_const_expr_id expression)
 {
-	pigen_binary_resolution resolution;
+	const pigen_const_expr *known = pigen_const_expr_get(model, expression);
+	const pigen_const_expr_id *children;
+	uint64_t result;
+	size_t i;
 
-	assert(pigen_data_type_resolve_binary_operation(model, operator, left, right,
-		expected_result, &resolution));
-	assert_conversion(resolution.left_conversion, left_conversion_kind, left,
-		effective_operand);
-	assert_conversion(resolution.right_conversion, right_conversion_kind, right,
-		effective_operand);
-	assert(resolution.operation.operator == operator);
-	assert(resolution.operation.left_data_type.index == effective_operand.index);
-	assert(resolution.operation.right_data_type.index == effective_operand.index);
-	assert(resolution.operation.result_data_type.index == boolean_type.index);
+	assert(known);
+	if (known->kind == PIGEN_CONST_EXPR_INTEGER) return known->as.integer;
+	assert(known->kind == PIGEN_CONST_EXPR_WIDTH_SUM ||
+		known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ||
+		known->kind == PIGEN_CONST_EXPR_WIDTH_MAXIMUM);
+	children = pigen_const_expr_children(model, known->as.sequence.first_child,
+		known->as.sequence.child_count);
+	assert(children);
+	result = known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ? 1 : 0;
+	for (i = 0; i < known->as.sequence.child_count; i++)
+	{
+		uint64_t child = evaluate_width(model, children[i]);
+
+		if (known->kind == PIGEN_CONST_EXPR_WIDTH_SUM) result += child;
+		else if (known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT) result *= child;
+		else if (child > result) result = child;
+	}
+	return result;
 }
 
-static void assert_integer_boolean_unary_resolution(pigen_semantic_model *model,
-	pigen_unary_operator operator, pigen_data_type_id operand,
-	pigen_data_type_id expected_result, pigen_data_type_id boolean_type)
+static void assert_numerical_width(pigen_semantic_model *model,
+	pigen_data_type_id type, pigen_numerical_interpretation interpretation,
+	uint64_t width)
 {
-	pigen_unary_resolution resolution;
-
-	assert(pigen_data_type_resolve_unary_operation(model, operator, operand,
-		expected_result, &resolution));
-	assert_conversion(resolution.operand_conversion, PIGEN_CONVERSION_IDENTITY,
-		operand, operand);
-	assert(resolution.operation.operator == operator);
-	assert(resolution.operation.operand_data_type.index == operand.index);
-	assert(resolution.operation.result_data_type.index == boolean_type.index);
+	assert(pigen_data_type_numerical_interpretation(model, type) ==
+		interpretation);
+	assert(evaluate_width(model, pigen_data_type_packed_width(model, type)) ==
+		width);
 }
 
 int main(void)
@@ -115,6 +116,13 @@ int main(void)
 	pigen_data_type_id signed_16;
 	pigen_data_type_id unsigned_8;
 	pigen_data_type_id unsigned_12;
+	pigen_data_type_id exact_one;
+	pigen_data_type_id exact_zero;
+	pigen_data_type_id exact_three;
+	pigen_integer_id one;
+	pigen_integer_id zero;
+	pigen_integer_id three;
+	pigen_integer_id negative_one;
 	pigen_data_type_id pigen_byte;
 	pigen_data_type_id byte_alias_a;
 	pigen_data_type_id byte_alias_b;
@@ -230,6 +238,16 @@ int main(void)
 	signed_16 = pigen_data_type_signed_integer(&model, width_16);
 	unsigned_8 = pigen_data_type_unsigned_integer(&model, width_8);
 	unsigned_12 = pigen_data_type_unsigned_integer(&model, width_12);
+	zero = pigen_integer_intern_u64(&model, 0);
+	one = pigen_integer_intern_u64(&model, 1);
+	three = pigen_integer_intern_u64(&model, 3);
+	negative_one = pigen_integer_negate(&model, one);
+	exact_zero = pigen_data_type_exact_integer(&model, zero);
+	exact_one = pigen_data_type_exact_integer(&model, one);
+	exact_three = pigen_data_type_exact_integer(&model, three);
+	assert(pigen_data_type_exact_value(&model, exact_one).index == one.index);
+	assert(pigen_data_type_numerical_interpretation(&model, exact_one) ==
+		PIGEN_NUMERICAL_EXACT_INTEGER);
 	pigen_byte = pigen_data_type_byte(&model);
 	bit_type = pigen_data_type_primitive_from_spelling(&model,
 		occurrence(source, text, "bit", 0), PIGEN_SIGN_UNSIGNED, NULL, 0);
@@ -314,316 +332,187 @@ int main(void)
 	assert(!pigen_data_type_resolve_explicit_conversion(&model,
 		pigen_byte, signed_8, NULL));
 
+	/* Pigen numerical operations derive intrinsic, lossless result types. */
 	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
-		signed_8, signed_12, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_INTEGER_RESIZE, signed_8, signed_12);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_12, signed_12);
-	assert(binary_resolution.operation.operator == PIGEN_BINARY_ADD);
-	assert(binary_resolution.operation.left_data_type.index == signed_12.index);
-	assert(binary_resolution.operation.right_data_type.index == signed_12.index);
-	assert(binary_resolution.operation.result_data_type.index == signed_12.index);
+		unsigned_8, unsigned_8, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		signed_8, signed_8, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_AND, unsigned_8, unsigned_12,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
+		PIGEN_BINARY_MULTIPLY, binary_resolution.operation.result_data_type,
+		signed_8, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 17);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		signed_8, unsigned_8, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_INTEGER_RESIZE, unsigned_8, unsigned_12);
+		PIGEN_CONVERSION_INTEGER_RESIZE, signed_8,
+		binary_resolution.operation.left_data_type);
 	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, unsigned_12, unsigned_12);
-	assert(binary_resolution.operation.operator == PIGEN_BINARY_BITWISE_AND);
-	assert(binary_resolution.operation.left_data_type.index == unsigned_12.index);
-	assert(binary_resolution.operation.right_data_type.index == unsigned_12.index);
-	assert(binary_resolution.operation.result_data_type.index == unsigned_12.index);
+		PIGEN_CONVERSION_INTEGER_PROMOTION, unsigned_8,
+		binary_resolution.operation.right_data_type);
+	assert_numerical_width(&model, binary_resolution.operation.left_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 10);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_MULTIPLY, signed_8, signed_8,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert(binary_resolution.operation.left_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.right_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.result_data_type.index == signed_8.index);
+		PIGEN_BINARY_SUBTRACT, unsigned_8, unsigned_8, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_MULTIPLY, signed_8, signed_8, signed_16,
-		&binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_INTEGER_RESIZE, signed_8, signed_16);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_INTEGER_RESIZE, signed_8, signed_16);
-	assert(binary_resolution.operation.left_data_type.index == signed_16.index);
-	assert(binary_resolution.operation.right_data_type.index == signed_16.index);
-	assert(binary_resolution.operation.result_data_type.index == signed_16.index);
+		PIGEN_BINARY_MULTIPLY, unsigned_8, unsigned_8, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 16);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_MULTIPLY, signed_16, signed_16, signed_8,
-		&binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_16, signed_16);
+		PIGEN_BINARY_MULTIPLY, signed_8, signed_8, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 16);
+
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		unsigned_8, exact_one, &binary_resolution));
 	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_16, signed_16);
-	assert(binary_resolution.operation.left_data_type.index == signed_16.index);
-	assert(binary_resolution.operation.right_data_type.index == signed_16.index);
-	assert(binary_resolution.operation.result_data_type.index == signed_16.index);
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
-		signed_8, unsigned_8, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_LESS,
-		signed_8, unsigned_8, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_LESS,
-		signed_8, bit_type, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
+		PIGEN_CONVERSION_EXACT_INTEGER, exact_one,
+		binary_resolution.operation.right_data_type);
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 9);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_SHIFT_LEFT, signed_8, unsigned_12,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, unsigned_12, unsigned_12);
-	assert(binary_resolution.operation.left_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.right_data_type.index == unsigned_12.index);
-	assert(binary_resolution.operation.result_data_type.index == signed_8.index);
-	assert(!pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_SHIFT_LEFT, signed_8, signed_12,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
-	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_LESS,
-		signed_8, signed_8, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert(binary_resolution.operation.left_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.right_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.result_data_type.index == boolean_type.index);
-	assert_integer_boolean_resolution(&model, PIGEN_BINARY_LESS, signed_8,
-		signed_12, signed_16, signed_12, PIGEN_CONVERSION_INTEGER_RESIZE,
-		PIGEN_CONVERSION_IDENTITY, boolean_type);
-	assert_integer_boolean_resolution(&model, PIGEN_BINARY_LESS, signed_8,
-		signed_12, signed_8, signed_12, PIGEN_CONVERSION_INTEGER_RESIZE,
-		PIGEN_CONVERSION_IDENTITY, boolean_type);
-	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_EQUAL,
-		signed_8, signed_8, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert(binary_resolution.operation.left_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.right_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.result_data_type.index == boolean_type.index);
-	assert_integer_boolean_resolution(&model, PIGEN_BINARY_EQUAL, signed_8,
-		signed_12, signed_16, signed_12, PIGEN_CONVERSION_INTEGER_RESIZE,
-		PIGEN_CONVERSION_IDENTITY, boolean_type);
-	assert_integer_boolean_resolution(&model, PIGEN_BINARY_EQUAL, signed_8,
-		signed_12, signed_8, signed_12, PIGEN_CONVERSION_INTEGER_RESIZE,
-		PIGEN_CONVERSION_IDENTITY, boolean_type);
+		PIGEN_BINARY_MULTIPLY, unsigned_8, exact_three, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 10);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_LOGICAL_AND, signed_8, signed_8,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert(binary_resolution.operation.left_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.right_data_type.index == signed_8.index);
-	assert(binary_resolution.operation.result_data_type.index == boolean_type.index);
-	assert_integer_boolean_resolution(&model, PIGEN_BINARY_LOGICAL_AND, signed_8,
-		signed_12, signed_16, signed_12, PIGEN_CONVERSION_INTEGER_RESIZE,
-		PIGEN_CONVERSION_IDENTITY, boolean_type);
-	assert_integer_boolean_resolution(&model, PIGEN_BINARY_LOGICAL_AND, signed_8,
-		signed_12, signed_8, signed_12, PIGEN_CONVERSION_INTEGER_RESIZE,
-		PIGEN_CONVERSION_IDENTITY, boolean_type);
-	binary_resolution = (pigen_binary_resolution){
-		{PIGEN_CONVERSION_INVALID, signed_8, unsigned_8},
-		{PIGEN_CONVERSION_INVALID, signed_12, unsigned_12},
-		{PIGEN_BINARY_POWER, signed_16, unsigned_12, pigen_byte}};
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_LESS,
-		signed_8, signed_12, (pigen_data_type_id){PIGEN_INVALID_ID - 1},
-		&binary_resolution));
-	assert(binary_resolution.operation.operator == PIGEN_BINARY_POWER);
-	assert(binary_resolution.left_conversion.source_data_type.index ==
-		signed_8.index);
-	assert(binary_resolution.right_conversion.target_data_type.index ==
-		unsigned_12.index);
-	assert(pigen_data_type_resolve_unary_operation(&model, PIGEN_UNARY_NEGATE,
-		signed_8, INVALID_ID(pigen_data_type_id), &unary_resolution));
-	assert_conversion(unary_resolution.operand_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert(unary_resolution.operation.operator == PIGEN_UNARY_NEGATE);
-	assert(unary_resolution.operation.operand_data_type.index == signed_8.index);
-	assert(unary_resolution.operation.result_data_type.index == signed_8.index);
-	assert(pigen_data_type_resolve_unary_operation(&model,
-		PIGEN_UNARY_LOGICAL_NOT, signed_8, INVALID_ID(pigen_data_type_id),
-		&unary_resolution));
-	assert_conversion(unary_resolution.operand_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert(unary_resolution.operation.operand_data_type.index == signed_8.index);
-	assert(unary_resolution.operation.result_data_type.index == boolean_type.index);
-	assert_integer_boolean_unary_resolution(&model, PIGEN_UNARY_LOGICAL_NOT,
-		signed_8, signed_16, boolean_type);
-	assert_integer_boolean_unary_resolution(&model, PIGEN_UNARY_LOGICAL_NOT,
-		signed_8, unsigned_12, boolean_type);
-	assert_integer_boolean_unary_resolution(&model, PIGEN_UNARY_REDUCTION_XOR,
-		signed_8, signed_16, boolean_type);
-	assert_integer_boolean_unary_resolution(&model, PIGEN_UNARY_REDUCTION_XOR,
-		signed_8, unsigned_12, boolean_type);
-	unary_resolution = (pigen_unary_resolution){
-		{PIGEN_CONVERSION_INTEGER_REINTERPRET, signed_8, unsigned_8},
-		{PIGEN_UNARY_REDUCTION_NOR, signed_16, pigen_byte}};
-	assert(!pigen_data_type_resolve_unary_operation(&model,
-		PIGEN_UNARY_LOGICAL_NOT, signed_8,
-		(pigen_data_type_id){PIGEN_INVALID_ID - 1}, &unary_resolution));
-	assert(unary_resolution.operand_conversion.kind ==
-		PIGEN_CONVERSION_INTEGER_REINTERPRET);
-	assert(unary_resolution.operand_conversion.source_data_type.index ==
-		signed_8.index);
-	assert(unary_resolution.operand_conversion.target_data_type.index ==
+		PIGEN_BINARY_MULTIPLY, unsigned_8, exact_one, &binary_resolution));
+	assert(binary_resolution.operation.result_data_type.index ==
 		unsigned_8.index);
-	assert(unary_resolution.operation.operator == PIGEN_UNARY_REDUCTION_NOR);
-	assert(unary_resolution.operation.operand_data_type.index == signed_16.index);
-	assert(unary_resolution.operation.result_data_type.index == pigen_byte.index);
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
-		signed_8, signed_8, unsigned_12, &binary_resolution));
-	binary_resolution = (pigen_binary_resolution){
-		{PIGEN_CONVERSION_INVALID, signed_8, unsigned_8},
-		{PIGEN_CONVERSION_INVALID, signed_12, unsigned_12},
-		{PIGEN_BINARY_POWER, signed_16, unsigned_12, pigen_byte}};
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
-		signed_8, signed_8, (pigen_data_type_id){PIGEN_INVALID_ID - 1},
-		&binary_resolution));
-	assert(binary_resolution.operation.operator == PIGEN_BINARY_POWER);
-	assert(binary_resolution.left_conversion.source_data_type.index ==
-		signed_8.index);
-	assert(binary_resolution.right_conversion.target_data_type.index ==
-		unsigned_12.index);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		unsigned_8, exact_zero, &binary_resolution));
+	assert(binary_resolution.operation.result_data_type.index ==
+		unsigned_8.index);
+
+	assert(pigen_data_type_resolve_unary_operation(&model,
+		PIGEN_UNARY_NEGATE, signed_8, &unary_resolution));
+	assert_numerical_width(&model, unary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_unary_operation(&model,
+		PIGEN_UNARY_NEGATE, unsigned_8, &unary_resolution));
+	assert_numerical_width(&model, unary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_unary_operation(&model,
+		PIGEN_UNARY_NEGATE, exact_one, &unary_resolution));
+	assert(pigen_data_type_exact_value(&model,
+		unary_resolution.operation.result_data_type).index ==
+		negative_one.index);
 
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_AND, pigen_byte, pigen_byte,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(binary_resolution.operation.left_data_type.index == pigen_byte.index);
-	assert(binary_resolution.operation.right_data_type.index == pigen_byte.index);
-	assert(binary_resolution.operation.result_data_type.index == pigen_byte.index);
-	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_EQUAL,
-		pigen_byte, pigen_byte, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(binary_resolution.operation.result_data_type.index == boolean_type.index);
-	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_LOGICAL_OR, pigen_byte, pigen_byte,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(binary_resolution.operation.result_data_type.index == boolean_type.index);
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
-		pigen_byte, pigen_byte, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert(!pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_MULTIPLY, pigen_byte, pigen_byte,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_LESS,
-		pigen_byte, pigen_byte, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert(!pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_AND, pigen_byte, unsigned_8,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_EQUAL,
-		pigen_byte, unsigned_8, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
-	assert(!pigen_data_type_resolve_unary_operation(&model, PIGEN_UNARY_NEGATE,
-		pigen_byte, INVALID_ID(pigen_data_type_id), &unary_resolution));
+		PIGEN_BINARY_BITWISE_AND, signed_8, unsigned_8, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
+	for (i = PIGEN_BINARY_LESS; i <= PIGEN_BINARY_WILDCARD_NOT_EQUAL; i++)
+	{
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			(pigen_binary_operator)i, signed_8, unsigned_8,
+			&binary_resolution));
+		assert(binary_resolution.operation.result_data_type.index ==
+			boolean_type.index);
+	}
+	for (i = PIGEN_BINARY_BITWISE_AND; i <= PIGEN_BINARY_BITWISE_OR; i++)
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			(pigen_binary_operator)i, signed_8, unsigned_8,
+			&binary_resolution));
+	for (i = PIGEN_BINARY_LOGICAL_AND; i <= PIGEN_BINARY_LOGICAL_OR; i++)
+	{
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			(pigen_binary_operator)i, signed_8, unsigned_8,
+			&binary_resolution));
+		assert(binary_resolution.operation.result_data_type.index ==
+			boolean_type.index);
+	}
 	assert(pigen_data_type_resolve_unary_operation(&model,
-		PIGEN_UNARY_BITWISE_NOT, pigen_byte, INVALID_ID(pigen_data_type_id),
-		&unary_resolution));
-	assert_conversion(unary_resolution.operand_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(unary_resolution.operation.operand_data_type.index == pigen_byte.index);
-	assert(unary_resolution.operation.result_data_type.index == pigen_byte.index);
+		PIGEN_UNARY_POSITIVE, signed_8, &unary_resolution));
 	assert(pigen_data_type_resolve_unary_operation(&model,
-		PIGEN_UNARY_REDUCTION_AND, pigen_byte, INVALID_ID(pigen_data_type_id),
-		&unary_resolution));
-	assert_conversion(unary_resolution.operand_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(unary_resolution.operation.operand_data_type.index == pigen_byte.index);
-	assert(unary_resolution.operation.result_data_type.index == boolean_type.index);
-	assert(pigen_data_type_resolve_conditional_operation(&model, pigen_byte,
-		signed_8, signed_12, signed_16, &conditional_resolution));
-	assert_conversion(conditional_resolution.condition_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert_conversion(conditional_resolution.when_true_conversion,
-		PIGEN_CONVERSION_INTEGER_RESIZE, signed_8, signed_16);
-	assert_conversion(conditional_resolution.when_false_conversion,
-		PIGEN_CONVERSION_INTEGER_RESIZE, signed_12, signed_16);
-	assert(conditional_resolution.operation.condition_data_type.index ==
-		pigen_byte.index);
-	assert(conditional_resolution.operation.when_true_data_type.index ==
-		signed_16.index);
-	assert(conditional_resolution.operation.when_false_data_type.index ==
-		signed_16.index);
-	assert(conditional_resolution.operation.result_data_type.index ==
-		signed_16.index);
-	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
-		pigen_byte, pigen_byte, INVALID_ID(pigen_data_type_id),
-		&conditional_resolution));
-	assert_conversion(conditional_resolution.condition_conversion,
-		PIGEN_CONVERSION_IDENTITY, signed_8, signed_8);
-	assert_conversion(conditional_resolution.when_true_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert_conversion(conditional_resolution.when_false_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(conditional_resolution.operation.condition_data_type.index ==
-		signed_8.index);
-	assert(conditional_resolution.operation.when_true_data_type.index ==
-		pigen_byte.index);
-	assert(conditional_resolution.operation.when_false_data_type.index ==
-		pigen_byte.index);
-	assert(conditional_resolution.operation.result_data_type.index ==
-		pigen_byte.index);
-	conditional_resolution = (pigen_conditional_resolution){
-		{PIGEN_CONVERSION_INTEGER_REINTERPRET, signed_8, unsigned_8},
-		{PIGEN_CONVERSION_INTEGER_RESIZE, signed_12, signed_16},
-		{PIGEN_CONVERSION_INTEGER_TO_VECTOR, unsigned_12, pigen_byte},
-		{unsigned_8, signed_16, pigen_byte, boolean_type}};
-	assert(!pigen_data_type_resolve_conditional_operation(&model, signed_8,
-		signed_8, signed_12, (pigen_data_type_id){PIGEN_INVALID_ID - 1},
-		&conditional_resolution));
-	assert(conditional_resolution.condition_conversion.kind ==
-		PIGEN_CONVERSION_INTEGER_REINTERPRET);
-	assert(conditional_resolution.condition_conversion.source_data_type.index ==
-		signed_8.index);
-	assert(conditional_resolution.condition_conversion.target_data_type.index ==
-		unsigned_8.index);
-	assert(conditional_resolution.when_true_conversion.kind ==
-		PIGEN_CONVERSION_INTEGER_RESIZE);
-	assert(conditional_resolution.when_true_conversion.source_data_type.index ==
-		signed_12.index);
-	assert(conditional_resolution.when_true_conversion.target_data_type.index ==
-		signed_16.index);
-	assert(conditional_resolution.when_false_conversion.kind ==
-		PIGEN_CONVERSION_INTEGER_TO_VECTOR);
-	assert(conditional_resolution.when_false_conversion.source_data_type.index ==
-		unsigned_12.index);
-	assert(conditional_resolution.when_false_conversion.target_data_type.index ==
-		pigen_byte.index);
-	assert(conditional_resolution.operation.condition_data_type.index ==
-		unsigned_8.index);
-	assert(conditional_resolution.operation.when_true_data_type.index ==
-		signed_16.index);
-	assert(conditional_resolution.operation.when_false_data_type.index ==
-		pigen_byte.index);
-	assert(conditional_resolution.operation.result_data_type.index ==
+		PIGEN_UNARY_BITWISE_NOT, signed_8, &unary_resolution));
+	assert(pigen_data_type_resolve_unary_operation(&model,
+		PIGEN_UNARY_LOGICAL_NOT, signed_8, &unary_resolution));
+	assert(unary_resolution.operation.result_data_type.index ==
 		boolean_type.index);
+	for (i = PIGEN_UNARY_REDUCTION_AND; i <= PIGEN_UNARY_REDUCTION_XNOR; i++)
+	{
+		assert(pigen_data_type_resolve_unary_operation(&model,
+			(pigen_unary_operator)i, signed_8, &unary_resolution));
+		assert(unary_resolution.operation.result_data_type.index ==
+			boolean_type.index);
+	}
+
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_SHIFT_RIGHT, signed_8, exact_one, &binary_resolution));
+	assert(binary_resolution.operation.result_data_type.index == signed_8.index);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_ARITH_SHIFT_RIGHT, signed_8, exact_one,
+		&binary_resolution));
+	assert(binary_resolution.operation.result_data_type.index == signed_8.index);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_SHIFT_LEFT, signed_8, exact_one, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_ARITH_SHIFT_LEFT, signed_8, exact_one,
+		&binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, unsigned_8, exact_three, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 24);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_SHIFT_LEFT, signed_8, unsigned_8, &binary_resolution));
+	assert(pigen_const_expr_get(&model, pigen_data_type_packed_width(&model,
+		binary_resolution.operation.result_data_type))->kind ==
+		PIGEN_CONST_EXPR_WIDTH_SUM);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, unsigned_8, unsigned_8, &binary_resolution));
+	assert(pigen_const_expr_get(&model, pigen_data_type_packed_width(&model,
+		binary_resolution.operation.result_data_type))->kind ==
+		PIGEN_CONST_EXPR_WIDTH_PRODUCT);
+	assert(!pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_DIVIDE, signed_8, signed_8, &binary_resolution));
+	assert(!pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_MODULO, signed_8, signed_8, &binary_resolution));
+	binary_resolution.operation.operator = PIGEN_BINARY_POWER;
+	assert(!pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_DIVIDE, signed_8, signed_8, &binary_resolution));
+	assert(binary_resolution.operation.operator == PIGEN_BINARY_POWER);
+
+	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
+		signed_8, unsigned_8, &conditional_resolution));
+	assert_numerical_width(&model,
+		conditional_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
+		exact_one, exact_three, &conditional_resolution));
+	assert_numerical_width(&model,
+		conditional_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 2);
+	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		pigen_byte, pigen_byte, &binary_resolution));
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_BITWISE_AND, pigen_byte, pigen_byte,
+		&binary_resolution));
+	assert(binary_resolution.operation.result_data_type.index ==
+		pigen_byte.index);
+	assert(pigen_data_type_resolve_unary_operation(&model,
+		PIGEN_UNARY_REDUCTION_XOR, pigen_byte, &unary_resolution));
+	assert(unary_resolution.operation.result_data_type.index ==
+		boolean_type.index);
+	assert(pigen_data_type_resolve_assignment_conversion(&model,
+		exact_three, unsigned_8, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_EXACT_INTEGER);
+	assert(pigen_data_type_resolve_explicit_conversion(&model,
+		exact_three, pigen_byte, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_EXACT_INTEGER);
+	assert(pigen_data_type_packed_width(&model, exact_three).index ==
+		PIGEN_INVALID_ID);
 	left_bound = pigen_expr_add_integer(&model, 7,
 		unsized_integer_data_type, range);
 	right_bound = pigen_expr_add_integer(&model, 0,
@@ -666,8 +555,7 @@ int main(void)
 	assert(pigen_expr_get(&model, left_bound)->shape.index == scalar_shape.index);
 	assert(pigen_data_type_resolve_conditional_operation(&model,
 		unsized_integer_data_type, unsized_integer_data_type,
-		unsized_integer_data_type, INVALID_ID(pigen_data_type_id),
-		&conditional_resolution));
+		unsized_integer_data_type, &conditional_resolution));
 	assert_conversion(conditional_resolution.condition_conversion,
 		PIGEN_CONVERSION_IDENTITY, unsized_integer_data_type,
 		unsized_integer_data_type);
@@ -919,8 +807,7 @@ int main(void)
 	assert(byte_alias_b.index != PIGEN_INVALID_ID);
 	assert(byte_alias_a.index != byte_alias_b.index);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_AND, byte_alias_a, byte_alias_a,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
+		PIGEN_BINARY_BITWISE_AND, byte_alias_a, byte_alias_a, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,
 		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
 	assert_conversion(binary_resolution.right_conversion,
@@ -928,8 +815,7 @@ int main(void)
 	assert(binary_resolution.operation.result_data_type.index ==
 		byte_alias_a.index);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_AND, byte_alias_a, byte_alias_b,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
+		PIGEN_BINARY_BITWISE_AND, byte_alias_a, byte_alias_b, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,
 		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
 	assert_conversion(binary_resolution.right_conversion,
@@ -940,16 +826,14 @@ int main(void)
 		byte_alias_b.index);
 	assert(binary_resolution.operation.result_data_type.index == pigen_byte.index);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_OR, byte_alias_a, pigen_byte,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
+		PIGEN_BINARY_BITWISE_OR, byte_alias_a, pigen_byte, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,
 		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
 	assert_conversion(binary_resolution.right_conversion,
 		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
 	assert(binary_resolution.operation.result_data_type.index == pigen_byte.index);
 	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_EQUAL,
-		byte_alias_a, byte_alias_b, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
+		byte_alias_a, byte_alias_b, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,
 		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
 	assert_conversion(binary_resolution.right_conversion,
@@ -957,8 +841,7 @@ int main(void)
 	assert(binary_resolution.operation.result_data_type.index ==
 		boolean_type.index);
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_LOGICAL_OR, byte_alias_a, pigen_byte,
-		INVALID_ID(pigen_data_type_id), &binary_resolution));
+		PIGEN_BINARY_LOGICAL_OR, byte_alias_a, pigen_byte, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,
 		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
 	assert_conversion(binary_resolution.right_conversion,
@@ -966,8 +849,7 @@ int main(void)
 	assert(binary_resolution.operation.result_data_type.index ==
 		boolean_type.index);
 	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
-		byte_alias_a, byte_alias_a, INVALID_ID(pigen_data_type_id),
-		&conditional_resolution));
+		byte_alias_a, byte_alias_a, &conditional_resolution));
 	assert_conversion(conditional_resolution.when_true_conversion,
 		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
 	assert_conversion(conditional_resolution.when_false_conversion,
@@ -975,8 +857,7 @@ int main(void)
 	assert(conditional_resolution.operation.result_data_type.index ==
 		byte_alias_a.index);
 	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
-		byte_alias_a, byte_alias_b, INVALID_ID(pigen_data_type_id),
-		&conditional_resolution));
+		byte_alias_a, byte_alias_b, &conditional_resolution));
 	assert_conversion(conditional_resolution.when_true_conversion,
 		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
 	assert_conversion(conditional_resolution.when_false_conversion,
@@ -988,8 +869,7 @@ int main(void)
 	assert(conditional_resolution.operation.result_data_type.index ==
 		pigen_byte.index);
 	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
-		byte_alias_a, pigen_byte, INVALID_ID(pigen_data_type_id),
-		&conditional_resolution));
+		byte_alias_a, pigen_byte, &conditional_resolution));
 	assert_conversion(conditional_resolution.when_true_conversion,
 		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
 	assert_conversion(conditional_resolution.when_false_conversion,
@@ -1010,8 +890,7 @@ int main(void)
 	assert(conversion.source_data_type.index == signed_integer_alias.index);
 	assert(conversion.target_data_type.index == signed_16.index);
 	assert(pigen_data_type_resolve_unary_operation(&model,
-		PIGEN_UNARY_NEGATE, aliased_unsized_integer_type,
-		INVALID_ID(pigen_data_type_id), &unary_resolution));
+		PIGEN_UNARY_NEGATE, aliased_unsized_integer_type, &unary_resolution));
 	assert_conversion(unary_resolution.operand_conversion,
 		PIGEN_CONVERSION_IDENTITY, aliased_unsized_integer_type,
 		aliased_unsized_integer_type);
@@ -1023,8 +902,7 @@ int main(void)
 	assert(pigen_expr_add_unary(&model, unary_resolution.operation, left_bound,
 		range).index == PIGEN_INVALID_ID);
 	assert(pigen_data_type_resolve_unary_operation(&model,
-		PIGEN_UNARY_LOGICAL_NOT, aliased_unsized_integer_type,
-		INVALID_ID(pigen_data_type_id), &unary_resolution));
+		PIGEN_UNARY_LOGICAL_NOT, aliased_unsized_integer_type, &unary_resolution));
 	assert_conversion(unary_resolution.operand_conversion,
 		PIGEN_CONVERSION_IDENTITY, aliased_unsized_integer_type,
 		aliased_unsized_integer_type);
@@ -1032,8 +910,7 @@ int main(void)
 		boolean_type.index);
 	assert(pigen_data_type_resolve_binary_operation(&model,
 		PIGEN_BINARY_MULTIPLY, aliased_unsized_integer_type,
-		aliased_unsized_integer_type, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
+		aliased_unsized_integer_type, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,
 		PIGEN_CONVERSION_IDENTITY, aliased_unsized_integer_type,
 		aliased_unsized_integer_type);
@@ -1049,8 +926,7 @@ int main(void)
 		aliased_unsized_integer_type.index);
 	assert(pigen_data_type_resolve_binary_operation(&model,
 		PIGEN_BINARY_EQUAL, aliased_unsized_integer_type,
-		unsized_integer_data_type, INVALID_ID(pigen_data_type_id),
-		&binary_resolution));
+		unsized_integer_data_type, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,
 		PIGEN_CONVERSION_IDENTITY, aliased_unsized_integer_type,
 		aliased_unsized_integer_type);
@@ -1061,8 +937,7 @@ int main(void)
 		boolean_type.index);
 	assert(pigen_data_type_resolve_conditional_operation(&model,
 		aliased_unsized_integer_type, aliased_unsized_integer_type,
-		aliased_unsized_integer_type, INVALID_ID(pigen_data_type_id),
-		&conditional_resolution));
+		aliased_unsized_integer_type, &conditional_resolution));
 	assert_conversion(conditional_resolution.condition_conversion,
 		PIGEN_CONVERSION_IDENTITY, aliased_unsized_integer_type,
 		aliased_unsized_integer_type);
