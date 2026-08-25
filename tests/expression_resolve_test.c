@@ -337,6 +337,10 @@ int main(void)
 						unsized_integer_data_type)}, 2);
 		pigen_data_type_id promoted_signed = pigen_data_type_signed_integer(
 			&model, promoted_width);
+		pigen_data_type_id exact_zero = pigen_data_type_exact_integer(&model,
+			pigen_integer_intern_u64(&model, 0));
+		pigen_data_type_id exact_one = pigen_data_type_exact_integer(&model,
+			pigen_integer_intern_u64(&model, 1));
 		pigen_const_expr_id result_width;
 
 		assert(!pigen_data_type_conversion_is_valid(&model,
@@ -356,6 +360,23 @@ int main(void)
 		assert(pigen_const_expr_get(&model, result_width)->kind ==
 			PIGEN_CONST_EXPR_NUMERICAL_RANGE_WIDTH);
 		assert(pigen_const_expr_is_symbolic(&model, result_width));
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			PIGEN_BINARY_MULTIPLY, symbolic_signed, exact_zero,
+			&binary_resolution));
+		assert(binary_resolution.operation.result_data_type.index ==
+			pigen_data_type_unsigned_integer(&model,
+				pigen_const_expr_intern_integer(&model, 1,
+					unsized_integer_data_type)).index);
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			PIGEN_BINARY_MULTIPLY, symbolic_signed, exact_one,
+			&binary_resolution));
+		assert(binary_resolution.operation.result_data_type.index ==
+			symbolic_signed.index);
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			PIGEN_BINARY_ADD, symbolic_unsigned, exact_zero,
+			&binary_resolution));
+		assert(binary_resolution.operation.result_data_type.index ==
+			symbolic_unsigned.index);
 	}
 	symbolic_shift_amount = declare_signal(&model, module, scope,
 		symbolic_unsigned,

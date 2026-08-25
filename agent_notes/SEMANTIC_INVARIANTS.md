@@ -174,7 +174,9 @@ contract stated in `SPEC.md`.
   later evaluation applies the same operator, operand-order, exact-value, and
   signedness law. Parametric signedness is the narrowest fixed family lossless
   over every valid positive width. A one-bit power never grows merely because
-  its exact exponent exceeds host width.
+  its exact exponent exceeds host width. Proven dominant-width formulae avoid
+  constructing endpoint integers proportional to a declared hardware width;
+  zero and identity operations canonicalize independently of symbolic width.
 - Expression resolution is two-stage. Temporary analyzed nodes retain syntax,
   provenance, shape, intrinsic data type, constant identity, children, and
   complete operation/conversion decisions. Analysis appends no semantic

@@ -57,6 +57,100 @@ static void assert_numerical_width(pigen_semantic_model *model,
 	assert(actual_width == width);
 }
 
+static void assert_small_exact_range_table(pigen_semantic_model *model,
+	pigen_data_type_id unsized_integer_data_type)
+{
+	pigen_binary_operator operators[] = {PIGEN_BINARY_ADD,
+		PIGEN_BINARY_SUBTRACT, PIGEN_BINARY_MULTIPLY};
+	uint64_t width;
+	int concrete_signed;
+	int exact_is_left;
+	int exact_value;
+	size_t operation_index;
+
+	for (concrete_signed = 0; concrete_signed <= 1; concrete_signed++)
+		for (width = 1; width <= 12; width++)
+			for (exact_value = -16; exact_value <= 16; exact_value++)
+				for (exact_is_left = 0; exact_is_left <= 1; exact_is_left++)
+					for (operation_index = 0;
+						operation_index < sizeof(operators) / sizeof(*operators);
+						operation_index++)
+	{
+		int64_t concrete_minimum = concrete_signed ?
+			-(INT64_C(1) << (width - 1)) : 0;
+		int64_t concrete_maximum = concrete_signed ?
+			(INT64_C(1) << (width - 1)) - 1 :
+			(INT64_C(1) << width) - 1;
+		int64_t left_minimum = exact_is_left ? exact_value : concrete_minimum;
+		int64_t left_maximum = exact_is_left ? exact_value : concrete_maximum;
+		int64_t right_minimum = exact_is_left ? concrete_minimum : exact_value;
+		int64_t right_maximum = exact_is_left ? concrete_maximum : exact_value;
+		int64_t products[4];
+		int64_t result_minimum;
+		int64_t result_maximum;
+		uint64_t expected_width = 1;
+		pigen_const_expr_id concrete_width =
+			pigen_const_expr_intern_integer(model, width,
+				unsized_integer_data_type);
+		pigen_data_type_id concrete = concrete_signed ?
+			pigen_data_type_signed_integer(model, concrete_width) :
+			pigen_data_type_unsigned_integer(model, concrete_width);
+		pigen_integer_id exact_integer = pigen_integer_intern_u64(model,
+			(uint64_t)(exact_value < 0 ? -exact_value : exact_value));
+		pigen_data_type_id exact;
+		pigen_binary_resolution resolution;
+
+		if (exact_value < 0)
+			exact_integer = pigen_integer_negate(model, exact_integer);
+		exact = pigen_data_type_exact_integer(model, exact_integer);
+		if (operators[operation_index] == PIGEN_BINARY_ADD)
+		{
+			result_minimum = left_minimum + right_minimum;
+			result_maximum = left_maximum + right_maximum;
+		}
+		else if (operators[operation_index] == PIGEN_BINARY_SUBTRACT)
+		{
+			result_minimum = left_minimum - right_maximum;
+			result_maximum = left_maximum - right_minimum;
+		}
+		else
+		{
+			products[0] = left_minimum * right_minimum;
+			products[1] = left_minimum * right_maximum;
+			products[2] = left_maximum * right_minimum;
+			products[3] = left_maximum * right_maximum;
+			result_minimum = result_maximum = products[0];
+			for (size_t i = 1; i < 4; i++)
+			{
+				if (products[i] < result_minimum) result_minimum = products[i];
+				if (products[i] > result_maximum) result_maximum = products[i];
+			}
+		}
+		if (result_minimum < 0)
+			while (result_minimum < -(INT64_C(1) << (expected_width - 1)) ||
+				result_maximum >
+					(INT64_C(1) << (expected_width - 1)) - 1)
+				expected_width++;
+		else
+			while (result_maximum >
+				(INT64_C(1) << expected_width) - 1)
+				expected_width++;
+		assert(pigen_data_type_resolve_binary_operation(model,
+			operators[operation_index], exact_is_left ? exact : concrete,
+			exact_is_left ? concrete : exact, &resolution));
+		if (evaluate_width(model, pigen_data_type_packed_width(model,
+			resolution.operation.result_data_type)) != expected_width)
+			fprintf(stderr, "range table: signed=%d width=%llu exact=%d "
+				"left=%d operator=%d\n", concrete_signed,
+				(unsigned long long)width, exact_value, exact_is_left,
+				operators[operation_index]);
+		assert_numerical_width(model, resolution.operation.result_data_type,
+			result_minimum < 0 ? PIGEN_NUMERICAL_SIGNED_INTEGER :
+				PIGEN_NUMERICAL_UNSIGNED_INTEGER,
+			expected_width);
+	}
+}
+
 int main(void)
 {
 	const char text[] =
@@ -484,6 +578,7 @@ int main(void)
 		&binary_resolution));
 	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
 		PIGEN_NUMERICAL_SIGNED_INTEGER, 7);
+	assert_small_exact_range_table(&model, unsized_integer_data_type);
 
 	assert(pigen_data_type_resolve_unary_operation(&model,
 		PIGEN_UNARY_NEGATE, signed_8, &unary_resolution));
@@ -592,6 +687,61 @@ int main(void)
 		pigen_data_type_exact_integer(&model, beyond_size_odd),
 		&binary_resolution));
 	assert(binary_resolution.operation.result_data_type.index == signed_1.index);
+	{
+		pigen_const_expr_id deferred_width =
+			pigen_const_expr_intern_numerical_range_width(&model,
+				(pigen_numerical_range_width){PIGEN_BINARY_POWER,
+					PIGEN_NUMERICAL_UNSIGNED_INTEGER, width_1, beyond_size,
+					0, 0});
+		uint64_t evaluated_width;
+
+		assert(deferred_width.index != PIGEN_INVALID_ID);
+		assert(pigen_const_expr_evaluate_u64(&model, deferred_width,
+			&evaluated_width));
+		assert(evaluated_width == 1);
+	}
+	{
+		pigen_const_expr_id very_wide = pigen_const_expr_intern_integer(&model,
+			1000000, unsized_integer_data_type);
+		pigen_data_type_id very_wide_unsigned =
+			pigen_data_type_unsigned_integer(&model, very_wide);
+		pigen_data_type_id very_wide_signed =
+			pigen_data_type_signed_integer(&model, very_wide);
+		pigen_const_expr_id deferred_addition;
+		uint64_t deferred_value;
+		size_t limb_count = model.integer_limb_count;
+
+		assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+			very_wide_unsigned, exact_three, &binary_resolution));
+		assert_numerical_width(&model,
+			binary_resolution.operation.result_data_type,
+			PIGEN_NUMERICAL_UNSIGNED_INTEGER, 1000001);
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			PIGEN_BINARY_MULTIPLY, very_wide_signed, exact_negative_three,
+			&binary_resolution));
+		assert_numerical_width(&model,
+			binary_resolution.operation.result_data_type,
+			PIGEN_NUMERICAL_SIGNED_INTEGER, 1000002);
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			PIGEN_BINARY_POWER, very_wide_unsigned, exact_three,
+			&binary_resolution));
+		assert_numerical_width(&model,
+			binary_resolution.operation.result_data_type,
+			PIGEN_NUMERICAL_UNSIGNED_INTEGER, 3000000);
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			PIGEN_BINARY_POWER, very_wide_signed, exact_three,
+			&binary_resolution));
+		assert_numerical_width(&model,
+			binary_resolution.operation.result_data_type,
+			PIGEN_NUMERICAL_SIGNED_INTEGER, 2999998);
+		deferred_addition = pigen_const_expr_intern_numerical_range_width(&model,
+			(pigen_numerical_range_width){PIGEN_BINARY_ADD,
+				PIGEN_NUMERICAL_UNSIGNED_INTEGER, very_wide, three, 0, 0});
+		assert(pigen_const_expr_evaluate_u64(&model, deferred_addition,
+			&deferred_value));
+		assert(deferred_value == 1000001);
+		assert(model.integer_limb_count - limb_count < 16);
+	}
 	assert(pigen_data_type_resolve_binary_operation(&model,
 		PIGEN_BINARY_SHIFT_LEFT, signed_8, unsigned_8, &binary_resolution));
 	assert(pigen_const_expr_get(&model, pigen_data_type_packed_width(&model,

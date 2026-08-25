@@ -158,13 +158,18 @@ Pigen domain. Never infer literal policy from constant-only admissibility.
 
 For known numerical ranges, the data-type owner computes range endpoints with
 the arbitrary-precision integer catalogue and chooses the narrowest containing
-integer type. An exact/concrete operation whose concrete width is parametric
+integer type. When a declared width dominates the stored exact operand, proven
+bit-length formulae produce the same result without materializing `2^width`;
+semantic work must never allocate storage proportional to a merely declared
+hardware width. An exact/concrete operation whose concrete width is parametric
 stores one canonical numerical-range-width node containing the operator,
 concrete family and width, exact value, operand order, and uniformly lossless
 result family. The node evaluates the same endpoint law once parameters are
 known instead of falling back to a magnitude approximation. Power keeps this
 law even when its exact exponent exceeds host `size_t`; one-bit bases resolve
-immediately from exponent parity. Semantic conversion constructors call back
+immediately from exponent parity, including after symbolic specialization.
+Width-independent identities such as `x + 0`, `x * 1`, and `x * 0` canonicalize
+before any parametric range node. Semantic conversion constructors call back
 into the data-type owner and symbolic unsigned-to-signed promotion is accepted
 only when the target width structurally proves the required extra sign bit.
 

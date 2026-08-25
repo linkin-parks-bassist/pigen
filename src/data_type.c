@@ -1203,6 +1203,18 @@ static int exact_is_zero(const pigen_semantic_model *model,
 	return value.index != PIGEN_INVALID_ID && pigen_integer_is_zero(model, value);
 }
 
+static int exact_is_one(const pigen_semantic_model *model,
+	pigen_data_type_id type)
+{
+	pigen_integer_id value = pigen_data_type_exact_value(model, type);
+	const pigen_integer *known;
+
+	if (value.index == PIGEN_INVALID_ID) return 0;
+	known = &model->integers[value.index];
+	return !known->negative && known->limb_count == 1 &&
+		model->integer_limbs[known->first_limb] == 1;
+}
+
 static pigen_data_type_id type_containing_integer_range(
 	pigen_semantic_model *model, pigen_integer_id minimum,
 	pigen_integer_id maximum)
@@ -1221,6 +1233,108 @@ static pigen_data_type_id type_containing_integer_range(
 	if (!minimum_width || !maximum_width) return INVALID_ID(pigen_data_type_id);
 	return integer_with_width(model, is_signed, width_constant(model,
 		minimum_width > maximum_width ? minimum_width : maximum_width));
+}
+
+static int add_width(uint64_t left, uint64_t right, uint64_t *result)
+{
+	if (!result || left > UINT64_MAX - right) return 0;
+	*result = left + right;
+	return 1;
+}
+
+static int multiply_width(uint64_t left, uint64_t right, uint64_t *result)
+{
+	if (!result || (right && left > UINT64_MAX / right)) return 0;
+	*result = left * right;
+	return 1;
+}
+
+/* Returns one when the concrete width dominates the stored exact magnitude,
+ * zero when endpoint calculation remains bounded by that magnitude, and minus
+ * one when the mathematical width exceeds the internal width domain. */
+static int dominant_arithmetic_range_width(pigen_semantic_model *model,
+	pigen_binary_operator operator,
+	pigen_numerical_interpretation concrete_interpretation,
+	uint64_t concrete_width, pigen_integer_id exact, int exact_is_left,
+	int *result_is_signed, uint64_t *result_width)
+{
+	pigen_integer_id magnitude = exact;
+	pigen_integer_id one;
+	pigen_integer_id one_less;
+	size_t magnitude_width;
+	size_t one_less_width = 0;
+	int negative;
+	int is_one;
+	uint64_t growth;
+
+	if (!result_is_signed || !result_width ||
+		!numerical_is_concrete(concrete_interpretation))
+		return -1;
+	negative = pigen_integer_is_negative(model, exact);
+	if (negative) magnitude = pigen_integer_negate(model, exact);
+	magnitude_width = pigen_integer_unsigned_width(model, magnitude);
+	if (!magnitude_width || magnitude_width > UINT64_MAX - 2 ||
+		concrete_width <= (uint64_t)magnitude_width + 2)
+		return 0;
+	if (pigen_integer_is_zero(model, magnitude))
+	{
+		*result_is_signed = 1;
+		return add_width(concrete_width, 1, result_width) ? 1 : -1;
+	}
+	one = pigen_integer_intern_u64(model, 1);
+	is_one = pigen_integer_compare(model, magnitude, one) == 0;
+	if (!is_one)
+	{
+		one_less = pigen_integer_subtract(model, magnitude, one);
+		one_less_width = pigen_integer_unsigned_width(model, one_less);
+		if (!one_less_width) return -1;
+	}
+	if (concrete_interpretation == PIGEN_NUMERICAL_UNSIGNED_INTEGER)
+	{
+		if (operator == PIGEN_BINARY_ADD)
+		{
+			*result_is_signed = negative;
+			return add_width(concrete_width, 1, result_width) ? 1 : -1;
+		}
+		if (operator == PIGEN_BINARY_SUBTRACT)
+		{
+			*result_is_signed = exact_is_left || !negative;
+			growth = exact_is_left && negative && !is_one ? 2 : 1;
+			return add_width(concrete_width, growth, result_width) ? 1 : -1;
+		}
+		if (operator == PIGEN_BINARY_MULTIPLY)
+		{
+			*result_is_signed = negative;
+			if (is_one)
+				growth = negative ? 1 : 0;
+			else
+			{
+				growth = (uint64_t)one_less_width;
+				if (negative && growth != UINT64_MAX) growth++;
+				else if (negative) return -1;
+			}
+			return add_width(concrete_width, growth, result_width) ? 1 : -1;
+		}
+	}
+	else
+	{
+		*result_is_signed = 1;
+		if (operator == PIGEN_BINARY_ADD ||
+			(operator == PIGEN_BINARY_SUBTRACT && !exact_is_left))
+			return add_width(concrete_width, 1, result_width) ? 1 : -1;
+		if (operator == PIGEN_BINARY_SUBTRACT)
+		{
+			growth = negative && is_one ? 0 : 1;
+			return add_width(concrete_width, growth, result_width) ? 1 : -1;
+		}
+		if (operator == PIGEN_BINARY_MULTIPLY)
+		{
+			growth = negative ? (uint64_t)magnitude_width :
+				is_one ? 0 : (uint64_t)one_less_width;
+			return add_width(concrete_width, growth, result_width) ? 1 : -1;
+		}
+	}
+	return -1;
 }
 
 static int concrete_integer_bounds(pigen_semantic_model *model,
@@ -1363,6 +1477,51 @@ static int range_width_for_family(const pigen_semantic_model *model,
 	return 1;
 }
 
+/* Returns one for a proven closed width, zero when exact endpoint arithmetic
+ * is still needed, and minus one when the result cannot fit the width domain. */
+static int closed_power_range_width(pigen_semantic_model *model,
+	pigen_numerical_interpretation interpretation, uint64_t concrete_width,
+	pigen_integer_id exponent_value, uint64_t *result_width)
+{
+	size_t exponent;
+	size_t exponent_width;
+	uint64_t product;
+
+	if (!result_width || !concrete_width ||
+		!numerical_is_concrete(interpretation) ||
+		pigen_integer_is_negative(model, exponent_value))
+		return -1;
+	if (concrete_width == 1)
+	{
+		*result_width = 1;
+		return 1;
+	}
+	if (!pigen_integer_to_size(model, exponent_value, &exponent)) return -1;
+	if (!exponent)
+	{
+		*result_width = 1;
+		return 1;
+	}
+	if (interpretation == PIGEN_NUMERICAL_SIGNED_INTEGER)
+	{
+		if (!multiply_width(concrete_width - 1, (uint64_t)exponent,
+			&product) || !add_width(product, 1, result_width))
+			return -1;
+		return 1;
+	}
+	if (exponent == 1)
+	{
+		*result_width = concrete_width;
+		return 1;
+	}
+	exponent_width = pigen_integer_unsigned_width(model, exponent_value);
+	if (!exponent_width) return -1;
+	if ((uint64_t)exponent_width < concrete_width)
+		return multiply_width(concrete_width, (uint64_t)exponent,
+			result_width) ? 1 : -1;
+	return 0;
+}
+
 int pigen_data_type_evaluate_numerical_range_width(
 	pigen_semantic_model *model, pigen_numerical_range_width range,
 	uint64_t *width)
@@ -1372,22 +1531,43 @@ int pigen_data_type_evaluate_numerical_range_width(
 	size_t exponent;
 	pigen_integer_id minimum;
 	pigen_integer_id maximum;
+	int closed_result;
+	int result_is_signed;
 
 	if (!model || !pigen_const_expr_evaluate_u64(model, range.concrete_width,
-		&concrete_width) || concrete_width > SIZE_MAX)
+		&concrete_width))
 		return 0;
-	width_size = (size_t)concrete_width;
 	if (range.operator == PIGEN_BINARY_POWER)
 	{
+		if (range.result_is_signed !=
+			(range.concrete_interpretation == PIGEN_NUMERICAL_SIGNED_INTEGER &&
+			pigen_integer_is_odd(model, range.exact_value)))
+			return 0;
+		closed_result = closed_power_range_width(model,
+			range.concrete_interpretation, concrete_width, range.exact_value,
+			width);
+		if (closed_result) return closed_result > 0;
+		if (concrete_width > SIZE_MAX) return 0;
+		width_size = (size_t)concrete_width;
 		if (!pigen_integer_to_size(model, range.exact_value, &exponent) ||
 			!power_range_endpoints(model, range.concrete_interpretation,
 				width_size, range.exact_value, exponent, &minimum, &maximum))
 			return 0;
 	}
-	else if (!arithmetic_range_endpoints(model, range.operator,
+	else
+	{
+		closed_result = dominant_arithmetic_range_width(model, range.operator,
+			range.concrete_interpretation, concrete_width, range.exact_value,
+			range.exact_is_left, &result_is_signed, width);
+		if (closed_result)
+			return closed_result > 0 &&
+				result_is_signed == range.result_is_signed;
+		if (concrete_width > SIZE_MAX) return 0;
+		width_size = (size_t)concrete_width;
+		if (!arithmetic_range_endpoints(model, range.operator,
 		range.concrete_interpretation, width_size, range.exact_value,
-		range.exact_is_left, &minimum, &maximum))
-		return 0;
+		range.exact_is_left, &minimum, &maximum)) return 0;
+	}
 	return range_width_for_family(model, minimum, maximum,
 		range.result_is_signed, width);
 }
@@ -1419,10 +1599,26 @@ static pigen_data_type_id concrete_exact_range_type(
 	pigen_integer_id minimum;
 	pigen_integer_id maximum;
 	uint64_t width;
+	uint64_t result_width_value;
 	int result_is_signed;
+	int dominant_result;
 	pigen_const_expr_id result_width;
 
 	if (exact_value.index == PIGEN_INVALID_ID) return INVALID_ID(pigen_data_type_id);
+	if (operator == PIGEN_BINARY_MULTIPLY && exact_is_zero(model, exact))
+		return pigen_data_type_unsigned_integer(model, width_constant(model, 1));
+	if ((operator == PIGEN_BINARY_MULTIPLY && exact_is_one(model, exact)) ||
+		(operator == PIGEN_BINARY_ADD && exact_is_zero(model, exact)) ||
+		(operator == PIGEN_BINARY_SUBTRACT && !exact_is_left &&
+		exact_is_zero(model, exact)))
+		return concrete;
+	if (pigen_const_expr_evaluate_u64(model, concrete_width, &width) &&
+		(dominant_result = dominant_arithmetic_range_width(model, operator,
+			interpretation, width, exact_value, exact_is_left,
+			&result_is_signed, &result_width_value)) != 0)
+		return dominant_result > 0 ? integer_with_width(model, result_is_signed,
+			width_constant(model, result_width_value)) :
+			INVALID_ID(pigen_data_type_id);
 	if (pigen_const_expr_evaluate_u64(model, concrete_width, &width) &&
 		width <= SIZE_MAX)
 	{
@@ -1448,10 +1644,7 @@ static pigen_data_type_id concrete_exact_power_type(
 		pigen_data_type_numerical_interpretation(model, base);
 	pigen_integer_id exponent_value = pigen_data_type_exact_value(model,
 		exact_exponent);
-	pigen_integer_id minimum;
-	pigen_integer_id maximum;
 	uint64_t width;
-	size_t exponent;
 	int width_is_known;
 	int result_is_signed;
 	pigen_const_expr_id result_width;
@@ -1465,13 +1658,17 @@ static pigen_data_type_id concrete_exact_power_type(
 	if (width_is_known && width == 1)
 		return integer_with_width(model, result_is_signed,
 			width_constant(model, 1));
-	if (width_is_known && width <= SIZE_MAX &&
-		pigen_integer_to_size(model, exponent_value, &exponent))
+	if (width_is_known)
 	{
-		if (!power_range_endpoints(model, interpretation, (size_t)width,
-			exponent_value, exponent, &minimum, &maximum))
+		uint64_t result_width_value;
+		pigen_numerical_range_width range = {PIGEN_BINARY_POWER,
+			interpretation, base_width, exponent_value, 0, result_is_signed};
+
+		if (!pigen_data_type_evaluate_numerical_range_width(model, range,
+			&result_width_value))
 			return INVALID_ID(pigen_data_type_id);
-		return type_containing_integer_range(model, minimum, maximum);
+		return integer_with_width(model, result_is_signed,
+			width_constant(model, result_width_value));
 	}
 	result_width = pigen_const_expr_intern_numerical_range_width(model,
 		(pigen_numerical_range_width){PIGEN_BINARY_POWER, interpretation,
