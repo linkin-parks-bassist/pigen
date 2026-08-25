@@ -145,7 +145,7 @@ static pigen_expr_id materialize(expression_materializer *materializer,
 static pigen_expr_id resolve_with_policy(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression, int constant_only,
-	pigen_semantic_error *error)
+	const pigen_resolve_policy *policy, pigen_semantic_error *error)
 {
 	pigen_analyzed_expr_arena arena = {0};
 	pigen_analyzed_expr_id analyzed;
@@ -153,22 +153,32 @@ static pigen_expr_id resolve_with_policy(
 	pigen_expr_id result;
 	size_t expression_count;
 	size_t child_count;
+	size_t constraint_count;
+	size_t i;
 
-	if (!pigen_analyze_expression(syntax, model, scope, expression,
-		constant_only, &arena, &analyzed, error))
+	if (!policy || !policy->maximum_generated_bits ||
+		!pigen_analyze_expression(syntax, model, scope, expression,
+			constant_only, policy, &arena, &analyzed, error))
 	{
 		pigen_free_analyzed_expr_arena(&arena);
 		return INVALID_ID(pigen_expr_id);
 	}
 	expression_count = model->expression_count;
 	child_count = model->expression_child_count;
+	constraint_count = model->width_constraint_count;
 	materializer.model = model;
 	materializer.arena = &arena;
 	result = materialize(&materializer, analyzed);
+	for (i = 0; result.index != PIGEN_INVALID_ID &&
+		i < arena.constraint_count; i++)
+		if (!pigen_width_constraint_add(model, arena.constraints[i].width,
+			arena.constraints[i].maximum_bits, arena.constraints[i].span))
+			result = INVALID_ID(pigen_expr_id);
 	if (result.index == PIGEN_INVALID_ID)
 	{
 		model->expression_count = expression_count;
 		model->expression_child_count = child_count;
+		model->width_constraint_count = constraint_count;
 		if (error && !error->message)
 		{
 			error->span = arena.nodes[analyzed.index].span;
@@ -182,15 +192,62 @@ static pigen_expr_id resolve_with_policy(
 pigen_expr_id pigen_resolve_expression(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression,
+	const pigen_resolve_policy *policy,
 	pigen_semantic_error *error)
 {
-	return resolve_with_policy(syntax, model, scope, expression, 0, error);
+	return resolve_with_policy(syntax, model, scope, expression, 0, policy,
+		error);
 }
 
 pigen_expr_id pigen_resolve_constant_expression(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression,
+	const pigen_resolve_policy *policy,
 	pigen_semantic_error *error)
 {
-	return resolve_with_policy(syntax, model, scope, expression, 1, error);
+	return resolve_with_policy(syntax, model, scope, expression, 1, policy,
+		error);
+}
+
+pigen_expr_id pigen_resolve_assignment_value(
+	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
+	pigen_scope_id scope, pigen_syntax_expr_id expression,
+	pigen_data_type_id target, const pigen_resolve_policy *policy,
+	pigen_semantic_error *error)
+{
+	size_t expression_count = model ? model->expression_count : 0;
+	size_t child_count = model ? model->expression_child_count : 0;
+	size_t constraint_count = model ? model->width_constraint_count : 0;
+	pigen_expr_id value = pigen_resolve_expression(syntax, model, scope,
+		expression, policy, error);
+	const pigen_semantic_expr *known = pigen_expr_get(model, value);
+	pigen_conversion conversion;
+	pigen_expr_id result;
+
+	if (!known || !pigen_data_type_resolve_assignment_conversion(model,
+		known->data_type, target, &conversion))
+	{
+		if (model)
+		{
+			model->expression_count = expression_count;
+			model->expression_child_count = child_count;
+			model->width_constraint_count = constraint_count;
+		}
+		if (error && !error->message)
+		{
+			error->span = known ? known->span :
+				(pigen_source_span){INVALID_ID(pigen_source_id), 0, 0};
+			error->message = "invalid assignment conversion";
+		}
+		return INVALID_ID(pigen_expr_id);
+	}
+	result = materialize_conversion(&(expression_materializer){model, NULL},
+		value, conversion, known->span);
+	if (result.index == PIGEN_INVALID_ID)
+	{
+		model->expression_count = expression_count;
+		model->expression_child_count = child_count;
+		model->width_constraint_count = constraint_count;
+	}
+	return result;
 }

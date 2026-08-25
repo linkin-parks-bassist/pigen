@@ -14,6 +14,7 @@ typedef struct {
 	pigen_semantic_model *model;
 	pigen_scope_id scope;
 	int constant_only;
+	const pigen_resolve_policy *policy;
 	pigen_analyzed_expr_arena *arena;
 	pigen_semantic_error *error;
 } expression_analyzer;
@@ -97,6 +98,61 @@ static size_t append_states(expression_analyzer *analyzer,
 		count * sizeof(*states));
 	analyzer->arena->literal_state_count = needed;
 	return first;
+}
+
+static int append_constraint(expression_analyzer *analyzer,
+	pigen_width_constraint constraint)
+{
+	if (analyzer->arena->constraint_count ==
+		analyzer->arena->constraint_capacity)
+	{
+		analyzer->arena->constraint_capacity =
+			analyzer->arena->constraint_capacity ?
+			analyzer->arena->constraint_capacity * 2 : 8;
+		analyzer->arena->constraints = pigen_resize(
+			analyzer->arena->constraints,
+			analyzer->arena->constraint_capacity *
+				sizeof(*analyzer->arena->constraints));
+	}
+	analyzer->arena->constraints[analyzer->arena->constraint_count++] =
+		constraint;
+	return 1;
+}
+
+static int generated_width_operator(pigen_binary_operator operator)
+{
+	return operator == PIGEN_BINARY_POWER ||
+		operator == PIGEN_BINARY_SHIFT_LEFT ||
+		operator == PIGEN_BINARY_ARITH_SHIFT_LEFT;
+}
+
+static int check_generated_width(expression_analyzer *analyzer,
+	pigen_data_type_id data_type, pigen_binary_operator operator,
+	pigen_syntax_location location)
+{
+	pigen_const_expr_id width;
+	uint64_t value;
+
+	if (!analyzer->policy || !generated_width_operator(operator)) return 1;
+	width = pigen_data_type_packed_width(analyzer->model, data_type);
+	if (width.index == PIGEN_INVALID_ID)
+	{
+		fail(analyzer, location, "generated result has no bounded width");
+		return 0;
+	}
+	if (pigen_const_expr_evaluate_u64(analyzer->model, width, &value))
+	{
+		if (value <= analyzer->policy->maximum_generated_bits) return 1;
+		fail(analyzer, location, "generated result exceeds width limit");
+		return 0;
+	}
+	if (!pigen_const_expr_is_symbolic(analyzer->model, width))
+	{
+		fail(analyzer, location, "generated result width overflows");
+		return 0;
+	}
+	return append_constraint(analyzer, (pigen_width_constraint){width,
+		analyzer->policy->maximum_generated_bits, location.source_span});
 }
 
 static int decimal_size(const char *text, size_t length, size_t *value)
@@ -571,6 +627,9 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 			node.as.binary.right = right;
 			node.data_type = node.as.binary.resolution.operation.result_data_type;
 			node.shape = analyzer->arena->nodes[left.index].shape;
+			if (!check_generated_width(analyzer, node.data_type, operator,
+				syntax->as.binary.operator_location))
+				return INVALID_ID(pigen_analyzed_expr_id);
 			left_constant = converted_constant(analyzer,
 				analyzer->arena->nodes[left.index].constant,
 				node.as.binary.resolution.left_conversion);
@@ -817,6 +876,7 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 int pigen_analyze_expression(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model, pigen_scope_id scope,
 	pigen_syntax_expr_id expression, int constant_only,
+	const pigen_resolve_policy *policy,
 	pigen_analyzed_expr_arena *arena, pigen_analyzed_expr_id *result,
 	pigen_semantic_error *error)
 {
@@ -830,6 +890,7 @@ int pigen_analyze_expression(const pigen_syntax_tree *syntax,
 	analyzer.model = model;
 	analyzer.scope = scope;
 	analyzer.constant_only = constant_only;
+	analyzer.policy = policy;
 	analyzer.arena = arena;
 	analyzer.error = error;
 	*result = analyze(&analyzer, expression);
@@ -853,5 +914,6 @@ void pigen_free_analyzed_expr_arena(pigen_analyzed_expr_arena *arena)
 	free(arena->nodes);
 	free(arena->children);
 	free(arena->literal_states);
+	free(arena->constraints);
 	memset(arena, 0, sizeof(*arena));
 }

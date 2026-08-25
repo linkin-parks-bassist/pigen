@@ -814,6 +814,220 @@ const pigen_bit_state *pigen_const_expr_bits(
 	return model->literal_states + known->as.bits.first_state;
 }
 
+static int evaluate_u64(const pigen_semantic_model *model,
+	pigen_const_expr_id expression, uint64_t *value, size_t remaining)
+{
+	const pigen_const_expr *known = pigen_const_expr_get(model, expression);
+	const pigen_const_expr_id *children;
+	uint64_t left;
+	uint64_t right;
+	uint64_t result;
+	size_t i;
+
+	if (!known || !value || !remaining) return 0;
+	switch (known->kind)
+	{
+		case PIGEN_CONST_EXPR_INTEGER:
+			*value = known->as.integer;
+			return 1;
+		case PIGEN_CONST_EXPR_EXACT_INTEGER:
+		{
+			const pigen_integer *integer =
+				&model->integers[known->as.exact_integer.index];
+			if (integer->negative || integer->limb_count > 2) return 0;
+			result = integer->limb_count ?
+				model->integer_limbs[integer->first_limb] : 0;
+			if (integer->limb_count == 2)
+				result |= (uint64_t)model->integer_limbs[integer->first_limb + 1]
+					<< 32;
+			*value = result;
+			return 1;
+		}
+		case PIGEN_CONST_EXPR_CONVERSION:
+			return evaluate_u64(model, known->as.conversion.operand, value,
+				remaining - 1);
+		case PIGEN_CONST_EXPR_BINARY:
+			if (!evaluate_u64(model, known->as.binary.left, &left,
+				remaining - 1) ||
+				!evaluate_u64(model, known->as.binary.right, &right,
+					remaining - 1)) return 0;
+			switch (known->as.binary.operation.operator)
+			{
+				case PIGEN_BINARY_ADD:
+					if (left > UINT64_MAX - right) return 0;
+					*value = left + right;
+					return 1;
+				case PIGEN_BINARY_SUBTRACT:
+					if (left < right) return 0;
+					*value = left - right;
+					return 1;
+				case PIGEN_BINARY_MULTIPLY:
+					if (right && left > UINT64_MAX / right) return 0;
+					*value = left * right;
+					return 1;
+				case PIGEN_BINARY_POWER:
+					result = 1;
+					while (right)
+					{
+						if ((right & 1) && left && result > UINT64_MAX / left)
+							return 0;
+						if (right & 1) result *= left;
+						right >>= 1;
+						if (right)
+						{
+							if (left && left > UINT64_MAX / left) return 0;
+							left *= left;
+						}
+					}
+					*value = result;
+					return 1;
+				default: return 0;
+			}
+		case PIGEN_CONST_EXPR_SELECT_WIDTH:
+			if (!evaluate_u64(model, known->as.select_width.right, &right,
+				remaining - 1)) return 0;
+			if (known->as.select_width.kind != PIGEN_SEMANTIC_SELECT_RANGE)
+			{
+				*value = right;
+				return 1;
+			}
+			if (!evaluate_u64(model, known->as.select_width.left, &left,
+				remaining - 1)) return 0;
+			if (left >= right)
+			{
+				if (left - right == UINT64_MAX) return 0;
+				*value = left - right + 1;
+			}
+			else
+			{
+				if (right - left == UINT64_MAX) return 0;
+				*value = right - left + 1;
+			}
+			return 1;
+		case PIGEN_CONST_EXPR_WIDTH_SUM:
+		case PIGEN_CONST_EXPR_WIDTH_PRODUCT:
+		case PIGEN_CONST_EXPR_WIDTH_MAXIMUM:
+			children = pigen_const_expr_children(model,
+				known->as.sequence.first_child, known->as.sequence.child_count);
+			if (!children) return 0;
+			result = known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ? 1 : 0;
+			for (i = 0; i < known->as.sequence.child_count; i++)
+			{
+				if (!evaluate_u64(model, children[i], &right, remaining - 1))
+					return 0;
+				if (known->kind == PIGEN_CONST_EXPR_WIDTH_SUM)
+				{
+					if (result > UINT64_MAX - right) return 0;
+					result += right;
+				}
+				else if (known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT)
+				{
+					if (right && result > UINT64_MAX / right) return 0;
+					result *= right;
+				}
+				else if (right > result) result = right;
+			}
+			*value = result;
+			return 1;
+		default:
+			return 0;
+	}
+}
+
+int pigen_const_expr_evaluate_u64(const pigen_semantic_model *model,
+	pigen_const_expr_id expression, uint64_t *value)
+{
+	return model && evaluate_u64(model, expression, value,
+		model->constant_expression_count + 1);
+}
+
+static int constant_is_symbolic(const pigen_semantic_model *model,
+	pigen_const_expr_id expression, size_t remaining)
+{
+	const pigen_const_expr *known = pigen_const_expr_get(model, expression);
+	const pigen_const_expr_id *children;
+	size_t i;
+
+	if (!known || !remaining) return 0;
+	if (known->kind == PIGEN_CONST_EXPR_SYMBOL) return 1;
+	switch (known->kind)
+	{
+		case PIGEN_CONST_EXPR_UNARY:
+			return constant_is_symbolic(model, known->as.unary.operand,
+				remaining - 1);
+		case PIGEN_CONST_EXPR_CONVERSION:
+			return constant_is_symbolic(model, known->as.conversion.operand,
+				remaining - 1);
+		case PIGEN_CONST_EXPR_BINARY:
+			return constant_is_symbolic(model, known->as.binary.left,
+				remaining - 1) || constant_is_symbolic(model,
+				known->as.binary.right, remaining - 1);
+		case PIGEN_CONST_EXPR_CONDITIONAL:
+			return constant_is_symbolic(model, known->as.conditional.condition,
+				remaining - 1) || constant_is_symbolic(model,
+				known->as.conditional.when_true, remaining - 1) ||
+				constant_is_symbolic(model, known->as.conditional.when_false,
+					remaining - 1);
+		case PIGEN_CONST_EXPR_INDEX:
+			return constant_is_symbolic(model, known->as.index.base,
+				remaining - 1) || constant_is_symbolic(model,
+				known->as.index.index, remaining - 1);
+		case PIGEN_CONST_EXPR_SELECT:
+			return constant_is_symbolic(model, known->as.select.base,
+				remaining - 1) || constant_is_symbolic(model,
+				known->as.select.left, remaining - 1) || constant_is_symbolic(model,
+				known->as.select.right, remaining - 1);
+		case PIGEN_CONST_EXPR_SELECT_WIDTH:
+			return constant_is_symbolic(model, known->as.select_width.left,
+				remaining - 1) || constant_is_symbolic(model,
+				known->as.select_width.right, remaining - 1);
+		case PIGEN_CONST_EXPR_CONCATENATION:
+		case PIGEN_CONST_EXPR_WIDTH_SUM:
+		case PIGEN_CONST_EXPR_WIDTH_PRODUCT:
+		case PIGEN_CONST_EXPR_WIDTH_MAXIMUM:
+			children = pigen_const_expr_children(model,
+				known->as.sequence.first_child, known->as.sequence.child_count);
+			if (!children) return 0;
+			for (i = 0; i < known->as.sequence.child_count; i++)
+				if (constant_is_symbolic(model, children[i], remaining - 1))
+					return 1;
+			return 0;
+		default:
+			return 0;
+	}
+}
+
+int pigen_const_expr_is_symbolic(const pigen_semantic_model *model,
+	pigen_const_expr_id expression)
+{
+	return model && constant_is_symbolic(model, expression,
+		model->constant_expression_count + 1);
+}
+
+int pigen_width_constraint_add(pigen_semantic_model *model,
+	pigen_const_expr_id width, size_t maximum_bits, pigen_source_span span)
+{
+	if (!model || !pigen_const_expr_get(model, width) || !maximum_bits ||
+		!pigen_source_span_valid(model->sources, span)) return 0;
+	if (model->width_constraint_count == model->width_constraint_capacity)
+	{
+		model->width_constraint_capacity = model->width_constraint_capacity ?
+			model->width_constraint_capacity * 2 : 16;
+		model->width_constraints = pigen_resize(model->width_constraints,
+			model->width_constraint_capacity * sizeof(*model->width_constraints));
+	}
+	model->width_constraints[model->width_constraint_count++] =
+		(pigen_width_constraint){width, maximum_bits, span};
+	return 1;
+}
+
+const pigen_width_constraint *pigen_width_constraint_get(
+	const pigen_semantic_model *model, size_t index)
+{
+	return model && index < model->width_constraint_count ?
+		&model->width_constraints[index] : NULL;
+}
+
 static pigen_expr_id add_expression(pigen_semantic_model *model,
 	pigen_semantic_expr expression)
 {
@@ -1851,6 +2065,11 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 {
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	const pigen_semantic_process *process = pigen_process_get(model, process_id);
+	const pigen_semantic_lvalue *destination_value = pigen_lvalue_get(model,
+		destination);
+	const pigen_semantic_expr *destination_expression = destination_value ?
+		pigen_expr_get(model, destination_value->expression) : NULL;
+	const pigen_semantic_expr *source_expression = pigen_expr_get(model, value);
 	pigen_transfer_id result;
 	size_t i;
 	size_t j;
@@ -1858,7 +2077,9 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	if (!module || !process || process->module.index != module_id.index ||
 		process->domain.index != domain_id.index ||
 		!pigen_clock_domain_get(model, domain_id) ||
-		!pigen_lvalue_get(model, destination) || !pigen_expr_get(model, value) ||
+		!destination_value || !destination_expression || !source_expression ||
+		destination_value->data_type.index != source_expression->data_type.index ||
+		destination_expression->shape.index != source_expression->shape.index ||
 		guard.index == PIGEN_INVALID_ID || guard.index >= model->predicate_count ||
 		(signal_use_count && !signal_uses) ||
 		!span_contains(process->span, span) || syntax.index == PIGEN_INVALID_ID ||
@@ -2033,5 +2254,6 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->processes);
 	free(model->transfers);
 	free(model->transfer_signal_uses);
+	free(model->width_constraints);
 	*model = (pigen_semantic_model){0};
 }

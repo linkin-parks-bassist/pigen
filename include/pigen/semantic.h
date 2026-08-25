@@ -286,6 +286,12 @@ typedef struct {
 } pigen_semantic_clock_domain;
 
 typedef struct {
+	pigen_const_expr_id width;
+	size_t maximum_bits;
+	pigen_source_span span;
+} pigen_width_constraint;
+
+typedef struct {
 	pigen_syntax_id syntax;
 	pigen_module_id module;
 	pigen_clock_domain_id domain;
@@ -398,6 +404,9 @@ struct pigen_semantic_model {
 	pigen_transfer_signal_use *transfer_signal_uses;
 	size_t transfer_signal_use_count;
 	size_t transfer_signal_use_capacity;
+	pigen_width_constraint *width_constraints;
+	size_t width_constraint_count;
+	size_t width_constraint_capacity;
 	pigen_scope_id compilation_scope;
 	pigen_data_type_id unsized_integer_data_type;
 	pigen_data_type_id boolean_data_type;
@@ -473,6 +482,14 @@ const pigen_const_expr *pigen_const_expr_get(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
 const pigen_bit_state *pigen_const_expr_bits(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
+int pigen_const_expr_evaluate_u64(const pigen_semantic_model *model,
+	pigen_const_expr_id expression, uint64_t *value);
+int pigen_const_expr_is_symbolic(const pigen_semantic_model *model,
+	pigen_const_expr_id expression);
+int pigen_width_constraint_add(pigen_semantic_model *model,
+	pigen_const_expr_id width, size_t maximum_bits, pigen_source_span span);
+const pigen_width_constraint *pigen_width_constraint_get(
+	const pigen_semantic_model *model, size_t index);
 pigen_expr_id pigen_expr_add_integer(pigen_semantic_model *model,
 	uint64_t value, pigen_data_type_id type, pigen_source_span span);
 pigen_expr_id pigen_expr_add_exact_integer(pigen_semantic_model *model,

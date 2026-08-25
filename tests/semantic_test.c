@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "pigen/semantic.h"
@@ -111,6 +112,10 @@ int main(void)
 	pigen_expr_id first_shape_index;
 	pigen_expr_id second_shape_index;
 	pigen_lvalue_id module_value_lvalue;
+	pigen_lvalue_id scalar_module_value_lvalue;
+	pigen_expr_id scalar_byte_value;
+	pigen_expr_id scalar_logic_value;
+	pigen_bit_state zero_byte[8] = {0};
 	pigen_data_type_id unsized_integer_data_type;
 	pigen_data_type_id aliased_unsized_integer_type;
 	pigen_data_type_id signed_8;
@@ -182,6 +187,8 @@ int main(void)
 	pigen_signal_id module_value_signal;
 	pigen_signal_id pipeline_value_signal;
 	pigen_signal_id first_local_signal;
+	pigen_clock_domain_id test_domain;
+	pigen_process_id test_process;
 	pigen_symbol_id shadowed;
 	pigen_symbol_id found;
 	const pigen_transfer_type_descriptor *wire_descriptor;
@@ -1083,6 +1090,33 @@ int main(void)
 	assert(pigen_lvalue_get(&model,
 		module_value_lvalue)->as.projection.signal.index ==
 		module_value_signal.index);
+	model.predicates = malloc(sizeof(*model.predicates));
+	assert(model.predicates);
+	model.predicates[0] = (pigen_predicate){0};
+	model.predicate_count = 1;
+	model.predicate_capacity = 1;
+	test_domain = pigen_clock_domain_intern(&model, module_value,
+		PIGEN_SEMANTIC_POSEDGE);
+	test_process = pigen_process_add(&model, (pigen_syntax_id){9}, module,
+		test_domain, module_value_expression, whole);
+	assert(test_process.index != PIGEN_INVALID_ID);
+	scalar_byte_value = pigen_expr_add_bits(&model, zero_byte, 8, byte_type,
+		first_value);
+	assert(scalar_byte_value.index != PIGEN_INVALID_ID);
+	assert(pigen_transfer_add(&model, (pigen_syntax_id){10}, module,
+		test_process, module_value_lvalue, scalar_byte_value,
+		(pigen_predicate_id){0}, test_domain, NULL, 0, whole).index ==
+		PIGEN_INVALID_ID);
+	scalar_module_value_lvalue = pigen_lvalue_resolve(&model,
+		second_shape_index);
+	assert(scalar_module_value_lvalue.index != PIGEN_INVALID_ID);
+	scalar_logic_value = pigen_expr_add_bits(&model, zero_byte, 8,
+		sized_logic_type, first_value);
+	assert(scalar_logic_value.index != PIGEN_INVALID_ID);
+	assert(pigen_transfer_add(&model, (pigen_syntax_id){11}, module,
+		test_process, scalar_module_value_lvalue, scalar_logic_value,
+		(pigen_predicate_id){0}, test_domain, NULL, 0, whole).index ==
+		PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, pipeline_scope, PIGEN_SYMBOL_SIGNAL,
 		byte_type, second_value, whole, &pipeline_value, &shadowed) == PIGEN_DECLARE_OK);
 	assert(shadowed.index == module_value.index);

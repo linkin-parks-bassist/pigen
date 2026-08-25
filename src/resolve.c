@@ -13,6 +13,7 @@
 typedef struct {
 	const pigen_syntax_tree *syntax;
 	pigen_semantic_model *model;
+	const pigen_resolve_policy *policy;
 	pigen_semantic_error *error;
 } resolver;
 
@@ -76,7 +77,7 @@ static pigen_expr_id resolve_constant(resolver *resolver, pigen_scope_id scope,
 	pigen_syntax_expr_id syntax_id)
 {
 	return pigen_resolve_constant_expression(resolver->syntax, resolver->model,
-		scope, syntax_id, resolver->error);
+		scope, syntax_id, resolver->policy, resolver->error);
 }
 
 static pigen_shape_id resolve_shape(resolver *resolver, pigen_scope_id scope,
@@ -518,7 +519,8 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	pigen_expr_id destination_expression = pigen_resolve_expression(
 		resolver->syntax, model, module->scope,
-		assignment->as.nonblocking_assignment.destination, resolver->error);
+		assignment->as.nonblocking_assignment.destination, resolver->policy,
+		resolver->error);
 	pigen_lvalue_id destination = pigen_lvalue_resolve(model,
 		destination_expression);
 	pigen_expr_id value;
@@ -531,20 +533,24 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	if (destination.index == PIGEN_INVALID_ID)
 		return fail_location(resolver, assignment->location,
 			"transfer destination requires a supported lvalue");
-	value = pigen_resolve_expression(resolver->syntax, model, module->scope,
-		assignment->as.nonblocking_assignment.value, resolver->error);
+	if (!lvalue_is_assignable(model, destination))
+		return fail_location(resolver, assignment->location,
+			"transfer destination is not a writable variable or signal");
+	destination_value = pigen_expr_get(model, destination_expression);
+	if (!destination_value)
+		return fail_location(resolver, assignment->location,
+			"transfer destination requires a supported expression");
+	value = pigen_resolve_assignment_value(resolver->syntax, model,
+		module->scope, assignment->as.nonblocking_assignment.value,
+		destination_value->data_type, resolver->policy, resolver->error);
 	if (value.index == PIGEN_INVALID_ID)
 		return fail_location(resolver, assignment->location,
-			"transfer value requires a supported expression");
-	destination_value = pigen_expr_get(model, destination_expression);
+			"transfer value requires a compatible expression");
 	source_value = pigen_expr_get(model, value);
 	if (!destination_value || !source_value ||
 		destination_value->shape.index != source_value->shape.index)
 		return fail_location(resolver, assignment->location,
 			"transfer shape mismatch");
-	if (!lvalue_is_assignable(model, destination))
-		return fail_location(resolver, assignment->location,
-			"transfer destination is not a writable variable or signal");
 	if (!analyze_transfer(resolver, destination, value, guard, domain,
 		assignment->location.source_span, &signal_uses,
 		&signal_use_count)) return 0;
@@ -567,7 +573,7 @@ static int resolve_if_statement(resolver *resolver,
 		module_id);
 	pigen_expr_id condition = pigen_resolve_expression(resolver->syntax,
 		resolver->model, module->scope, statement->as.if_statement.condition,
-		resolver->error);
+		resolver->policy, resolver->error);
 	pigen_predicate_id then_guard;
 	pigen_predicate_id else_guard;
 	pigen_syntax_id then_id = statement->first_child;
@@ -644,7 +650,8 @@ static int add_clocked_process(resolver *resolver,
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	pigen_expr_id clock = pigen_resolve_expression(resolver->syntax, model,
-		module->scope, syntax_node->as.clocked_process.clock, resolver->error);
+		module->scope, syntax_node->as.clocked_process.clock, resolver->policy,
+		resolver->error);
 	const pigen_semantic_expr *clock_expression = pigen_expr_get(model, clock);
 	pigen_clock_domain_id domain;
 	pigen_process_id process;
@@ -779,12 +786,12 @@ static int validate_signal_ownership(resolver *resolver)
 }
 
 int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
-	pigen_semantic_model *model,
+	pigen_semantic_model *model, const pigen_resolve_policy *policy,
 	pigen_semantic_error *error)
 {
 	const pigen_source_manager *sources = syntax && syntax->expanded ?
 		syntax->expanded->sources : NULL;
-	resolver resolver = {syntax, model, error};
+	resolver resolver = {syntax, model, policy, error};
 	const pigen_syntax_node *root;
 	pigen_syntax_id child;
 	pigen_source_span root_span;
@@ -792,6 +799,7 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	pigen_semantic_init(model, sources);
 	if (error) *error = (pigen_semantic_error){INVALID_ID(pigen_origin_id),
 		(pigen_source_span){INVALID_ID(pigen_source_id), 0, 0}, NULL};
+	if (!policy || !policy->maximum_generated_bits) return 0;
 	root = pigen_syntax_get(syntax, (pigen_syntax_id){0});
 	if (!root || root->kind != PIGEN_SYNTAX_COMPILATION_UNIT)
 		return 0;

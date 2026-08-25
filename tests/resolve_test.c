@@ -90,12 +90,84 @@ static void expect_resolve_error(const char *text, const char *expected)
 	pigen_syntax_error syntax_error = {0};
 	pigen_semantic_model model;
 	pigen_semantic_error error = {0};
+	pigen_resolve_policy policy = {.maximum_generated_bits = 1024};
 
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
 	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
-	assert(!pigen_resolve_semantics(&syntax, &model, &error));
+	assert(!pigen_resolve_semantics(&syntax, &model, &policy, &error));
 	assert(error.message && strstr(error.message, expected));
+	pigen_free_semantic_model(&model);
+	pigen_free_syntax_tree(&syntax);
+	pigen_free_preprocess_result(&preprocessed);
+	pigen_free_sources(&sources);
+}
+
+static uint64_t evaluate_width(const pigen_semantic_model *model,
+	pigen_data_type_id type)
+{
+	uint64_t value;
+
+	assert(pigen_const_expr_evaluate_u64(model,
+		pigen_data_type_packed_width((pigen_semantic_model *)model, type),
+		&value));
+	return value;
+}
+
+static void test_typed_assignments(void)
+{
+	const char text[] =
+		"typedef int[8] int8_t;\n"
+		"typedef int[16] int16_t;\n"
+		"typedef int[24] int24_t;\n"
+		"typedef uint[16] uint16_t;\n"
+		"module typed(input logic clk);\n"
+		"  buf int8_t a0, b0, c0, a1, b1, c1, a2, b2, c2;\n"
+		"  buf int16_t low;\n"
+		"  buf int24_t wide;\n"
+		"  buf uint16_t changed;\n"
+		"  always_ff @(posedge clk) begin\n"
+		"    low <= (a0 + b0) * c0;\n"
+		"    wide <= (a1 + b1) * c1;\n"
+		"    changed <= uint16_t'((a2 + b2) * c2);\n"
+		"  end\n"
+		"endmodule\n";
+	pigen_source_manager sources = {0};
+	pigen_source_id source = pigen_source_add(&sources, "typed.pigen", text,
+		strlen(text));
+	pigen_preprocess_result preprocessed = {0};
+	pigen_preprocess_error preprocess_error = {0};
+	pigen_syntax_tree syntax = {0};
+	pigen_syntax_error syntax_error = {0};
+	pigen_semantic_model model;
+	pigen_semantic_error error = {0};
+	pigen_resolve_policy policy = {.maximum_generated_bits = 1024};
+	size_t i;
+
+	assert(source.index != PIGEN_INVALID_ID);
+	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
+		&preprocess_error));
+	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
+	assert(pigen_resolve_semantics(&syntax, &model, &policy, &error));
+	assert(model.transfer_count == 3);
+	for (i = 0; i < model.transfer_count; i++)
+	{
+		const pigen_semantic_transfer *transfer = pigen_transfer_get(&model,
+			(pigen_transfer_id){(uint32_t)i});
+		const pigen_semantic_expr *value = pigen_expr_get(&model,
+			transfer->value);
+		const pigen_semantic_expr *intrinsic;
+
+		assert(value && value->kind == PIGEN_EXPR_CONVERSION);
+		assert(value->as.conversion.conversion.kind ==
+			(i == 2 ? PIGEN_CONVERSION_INTEGER_REINTERPRET :
+				PIGEN_CONVERSION_INTEGER_RESIZE));
+		intrinsic = pigen_expr_get(&model, value->as.conversion.operand);
+		assert(intrinsic && intrinsic->kind == PIGEN_EXPR_BINARY);
+		assert(evaluate_width(&model, intrinsic->data_type) == 17);
+		assert(evaluate_width(&model, value->data_type) ==
+			(i == 1 ? 24 : 16));
+	}
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_tree(&syntax);
 	pigen_free_preprocess_result(&preprocessed);
@@ -157,6 +229,7 @@ int main(void)
 	pigen_semantic_model unknown_model;
 	pigen_semantic_model inout_model;
 	pigen_semantic_error error = {0};
+	pigen_resolve_policy policy = {.maximum_generated_bits = 1024};
 	const pigen_semantic_signal *left;
 	const pigen_semantic_signal *right;
 	const pigen_semantic_signal *alternate;
@@ -230,7 +303,7 @@ int main(void)
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
 	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
-	assert(pigen_resolve_semantics(&syntax, &model, &error));
+	assert(pigen_resolve_semantics(&syntax, &model, &policy, &error));
 	assert(model.compilation_scope.index != PIGEN_INVALID_ID);
 	assert(model.module_count == 2);
 	assert(model.parameter_count == 13);
@@ -596,7 +669,7 @@ int main(void)
 	assert(pigen_parse_syntax(&duplicate_preprocessed.expanded, &duplicate_syntax,
 		&syntax_error));
 	assert(!pigen_resolve_semantics(&duplicate_syntax,
-		&duplicate_model, &error));
+		&duplicate_model, &policy, &error));
 	assert(error.message && strstr(error.message, "duplicate module"));
 	assert(span_is(&sources, error.span, "same"));
 
@@ -606,13 +679,14 @@ int main(void)
 	assert(pigen_parse_syntax(&unknown_preprocessed.expanded, &unknown_syntax,
 		&syntax_error));
 	assert(!pigen_resolve_semantics(&unknown_syntax,
-		&unknown_model, &error));
+		&unknown_model, &policy, &error));
 	assert(error.message && strstr(error.message, "unknown type"));
 	assert(span_is(&sources, error.span, "missing_t"));
 	assert(pigen_preprocess(&sources, inout_source, NULL, &inout_preprocessed,
 		&preprocess_error));
 	assert(pigen_parse_syntax(&inout_preprocessed.expanded, &inout_syntax, &syntax_error));
-	assert(!pigen_resolve_semantics(&inout_syntax, &inout_model, &error));
+	assert(!pigen_resolve_semantics(&inout_syntax, &inout_model, &policy,
+		&error));
 	assert(error.message && strstr(error.message, "not inout"));
 
 	expect_resolve_error(
@@ -643,6 +717,19 @@ int main(void)
 	expect_resolve_error(
 		"module bad(input logic clk); buf bit x[2]; buf bit y[3]; "
 		"always @(posedge clk) y <= x; endmodule\n",
+		"shape mismatch");
+	test_typed_assignments();
+	expect_resolve_error(
+		"typedef int[8] int8_t; typedef uint[8] uint8_t; "
+		"module changed(input logic clk); buf int8_t source; "
+		"buf uint8_t destination; always_ff @(posedge clk) "
+		"destination <= source; endmodule\n",
+		"compatible");
+	expect_resolve_error(
+		"typedef int[8] int8_t; "
+		"module shaped(input logic clk); buf int8_t source[2]; "
+		"buf int8_t destination; always_ff @(posedge clk) "
+		"destination <= source; endmodule\n",
 		"shape mismatch");
 
 	pigen_free_semantic_model(&inout_model);

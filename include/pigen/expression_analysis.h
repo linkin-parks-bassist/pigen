@@ -3,6 +3,7 @@
 
 #include "pigen/semantic_error.h"
 #include "pigen/semantic.h"
+#include "pigen/resolve_policy.h"
 #include "pigen/syntax.h"
 
 typedef enum {
@@ -69,11 +70,15 @@ typedef struct {
 	pigen_bit_state *literal_states;
 	size_t literal_state_count;
 	size_t literal_state_capacity;
+	pigen_width_constraint *constraints;
+	size_t constraint_count;
+	size_t constraint_capacity;
 } pigen_analyzed_expr_arena;
 
 int pigen_analyze_expression(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model, pigen_scope_id scope,
 	pigen_syntax_expr_id expression, int constant_only,
+	const pigen_resolve_policy *policy,
 	pigen_analyzed_expr_arena *arena, pigen_analyzed_expr_id *result,
 	pigen_semantic_error *error);
 const pigen_analyzed_expr *pigen_analyzed_expr_get(

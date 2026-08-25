@@ -3,6 +3,7 @@
 
 #include "pigen/semantic.h"
 #include "pigen/semantic_error.h"
+#include "pigen/resolve_policy.h"
 #include "pigen/syntax.h"
 
 /* Resolves parameter, value, and signal expressions, including packed
@@ -11,11 +12,18 @@
 pigen_expr_id pigen_resolve_expression(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression,
+	const pigen_resolve_policy *policy,
 	pigen_semantic_error *error);
 /* Uses the same resolver but rejects any tree without a constant identity. */
 pigen_expr_id pigen_resolve_constant_expression(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression,
+	const pigen_resolve_policy *policy,
+	pigen_semantic_error *error);
+pigen_expr_id pigen_resolve_assignment_value(
+	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
+	pigen_scope_id scope, pigen_syntax_expr_id expression,
+	pigen_data_type_id target, const pigen_resolve_policy *policy,
 	pigen_semantic_error *error);
 
 #endif

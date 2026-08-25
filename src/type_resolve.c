@@ -63,7 +63,7 @@ static pigen_const_expr_id analyze_constant(const pigen_syntax_tree *syntax,
 	pigen_analyzed_expr_id result;
 	pigen_const_expr_id constant = INVALID_ID(pigen_const_expr_id);
 
-	if (pigen_analyze_expression(syntax, model, scope, expression, 1, &arena,
+	if (pigen_analyze_expression(syntax, model, scope, expression, 1, NULL, &arena,
 		&result, error))
 		constant = pigen_analyzed_expr_get(&arena, result)->constant;
 	pigen_free_analyzed_expr_arena(&arena);

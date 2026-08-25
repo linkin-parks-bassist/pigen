@@ -87,6 +87,7 @@ int main(void)
 	pigen_lvalue_id nested_concat_lvalue;
 	pigen_predicate_id always;
 	pigen_expression_use_analysis analysis = {0};
+	pigen_resolve_policy policy = {.maximum_generated_bits = 1024};
 	const pigen_semantic_expr *conditional;
 	const pigen_semantic_expr *indexed;
 	const pigen_semantic_expr *indexed_base;
@@ -108,7 +109,7 @@ int main(void)
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
 	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
-	assert(pigen_resolve_semantics(&syntax, &model, &resolve_error));
+	assert(pigen_resolve_semantics(&syntax, &model, &policy, &resolve_error));
 	for (first = 0; first < preprocessed.expanded.token_count; first++)
 		if (token_is(&preprocessed.expanded, first, "endmodule")) break;
 	assert(first + 1 < preprocessed.expanded.token_count);
@@ -141,40 +142,40 @@ int main(void)
 		&syntax.expressions, &syntax.types, &syntax_nested_concat, &syntax_error));
 	expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_expression, NULL);
+		syntax_expression, &policy, NULL);
 	lvalue_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_lvalue,
-		NULL);
+		&policy, NULL);
 	index_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_index,
-		NULL);
+		&policy, NULL);
 	index_lvalue_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_index_lvalue, NULL);
+		syntax_index_lvalue, &policy, NULL);
 	range_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_range,
-		NULL);
+		&policy, NULL);
 	select_lvalue_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_select_lvalue, NULL);
+		syntax_select_lvalue, &policy, NULL);
 	concat_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_concat,
-		NULL);
+		&policy, NULL);
 	invalid_concat_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_invalid_concat, NULL);
+		syntax_invalid_concat, &policy, NULL);
 	nested_concat_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_nested_concat, NULL);
+		syntax_nested_concat, &policy, NULL);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_invalid_index, NULL).index == PIGEN_INVALID_ID);
+		syntax_invalid_index, &policy, NULL).index == PIGEN_INVALID_ID);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_invalid_width, NULL).index == PIGEN_INVALID_ID);
+		syntax_invalid_width, &policy, NULL).index == PIGEN_INVALID_ID);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_invalid_range, NULL).index == PIGEN_INVALID_ID);
+		syntax_invalid_range, &policy, NULL).index == PIGEN_INVALID_ID);
 	conditional = pigen_expr_get(&model, expression);
 	indexed = pigen_expr_get(&model, index_expression);
 	assert(conditional && conditional->kind == PIGEN_EXPR_CONDITIONAL);
