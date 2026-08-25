@@ -712,7 +712,8 @@ int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
 	pigen_unary_operator operator, pigen_data_type_id operand,
 	pigen_unary_operation *operation)
 {
-	if (!pigen_data_type_is_integral(model, operand) ||
+	if (data_type_is_pigen_integer(model, operand) ||
+		!pigen_data_type_is_integral(model, operand) ||
 		!pigen_unary_operator_is_valid(operator) || !operation)
 		return 0;
 	*operation = (pigen_unary_operation){operator, operand,
@@ -735,7 +736,9 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 {
 	pigen_data_type_id result;
 
-	if (!pigen_data_type_is_integral(model, left) ||
+	if (data_type_is_pigen_integer(model, left) ||
+		data_type_is_pigen_integer(model, right) ||
+		!pigen_data_type_is_integral(model, left) ||
 		!pigen_data_type_is_integral(model, right) ||
 		!pigen_binary_operator_is_valid(operator) || !operation)
 		return 0;
@@ -750,7 +753,10 @@ int pigen_data_type_resolve_conditional_operation(pigen_semantic_model *model,
 	pigen_data_type_id condition, pigen_data_type_id when_true,
 	pigen_data_type_id when_false, pigen_conditional_operation *operation)
 {
-	if (!pigen_data_type_is_integral(model, condition) ||
+	if (data_type_is_pigen_integer(model, condition) ||
+		data_type_is_pigen_integer(model, when_true) ||
+		data_type_is_pigen_integer(model, when_false) ||
+		!pigen_data_type_is_integral(model, condition) ||
 		when_true.index != when_false.index ||
 		!data_type_get(model, when_true) || !operation)
 		return 0;

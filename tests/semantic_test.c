@@ -216,6 +216,10 @@ int main(void)
 	nonintegral_width = pigen_const_expr_intern_integer(&model, 8, pigen_byte);
 	assert(pigen_data_type_signed_integer(&model, nonintegral_width).index ==
 		PIGEN_INVALID_ID);
+	assert(!pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_LESS, signed_8, unsigned_8, &binary_operation));
+	assert(!pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_LESS, signed_8, bit_type, &binary_operation));
 	assert(pigen_data_type_resolve_assignment_conversion(&model,
 		signed_8, signed_8, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_IDENTITY);
