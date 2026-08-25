@@ -89,7 +89,7 @@ static void expect_resolve_error(const char *text, const char *expected)
 	pigen_syntax_tree syntax = {0};
 	pigen_syntax_error syntax_error = {0};
 	pigen_semantic_model model;
-	pigen_resolve_error error = {0};
+	pigen_semantic_error error = {0};
 
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
@@ -156,7 +156,7 @@ int main(void)
 	pigen_semantic_model duplicate_model;
 	pigen_semantic_model unknown_model;
 	pigen_semantic_model inout_model;
-	pigen_resolve_error error = {0};
+	pigen_semantic_error error = {0};
 	const pigen_semantic_signal *left;
 	const pigen_semantic_signal *right;
 	const pigen_semantic_signal *alternate;

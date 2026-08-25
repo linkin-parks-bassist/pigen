@@ -37,13 +37,44 @@ typedef struct {
 	pigen_const_expr_id right;
 } pigen_packed_dimension;
 
-pigen_data_type_id pigen_data_type_primitive_from_spelling(
+typedef enum {
+	PIGEN_DATA_TYPE_ARGUMENT_COUNT,
+	PIGEN_DATA_TYPE_ARGUMENT_RANGE
+} pigen_data_type_argument_kind;
+
+typedef struct {
+	pigen_data_type_argument_kind kind;
+	union {
+		pigen_const_expr_id count;
+		struct {
+			pigen_const_expr_id left;
+			pigen_const_expr_id right;
+		} range;
+	} as;
+} pigen_data_type_argument;
+
+typedef enum {
+	PIGEN_TYPE_SPELLING_UNKNOWN,
+	PIGEN_TYPE_SPELLING_SYSTEMVERILOG,
+	PIGEN_TYPE_SPELLING_PIGEN
+} pigen_type_spelling_domain;
+
+pigen_type_spelling_domain pigen_data_type_spelling_domain(
+	const pigen_semantic_model *model, pigen_source_span spelling);
+pigen_data_type_id pigen_data_type_from_spelling(
 	pigen_semantic_model *model, pigen_source_span spelling,
-	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
-	size_t dimension_count);
+	pigen_signedness signedness, const pigen_data_type_argument *arguments,
+	size_t argument_count);
+pigen_data_type_id pigen_data_type_alias_with_arguments(
+	pigen_semantic_model *model, pigen_symbol_id alias,
+	pigen_data_type_id target, pigen_signedness signedness,
+	const pigen_data_type_argument *arguments, size_t argument_count);
 pigen_data_type_id pigen_data_type_implicit(pigen_semantic_model *model,
 	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
 	size_t dimension_count);
+pigen_data_type_id pigen_data_type_implicit_with_arguments(
+	pigen_semantic_model *model, pigen_signedness signedness,
+	const pigen_data_type_argument *arguments, size_t argument_count);
 pigen_data_type_id pigen_data_type_alias(pigen_semantic_model *model,
 	pigen_symbol_id alias, pigen_data_type_id target,
 	pigen_signedness signedness,

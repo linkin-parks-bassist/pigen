@@ -5,6 +5,7 @@
 #include "pigen/expression_use.h"
 #include "pigen/predicate.h"
 #include "pigen/resolve.h"
+#include "pigen/type_resolve.h"
 #include "pigen/util.h"
 
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
@@ -12,7 +13,7 @@
 typedef struct {
 	const pigen_syntax_tree *syntax;
 	pigen_semantic_model *model;
-	pigen_resolve_error *error;
+	pigen_semantic_error *error;
 } resolver;
 
 static int fail(resolver *resolver, pigen_source_span span, const char *message)
@@ -76,76 +77,6 @@ static pigen_expr_id resolve_constant(resolver *resolver, pigen_scope_id scope,
 {
 	return pigen_resolve_constant_expression(resolver->syntax, resolver->model,
 		scope, syntax_id);
-}
-
-static pigen_data_type_id resolve_type(resolver *resolver, pigen_scope_id scope,
-	const pigen_syntax_type *syntax_type)
-{
-	pigen_signedness signedness;
-	pigen_packed_dimension *dimensions = NULL;
-	const pigen_syntax_dimension *syntax_dimensions;
-	pigen_data_type_id result;
-	size_t i;
-
-	if (syntax_type->signedness == PIGEN_SYNTAX_SIGN_SIGNED)
-		signedness = PIGEN_SIGN_SIGNED;
-	else if (syntax_type->signedness == PIGEN_SYNTAX_SIGN_UNSIGNED)
-		signedness = PIGEN_SIGN_UNSIGNED;
-	else
-		signedness = PIGEN_SIGN_IMPLICIT;
-	if (syntax_type->dimension_count)
-	{
-		dimensions = pigen_resize(NULL,
-			syntax_type->dimension_count * sizeof(*dimensions));
-		syntax_dimensions = pigen_syntax_type_dimensions(resolver->syntax,
-			syntax_type);
-		if (!syntax_dimensions)
-		{
-			free(dimensions);
-			return INVALID_ID(pigen_data_type_id);
-		}
-		for (i = 0; i < syntax_type->dimension_count; i++)
-		{
-			pigen_expr_id left = resolve_constant(resolver, scope,
-				syntax_dimensions[i].left);
-			pigen_expr_id right = resolve_constant(resolver, scope,
-				syntax_dimensions[i].right);
-			if (left.index == PIGEN_INVALID_ID ||
-				right.index == PIGEN_INVALID_ID)
-			{
-				fail_location(resolver, syntax_dimensions[i].location,
-					"packed bounds require constant expressions");
-				free(dimensions);
-				return INVALID_ID(pigen_data_type_id);
-			}
-			dimensions[i].left = pigen_expr_constant(resolver->model, left);
-			dimensions[i].right = pigen_expr_constant(resolver->model, right);
-		}
-	}
-	if (syntax_type->base.index == PIGEN_INVALID_ID)
-		result = pigen_data_type_implicit(resolver->model, signedness,
-			dimensions, syntax_type->dimension_count);
-	else
-	{
-		pigen_source_span spelling = token_spelling(resolver,
-			syntax_type->base);
-		result = pigen_data_type_primitive_from_spelling(resolver->model,
-			spelling, signedness, dimensions, syntax_type->dimension_count);
-		if (result.index == PIGEN_INVALID_ID)
-		{
-			pigen_symbol_id alias = pigen_symbol_lookup(resolver->model, scope,
-				spelling);
-			const pigen_symbol *symbol = pigen_symbol_get(resolver->model, alias);
-			if (!symbol || symbol->kind != PIGEN_SYMBOL_TYPEDEF)
-				fail_token(resolver, syntax_type->base, "unknown type name");
-			else
-				result = pigen_data_type_alias(resolver->model, alias,
-					symbol->data_type, signedness, dimensions,
-					syntax_type->dimension_count);
-		}
-	}
-	free(dimensions);
-	return result;
 }
 
 static pigen_shape_id resolve_shape(resolver *resolver, pigen_scope_id scope,
@@ -300,8 +231,8 @@ static int add_signal_declaration(resolver *resolver,
 	if (syntax_node->as.signal_declaration.direction == PIGEN_DIRECTION_INOUT)
 		return fail_location(resolver, syntax_node->location,
 			"signal ports must be input or output, not inout");
-	data_type = resolve_type(resolver, module->scope,
-		&syntax_node->as.signal_declaration.payload);
+	data_type = pigen_resolve_type(resolver->syntax, resolver->model, module->scope,
+		syntax_node->as.signal_declaration.payload, resolver->error);
 	if (data_type.index == PIGEN_INVALID_ID) return 0;
 	if (descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH)
 	{
@@ -364,8 +295,8 @@ static int add_static_signal_declaration(resolver *resolver,
 {
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
-	pigen_data_type_id type = resolve_type(resolver, module->scope,
-		&syntax_node->as.static_signal_declaration.type);
+	pigen_data_type_id type = pigen_resolve_type(resolver->syntax, resolver->model, module->scope,
+		syntax_node->as.static_signal_declaration.type, resolver->error);
 	pigen_syntax_id declarator_id;
 
 	if (type.index == PIGEN_INVALID_ID) return 0;
@@ -410,8 +341,8 @@ static int add_static_signal_declaration(resolver *resolver,
 static int add_typedef(resolver *resolver, pigen_scope_id scope,
 	const pigen_syntax_node *syntax_node)
 {
-	pigen_data_type_id underlying = resolve_type(resolver, scope,
-		&syntax_node->as.type_definition.type);
+	pigen_data_type_id underlying = pigen_resolve_type(resolver->syntax, resolver->model, scope,
+		syntax_node->as.type_definition.type, resolver->error);
 	pigen_symbol_id symbol;
 	pigen_declare_result declared;
 
@@ -848,7 +779,7 @@ static int validate_signal_ownership(resolver *resolver)
 
 int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model,
-	pigen_resolve_error *error)
+	pigen_semantic_error *error)
 {
 	const pigen_source_manager *sources = syntax && syntax->expanded ?
 		syntax->expanded->sources : NULL;
@@ -858,7 +789,7 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	pigen_source_span root_span;
 
 	pigen_semantic_init(model, sources);
-	if (error) *error = (pigen_resolve_error){INVALID_ID(pigen_origin_id),
+	if (error) *error = (pigen_semantic_error){INVALID_ID(pigen_origin_id),
 		(pigen_source_span){INVALID_ID(pigen_source_id), 0, 0}, NULL};
 	root = pigen_syntax_get(syntax, (pigen_syntax_id){0});
 	if (!root || root->kind != PIGEN_SYNTAX_COMPILATION_UNIT)

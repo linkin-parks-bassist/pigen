@@ -12,7 +12,7 @@ static pigen_syntax_expr_id parse(const pigen_preprocess_result *preprocessed,
 	pigen_syntax_error error = {0};
 	pigen_syntax_expr_id result = INVALID_ID(pigen_syntax_expr_id);
 	assert(pigen_parse_expression(&preprocessed->expanded, first, after,
-		&syntax->expressions, &result, &error));
+		&syntax->expressions, &syntax->types, &result, &error));
 	return result;
 }
 

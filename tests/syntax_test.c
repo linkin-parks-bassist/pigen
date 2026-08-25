@@ -35,6 +35,9 @@ static int expression_is(const pigen_source_manager *sources,
 
 int main(void)
 {
+	const char casts[] =
+		"uint[8]'(value) word_t'(value) logic [15:0]'(value) "
+		"uint[]'(value) logic[15:]'(value) uint[8]'value (value)'(value)";
 	const char text[] =
 		"package prefix; localparam module = 1; endpackage\n"
 		"typedef logic [31:0] global_word_t;\n"
@@ -51,6 +54,7 @@ int main(void)
 		"        right <= left;\n"
 		"      else\n"
 		"        left <= right;\n"
+		"    pulse <= uint[8]'(pulse);\n"
 		"  end\n"
 		"endmodule\n"
 		"module ordinary #(parameter int X = 1);\n"
@@ -74,12 +78,15 @@ int main(void)
 		strlen(invalid));
 	pigen_source_id rollback_source = pigen_source_add(&sources,
 		"rollback.pigen", rollback, strlen(rollback));
+	pigen_source_id cast_source = pigen_source_add(&sources, "casts.pigen",
+		casts, strlen(casts));
 	pigen_syntax_tree tree = {0};
 	pigen_syntax_tree bad_tree = {0};
 	pigen_syntax_tree rollback_tree = {0};
 	pigen_preprocess_result preprocessed = {0};
 	pigen_preprocess_result bad_preprocessed = {0};
 	pigen_preprocess_result rollback_preprocessed = {0};
+	pigen_preprocess_result cast_preprocessed = {0};
 	pigen_preprocess_error preprocess_error = {0};
 	pigen_syntax_error error = {0};
 	const pigen_syntax_node *root;
@@ -97,6 +104,50 @@ int main(void)
 	int found_memory = 0;
 	int found_samples = 0;
 	int found_masks = 0;
+	pigen_syntax_expr_arena cast_expressions = {0};
+	pigen_syntax_type_arena cast_types = {0};
+	pigen_syntax_expr_id cast_expression;
+	const pigen_syntax_expr *cast_node;
+	const pigen_syntax_type *cast_type;
+	const pigen_syntax_type_argument *cast_argument;
+
+	assert(pigen_preprocess(&sources, cast_source, NULL, &cast_preprocessed,
+		&preprocess_error));
+	assert(pigen_parse_expression(&cast_preprocessed.expanded, 0, 8,
+		&cast_expressions, &cast_types, &cast_expression, &error));
+	cast_node = pigen_syntax_expr_get(&cast_expressions, cast_expression);
+	assert(cast_node && cast_node->kind == PIGEN_SYNTAX_EXPR_CAST);
+	cast_type = pigen_syntax_type_get(&cast_types, cast_node->as.cast.type);
+	assert(cast_type && cast_type->argument_count == 1);
+	cast_argument = pigen_syntax_type_arguments(&cast_types,
+		cast_type->first_argument, cast_type->argument_count);
+	assert(cast_argument && cast_argument->kind == PIGEN_SYNTAX_TYPE_COUNT);
+	assert(expression_is(&sources, &(pigen_syntax_tree){
+		.expressions = cast_expressions}, cast_node->as.cast.value, "value"));
+	assert(span_is(&sources, cast_node->location.source_span,
+		"uint[8]'(value)"));
+	assert(pigen_parse_expression(&cast_preprocessed.expanded, 8, 13,
+		&cast_expressions, &cast_types, &cast_expression, &error));
+	cast_node = pigen_syntax_expr_get(&cast_expressions, cast_expression);
+	cast_type = pigen_syntax_type_get(&cast_types, cast_node->as.cast.type);
+	assert(cast_type && !cast_type->argument_count &&
+		token_is(&cast_preprocessed.expanded, cast_type->base, "word_t"));
+	assert(pigen_parse_expression(&cast_preprocessed.expanded, 13, 23,
+		&cast_expressions, &cast_types, &cast_expression, &error));
+	cast_node = pigen_syntax_expr_get(&cast_expressions, cast_expression);
+	cast_type = pigen_syntax_type_get(&cast_types, cast_node->as.cast.type);
+	cast_argument = pigen_syntax_type_arguments(&cast_types,
+		cast_type->first_argument, cast_type->argument_count);
+	assert(cast_type && cast_type->argument_count == 1 && cast_argument &&
+		cast_argument->kind == PIGEN_SYNTAX_TYPE_RANGE);
+	assert(!pigen_parse_expression(&cast_preprocessed.expanded, 23, 30,
+		&cast_expressions, &cast_types, &cast_expression, &error));
+	assert(!pigen_parse_expression(&cast_preprocessed.expanded, 30, 39,
+		&cast_expressions, &cast_types, &cast_expression, &error));
+	assert(!pigen_parse_expression(&cast_preprocessed.expanded, 39, 45,
+		&cast_expressions, &cast_types, &cast_expression, &error));
+	assert(!pigen_parse_expression(&cast_preprocessed.expanded, 45, 52,
+		&cast_expressions, &cast_types, &cast_expression, &error));
 
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
 		&preprocess_error));
@@ -190,7 +241,8 @@ int main(void)
 				declarator_id = declarator->next_sibling;
 			}
 			assert(token_is(&preprocessed.expanded,
-				node->as.static_signal_declaration.type.base, "logic"));
+				pigen_syntax_type_get(&tree.types,
+					node->as.static_signal_declaration.type)->base, "logic"));
 			static_declarations++;
 			continue;
 		}
@@ -228,8 +280,17 @@ int main(void)
 			assert(expression_is(&sources, &tree,
 				assignment->as.nonblocking_assignment.value, "right"));
 			assert(assignment->next_sibling.index == PIGEN_INVALID_ID);
+			assignment = pigen_syntax_get(&tree, outer_if->next_sibling);
+			assert(assignment &&
+				assignment->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
+			cast_node = pigen_syntax_expr_get(&tree.expressions,
+				assignment->as.nonblocking_assignment.value);
+			assert(cast_node && cast_node->kind == PIGEN_SYNTAX_EXPR_CAST);
+			cast_type = pigen_syntax_type_get(&tree.types,
+				cast_node->as.cast.type);
+			assert(cast_type && cast_type->argument_count == 1);
 			clocked_processes++;
-			assignments += 2;
+			assignments += 3;
 			continue;
 		}
 		assert(node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION);
@@ -245,22 +306,26 @@ int main(void)
 			if (token_is(&preprocessed.expanded,
 				declarator->as.signal_declarator.name, "left"))
 			{
-				const pigen_syntax_dimension *dimension =
-					pigen_syntax_type_dimensions(&tree,
-						&node->as.signal_declaration.payload);
+				const pigen_syntax_type *type = pigen_syntax_type_get(&tree.types,
+					node->as.signal_declaration.payload);
+				const pigen_syntax_type_argument *argument =
+					pigen_syntax_type_arguments(&tree.types,
+						type->first_argument, type->argument_count);
 				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_BUF);
-				assert(node->as.signal_declaration.payload.signedness ==
+				assert(type->signedness ==
 					PIGEN_SYNTAX_SIGN_SIGNED);
-				assert(dimension && expression_is(&sources, &tree,
-					dimension->left, "WIDTH-1") && expression_is(&sources, &tree,
-						dimension->right, "0"));
+				assert(argument && argument->kind == PIGEN_SYNTAX_TYPE_RANGE &&
+					expression_is(&sources, &tree, argument->as.range.left,
+						"WIDTH-1") && expression_is(&sources, &tree,
+						argument->as.range.right, "0"));
 			}
 			else if (token_is(&preprocessed.expanded,
 				declarator->as.signal_declarator.name, "queue"))
 			{
 				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_FIFO);
 				assert(token_is(&preprocessed.expanded,
-					node->as.signal_declaration.payload.base, "packet_t"));
+					pigen_syntax_type_get(&tree.types,
+						node->as.signal_declaration.payload)->base, "packet_t"));
 				assert(expression_is(&sources, &tree,
 					node->as.signal_declaration.transfer_argument,
 					"DEPTH"));
@@ -270,8 +335,10 @@ int main(void)
 			{
 				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_PORT);
 				assert(token_is(&preprocessed.expanded,
-					node->as.signal_declaration.payload.base, "logic"));
-				assert(node->as.signal_declaration.payload.signedness ==
+					pigen_syntax_type_get(&tree.types,
+						node->as.signal_declaration.payload)->base, "logic"));
+				assert(pigen_syntax_type_get(&tree.types,
+					node->as.signal_declaration.payload)->signedness ==
 					PIGEN_SYNTAX_SIGN_UNSIGNED);
 			}
 			declarator_id = declarator->next_sibling;
@@ -283,7 +350,7 @@ int main(void)
 	assert(static_declarations == 3);
 	assert(found_memory && found_samples && found_masks);
 	assert(clocked_processes == 1);
-	assert(assignments == 2);
+	assert(assignments == 3);
 	assert(opaques >= 1);
 
 	assert(pigen_preprocess(&sources, bad_source, NULL, &bad_preprocessed,
@@ -312,9 +379,12 @@ int main(void)
 	pigen_free_syntax_tree(&bad_tree);
 	pigen_free_syntax_tree(&rollback_tree);
 	pigen_free_syntax_tree(&tree);
+	pigen_free_syntax_expr_arena(&cast_expressions);
+	pigen_free_syntax_type_arena(&cast_types);
 	pigen_free_preprocess_result(&bad_preprocessed);
 	pigen_free_preprocess_result(&rollback_preprocessed);
 	pigen_free_preprocess_result(&preprocessed);
+	pigen_free_preprocess_result(&cast_preprocessed);
 	pigen_free_sources(&sources);
 	puts("PASS: declarations and recursive clocked controls have structured syntax");
 	return 0;

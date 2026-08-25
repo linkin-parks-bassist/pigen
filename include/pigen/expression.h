@@ -3,25 +3,7 @@
 
 #include <stddef.h>
 
-#include "pigen/preprocess.h"
-
-typedef struct {
-	pigen_token_id first;
-	pigen_token_id after;
-} pigen_token_extent;
-
-typedef struct {
-	pigen_token_extent extent;
-	pigen_origin_id origin;
-	/* Invalid when the expanded extent has no single original-source range. */
-	pigen_source_span source_span;
-} pigen_syntax_location;
-
-typedef struct {
-	pigen_origin_id origin;
-	pigen_source_span span;
-	const char *message;
-} pigen_syntax_error;
+#include "pigen/type_syntax.h"
 
 typedef enum {
 	PIGEN_SYNTAX_EXPR_LITERAL,
@@ -133,25 +115,26 @@ typedef struct {
 			pigen_syntax_select_kind kind;
 		} select;
 		struct {
-			pigen_syntax_expr_id type;
+			pigen_syntax_type_id type;
 			pigen_syntax_expr_id value;
 		} cast;
 	} as;
 } pigen_syntax_expr;
 
-typedef struct {
+struct pigen_syntax_expr_arena {
 	pigen_syntax_expr *nodes;
 	size_t node_count;
 	size_t node_capacity;
 	pigen_syntax_expr_id *children;
 	size_t child_count;
 	size_t child_capacity;
-} pigen_syntax_expr_arena;
+};
 
 pigen_syntax_location pigen_syntax_location_from_extent(
 	const pigen_expanded_source *source, size_t first, size_t after);
 int pigen_parse_expression(const pigen_expanded_source *source,
 	size_t first, size_t after, pigen_syntax_expr_arena *arena,
+	pigen_syntax_type_arena *types,
 	pigen_syntax_expr_id *expression, pigen_syntax_error *error);
 const pigen_syntax_expr *pigen_syntax_expr_get(
 	const pigen_syntax_expr_arena *arena, pigen_syntax_expr_id expression);

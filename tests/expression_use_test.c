@@ -45,7 +45,7 @@ int main(void)
 	pigen_preprocess_result preprocessed = {0};
 	pigen_preprocess_error preprocess_error = {0};
 	pigen_syntax_error syntax_error = {0};
-	pigen_resolve_error resolve_error = {0};
+	pigen_semantic_error resolve_error = {0};
 	pigen_syntax_tree syntax = {0};
 	pigen_semantic_model model;
 	pigen_syntax_expr_id syntax_expression = INVALID_ID(pigen_syntax_expr_id);
@@ -115,30 +115,30 @@ int main(void)
 	first++;
 	assert(preprocessed.expanded.token_count - 1 == first + 80);
 	assert(pigen_parse_expression(&preprocessed.expanded, first, first + 5,
-		&syntax.expressions,
+		&syntax.expressions, &syntax.types,
 		&syntax_expression, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 5, first + 8,
-		&syntax.expressions, &syntax_lvalue, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_lvalue, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 8, first + 12,
-		&syntax.expressions, &syntax_index, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_index, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 12, first + 18,
-		&syntax.expressions, &syntax_index_lvalue, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_index_lvalue, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 18, first + 25,
-		&syntax.expressions, &syntax_invalid_index, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_invalid_index, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 25, first + 31,
-		&syntax.expressions, &syntax_range, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_range, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 31, first + 39,
-		&syntax.expressions, &syntax_select_lvalue, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_select_lvalue, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 39, first + 45,
-		&syntax.expressions, &syntax_invalid_width, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_invalid_width, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 45, first + 51,
-		&syntax.expressions, &syntax_invalid_range, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_invalid_range, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 51, first + 66,
-		&syntax.expressions, &syntax_concat, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_concat, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 66, first + 71,
-		&syntax.expressions, &syntax_invalid_concat, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_invalid_concat, &syntax_error));
 	assert(pigen_parse_expression(&preprocessed.expanded, first + 71, first + 80,
-		&syntax.expressions, &syntax_nested_concat, &syntax_error));
+		&syntax.expressions, &syntax.types, &syntax_nested_concat, &syntax_error));
 	expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
 		syntax_expression);

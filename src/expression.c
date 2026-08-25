@@ -10,6 +10,7 @@
 typedef struct {
 	const pigen_expanded_source *source;
 	pigen_syntax_expr_arena *arena;
+	pigen_syntax_type_arena *types;
 	pigen_syntax_error *error;
 	size_t at;
 	size_t after;
@@ -305,9 +306,42 @@ static pigen_syntax_expr_id parse_primary(expression_parser *parser)
 	const pigen_expanded_token *token;
 	pigen_syntax_expr node = {0};
 	pigen_syntax_expr_id result;
+	pigen_syntax_type_id cast_type;
+	size_t type_after;
+	size_t original_node_count;
+	size_t original_child_count;
+	size_t original_type_count;
+	size_t original_type_argument_count;
 
 	if (parser->at >= parser->after)
 		return fail(parser, parser->at, "expected expression");
+	original_node_count = parser->arena->node_count;
+	original_child_count = parser->arena->child_count;
+	original_type_count = parser->types->node_count;
+	original_type_argument_count = parser->types->argument_count;
+	if (pigen_parse_type_prefix(parser->source, parser->at, parser->after,
+		parser->arena, parser->types, &cast_type, &type_after, NULL) &&
+		pigen_syntax_type_get(parser->types, cast_type)->base.index !=
+			PIGEN_INVALID_ID &&
+		token_is(parser, type_after, "'") && token_is(parser, type_after + 1, "("))
+	{
+		parser->at = type_after + 2;
+		result = parse_precedence(parser, 1);
+		if (result.index == PIGEN_INVALID_ID) return result;
+		if (!token_is(parser, parser->at, ")"))
+			return fail(parser, parser->at, "unterminated cast");
+		parser->at++;
+		node.kind = PIGEN_SYNTAX_EXPR_CAST;
+		node.location = pigen_syntax_location_from_extent(parser->source,
+			start, parser->at);
+		node.as.cast.type = cast_type;
+		node.as.cast.value = result;
+		return add_node(parser, node);
+	}
+	parser->arena->node_count = original_node_count;
+	parser->arena->child_count = original_child_count;
+	parser->types->node_count = original_type_count;
+	parser->types->argument_count = original_type_argument_count;
 	if (token_is(parser, parser->at, "("))
 	{
 		parser->at++;
@@ -419,20 +453,6 @@ static pigen_syntax_expr_id parse_postfix(expression_parser *parser)
 				return fail(parser, parser->at, "unterminated select");
 			parser->at++;
 		}
-		else if (token_is(parser, parser->at, "'") &&
-			token_is(parser, parser->at + 1, "("))
-		{
-			pigen_syntax_expr_id value;
-			parser->at += 2;
-			value = parse_precedence(parser, 1);
-			if (value.index == PIGEN_INVALID_ID) return value;
-			if (!token_is(parser, parser->at, ")"))
-				return fail(parser, parser->at, "unterminated cast");
-			parser->at++;
-			node.kind = PIGEN_SYNTAX_EXPR_CAST;
-			node.as.cast.type = base;
-			node.as.cast.value = value;
-		}
 		else break;
 		node.location = pigen_syntax_location_from_extent(parser->source,
 			start, parser->at);
@@ -527,22 +547,38 @@ static pigen_syntax_expr_id parse_precedence(expression_parser *parser,
 
 int pigen_parse_expression(const pigen_expanded_source *source,
 	size_t first, size_t after, pigen_syntax_expr_arena *arena,
+	pigen_syntax_type_arena *types,
 	pigen_syntax_expr_id *expression, pigen_syntax_error *error)
 {
-	expression_parser parser = {source, arena, error, first, after};
+	expression_parser parser = {source, arena, types, error, first, after};
 	pigen_syntax_expr_id result;
+	size_t original_node_count;
+	size_t original_child_count;
+	size_t original_type_count;
+	size_t original_type_argument_count;
 	if (expression) *expression = INVALID_ID(pigen_syntax_expr_id);
-	if (!source || !arena || first >= after || after > source->token_count)
+	if (!source || !arena || !types || first >= after ||
+		after > source->token_count)
 		return 0;
+	original_node_count = arena->node_count;
+	original_child_count = arena->child_count;
+	original_type_count = types->node_count;
+	original_type_argument_count = types->argument_count;
 	result = parse_precedence(&parser, 1);
-	if (result.index == PIGEN_INVALID_ID) return 0;
+	if (result.index == PIGEN_INVALID_ID) goto fail_parse;
 	if (parser.at != after)
 	{
 		fail(&parser, parser.at, "unsupported trailing expression syntax");
-		return 0;
+		goto fail_parse;
 	}
 	if (expression) *expression = result;
 	return 1;
+fail_parse:
+	arena->node_count = original_node_count;
+	arena->child_count = original_child_count;
+	types->node_count = original_type_count;
+	types->argument_count = original_type_argument_count;
+	return 0;
 }
 
 const pigen_syntax_expr *pigen_syntax_expr_get(

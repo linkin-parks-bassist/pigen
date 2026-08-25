@@ -160,6 +160,7 @@ int main(void)
 	pigen_binary_resolution binary_resolution;
 	pigen_conditional_resolution conditional_resolution;
 	pigen_conversion conversion;
+	pigen_data_type_argument type_argument;
 	pigen_shape_id scalar_shape;
 	pigen_shape_id signal_shape;
 	pigen_shape_id same_signal_shape;
@@ -246,6 +247,14 @@ int main(void)
 	unsigned_8 = pigen_data_type_unsigned_integer(&model, width_8);
 	unsigned_12 = pigen_data_type_unsigned_integer(&model, width_12);
 	unsigned_2 = pigen_data_type_unsigned_integer(&model, width_2);
+	type_argument = (pigen_data_type_argument){PIGEN_DATA_TYPE_ARGUMENT_COUNT,
+		{.count = width_8}};
+	assert(pigen_data_type_from_spelling(&model,
+		occurrence(source, text, "int", 0), PIGEN_SIGN_IMPLICIT,
+		&type_argument, 1).index == signed_8.index);
+	assert(pigen_data_type_from_spelling(&model,
+		occurrence(source, text, "uint", 0), PIGEN_SIGN_IMPLICIT,
+		&type_argument, 1).index == unsigned_8.index);
 	zero = pigen_integer_intern_u64(&model, 0);
 	one = pigen_integer_intern_u64(&model, 1);
 	three = pigen_integer_intern_u64(&model, 3);
@@ -257,17 +266,17 @@ int main(void)
 	assert(pigen_data_type_numerical_interpretation(&model, exact_one) ==
 		PIGEN_NUMERICAL_EXACT_INTEGER);
 	pigen_byte = pigen_data_type_byte(&model);
-	bit_type = pigen_data_type_primitive_from_spelling(&model,
+	bit_type = pigen_data_type_from_spelling(&model,
 		occurrence(source, text, "bit", 0), PIGEN_SIGN_UNSIGNED, NULL, 0);
-	assert(pigen_data_type_primitive_from_spelling(&model,
+	assert(pigen_data_type_from_spelling(&model,
 		occurrence(source, text, "int", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
 		PIGEN_INVALID_ID);
-	assert(pigen_data_type_primitive_from_spelling(&model,
+	assert(pigen_data_type_from_spelling(&model,
 		occurrence(source, text, "uint", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
 		PIGEN_INVALID_ID);
-	assert(pigen_data_type_primitive_from_spelling(&model,
+	assert(pigen_data_type_from_spelling(&model,
 		occurrence(source, text, "byte", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
-		PIGEN_INVALID_ID);
+		pigen_byte.index);
 	assert(signed_8.index == same_signed_8.index);
 	assert(signed_8.index != signed_16.index);
 	assert(signed_8.index != unsigned_8.index);
@@ -707,7 +716,7 @@ int main(void)
 			pigen_expr_constant(&model, left_bound),
 			pigen_expr_constant(&model, right_bound),
 			PIGEN_SEMANTIC_SELECT_RANGE)) == 1);
-	bit_type = pigen_data_type_primitive_from_spelling(&model,
+	bit_type = pigen_data_type_from_spelling(&model,
 		occurrence(source, text, "bit", 0), PIGEN_SIGN_UNSIGNED, NULL, 0);
 	assert(pigen_data_type_state_domain(&model, bit_type) ==
 		PIGEN_DATA_TYPE_STATE_TWO);

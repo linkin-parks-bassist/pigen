@@ -35,18 +35,6 @@ typedef enum {
 } pigen_syntax_edge;
 
 typedef enum {
-	PIGEN_SYNTAX_SIGN_IMPLICIT,
-	PIGEN_SYNTAX_SIGN_UNSIGNED,
-	PIGEN_SYNTAX_SIGN_SIGNED
-} pigen_syntax_signedness;
-
-typedef struct {
-	pigen_syntax_location location;
-	pigen_syntax_expr_id left;
-	pigen_syntax_expr_id right;
-} pigen_syntax_dimension;
-
-typedef enum {
 	PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT,
 	PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE
 } pigen_syntax_shape_dimension_form;
@@ -70,14 +58,6 @@ typedef struct {
 } pigen_syntax_signal_declarator;
 
 typedef struct {
-	pigen_token_id base;
-	pigen_syntax_signedness signedness;
-	pigen_syntax_location location;
-	size_t first_dimension;
-	size_t dimension_count;
-} pigen_syntax_type;
-
-typedef struct {
 	pigen_syntax_kind kind;
 	pigen_syntax_location location;
 	pigen_syntax_id parent;
@@ -93,18 +73,18 @@ typedef struct {
 		} parameter;
 		struct {
 			pigen_token_id name;
-			pigen_syntax_type type;
+			pigen_syntax_type_id type;
 		} type_definition;
 		struct {
 			pigen_syntax_direction direction;
 			pigen_transfer_type transfer_type;
-			pigen_syntax_type type;
+			pigen_syntax_type_id type;
 		} static_signal_declaration;
 		pigen_syntax_signal_declarator static_signal_declarator;
 		struct {
 			pigen_transfer_type transfer_type;
 			pigen_syntax_direction direction;
-			pigen_syntax_type payload;
+			pigen_syntax_type_id payload;
 			pigen_syntax_expr_id transfer_argument;
 		} signal_declaration;
 		pigen_syntax_signal_declarator signal_declarator;
@@ -128,21 +108,17 @@ typedef struct {
 	pigen_syntax_node *nodes;
 	size_t node_count;
 	size_t node_capacity;
-	pigen_syntax_dimension *dimensions;
-	size_t dimension_count;
-	size_t dimension_capacity;
 	pigen_syntax_shape_dimension *shape_dimensions;
 	size_t shape_dimension_count;
 	size_t shape_dimension_capacity;
 	pigen_syntax_expr_arena expressions;
+	pigen_syntax_type_arena types;
 } pigen_syntax_tree;
 
 int pigen_parse_syntax(const pigen_expanded_source *source,
 	pigen_syntax_tree *tree, pigen_syntax_error *error);
 const pigen_syntax_node *pigen_syntax_get(const pigen_syntax_tree *tree,
 	pigen_syntax_id node);
-const pigen_syntax_dimension *pigen_syntax_type_dimensions(
-	const pigen_syntax_tree *tree, const pigen_syntax_type *type);
 const pigen_syntax_shape_dimension *pigen_syntax_declarator_shape_dimensions(
 	const pigen_syntax_tree *tree, const pigen_syntax_node *declarator);
 void pigen_free_syntax_tree(pigen_syntax_tree *tree);

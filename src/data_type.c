@@ -216,7 +216,7 @@ static pigen_data_type_id scalar_data_type(pigen_semantic_model *model,
 		INVALID_ID(pigen_const_expr_id), INVALID_ID(pigen_integer_id), NULL, 0);
 }
 
-pigen_data_type_id pigen_data_type_primitive_from_spelling(
+static pigen_data_type_id primitive_data_type_from_spelling(
 	pigen_semantic_model *model, pigen_source_span spelling,
 	pigen_signedness signedness, const pigen_packed_dimension *dimensions,
 	size_t dimension_count)
@@ -456,6 +456,126 @@ static pigen_const_expr_id intern_unsized_integer_binary(
 		return INVALID_ID(pigen_const_expr_id);
 	return pigen_const_expr_intern_binary(model, resolution.operation, left,
 		right);
+}
+
+pigen_type_spelling_domain pigen_data_type_spelling_domain(
+	const pigen_semantic_model *model, pigen_source_span spelling)
+{
+	if (!model || !model->sources) return PIGEN_TYPE_SPELLING_UNKNOWN;
+	if (spelling_is(model, spelling, "int") ||
+		spelling_is(model, spelling, "uint") ||
+		spelling_is(model, spelling, "byte"))
+		return PIGEN_TYPE_SPELLING_PIGEN;
+	return primitive_from_spelling(model, spelling) ?
+		PIGEN_TYPE_SPELLING_SYSTEMVERILOG : PIGEN_TYPE_SPELLING_UNKNOWN;
+}
+
+static pigen_packed_dimension *arguments_to_dimensions(
+	pigen_semantic_model *model, const pigen_data_type_argument *arguments,
+	size_t argument_count)
+{
+	pigen_packed_dimension *dimensions;
+	pigen_const_expr_id zero;
+	pigen_const_expr_id one;
+	size_t i;
+
+	if (!argument_count) return NULL;
+	if (!arguments) return NULL;
+	dimensions = pigen_resize(NULL, argument_count * sizeof(*dimensions));
+	zero = pigen_const_expr_intern_integer(model, 0,
+		pigen_data_type_unsized_integer(model));
+	one = pigen_const_expr_intern_integer(model, 1,
+		pigen_data_type_unsized_integer(model));
+	for (i = 0; i < argument_count; i++)
+	{
+		if (arguments[i].kind == PIGEN_DATA_TYPE_ARGUMENT_RANGE)
+		{
+			dimensions[i].left = arguments[i].as.range.left;
+			dimensions[i].right = arguments[i].as.range.right;
+		}
+		else if (arguments[i].kind == PIGEN_DATA_TYPE_ARGUMENT_COUNT)
+		{
+			dimensions[i].left = intern_unsized_integer_binary(model,
+				PIGEN_BINARY_SUBTRACT, arguments[i].as.count, one);
+			dimensions[i].right = zero;
+		}
+		else
+		{
+			free(dimensions);
+			return NULL;
+		}
+		if (!pigen_const_expr_get(model, dimensions[i].left) ||
+			!pigen_const_expr_get(model, dimensions[i].right))
+		{
+			free(dimensions);
+			return NULL;
+		}
+	}
+	return dimensions;
+}
+
+pigen_data_type_id pigen_data_type_from_spelling(
+	pigen_semantic_model *model, pigen_source_span spelling,
+	pigen_signedness signedness, const pigen_data_type_argument *arguments,
+	size_t argument_count)
+{
+	pigen_packed_dimension *dimensions;
+	pigen_data_type_id result;
+
+	if (!model || (argument_count && !arguments))
+		return INVALID_ID(pigen_data_type_id);
+	if (spelling_is(model, spelling, "int") ||
+		spelling_is(model, spelling, "uint"))
+	{
+		if (signedness != PIGEN_SIGN_IMPLICIT || argument_count != 1 ||
+			arguments[0].kind != PIGEN_DATA_TYPE_ARGUMENT_COUNT)
+			return INVALID_ID(pigen_data_type_id);
+		return spelling_is(model, spelling, "int") ?
+			pigen_data_type_signed_integer(model, arguments[0].as.count) :
+			pigen_data_type_unsigned_integer(model, arguments[0].as.count);
+	}
+	if (spelling_is(model, spelling, "byte"))
+		return signedness == PIGEN_SIGN_IMPLICIT && !argument_count ?
+			pigen_data_type_byte(model) : INVALID_ID(pigen_data_type_id);
+	if (!primitive_from_spelling(model, spelling))
+		return INVALID_ID(pigen_data_type_id);
+	dimensions = arguments_to_dimensions(model, arguments, argument_count);
+	if (argument_count && !dimensions) return INVALID_ID(pigen_data_type_id);
+	result = primitive_data_type_from_spelling(model, spelling, signedness,
+		dimensions, argument_count);
+	free(dimensions);
+	return result;
+}
+
+pigen_data_type_id pigen_data_type_alias_with_arguments(
+	pigen_semantic_model *model, pigen_symbol_id alias,
+	pigen_data_type_id target, pigen_signedness signedness,
+	const pigen_data_type_argument *arguments, size_t argument_count)
+{
+	pigen_packed_dimension *dimensions = arguments_to_dimensions(model,
+		arguments, argument_count);
+	pigen_data_type_id result;
+
+	if (argument_count && !dimensions) return INVALID_ID(pigen_data_type_id);
+	result = pigen_data_type_alias(model, alias, target, signedness, dimensions,
+		argument_count);
+	free(dimensions);
+	return result;
+}
+
+pigen_data_type_id pigen_data_type_implicit_with_arguments(
+	pigen_semantic_model *model, pigen_signedness signedness,
+	const pigen_data_type_argument *arguments, size_t argument_count)
+{
+	pigen_packed_dimension *dimensions = arguments_to_dimensions(model,
+		arguments, argument_count);
+	pigen_data_type_id result;
+
+	if (argument_count && !dimensions) return INVALID_ID(pigen_data_type_id);
+	result = pigen_data_type_implicit(model, signedness, dimensions,
+		argument_count);
+	free(dimensions);
+	return result;
 }
 
 pigen_data_type_id pigen_data_type_packed_select(pigen_semantic_model *model,

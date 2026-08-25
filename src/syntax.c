@@ -141,40 +141,6 @@ static size_t matching_bracket(const syntax_parser *parser, size_t open,
 	return limit;
 }
 
-static int add_dimension(syntax_parser *parser, size_t open, size_t close)
-{
-	pigen_syntax_tree *tree = parser->tree;
-	pigen_syntax_dimension dimension;
-	size_t colon = open + 1;
-	size_t depth = 0;
-
-	for (; colon < close; colon++)
-	{
-		if (token_is(parser, colon, "(") || token_is(parser, colon, "[") ||
-			token_is(parser, colon, "{")) depth++;
-		else if (token_is(parser, colon, ")") || token_is(parser, colon, "]") ||
-			token_is(parser, colon, "}")) depth--;
-		else if (!depth && token_is(parser, colon, ":")) break;
-	}
-	if (colon == open + 1 || colon == close || colon + 1 == close)
-		return fail(parser, open, "packed dimension requires `left:right`");
-	dimension.location = range_location(parser, open, close + 1);
-	if (!pigen_parse_expression(parser->expanded, open + 1, colon,
-		&tree->expressions, &dimension.left, parser->error) ||
-		!pigen_parse_expression(parser->expanded, colon + 1, close,
-			&tree->expressions, &dimension.right, parser->error))
-		return 0;
-	if (tree->dimension_count == tree->dimension_capacity)
-	{
-		tree->dimension_capacity = tree->dimension_capacity ?
-			tree->dimension_capacity * 2 : 16;
-		tree->dimensions = pigen_resize(tree->dimensions,
-			tree->dimension_capacity * sizeof(*tree->dimensions));
-	}
-	tree->dimensions[tree->dimension_count++] = dimension;
-	return 1;
-}
-
 static int add_shape_dimension(syntax_parser *parser, size_t open,
 	size_t close)
 {
@@ -198,15 +164,18 @@ static int add_shape_dimension(syntax_parser *parser, size_t open,
 	{
 		dimension.form = PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT;
 		if (!pigen_parse_expression(parser->expanded, open + 1, close,
-			&tree->expressions, &dimension.as.count, parser->error)) return 0;
+			&tree->expressions, &tree->types, &dimension.as.count,
+			parser->error)) return 0;
 	}
 	else
 	{
 		dimension.form = PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE;
 		if (!pigen_parse_expression(parser->expanded, open + 1, colon,
-			&tree->expressions, &dimension.as.range.left, parser->error) ||
+			&tree->expressions, &tree->types, &dimension.as.range.left,
+			parser->error) ||
 			!pigen_parse_expression(parser->expanded, colon + 1, close,
-				&tree->expressions, &dimension.as.range.right, parser->error))
+				&tree->expressions, &tree->types, &dimension.as.range.right,
+				parser->error))
 			return 0;
 	}
 	if (tree->shape_dimension_count == tree->shape_dimension_capacity)
@@ -222,7 +191,7 @@ static int add_shape_dimension(syntax_parser *parser, size_t open,
 
 static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	pigen_transfer_parameter parameter, int allow_implicit_scalar,
-	pigen_syntax_type *type, size_t *name_at,
+	pigen_syntax_type_id *type, size_t *name_at,
 	pigen_syntax_expr_id *transfer_argument)
 {
 	size_t at = start;
@@ -231,44 +200,29 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	size_t last_group_close = 0;
 	size_t group_count = 0;
 	size_t payload_groups;
+	size_t type_end;
+	size_t parsed_after;
+	int has_base = 0;
 
-	*type = (pigen_syntax_type){0};
+	*type = INVALID_ID(pigen_syntax_type_id);
 	*transfer_argument = INVALID_ID(pigen_syntax_expr_id);
-	type->signedness = PIGEN_SYNTAX_SIGN_IMPLICIT;
-	type->base = INVALID_ID(pigen_token_id);
-	if (token_is(parser, at, "signed"))
-	{
-		type->signedness = PIGEN_SYNTAX_SIGN_SIGNED;
+	if (token_is(parser, at, "signed") || token_is(parser, at, "unsigned"))
 		at++;
-	}
-	else if (token_is(parser, at, "unsigned"))
-	{
-		type->signedness = PIGEN_SYNTAX_SIGN_UNSIGNED;
-		at++;
-	}
 	if (identifier(parser, at) && (!allow_implicit_scalar || at + 1 < limit) &&
 		!token_is(parser, at, "signed") &&
 		!token_is(parser, at, "unsigned"))
 	{
-		type->base = (pigen_token_id){(uint32_t)at};
+		has_base = 1;
 		at++;
-		if (token_is(parser, at, "signed"))
-		{
-			type->signedness = PIGEN_SYNTAX_SIGN_SIGNED;
+		if (token_is(parser, at, "signed") || token_is(parser, at, "unsigned"))
 			at++;
-		}
-		else if (token_is(parser, at, "unsigned"))
-		{
-			type->signedness = PIGEN_SYNTAX_SIGN_UNSIGNED;
-			at++;
-		}
 	}
 	groups_start = at;
 	while (at < limit && token_is(parser, at, "["))
 	{
 		size_t close = matching_bracket(parser, at, limit);
 		if (close == limit)
-			return fail(parser, at, "unterminated packed dimension");
+			return fail(parser, at, "unterminated packed type argument");
 		last_group_open = at;
 		last_group_close = close;
 		group_count++;
@@ -286,8 +240,8 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 			return fail(parser, last_group_open,
 				"transfer depth requires an expression");
 		if (!pigen_parse_expression(parser->expanded, last_group_open + 1,
-			last_group_close, &parser->tree->expressions, transfer_argument,
-			parser->error))
+			last_group_close, &parser->tree->expressions, &parser->tree->types,
+			transfer_argument, parser->error))
 			return fail(parser, last_group_open,
 				"invalid transfer depth expression");
 		payload_groups = group_count - 1;
@@ -295,30 +249,25 @@ static int parse_type(syntax_parser *parser, size_t start, size_t limit,
 	else
 		payload_groups = group_count;
 	if (parameter == PIGEN_TRANSFER_PARAMETER_DEPTH && !payload_groups &&
-		type->base.index == PIGEN_INVALID_ID)
+		!has_base)
 		return fail(parser, *name_at,
 			"transfer declaration requires a data type before its depth");
-	type->first_dimension = parser->tree->dimension_count;
-	type->dimension_count = payload_groups;
 	at = groups_start;
 	for (size_t i = 0; i < payload_groups; i++)
-	{
-		size_t close = matching_bracket(parser, at, limit);
-		if (!add_dimension(parser, at, close)) return 0;
-		at = close + 1;
-	}
+		at = matching_bracket(parser, at, limit) + 1;
 	if (payload_groups)
-		type->location = range_location(parser, start, at);
-	else if (type->base.index != PIGEN_INVALID_ID)
-	{
-		size_t type_end = parameter == PIGEN_TRANSFER_PARAMETER_DEPTH ?
+		type_end = at;
+	else if (has_base)
+		type_end = parameter == PIGEN_TRANSFER_PARAMETER_DEPTH ?
 			last_group_open : *name_at;
-		type->location = range_location(parser, start, type_end);
-	}
 	else if (!allow_implicit_scalar)
 		return fail(parser, *name_at, "declaration requires a packed type");
 	else
-		type->location = range_location(parser, start, *name_at);
+		type_end = *name_at;
+	if (!pigen_parse_type_prefix(parser->expanded, start, type_end,
+		&parser->tree->expressions, &parser->tree->types, type, &parsed_after,
+		parser->error) || parsed_after != type_end)
+		return 0;
 	return 1;
 }
 
@@ -458,7 +407,7 @@ static int parse_value(syntax_parser *parser, pigen_syntax_id module,
 	int explicit_data_type = 0;
 	pigen_syntax_direction direction = PIGEN_DIRECTION_INTERNAL;
 	pigen_transfer_type transfer_type;
-	pigen_syntax_type type = {0};
+	pigen_syntax_type_id type = INVALID_ID(pigen_syntax_type_id);
 	pigen_syntax_expr_id unused_transfer_argument =
 		INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_node node = {0};
@@ -525,7 +474,7 @@ static int parse_signal(syntax_parser *parser, pigen_syntax_id module,
 	pigen_syntax_direction direction = PIGEN_DIRECTION_INTERNAL;
 	pigen_transfer_type transfer_type;
 	const pigen_transfer_type_descriptor *descriptor;
-	pigen_syntax_type payload = {0};
+	pigen_syntax_type_id payload = INVALID_ID(pigen_syntax_type_id);
 	pigen_syntax_expr_id transfer_argument =
 		INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_location declaration_location = range_location(parser, start,
@@ -574,7 +523,7 @@ static int parse_signal(syntax_parser *parser, pigen_syntax_id module,
 static int parse_typedef(syntax_parser *parser, pigen_syntax_id parent,
 	size_t start, size_t semicolon, syntax_cursor *opaque_cursor)
 {
-	pigen_syntax_type type;
+	pigen_syntax_type_id type;
 	pigen_syntax_expr_id unused_transfer_argument =
 		INVALID_ID(pigen_syntax_expr_id);
 	pigen_syntax_location declaration = range_location(parser, start,
@@ -708,7 +657,7 @@ static int parse_parameter(syntax_parser *parser, pigen_syntax_id module,
 	node.as.parameter.name = (pigen_token_id){(uint32_t)name};
 	node.as.parameter.is_local = is_local;
 	if (!pigen_parse_expression(parser->expanded, equals + 1, after,
-		&parser->tree->expressions, &node.as.parameter.value, parser->error))
+		&parser->tree->expressions, &parser->tree->types, &node.as.parameter.value, parser->error))
 		return 0;
 	id = add_node(parser, node);
 	add_child(parser, module, id);
@@ -848,11 +797,14 @@ static const char *opaque_unit_closer(const syntax_parser *parser, size_t at)
 
 static void abandon_process_parse(syntax_parser *parser,
 	size_t syntax_node_count, size_t expression_node_count,
-	size_t expression_child_count, pigen_syntax_error saved_error)
+	size_t expression_child_count, size_t type_count,
+	size_t type_argument_count, pigen_syntax_error saved_error)
 {
 	parser->tree->node_count = syntax_node_count;
 	parser->tree->expressions.node_count = expression_node_count;
 	parser->tree->expressions.child_count = expression_child_count;
+	parser->tree->types.node_count = type_count;
+	parser->tree->types.argument_count = type_argument_count;
 	if (parser->error) *parser->error = saved_error;
 }
 
@@ -903,7 +855,7 @@ static int parse_if_statement(syntax_parser *parser, pigen_syntax_id parent,
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
 	if (!pigen_parse_expression(parser->expanded, start + 2, close,
-		&parser->tree->expressions, &node.as.if_statement.condition,
+		&parser->tree->expressions, &parser->tree->types, &node.as.if_statement.condition,
 		parser->error)) return 0;
 	statement = add_node(parser, node);
 	add_child(parser, parent, statement);
@@ -937,10 +889,10 @@ static int parse_nonblocking_assignment(syntax_parser *parser,
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
 	if (!pigen_parse_expression(parser->expanded, start, separator,
-		&parser->tree->expressions,
+		&parser->tree->expressions, &parser->tree->types,
 		&node.as.nonblocking_assignment.destination, parser->error) ||
 		!pigen_parse_expression(parser->expanded, separator + 1, semicolon,
-			&parser->tree->expressions,
+			&parser->tree->expressions, &parser->tree->types,
 			&node.as.nonblocking_assignment.value, parser->error)) return 0;
 	add_child(parser, parent, add_node(parser, node));
 	(*assignment_count)++;
@@ -970,6 +922,8 @@ static int parse_clocked_process(syntax_parser *parser,
 	size_t saved_syntax_node_count = parser->tree->node_count;
 	size_t saved_expression_node_count = expressions->node_count;
 	size_t saved_expression_child_count = expressions->child_count;
+	size_t saved_type_count = parser->tree->types.node_count;
+	size_t saved_type_argument_count = parser->tree->types.argument_count;
 	pigen_syntax_error saved_error = parser->error ? *parser->error :
 		(pigen_syntax_error){0};
 	size_t event_open = start + 2;
@@ -989,10 +943,11 @@ static int parse_clocked_process(syntax_parser *parser,
 		event_open + 3 != event_close || !identifier(parser, event_open + 2))
 		return 0;
 	if (!pigen_parse_expression(parser->expanded, event_open + 2, event_close,
-		expressions, &clock, parser->error))
+		expressions, &parser->tree->types, &clock, parser->error))
 	{
 		abandon_process_parse(parser, saved_syntax_node_count,
-			saved_expression_node_count, saved_expression_child_count, saved_error);
+			saved_expression_node_count, saved_expression_child_count,
+			saved_type_count, saved_type_argument_count, saved_error);
 		return 0;
 	}
 	node.kind = PIGEN_SYNTAX_CLOCKED_PROCESS;
@@ -1005,7 +960,8 @@ static int parse_clocked_process(syntax_parser *parser,
 		&process_after, &assignment_count) || !assignment_count)
 	{
 		abandon_process_parse(parser, saved_syntax_node_count,
-			saved_expression_node_count, saved_expression_child_count, saved_error);
+			saved_expression_node_count, saved_expression_child_count,
+			saved_type_count, saved_type_argument_count, saved_error);
 		return 0;
 	}
 	parser->tree->nodes[process.index].location = range_location(parser, start,
@@ -1238,15 +1194,6 @@ const pigen_syntax_node *pigen_syntax_get(const pigen_syntax_tree *tree,
 	return &tree->nodes[node.index];
 }
 
-const pigen_syntax_dimension *pigen_syntax_type_dimensions(
-	const pigen_syntax_tree *tree, const pigen_syntax_type *type)
-{
-	if (!type || !type->dimension_count ||
-		type->first_dimension + type->dimension_count > tree->dimension_count)
-		return NULL;
-	return tree->dimensions + type->first_dimension;
-}
-
 const pigen_syntax_shape_dimension *pigen_syntax_declarator_shape_dimensions(
 	const pigen_syntax_tree *tree, const pigen_syntax_node *declarator)
 {
@@ -1268,8 +1215,8 @@ const pigen_syntax_shape_dimension *pigen_syntax_declarator_shape_dimensions(
 void pigen_free_syntax_tree(pigen_syntax_tree *tree)
 {
 	free(tree->nodes);
-	free(tree->dimensions);
 	free(tree->shape_dimensions);
 	pigen_free_syntax_expr_arena(&tree->expressions);
+	pigen_free_syntax_type_arena(&tree->types);
 	*tree = (pigen_syntax_tree){0};
 }
