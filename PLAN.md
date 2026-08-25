@@ -41,69 +41,32 @@ middle. Completed prototype behavior is evidence, not architecture.
 
 ## Current architecture status
 
-The replacement foundation has immutable source storage, preprocessing with
-token provenance, a partial structured syntax tree, scopes, stable identities,
-structural packed types, typed expressions and lvalues, canonical predicates,
-clock domains, direct transfers, and a transfer-incidence ownership graph. Its
-focused unit tests pass. Static and general declarations now resolve into one
-signal arena and one symbol binding; every direct-transfer incidence is
-recorded, with transfer-type laws deciding semantic roles and domain behavior.
-One canonical transfer-type descriptor catalogue now owns source spelling,
-concrete/static classification, parameter form, write eligibility, constant
-valid/ready laws, consumption, production, ownership, and domain binding. The
-syntax and semantic layers query it rather than enumerating transfer types.
-Signals carry a generic transfer argument whose meaning comes from that
-descriptor; `fifo` currently interprets it as depth. The same owner now maps
-each transfer type to a backend-neutral realization identity with explicit
-capacity source, ready dependency, occupancy, and reset properties. Invalid
-zero-valued properties make incomplete catalogue entries fail closed. Backend
-spellings remain outside the semantic catalogue. The production compiler's
-older character catalogue is explicitly named as a prototype and remains
-quarantined until cutover.
-The full `make verify` suite most recently passed after the transfer-realization
-cutover on 2026-08-24.
+The replacement middle now has immutable sources and token provenance,
+structured syntax and shared structural type syntax, scopes and stable symbols,
+canonical data types and shapes, exact arbitrary-precision integers, typed
+expressions and lvalues, canonical predicates, clock domains, direct transfers,
+and transfer-incidence ownership. One transfer-type catalogue owns behavioral
+laws and backend-neutral realizations. One data-type subsystem owns primitive
+spelling, canonical representation, packed layout, signedness, numerical
+interpretation, conversions, and operation-result policy.
 
-It is not linked into the production executable. The production compiler still
-uses rewritten source, generated names, marker comments, rescanning, and
-feature-local models. Canonical structural shape identities are shared by
-signals and expressions, and recognized declarations now parse ordered count
-and range dimensions directly into those identities. Expression indexing
-consumes unpacked dimensions before packed dimensions; unsupported unpacked
-slices and concatenations are rejected rather than reinterpreted. The target
-data-first declaration grammar remains incomplete. `data_type.h` and
-`data_type.c` now own canonical data-type construction, aliases, packed layout,
-projection, symbolic width sums/products/maxima, state and numerical domains,
-concatenation, sized-logic construction, conversion policy, and family-owned
-operation resolution. The general semantic and predicate layers consume that
-opaque interface without enumerating or inspecting primitive constructors.
-Semantic records carry explicit `pigen_data_type_id` fields rather than a
-generic type identity. Canonical aliases store their resolved target identity,
-so later data-type operations do not re-enter the symbol table. Primitive
-spelling/resolution is now
-routed through that owner: syntax retains the written base token without
-classifying it, and resolution asks the data-type subsystem before considering
-a typedef. One compile-time primitive descriptor table now owns each existing
-primitive's source spelling, fixed base width, state domain, and capability
-flags. Width, packed projection, concatenation, and capability queries consume
-those descriptors rather than rediscovering the primitive catalogue. The
-compiler's private type for unsized integer expressions is explicitly named
-`unsized_integer`; it is distinct from semantic-only two-state `int[n]` and
-`uint[n]` families. Those families and raw two-state `byte` have canonical
-identities and fail-closed conversion/operation decisions, but no source
-spellings yet. Data-first syntax, conversion expression nodes, contextual
-expected-type plumbing, lowering, and production integration remain incomplete.
-There is no elastic RTL IR or terminal structured emitter.
+Expression resolution is intrinsically typed and two-stage. Analysis builds a
+temporary tree without appending semantic expressions; materialization commits
+one tree with every required non-identity conversion explicit. Unsized Pigen
+decimals are exact values, operation types are lossless and independent of the
+destination, and SystemVerilog-style casts share declaration type syntax.
+Assignment asks the destination family for one final conversion above the
+complete RHS. Semantic transfers independently require exact final data-type
+and shape identity. A positive resolve policy rejects known excessive generated
+widths and carries parameter-dependent widths as semantic constraints.
+Fresh `make verify` passed for this intrinsic-expression cutover on 2026-08-25.
 
-The semantic unary, binary, and select-operation vocabulary is owned by
-`operation.h` and `operation.c`. Expression records and data-type rules consume
-that shared algebra independently: operation identity is global structure;
-operand-dependent meaning remains local to the data-type subsystem. That owner
-now resolves each unary, binary, and conditional application into required
-conversion records plus an effective operation record. Semantic and canonical
-constant expressions carry the operation directly. Expression resolution
-currently passes no expected type and accepts only identity conversions at one
-explicit gate; conversion nodes and contextual plumbing will replace that
-incomplete boundary.
+The structured middle remains unlinked from the production executable. The
+production compiler still uses rewritten source, generated names, marker
+comments, rescanning, and feature-local models. Source-visible data-first
+`int[n]`, `uint[n]`, `bit`, and `byte` declarations are deliberately the next
+frontend slice; tests currently reach those semantic types through shared type
+syntax and typedefs. There is no elastic RTL IR or terminal structured emitter.
 
 ## Architecture cutover
 
@@ -127,15 +90,16 @@ incomplete boundary.
 
 ### 2. Complete the shared frontend
 
-- [ ] Complete the centralized primitive data-type algebra. A compile-time
+- [x] Complete the centralized primitive data-type algebra. A compile-time
   descriptor table now owns spelling, fixed base width, state domain, and
   capability flags; canonical data types must additionally expose complete
   representation, signedness, numerical
   interpretation, compatibility, conversion, and operator-result semantics
   through shared APIs; unrelated passes must not enumerate primitive types.
-- [ ] Route expression typing and lowering through resolved type decisions so
+- [x] Route expression typing through resolved type decisions so
   signed and unsigned arithmetic, shifts, widening, and future fixed-point
-  scaling are decided once and carried forward structurally.
+  scaling are decided once and carried forward structurally. RTL lowering of
+  those decisions remains part of the vertical slice.
 - [ ] Parse target data-first declarations and declaration shapes structurally.
 - [ ] Preserve ordinary SystemVerilog declarations without reinterpreting
   explicit ranges or unrelated expression indexing.

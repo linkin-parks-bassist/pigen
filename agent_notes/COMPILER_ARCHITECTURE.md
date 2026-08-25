@@ -79,21 +79,23 @@ consume those decisions; they do not switch independently over `int`, `uint`,
 `include/pigen/data_type.h` and `src/data_type.c` now own the primitive
 catalogue, canonical interning, aliases, packed layout and projection, symbolic
 width algebra, state and numerical domains, conversion policy, and unary,
-binary, and conditional operation resolution. Semantic-only `int[n]`,
-`uint[n]`, and `byte` identities remain unavailable through source spelling.
+binary, and conditional operation resolution. Shared type syntax resolves
+`int[n]`, `uint[n]`, `bit`, and `byte` in casts and typedefs; recognizing them
+at the start of data-first signal declarations remains the next syntax slice.
 A compile-time descriptor table owns shared primitive facts; parameterized and
 operation-specific rules remain ordinary private code. Constructor tags, raw
 interning, descriptors, and canonical records are private to `src/data_type.c`;
 other layers carry opaque identities and conversion/operation records.
 
-Expression construction deliberately passes no expected result and accepts a
-resolution only when every required conversion is identity. This conspicuous
-incomplete boundary preserves current structured expressions until explicit
-conversion nodes and contextual expected-type plumbing exist; it is not a
-fallback or a second semantic path. Syntax still retains an unclassified base
-token, aliases retain resolved targets, and general semantic passes do not
-enumerate primitive constructors. Do not extend unrelated passes when changing
-`int`, `uint`, or `byte`.
+Expression construction has no expected-result input. The data-type owner
+returns complete intrinsic operation and conversion decisions; a temporary
+analyzed-expression arena validates the whole tree before one postorder
+materializer appends semantic expressions. Every non-identity conversion is an
+explicit semantic node and every identity conversion disappears. Syntax still
+retains an unclassified base token, aliases retain resolved targets, and
+general semantic passes do not enumerate primitive constructors. Do not extend
+unrelated passes when changing `int`, `uint`, `byte`, or a future fixed-point
+family.
 
 The descriptor table is a catalogue, not a promise that all primitive meaning
 is tabular. Operation-specific rules remain ordinary code inside the data-type
@@ -128,11 +130,23 @@ spelling nor primitive constructors own the shared operation vocabulary.
 An operator is only the shared algebraic symbol. The data-type subsystem
 resolves it into required conversions plus an operation whose effective operand
 identities are exactly those conversion targets. Runtime and canonical constant
-expressions carry the operation record, never a raw operator plus an independently
-asserted result type. Future conversion nodes must materialize the recorded
-decisions before operation construction. Fixed-point scaling and other real
-lowering semantics may extend this boundary without teaching expression walkers
-the primitive catalogue.
+expressions carry the operation record, never a raw operator plus an
+independently asserted result type. Fixed-point scaling and other real lowering
+semantics may extend conversion records without changing tree topology or
+teaching expression walkers the primitive catalogue.
+
+Typed boundaries are separate from intrinsic expression meaning. Assignment
+resolves the destination first, resolves the RHS without destination context,
+then asks the target family for one final conversion. Same-family integer
+narrowing and widening are ordinary resize decisions; interpretation changes
+and numerical/raw crossings require an explicit cast. `pigen_transfer_add()`
+requires final data-type and shape identity independently of resolver checks.
+
+Resource policy is likewise outside the data-type owner. The type algebra
+retains exact derived widths. Expression resolution receives a positive
+`maximum_generated_bits`, rejects a known excessive left-shift or power at its
+operator, and records a provenance-bearing semantic constraint when the width
+depends on parameters. Never clamp a lossless result to satisfy policy.
 
 Pipelines, transfers, FSMs, and fabrics consume these services and produce
 common semantic objects. No feature privately reparses names, expressions,
@@ -154,7 +168,7 @@ type inference, ownership analysis, source parsing, or semantic discovery.
 Fabric RTL, routes, manifests, reachability evidence, and SVGs derive from one
 resolved topology model.
 
-## Current replacement foundation (2026-08-21)
+## Current replacement foundation (2026-08-25)
 
 The unlinked replacement modules already provide:
 
@@ -187,6 +201,15 @@ The unlinked replacement modules already provide:
 - resolved unary, binary, and conditional decisions containing conversions plus
   operation records, with effective operand and result types supplied once by
   the data-type owner;
+- canonical arbitrary-precision signed integers and exact unsized Pigen literal
+  identities, distinct from ordinary SystemVerilog unsized integers;
+- one temporary analyzed-expression arena and one semantic materializer;
+  analysis may intern canonical catalogue identities but never appends semantic
+  expressions or lvalues;
+- explicit semantic and constant conversion nodes, shared structural cast/type
+  syntax, and SystemVerilog-style `type'(value)` casts;
+- assignment-only destination conversion, exact final transfer type/shape
+  invariants, and generated-width policy constraints;
 - one canonical transfer-type descriptor catalogue owning source spelling,
   concrete/static classification, parameter form, write eligibility,
   valid/ready constants, consumption, production, ownership, and domain
@@ -232,18 +255,16 @@ not enumerate either catalogue.
 The realization boundary is specified in
 `docs/superpowers/specs/2026-08-24-transfer-realization-design.md`.
 
-The data-type boundary is specified in
-`docs/superpowers/specs/2026-08-25-data-type-policy-design.md`. Pigen's initial
-`int[n]` and `uint[n]` families are two-state integers; implicit mixed-family
-arithmetic is rejected. `byte` is a two-state raw vector with no arithmetic
-interpretation. Operation policy belongs to the data-type owner and receives
-exact operands plus optional expected type; it returns effective operand
-types, conversions, and result type. Context may widen an integer operation
-but never narrows it before the final assignment conversion. These are
-replaceable policy choices, not rules to duplicate in expression or lowering
-passes. Ada completed this semantic-only policy slice on 2026-08-25. Source
-spellings, conversion expression nodes, expected-type propagation, lowering,
-and production integration remain open.
+The intrinsic-expression boundary is specified in
+`docs/superpowers/specs/2026-08-25-intrinsic-expression-semantics-design.md`.
+Pigen's initial `int[n]` and `uint[n]` families are two-state integers with
+lossless mixed-family promotion where a unique common representation exists.
+`byte` is a two-state raw vector with no arithmetic interpretation. Operation
+policy receives intrinsic operands only and returns effective operand types,
+conversions, and result type. Ari completed exact literals, intrinsic sizing,
+two-stage resolution, casts, assignment boundaries, and resource constraints
+on 2026-08-25. Source-visible data-first declarations, lowering, and production
+integration remain open.
 
 As a rough architecture estimate, the replacement effort is about **25%**
 complete overall: the reusable frontend and semantic foundation is around
@@ -253,14 +274,17 @@ estimate, not line-count progress.
 
 ## Remaining cutover boundary
 
-The structured frontend still lacks complete target declarations, generic
+The structured frontend still lacks complete target data-first declarations, generic
 input specialization, the complete target data-first declaration grammar,
 cases, atomic blocks, signal actions,
 pipelines, FSMs, instances, and fabrics. Expression typing still lacks several
 SystemVerilog contextual and aggregate forms. Preprocessing still lacks token
 concatenation, stringification, and required advanced macro arguments.
 
-There is no elastic RTL IR or structured emitter. Production still lowers
+The expression/type spine is ready for those declarations: casts and
+declarations already share structural type syntax, and typedef-backed tests
+exercise intrinsic arithmetic through complete semantic transfers without
+adding a temporary second grammar. There is no elastic RTL IR or structured emitter. Production still lowers
 fabrics, FSMs, atomic blocks, pipelines, declarations, and assignments through
 rewritten source. In particular, pipeline placement still uses marker comments,
 generated names, rescanning, and reparsing.

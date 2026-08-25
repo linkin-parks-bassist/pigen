@@ -89,12 +89,17 @@ contract stated in `SPEC.md`.
   precondition for its existence.  Parameter-only trees point at canonical
   constant DAG nodes; runtime signal reads remain fully typed
   semantic expressions with an invalid constant identity.
+- An unsized Pigen decimal is a canonical arbitrary-precision exact integer
+  with no signed/unsigned family or implicit hardware width. In the ordinary
+  SystemVerilog constant-expression domain used by parameters and structural
+  ranges, unsized decimals retain SystemVerilog `unsized_integer` semantics;
+  do not erase this domain boundary merely because both use one walker.
 - Every explicitly sized based literal has an exact structural logic type and
   an exact-width four-state value.  Canonical literal identity is determined by
   type and normalized LSB-first `0`/`1`/`x`/`z` states, not source base or host
   integer capacity; each spelling occurrence retains its own expression
-  identity and provenance.  Context-dependent unbased literals remain
-  unresolved until their consumer establishes the required sizing semantics.
+  identity and provenance. It remains a raw bit vector and requires an explicit
+  cast before Pigen numerical arithmetic.
 - Relational, equality, logical, and reduction expressions have an unsigned
   scalar-logic result type. Their operands remain typed structural expressions;
   constant analysis does not replace parameter references with copied values.
@@ -140,8 +145,9 @@ contract stated in `SPEC.md`.
   SystemVerilog width, signedness, and state-domain merge is represented.
 - Pigen `int[n]` and `uint[n]` are initially two-state signed and unsigned
   integer families. Their widths are structural constant-expression identities.
-  Implicit arithmetic does not cross between the families; an explicit cast
-  chooses the interpretation.
+  Mixed-family operands are legal when the operation owner can form one unique
+  lossless common representation; signed operands sign-extend and unsigned
+  operands zero-extend. Assignment never uses that promotion to change family.
 - Pigen `byte` is initially a two-state eight-bit vector without numerical
   interpretation. It supports structural, bitwise, equality, and logical use,
   but arithmetic and ordered comparison require an explicit integer cast.
@@ -152,22 +158,27 @@ contract stated in `SPEC.md`.
   operation whose effective operand identities equal the conversion targets;
   failed resolution leaves the caller's record untouched. Primitive
   constructors and source-spelling recognition remain private.
-- Operator and type family jointly determine effective operands and result.
-  Optional expected type is policy input, not a universal coercion rule. The
-  initial integer-valued policy forms a canonical symbolic maximum from operand
-  widths and a compatible expected width, so a narrower consumer cannot shrink
-  the operation before final assignment conversion. Boolean-result operations
-  form their operand width only from their operands; result context neither
-  sizes nor restricts their family. Shifts preserve the left family and width
-  and require an unsigned-integer count. Byte-valued operations preserve a
-  shared exact alias identity and use canonical `byte` when the operand
-  identities differ. These policies may change without changing the
-  operation/conversion boundary.
-- Until semantic conversion expression nodes exist, expression resolution
-  passes exactly `INVALID_ID(pigen_data_type_id)` as the absent expectation and
-  constructs an expression only when every recorded conversion is identity.
-  This single fail-closed gate is deliberately incomplete, not a compatibility
-  path. Ada recorded the operation boundary on 2026-08-25.
+- Operator and type family jointly determine effective operands and intrinsic
+  result. No operation-resolution interface accepts a destination or expected
+  result. Addition, subtraction, multiplication, negation, conditionals, and
+  mixed numerical operations retain every mathematically possible result bit;
+  right shifts retain the zero-shift width, while left shifts and powers retain
+  exact worst-case symbolic widths. Boolean-result operations form operands
+  only from their inputs and return `bit`. These policies may change inside the
+  data-type owner without changing the operation/conversion boundary.
+- Expression resolution is two-stage. Temporary analyzed nodes retain syntax,
+  provenance, shape, intrinsic data type, constant identity, children, and
+  complete operation/conversion decisions. Analysis appends no semantic
+  expressions or lvalues. One postorder materializer emits children, every
+  non-identity conversion, then the operation. Failure leaves no partial
+  semantic expression tree.
+- Runtime and constant conversion topology is isomorphic. A semantic conversion
+  preserves shape and owns the corresponding constant conversion when its
+  operand is constant. Conversion roots are values, never lvalues. Identity
+  casts validate during analysis and materialize no node.
+- Casts use shared structural type syntax and the single explicit-conversion
+  policy. Pigen spells them `type'(expression)`; numerical-family and
+  numerical/raw-vector changes require this explicit boundary.
 - Identifier reads, lvalues, concatenations, casts, member selections, bit
   selections, indexed selections, calls, and conditional evaluation are
   distinct expression/use forms.
@@ -215,8 +226,15 @@ contract stated in `SPEC.md`.
   independently.  If a signal is both read and written in an analyzed set,
   one deduplicated signal summary carries all applicable context bits while
   the occurrence records remain distinct.
-- Contextual sizing and signedness are established before transfer or RTL
-  lowering. The emitter never infers them from rendered text.
+- Intrinsic sizing and signedness are established before transfer or RTL
+  lowering. A typed assignment asks the destination family for one final
+  conversion above the complete RHS. Same-family integer narrowing retains low
+  bits and same-family widening is exact; neither changes intermediate types.
+  The emitter never infers sizing from rendered text.
+- A positive resolve policy bounds generated widths without changing their
+  meaning. Known excessive left-shift or power widths fail at the operator;
+  parameter-dependent widths become semantic `width <= limit` constraints with
+  operator provenance. A known overflow in width evaluation fails closed.
 - Builtin semantic types have model-owned stable identities. Constant-expression
   checking is a policy on the shared typed-expression resolver used by
   parameters, dimensions, depths, and future semantic consumers; declaration
@@ -255,6 +273,10 @@ contract stated in `SPEC.md`.
   types.
 - An atomic transfer owns an ordered destination bit stream, one value bit
   stream, a guard predicate, a clock domain, and its source span.
+- Transfer construction requires the final value and destination lvalue to have
+  identical data-type and shape identities. Assignment conversion is already
+  explicit above the RHS; transfer construction never repeats compatibility
+  policy or accepts a merely convertible value.
 - A direct whole-expression transfer requires identical source and destination
   shape identities. A mismatch is diagnosed from semantic objects; bracket
   text is never rendered and compared.
