@@ -95,6 +95,7 @@ static int visit(use_analyzer *analyzer, pigen_expr_id expression,
 	switch (known->kind)
 	{
 		case PIGEN_EXPR_INTEGER:
+		case PIGEN_EXPR_EXACT_INTEGER:
 		case PIGEN_EXPR_BITS:
 			return 1;
 		case PIGEN_EXPR_SYMBOL:
@@ -106,6 +107,9 @@ static int visit(use_analyzer *analyzer, pigen_expr_id expression,
 				predicate, context);
 		case PIGEN_EXPR_UNARY:
 			return visit(analyzer, known->as.unary.operand,
+				INVALID_ID(pigen_expr_id), predicate, context);
+		case PIGEN_EXPR_CONVERSION:
+			return visit(analyzer, known->as.conversion.operand,
 				INVALID_ID(pigen_expr_id), predicate, context);
 		case PIGEN_EXPR_BINARY:
 			return visit(analyzer, known->as.binary.left,
@@ -201,8 +205,10 @@ static int visit_lvalue(use_analyzer *analyzer, pigen_expr_id expression,
 					INVALID_ID(pigen_expr_id), predicate,
 					PIGEN_EXPRESSION_USE_TYPE);
 		case PIGEN_EXPR_INTEGER:
+		case PIGEN_EXPR_EXACT_INTEGER:
 		case PIGEN_EXPR_BITS:
 		case PIGEN_EXPR_UNARY:
+		case PIGEN_EXPR_CONVERSION:
 		case PIGEN_EXPR_BINARY:
 		case PIGEN_EXPR_CONDITIONAL:
 		case PIGEN_EXPR_CONCATENATION:

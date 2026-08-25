@@ -180,6 +180,9 @@ static int const_expressions_equal(const pigen_semantic_model *model,
 	{
 		case PIGEN_CONST_EXPR_INTEGER:
 			return left->as.integer == right->as.integer;
+		case PIGEN_CONST_EXPR_EXACT_INTEGER:
+			return left->as.exact_integer.index ==
+				right->as.exact_integer.index;
 		case PIGEN_CONST_EXPR_BITS:
 			return left->as.bits.state_count == right->as.bits.state_count &&
 				!memcmp(model->literal_states + left->as.bits.first_state,
@@ -222,6 +225,15 @@ static int const_expressions_equal(const pigen_semantic_model *model,
 					right->as.conditional.when_true.index &&
 				left->as.conditional.when_false.index ==
 					right->as.conditional.when_false.index;
+		case PIGEN_CONST_EXPR_CONVERSION:
+			return left->as.conversion.conversion.kind ==
+					right->as.conversion.conversion.kind &&
+				left->as.conversion.conversion.source_data_type.index ==
+					right->as.conversion.conversion.source_data_type.index &&
+				left->as.conversion.conversion.target_data_type.index ==
+					right->as.conversion.conversion.target_data_type.index &&
+				left->as.conversion.operand.index ==
+					right->as.conversion.operand.index;
 		case PIGEN_CONST_EXPR_INDEX:
 			return left->as.index.base.index == right->as.index.base.index &&
 				left->as.index.index.index == right->as.index.index.index;
@@ -291,6 +303,44 @@ pigen_const_expr_id pigen_const_expr_intern_integer(
 	expression.kind = PIGEN_CONST_EXPR_INTEGER;
 	expression.data_type = type;
 	expression.as.integer = value;
+	return intern_const_expression(model, expression);
+}
+
+pigen_const_expr_id pigen_const_expr_intern_exact_integer(
+	pigen_semantic_model *model, pigen_integer_id value,
+	pigen_data_type_id data_type)
+{
+	pigen_const_expr expression = {0};
+
+	if (pigen_data_type_exact_value(model, data_type).index != value.index)
+		return INVALID_ID(pigen_const_expr_id);
+	expression.kind = PIGEN_CONST_EXPR_EXACT_INTEGER;
+	expression.data_type = data_type;
+	expression.as.exact_integer = value;
+	return intern_const_expression(model, expression);
+}
+
+static int conversion_is_semantic(pigen_conversion conversion)
+{
+	return conversion.kind > PIGEN_CONVERSION_IDENTITY &&
+		conversion.kind <= PIGEN_CONVERSION_INTEGER_TO_VECTOR;
+}
+
+pigen_const_expr_id pigen_const_expr_intern_conversion(
+	pigen_semantic_model *model, pigen_conversion conversion,
+	pigen_const_expr_id operand)
+{
+	const pigen_const_expr *known = pigen_const_expr_get(model, operand);
+	pigen_const_expr expression = {0};
+
+	if (!known || !conversion_is_semantic(conversion) ||
+		known->data_type.index != conversion.source_data_type.index ||
+		!pigen_data_type_exists(model, conversion.target_data_type))
+		return INVALID_ID(pigen_const_expr_id);
+	expression.kind = PIGEN_CONST_EXPR_CONVERSION;
+	expression.data_type = conversion.target_data_type;
+	expression.as.conversion.conversion = conversion;
+	expression.as.conversion.operand = operand;
 	return intern_const_expression(model, expression);
 }
 
@@ -801,6 +851,56 @@ pigen_expr_id pigen_expr_add_integer(pigen_semantic_model *model,
 	if (expression.constant.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
 	expression.as.integer = value;
+	return add_expression(model, expression);
+}
+
+pigen_expr_id pigen_expr_add_exact_integer(pigen_semantic_model *model,
+	pigen_integer_id value, pigen_source_span span)
+{
+	pigen_semantic_expr expression = {0};
+
+	if (!model || value.index == PIGEN_INVALID_ID ||
+		value.index >= model->integer_count ||
+		!pigen_source_span_valid(model->sources, span) ||
+		!id_capacity_available(model->expression_count))
+		return INVALID_ID(pigen_expr_id);
+	expression.kind = PIGEN_EXPR_EXACT_INTEGER;
+	expression.data_type = pigen_data_type_exact_integer(model, value);
+	expression.shape = pigen_semantic_scalar_shape(model);
+	expression.span = span;
+	expression.constant = pigen_const_expr_intern_exact_integer(model, value,
+		expression.data_type);
+	if (expression.constant.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_expr_id);
+	expression.as.exact_integer = value;
+	return add_expression(model, expression);
+}
+
+pigen_expr_id pigen_expr_add_conversion(pigen_semantic_model *model,
+	pigen_conversion conversion, pigen_expr_id operand,
+	pigen_source_span span)
+{
+	const pigen_semantic_expr *known = pigen_expr_get(model, operand);
+	pigen_semantic_expr expression = {0};
+
+	if (!known || !conversion_is_semantic(conversion) ||
+		known->data_type.index != conversion.source_data_type.index ||
+		!pigen_data_type_exists(model, conversion.target_data_type) ||
+		!pigen_source_span_valid(model->sources, span) ||
+		!id_capacity_available(model->expression_count))
+		return INVALID_ID(pigen_expr_id);
+	expression.kind = PIGEN_EXPR_CONVERSION;
+	expression.data_type = conversion.target_data_type;
+	expression.shape = known->shape;
+	expression.span = span;
+	expression.constant = known->constant.index == PIGEN_INVALID_ID ?
+		INVALID_ID(pigen_const_expr_id) :
+		pigen_const_expr_intern_conversion(model, conversion, known->constant);
+	if (known->constant.index != PIGEN_INVALID_ID &&
+		expression.constant.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_expr_id);
+	expression.as.conversion.conversion = conversion;
+	expression.as.conversion.operand = operand;
 	return add_expression(model, expression);
 }
 

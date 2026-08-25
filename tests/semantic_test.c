@@ -104,6 +104,9 @@ int main(void)
 	pigen_expr_id conditional;
 	pigen_expr_id same_conditional;
 	pigen_expr_id module_value_expression;
+	pigen_expr_id exact_expression;
+	pigen_expr_id converted_expression;
+	pigen_expr_id resized_expression;
 	pigen_expr_id shaped_concatenation_children[1];
 	pigen_expr_id first_shape_index;
 	pigen_expr_id second_shape_index;
@@ -116,6 +119,7 @@ int main(void)
 	pigen_data_type_id signed_16;
 	pigen_data_type_id unsigned_8;
 	pigen_data_type_id unsigned_12;
+	pigen_data_type_id unsigned_2;
 	pigen_data_type_id exact_one;
 	pigen_data_type_id exact_zero;
 	pigen_data_type_id exact_three;
@@ -142,6 +146,7 @@ int main(void)
 	pigen_data_type_id mixed_concat_type;
 	pigen_const_expr_id width_values[3];
 	pigen_const_expr_id width_8;
+	pigen_const_expr_id width_2;
 	pigen_const_expr_id width_12;
 	pigen_const_expr_id width_16;
 	pigen_const_expr_id width_maximum;
@@ -228,6 +233,8 @@ int main(void)
 		PIGEN_SIGN_UNSIGNED);
 	width_8 = pigen_const_expr_intern_integer(&model, 8,
 		unsized_integer_data_type);
+	width_2 = pigen_const_expr_intern_integer(&model, 2,
+		unsized_integer_data_type);
 	width_12 = pigen_const_expr_intern_integer(&model, 12,
 		unsized_integer_data_type);
 	width_16 = pigen_const_expr_intern_integer(&model, 16,
@@ -238,6 +245,7 @@ int main(void)
 	signed_16 = pigen_data_type_signed_integer(&model, width_16);
 	unsigned_8 = pigen_data_type_unsigned_integer(&model, width_8);
 	unsigned_12 = pigen_data_type_unsigned_integer(&model, width_12);
+	unsigned_2 = pigen_data_type_unsigned_integer(&model, width_2);
 	zero = pigen_integer_intern_u64(&model, 0);
 	one = pigen_integer_intern_u64(&model, 1);
 	three = pigen_integer_intern_u64(&model, 3);
@@ -513,6 +521,51 @@ int main(void)
 	assert(conversion.kind == PIGEN_CONVERSION_EXACT_INTEGER);
 	assert(pigen_data_type_packed_width(&model, exact_three).index ==
 		PIGEN_INVALID_ID);
+	exact_expression = pigen_expr_add_exact_integer(&model, three, whole);
+	assert(pigen_expr_get(&model, exact_expression)->kind ==
+		PIGEN_EXPR_EXACT_INTEGER);
+	converted_expression = pigen_expr_add_conversion(&model,
+		(pigen_conversion){PIGEN_CONVERSION_EXACT_INTEGER, exact_three,
+			unsigned_2}, exact_expression, whole);
+	resized_expression = pigen_expr_add_conversion(&model,
+		(pigen_conversion){PIGEN_CONVERSION_INTEGER_RESIZE, unsigned_2,
+			unsigned_8}, converted_expression, whole);
+	assert(pigen_expr_get(&model, converted_expression)->kind ==
+		PIGEN_EXPR_CONVERSION);
+	assert(pigen_expr_get(&model, converted_expression)->data_type.index ==
+		unsigned_2.index);
+	assert(pigen_expr_get(&model, converted_expression)->shape.index ==
+		pigen_expr_get(&model, exact_expression)->shape.index);
+	assert(pigen_expr_get(&model, resized_expression)->data_type.index ==
+		unsigned_8.index);
+	assert(pigen_const_expr_get(&model,
+		pigen_expr_constant(&model, converted_expression))->kind ==
+		PIGEN_CONST_EXPR_CONVERSION);
+	assert(pigen_lvalue_resolve(&model, converted_expression).index ==
+		PIGEN_INVALID_ID);
+	{
+		size_t expression_count = model.expression_count;
+		size_t constant_count = model.constant_expression_count;
+
+		assert(pigen_expr_add_conversion(&model,
+			(pigen_conversion){PIGEN_CONVERSION_IDENTITY, unsigned_2,
+				unsigned_2}, converted_expression, whole).index ==
+			PIGEN_INVALID_ID);
+		assert(pigen_expr_add_conversion(&model,
+			(pigen_conversion){PIGEN_CONVERSION_INTEGER_RESIZE, unsigned_8,
+				unsigned_12}, converted_expression, whole).index ==
+			PIGEN_INVALID_ID);
+		assert(pigen_expr_add_conversion(&model,
+			(pigen_conversion){PIGEN_CONVERSION_INTEGER_RESIZE, unsigned_2,
+				INVALID_ID(pigen_data_type_id)}, converted_expression, whole).index ==
+			PIGEN_INVALID_ID);
+		assert(pigen_expr_add_conversion(&model,
+			(pigen_conversion){PIGEN_CONVERSION_INVALID, unsigned_2,
+				unsigned_8}, converted_expression, whole).index ==
+			PIGEN_INVALID_ID);
+		assert(model.expression_count == expression_count);
+		assert(model.constant_expression_count == constant_count);
+	}
 	left_bound = pigen_expr_add_integer(&model, 7,
 		unsized_integer_data_type, range);
 	right_bound = pigen_expr_add_integer(&model, 0,

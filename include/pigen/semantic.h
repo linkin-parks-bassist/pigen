@@ -23,12 +23,14 @@ typedef enum {
 
 typedef enum {
 	PIGEN_EXPR_INTEGER,
+	PIGEN_EXPR_EXACT_INTEGER,
 	PIGEN_EXPR_BITS,
 	PIGEN_EXPR_SYMBOL,
 	PIGEN_EXPR_GROUP,
 	PIGEN_EXPR_UNARY,
 	PIGEN_EXPR_BINARY,
 	PIGEN_EXPR_CONDITIONAL,
+	PIGEN_EXPR_CONVERSION,
 	PIGEN_EXPR_INDEX,
 	PIGEN_EXPR_SELECT,
 	PIGEN_EXPR_CONCATENATION
@@ -36,11 +38,13 @@ typedef enum {
 
 typedef enum {
 	PIGEN_CONST_EXPR_INTEGER,
+	PIGEN_CONST_EXPR_EXACT_INTEGER,
 	PIGEN_CONST_EXPR_BITS,
 	PIGEN_CONST_EXPR_SYMBOL,
 	PIGEN_CONST_EXPR_UNARY,
 	PIGEN_CONST_EXPR_BINARY,
 	PIGEN_CONST_EXPR_CONDITIONAL,
+	PIGEN_CONST_EXPR_CONVERSION,
 	PIGEN_CONST_EXPR_INDEX,
 	PIGEN_CONST_EXPR_SELECT,
 	PIGEN_CONST_EXPR_SELECT_WIDTH,
@@ -125,6 +129,7 @@ typedef struct {
 	pigen_lvalue_id lvalue;
 	union {
 		uint64_t integer;
+		pigen_integer_id exact_integer;
 		struct { size_t first_state; size_t state_count; } bits;
 		pigen_symbol_id symbol;
 		struct { pigen_expr_id operand; } group;
@@ -143,6 +148,10 @@ typedef struct {
 			pigen_expr_id when_true;
 			pigen_expr_id when_false;
 		} conditional;
+		struct {
+			pigen_conversion conversion;
+			pigen_expr_id operand;
+		} conversion;
 		struct {
 			pigen_expr_id base;
 			pigen_expr_id index;
@@ -165,6 +174,7 @@ typedef struct {
 	pigen_data_type_id data_type;
 	union {
 		uint64_t integer;
+		pigen_integer_id exact_integer;
 		struct { size_t first_state; size_t state_count; } bits;
 		pigen_symbol_id symbol;
 		struct {
@@ -182,6 +192,10 @@ typedef struct {
 			pigen_const_expr_id when_true;
 			pigen_const_expr_id when_false;
 		} conditional;
+		struct {
+			pigen_conversion conversion;
+			pigen_const_expr_id operand;
+		} conversion;
 		struct {
 			pigen_const_expr_id base;
 			pigen_const_expr_id index;
@@ -411,6 +425,12 @@ pigen_shape_id pigen_shape_element(pigen_semantic_model *model,
 	pigen_shape_id shape);
 pigen_const_expr_id pigen_const_expr_intern_integer(
 	pigen_semantic_model *model, uint64_t value, pigen_data_type_id type);
+pigen_const_expr_id pigen_const_expr_intern_exact_integer(
+	pigen_semantic_model *model, pigen_integer_id value,
+	pigen_data_type_id data_type);
+pigen_const_expr_id pigen_const_expr_intern_conversion(
+	pigen_semantic_model *model, pigen_conversion conversion,
+	pigen_const_expr_id operand);
 pigen_const_expr_id pigen_const_expr_intern_bits(pigen_semantic_model *model,
 	const pigen_bit_state *states, size_t state_count, pigen_data_type_id type);
 pigen_const_expr_id pigen_const_expr_intern_symbol(
@@ -455,6 +475,11 @@ const pigen_bit_state *pigen_const_expr_bits(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
 pigen_expr_id pigen_expr_add_integer(pigen_semantic_model *model,
 	uint64_t value, pigen_data_type_id type, pigen_source_span span);
+pigen_expr_id pigen_expr_add_exact_integer(pigen_semantic_model *model,
+	pigen_integer_id value, pigen_source_span span);
+pigen_expr_id pigen_expr_add_conversion(pigen_semantic_model *model,
+	pigen_conversion conversion, pigen_expr_id operand,
+	pigen_source_span span);
 pigen_expr_id pigen_expr_add_bits(pigen_semantic_model *model,
 	const pigen_bit_state *states, size_t state_count, pigen_data_type_id type,
 	pigen_source_span span);

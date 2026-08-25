@@ -76,6 +76,10 @@ int main(void)
 	pigen_expr_id concat_expression;
 	pigen_expr_id invalid_concat_expression;
 	pigen_expr_id nested_concat_expression;
+	pigen_expr_id converted_read;
+	pigen_expr_id widened_read;
+	pigen_data_type_id converted_type;
+	pigen_data_type_id widened_type;
 	pigen_lvalue_id lvalue;
 	pigen_lvalue_id index_lvalue;
 	pigen_lvalue_id select_lvalue;
@@ -231,6 +235,28 @@ int main(void)
 	assert(analysis.signals[1].contexts ==
 		(PIGEN_EXPRESSION_USE_READ | PIGEN_EXPRESSION_USE_LVALUE));
 
+	pigen_free_expression_use_analysis(&analysis);
+	converted_type = pigen_data_type_unsigned_integer(&model,
+		pigen_data_type_packed_width(&model,
+			pigen_expr_get(&model, lvalue_expression)->data_type));
+	converted_read = pigen_expr_add_conversion(&model,
+		(pigen_conversion){PIGEN_CONVERSION_VECTOR_TO_INTEGER,
+			pigen_expr_get(&model, lvalue_expression)->data_type,
+			converted_type}, lvalue_expression,
+		pigen_expr_get(&model, lvalue_expression)->span);
+	assert(converted_read.index != PIGEN_INVALID_ID);
+	widened_type = pigen_data_type_unsigned_integer(&model,
+		pigen_const_expr_intern_integer(&model, 16,
+			pigen_data_type_unsized_integer(&model)));
+	widened_read = pigen_expr_add_conversion(&model,
+		(pigen_conversion){PIGEN_CONVERSION_INTEGER_RESIZE, converted_type,
+			widened_type}, converted_read,
+		pigen_expr_get(&model, converted_read)->span);
+	assert(widened_read.index != PIGEN_INVALID_ID);
+	assert(pigen_analyze_expression_uses(&model, widened_read, always,
+		PIGEN_EXPRESSION_USE_READ, &analysis));
+	assert(analysis.use_count == 1);
+	assert(analysis.signal_count == 1);
 	pigen_free_expression_use_analysis(&analysis);
 	assert(indexed->data_type.index ==
 		pigen_data_type_boolean(&model).index);
