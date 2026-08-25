@@ -9,6 +9,7 @@ static pigen_transfer_type resolve(const char *spelling)
 	pigen_transfer_type transfer_type;
 	assert(pigen_transfer_type_from_spelling(spelling, strlen(spelling),
 		&transfer_type));
+	assert(pigen_transfer_type_descriptor_get(transfer_type));
 	return transfer_type;
 }
 

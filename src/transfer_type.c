@@ -195,7 +195,8 @@ int pigen_transfer_type_from_spelling(const char *spelling, size_t length,
 
 	if (!spelling || !transfer_type) return 0;
 	for (i = 0; i < sizeof(transfer_types) / sizeof(*transfer_types); i++)
-		if (transfer_types[i].spelling &&
+		if (pigen_transfer_type_is_valid((pigen_transfer_type)i) &&
+			transfer_types[i].spelling &&
 			strlen(transfer_types[i].spelling) == length &&
 			!memcmp(transfer_types[i].spelling, spelling, length))
 		{
