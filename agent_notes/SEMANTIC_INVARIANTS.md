@@ -145,6 +145,11 @@ contract stated in `SPEC.md`.
 - Pigen `byte` is initially a two-state eight-bit vector without numerical
   interpretation. It supports structural, bitwise, equality, and logical use,
   but arithmetic and ordered comparison require an explicit integer cast.
+- The data-type owner keeps Pigen integer-family widths as intrinsic canonical
+  constant-expression identities. It exposes alias-transparent numerical
+  interpretation and fail-closed assignment/explicit conversion records;
+  primitive constructors and spelling recognition remain private concerns of
+  that owner. Ari recorded this boundary on 2026-08-25.
 - Operator and type family jointly determine effective operands and result.
   Optional expected type is policy input, not a universal coercion rule. The
   initial integer policy uses a compatible wider expectation but never lets a

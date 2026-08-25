@@ -4,6 +4,21 @@
 #include "pigen/ids.h"
 
 typedef enum {
+	PIGEN_CONVERSION_INVALID,
+	PIGEN_CONVERSION_IDENTITY,
+	PIGEN_CONVERSION_INTEGER_RESIZE,
+	PIGEN_CONVERSION_INTEGER_REINTERPRET,
+	PIGEN_CONVERSION_VECTOR_TO_INTEGER,
+	PIGEN_CONVERSION_INTEGER_TO_VECTOR
+} pigen_conversion_kind;
+
+typedef struct {
+	pigen_conversion_kind kind;
+	pigen_data_type_id source_data_type;
+	pigen_data_type_id target_data_type;
+} pigen_conversion;
+
+typedef enum {
 	PIGEN_UNARY_POSITIVE,
 	PIGEN_UNARY_NEGATE,
 	PIGEN_UNARY_BITWISE_NOT,

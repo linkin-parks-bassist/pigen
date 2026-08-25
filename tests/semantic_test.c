@@ -34,7 +34,10 @@ int main(void)
 		"    yield value;\n"
 		"  endpipeline\n"
 		"endmodule\n"
-		"bit\n";
+		"bit\n"
+		"int\n"
+		"uint\n"
+		"byte\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "scope.pigen", text,
 		strlen(text));
@@ -58,6 +61,14 @@ int main(void)
 	pigen_lvalue_id module_value_lvalue;
 	pigen_data_type_id unsized_integer_data_type;
 	pigen_data_type_id aliased_unsized_integer_type;
+	pigen_data_type_id signed_8;
+	pigen_data_type_id same_signed_8;
+	pigen_data_type_id signed_12;
+	pigen_data_type_id signed_16;
+	pigen_data_type_id unsigned_8;
+	pigen_data_type_id unsigned_12;
+	pigen_data_type_id pigen_byte;
+	pigen_data_type_id signed_integer_alias;
 	pigen_data_type_id boolean_type;
 	pigen_data_type_id byte_type;
 	pigen_data_type_id same_byte_type;
@@ -72,15 +83,20 @@ int main(void)
 	pigen_data_type_id bit_concat_type;
 	pigen_data_type_id mixed_concat_type;
 	pigen_const_expr_id width_values[3];
+	pigen_const_expr_id width_8;
+	pigen_const_expr_id width_12;
+	pigen_const_expr_id width_16;
 	pigen_const_expr_id width_maximum;
 	pigen_const_expr_id reordered_width_maximum;
 	pigen_const_expr_id nested_width_maximum;
 	pigen_const_expr_id zero_width;
 	pigen_const_expr_id symbolic_width;
+	pigen_const_expr_id nonintegral_width;
 	const pigen_const_expr_id *maximum_children;
 	pigen_unary_operation unary_operation;
 	pigen_binary_operation binary_operation;
 	pigen_conditional_operation conditional_operation;
+	pigen_conversion conversion;
 	pigen_shape_id scalar_shape;
 	pigen_shape_id signal_shape;
 	pigen_shape_id same_signal_shape;
@@ -93,6 +109,7 @@ int main(void)
 	pigen_module_id module;
 	pigen_symbol_id module_symbol;
 	pigen_symbol_id unsized_integer_alias_symbol;
+	pigen_symbol_id signed_integer_alias_symbol;
 	pigen_symbol_id module_value;
 	pigen_symbol_id pipeline_value;
 	pigen_symbol_id first_local;
@@ -149,10 +166,121 @@ int main(void)
 		PIGEN_SIGN_SIGNED);
 	assert(pigen_data_type_signedness(&model, boolean_type) ==
 		PIGEN_SIGN_UNSIGNED);
+	width_8 = pigen_const_expr_intern_integer(&model, 8,
+		unsized_integer_data_type);
+	width_12 = pigen_const_expr_intern_integer(&model, 12,
+		unsized_integer_data_type);
+	width_16 = pigen_const_expr_intern_integer(&model, 16,
+		unsized_integer_data_type);
+	signed_8 = pigen_data_type_signed_integer(&model, width_8);
+	same_signed_8 = pigen_data_type_signed_integer(&model, width_8);
+	signed_12 = pigen_data_type_signed_integer(&model, width_12);
+	signed_16 = pigen_data_type_signed_integer(&model, width_16);
+	unsigned_8 = pigen_data_type_unsigned_integer(&model, width_8);
+	unsigned_12 = pigen_data_type_unsigned_integer(&model, width_12);
+	pigen_byte = pigen_data_type_byte(&model);
+	bit_type = pigen_data_type_primitive_from_spelling(&model,
+		occurrence(source, text, "bit", 0), PIGEN_SIGN_UNSIGNED, NULL, 0);
+	assert(pigen_data_type_primitive_from_spelling(&model,
+		occurrence(source, text, "int", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
+		PIGEN_INVALID_ID);
+	assert(pigen_data_type_primitive_from_spelling(&model,
+		occurrence(source, text, "uint", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
+		PIGEN_INVALID_ID);
+	assert(pigen_data_type_primitive_from_spelling(&model,
+		occurrence(source, text, "byte", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
+		PIGEN_INVALID_ID);
+	assert(signed_8.index == same_signed_8.index);
+	assert(signed_8.index != signed_16.index);
+	assert(signed_8.index != unsigned_8.index);
+	assert(pigen_data_type_numerical_interpretation(&model, signed_8) ==
+		PIGEN_NUMERICAL_SIGNED_INTEGER);
+	assert(pigen_data_type_numerical_interpretation(&model, unsigned_8) ==
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER);
+	assert(pigen_data_type_numerical_interpretation(&model, pigen_byte) ==
+		PIGEN_NUMERICAL_NONE);
+	assert(pigen_data_type_state_domain(&model, signed_8) ==
+		PIGEN_DATA_TYPE_STATE_TWO);
+	assert(pigen_data_type_state_domain(&model, unsigned_8) ==
+		PIGEN_DATA_TYPE_STATE_TWO);
+	assert(pigen_data_type_state_domain(&model, pigen_byte) ==
+		PIGEN_DATA_TYPE_STATE_TWO);
+	assert(pigen_const_expr_get(&model,
+		pigen_data_type_packed_width(&model, pigen_byte))->as.integer == 8);
+	assert(pigen_data_type_packed_element(&model, signed_8).index ==
+		bit_type.index);
+	assert(pigen_data_type_packed_element(&model, pigen_byte).index ==
+		bit_type.index);
+	assert(pigen_data_type_signed_integer(&model,
+		INVALID_ID(pigen_const_expr_id)).index == PIGEN_INVALID_ID);
+	nonintegral_width = pigen_const_expr_intern_integer(&model, 8, pigen_byte);
+	assert(pigen_data_type_signed_integer(&model, nonintegral_width).index ==
+		PIGEN_INVALID_ID);
+	assert(pigen_data_type_resolve_assignment_conversion(&model,
+		signed_8, signed_8, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_IDENTITY);
+	assert(conversion.source_data_type.index == signed_8.index);
+	assert(conversion.target_data_type.index == signed_8.index);
+	assert(pigen_data_type_resolve_assignment_conversion(&model,
+		signed_8, signed_16, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_INTEGER_RESIZE);
+	assert(conversion.source_data_type.index == signed_8.index);
+	assert(conversion.target_data_type.index == signed_16.index);
+	conversion = (pigen_conversion){PIGEN_CONVERSION_INVALID,
+		INVALID_ID(pigen_data_type_id), INVALID_ID(pigen_data_type_id)};
+	assert(!pigen_data_type_resolve_assignment_conversion(&model,
+		signed_8, unsigned_8, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_INVALID);
+	assert(!pigen_data_type_resolve_assignment_conversion(&model,
+		pigen_byte, unsigned_8, &conversion));
+	assert(!pigen_data_type_resolve_assignment_conversion(&model,
+		INVALID_ID(pigen_data_type_id), signed_8, &conversion));
+	assert(!pigen_data_type_resolve_assignment_conversion(&model,
+		signed_8, signed_16, NULL));
+	assert(pigen_data_type_resolve_explicit_conversion(&model,
+		signed_8, unsigned_8, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_INTEGER_REINTERPRET);
+	assert(pigen_data_type_resolve_explicit_conversion(&model,
+		signed_8, unsigned_12, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_INTEGER_REINTERPRET);
+	assert(conversion.source_data_type.index == signed_8.index);
+	assert(conversion.target_data_type.index == unsigned_12.index);
+	assert(pigen_data_type_resolve_explicit_conversion(&model,
+		pigen_byte, unsigned_8, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_VECTOR_TO_INTEGER);
+	assert(pigen_data_type_resolve_explicit_conversion(&model,
+		pigen_byte, signed_12, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_VECTOR_TO_INTEGER);
+	assert(pigen_data_type_resolve_explicit_conversion(&model,
+		unsigned_8, pigen_byte, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_INTEGER_TO_VECTOR);
+	assert(pigen_data_type_resolve_explicit_conversion(&model,
+		unsigned_12, pigen_byte, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_INTEGER_TO_VECTOR);
+	assert(!pigen_data_type_resolve_explicit_conversion(&model,
+		INVALID_ID(pigen_data_type_id), pigen_byte, &conversion));
+	assert(!pigen_data_type_resolve_explicit_conversion(&model,
+		pigen_byte, signed_8, NULL));
 	left_bound = pigen_expr_add_integer(&model, 7,
 		unsized_integer_data_type, range);
 	right_bound = pigen_expr_add_integer(&model, 0,
 		unsized_integer_data_type, range);
+	zero_width = pigen_const_expr_intern_integer(&model, 0,
+		unsized_integer_data_type);
+	assert(pigen_data_type_signed_integer(&model, zero_width).index ==
+		PIGEN_INVALID_ID);
+	assert(pigen_data_type_numerical_interpretation(&model,
+		pigen_data_type_packed_select(&model, signed_8, width_8, width_8,
+			PIGEN_SEMANTIC_SELECT_RANGE)) == PIGEN_NUMERICAL_SYSTEMVERILOG);
+	assert(pigen_data_type_state_domain(&model,
+		pigen_data_type_packed_select(&model, signed_8, width_8, width_8,
+			PIGEN_SEMANTIC_SELECT_RANGE)) == PIGEN_DATA_TYPE_STATE_TWO);
+	assert(pigen_data_type_numerical_interpretation(&model,
+		pigen_data_type_packed_select(&model, pigen_byte, width_8, width_8,
+			PIGEN_SEMANTIC_SELECT_RANGE)) == PIGEN_NUMERICAL_SYSTEMVERILOG);
+	assert(pigen_data_type_state_domain(&model,
+		pigen_data_type_packed_select(&model, pigen_byte, width_8, width_8,
+			PIGEN_SEMANTIC_SELECT_RANGE)) == PIGEN_DATA_TYPE_STATE_TWO);
 	signal_dimensions[0] = (pigen_shape_dimension){
 		PIGEN_SHAPE_DIMENSION_COUNT,
 		{.count = pigen_expr_constant(&model, left_bound)}};
@@ -196,7 +324,8 @@ int main(void)
 	assert(byte_type.index != PIGEN_INVALID_ID);
 	assert(byte_type.index == same_byte_type.index);
 	assert(pigen_data_type_dimension_count(&model, byte_type) == 1);
-	assert(pigen_data_type_dimensions(&model, byte_type)->left.index == 0);
+	assert(pigen_data_type_dimensions(&model, byte_type)->left.index ==
+		dimension.left.index);
 	matrix_dimensions[0] = dimension;
 	matrix_dimensions[1] = dimension;
 	matrix_type = pigen_data_type_implicit(&model, PIGEN_SIGN_SIGNED,
@@ -299,6 +428,8 @@ int main(void)
 		pigen_expr_constant(&model, left_bound),
 		pigen_expr_constant(&model, right_bound),
 		PIGEN_SEMANTIC_SELECT_RANGE);
+	assert(pigen_data_type_signed_integer(&model, symbolic_width).index !=
+		PIGEN_INVALID_ID);
 	width_values[0] = symbolic_width;
 	width_values[1] = pigen_const_expr_intern_integer(&model, 8,
 		unsized_integer_data_type);
@@ -357,11 +488,26 @@ int main(void)
 	aliased_unsized_integer_type = pigen_data_type_alias(&model,
 		unsized_integer_alias_symbol,
 		unsized_integer_data_type, PIGEN_SIGN_IMPLICIT, NULL, 0);
+	assert(pigen_symbol_declare(&model, model.compilation_scope,
+		PIGEN_SYMBOL_TYPEDEF, signed_8, occurrence(source, text, "bit", 0),
+		whole, &signed_integer_alias_symbol, NULL) == PIGEN_DECLARE_OK);
+	signed_integer_alias = pigen_data_type_alias(&model,
+		signed_integer_alias_symbol, signed_8, PIGEN_SIGN_IMPLICIT, NULL, 0);
 	assert(aliased_unsized_integer_type.index != PIGEN_INVALID_ID);
+	assert(signed_integer_alias.index != PIGEN_INVALID_ID);
 	assert(pigen_data_type_alias_target(&model,
 		aliased_unsized_integer_type).index ==
 		unsized_integer_data_type.index);
 	assert(pigen_data_type_is_integral(&model, aliased_unsized_integer_type));
+	assert(pigen_data_type_numerical_interpretation(&model,
+		signed_integer_alias) == PIGEN_NUMERICAL_SIGNED_INTEGER);
+	assert(pigen_data_type_packed_width(&model, signed_integer_alias).index ==
+		width_8.index);
+	assert(pigen_data_type_resolve_assignment_conversion(&model,
+		signed_integer_alias, signed_16, &conversion));
+	assert(conversion.kind == PIGEN_CONVERSION_INTEGER_RESIZE);
+	assert(conversion.source_data_type.index == signed_integer_alias.index);
+	assert(conversion.target_data_type.index == signed_16.index);
 	assert(pigen_data_type_resolve_unary_operation(&model,
 		PIGEN_UNARY_NEGATE, aliased_unsized_integer_type,
 		&unary_operation));
@@ -491,7 +637,7 @@ int main(void)
 	assert(pigen_symbol_declare(&model, pipeline_scope, PIGEN_SYMBOL_SIGNAL,
 		byte_type, third_value, whole, &found, NULL) == PIGEN_DECLARE_DUPLICATE);
 	assert(found.index == pipeline_value.index);
-	assert(model.symbol_count == 5);
+	assert(model.symbol_count == 6);
 	assert(model.signal_count == 3);
 
 	for (i = 0; i < 64; i++)

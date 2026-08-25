@@ -23,6 +23,14 @@ typedef enum {
 	PIGEN_DATA_TYPE_STATE_FOUR
 } pigen_state_domain;
 
+typedef enum {
+	PIGEN_NUMERICAL_INVALID,
+	PIGEN_NUMERICAL_NONE,
+	PIGEN_NUMERICAL_SIGNED_INTEGER,
+	PIGEN_NUMERICAL_UNSIGNED_INTEGER,
+	PIGEN_NUMERICAL_SYSTEMVERILOG
+} pigen_numerical_interpretation;
+
 typedef struct {
 	pigen_const_expr_id left;
 	pigen_const_expr_id right;
@@ -62,12 +70,25 @@ pigen_data_type_id pigen_data_type_concatenation(pigen_semantic_model *model,
 	const pigen_data_type_id *data_types, size_t count);
 pigen_data_type_id pigen_data_type_unsized_integer(pigen_semantic_model *model);
 pigen_data_type_id pigen_data_type_boolean(pigen_semantic_model *model);
+pigen_data_type_id pigen_data_type_signed_integer(
+	pigen_semantic_model *model, pigen_const_expr_id width);
+pigen_data_type_id pigen_data_type_unsigned_integer(
+	pigen_semantic_model *model, pigen_const_expr_id width);
+pigen_data_type_id pigen_data_type_byte(pigen_semantic_model *model);
+pigen_numerical_interpretation pigen_data_type_numerical_interpretation(
+	const pigen_semantic_model *model, pigen_data_type_id data_type);
 int pigen_data_type_is_integral(const pigen_semantic_model *model,
 	pigen_data_type_id type);
 pigen_state_domain pigen_data_type_state_domain(
 	const pigen_semantic_model *model, pigen_data_type_id type);
 pigen_data_type_id pigen_data_type_sized_logic(pigen_semantic_model *model,
 	size_t width, pigen_signedness signedness);
+int pigen_data_type_resolve_assignment_conversion(
+	const pigen_semantic_model *model, pigen_data_type_id source,
+	pigen_data_type_id target, pigen_conversion *conversion);
+int pigen_data_type_resolve_explicit_conversion(
+	const pigen_semantic_model *model, pigen_data_type_id source,
+	pigen_data_type_id target, pigen_conversion *conversion);
 int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
 	pigen_unary_operator operator, pigen_data_type_id operand,
 	pigen_unary_operation *operation);
