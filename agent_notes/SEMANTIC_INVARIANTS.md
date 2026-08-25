@@ -154,11 +154,14 @@ contract stated in `SPEC.md`.
   constructors and source-spelling recognition remain private.
 - Operator and type family jointly determine effective operands and result.
   Optional expected type is policy input, not a universal coercion rule. The
-  initial integer policy forms a canonical symbolic maximum from operand widths
-  and a compatible expected width, so a narrower consumer cannot shrink the
-  operation before final assignment conversion. Shifts preserve the left
-  family and width and require an unsigned-integer count. These policies may
-  change without changing the operation/conversion boundary.
+  initial integer-valued policy forms a canonical symbolic maximum from operand
+  widths and a compatible expected width, so a narrower consumer cannot shrink
+  the operation before final assignment conversion. Boolean-result operations
+  form their operand width only from their operands; result context never sizes
+  them. Shifts preserve the left family and width and require an unsigned-integer
+  count. Byte-valued operations preserve a shared exact alias identity and use
+  canonical `byte` when the operand identities differ. These policies may change
+  without changing the operation/conversion boundary.
 - Until semantic conversion expression nodes exist, expression resolution
   passes exactly `INVALID_ID(pigen_data_type_id)` as the absent expectation and
   constructs an expression only when every recorded conversion is identity.

@@ -939,7 +939,9 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 			!binary_bitwise_operator(operator) &&
 			!binary_logical_operator(operator))
 			return 0;
-		if (!integer_common_data_type(model, operands, 2, expected_result,
+		if (!integer_common_data_type(model, operands, 2,
+			binary_boolean_result(operator) ?
+				INVALID_ID(pigen_data_type_id) : expected_result,
 			&effective_left))
 			return 0;
 		effective_right = effective_left;
@@ -949,13 +951,13 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	else if (data_type_is_byte(model, left) || data_type_is_byte(model, right))
 	{
 		if (!data_type_is_byte(model, left) || !data_type_is_byte(model, right) ||
-			left.index != right.index ||
 			(!binary_bitwise_operator(operator) &&
 			!binary_equality_operator(operator) &&
 			!binary_logical_operator(operator)))
 			return 0;
 		result = binary_boolean_result(operator) ?
-			pigen_data_type_boolean(model) : left;
+			pigen_data_type_boolean(model) :
+			left.index == right.index ? left : pigen_data_type_byte(model);
 	}
 	else
 	{
@@ -1009,10 +1011,10 @@ int pigen_data_type_resolve_conditional_operation(
 		data_type_is_byte(model, when_false))
 	{
 		if (!data_type_is_byte(model, when_true) ||
-			!data_type_is_byte(model, when_false) ||
-			when_true.index != when_false.index)
+			!data_type_is_byte(model, when_false))
 			return 0;
-		result = when_true;
+		result = when_true.index == when_false.index ? when_true :
+			pigen_data_type_byte(model);
 	}
 	else
 	{
