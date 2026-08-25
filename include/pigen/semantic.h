@@ -45,7 +45,8 @@ typedef enum {
 	PIGEN_CONST_EXPR_SELECT_WIDTH,
 	PIGEN_CONST_EXPR_CONCATENATION,
 	PIGEN_CONST_EXPR_WIDTH_SUM,
-	PIGEN_CONST_EXPR_WIDTH_PRODUCT
+	PIGEN_CONST_EXPR_WIDTH_PRODUCT,
+	PIGEN_CONST_EXPR_WIDTH_MAXIMUM
 } pigen_const_expr_kind;
 
 typedef uint8_t pigen_bit_state;
@@ -429,6 +430,9 @@ pigen_const_expr_id pigen_const_expr_intern_width_sum(
 	size_t count);
 pigen_const_expr_id pigen_const_expr_intern_width_product(
 	pigen_semantic_model *model, const pigen_const_expr_id *factors,
+	size_t count);
+pigen_const_expr_id pigen_const_expr_intern_width_maximum(
+	pigen_semantic_model *model, const pigen_const_expr_id *values,
 	size_t count);
 const pigen_const_expr_id *pigen_const_expr_children(
 	const pigen_semantic_model *model, size_t first, size_t count);

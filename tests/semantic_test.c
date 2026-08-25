@@ -71,6 +71,13 @@ int main(void)
 	pigen_data_type_id sized_logic_type;
 	pigen_data_type_id bit_concat_type;
 	pigen_data_type_id mixed_concat_type;
+	pigen_const_expr_id width_values[3];
+	pigen_const_expr_id width_maximum;
+	pigen_const_expr_id reordered_width_maximum;
+	pigen_const_expr_id nested_width_maximum;
+	pigen_const_expr_id zero_width;
+	pigen_const_expr_id symbolic_width;
+	const pigen_const_expr_id *maximum_children;
 	pigen_unary_operation unary_operation;
 	pigen_binary_operation binary_operation;
 	pigen_conditional_operation conditional_operation;
@@ -276,6 +283,64 @@ int main(void)
 	assert(pigen_const_expr_get(&model,
 		pigen_data_type_packed_width(&model, matrix_type))->kind ==
 		PIGEN_CONST_EXPR_WIDTH_PRODUCT);
+	width_values[0] = pigen_const_expr_intern_integer(&model, 8,
+		unsized_integer_data_type);
+	width_values[1] = pigen_const_expr_intern_integer(&model, 16,
+		unsized_integer_data_type);
+	width_values[2] = width_values[0];
+	width_maximum = pigen_const_expr_intern_width_maximum(&model,
+		width_values, 3);
+	assert(pigen_const_expr_get(&model, width_maximum)->kind ==
+		PIGEN_CONST_EXPR_INTEGER);
+	assert(pigen_const_expr_get(&model, width_maximum)->as.integer == 16);
+	assert(pigen_const_expr_intern_width_maximum(&model,
+		width_values, 1).index == width_values[0].index);
+	symbolic_width = pigen_const_expr_intern_select_width(&model,
+		pigen_expr_constant(&model, left_bound),
+		pigen_expr_constant(&model, right_bound),
+		PIGEN_SEMANTIC_SELECT_RANGE);
+	width_values[0] = symbolic_width;
+	width_values[1] = pigen_const_expr_intern_integer(&model, 8,
+		unsized_integer_data_type);
+	reordered_width_maximum = pigen_const_expr_intern_width_maximum(&model,
+		width_values, 2);
+	width_values[0] = pigen_const_expr_intern_integer(&model, 8,
+		unsized_integer_data_type);
+	width_values[1] = symbolic_width;
+	assert(reordered_width_maximum.index ==
+		pigen_const_expr_intern_width_maximum(&model, width_values, 2).index);
+	assert(pigen_const_expr_intern_width_maximum(&model,
+		&symbolic_width, 1).index == symbolic_width.index);
+	nested_width_maximum = pigen_const_expr_intern_width_maximum(&model,
+		width_values, 2);
+	width_values[0] = nested_width_maximum;
+	width_values[1] = symbolic_width;
+	width_values[2] = pigen_const_expr_intern_integer(&model, 8,
+		unsized_integer_data_type);
+	width_maximum = pigen_const_expr_intern_width_maximum(&model,
+		width_values, 3);
+	assert(pigen_const_expr_get(&model, width_maximum)->kind ==
+		PIGEN_CONST_EXPR_WIDTH_MAXIMUM);
+	maximum_children = pigen_const_expr_children(&model,
+		pigen_const_expr_get(&model, width_maximum)->as.sequence.first_child,
+		pigen_const_expr_get(&model, width_maximum)->as.sequence.child_count);
+	assert(pigen_const_expr_get(&model, width_maximum)->as.sequence.child_count == 2);
+	assert(maximum_children[0].index == symbolic_width.index ||
+		maximum_children[1].index == symbolic_width.index);
+	assert(maximum_children[0].index == width_values[2].index ||
+		maximum_children[1].index == width_values[2].index);
+	zero_width = pigen_const_expr_intern_integer(&model, 0,
+		unsized_integer_data_type);
+	assert(pigen_const_expr_intern_width_maximum(&model,
+		&zero_width, 1).index == zero_width.index);
+	assert(pigen_const_expr_intern_width_maximum(&model,
+		(pigen_const_expr_id[]){zero_width, symbolic_width}, 2).index ==
+		symbolic_width.index);
+	assert(pigen_const_expr_intern_width_maximum(&model, NULL, 0).index ==
+		PIGEN_INVALID_ID);
+	assert(pigen_const_expr_intern_width_maximum(&model,
+		(pigen_const_expr_id[]){INVALID_ID(pigen_const_expr_id)}, 1).index ==
+		PIGEN_INVALID_ID);
 
 	model.compilation_scope = pigen_scope_add(&model,
 		INVALID_ID(pigen_scope_id),

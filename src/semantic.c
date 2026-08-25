@@ -242,6 +242,7 @@ static int const_expressions_equal(const pigen_semantic_model *model,
 		case PIGEN_CONST_EXPR_CONCATENATION:
 		case PIGEN_CONST_EXPR_WIDTH_SUM:
 		case PIGEN_CONST_EXPR_WIDTH_PRODUCT:
+		case PIGEN_CONST_EXPR_WIDTH_MAXIMUM:
 			return left->as.sequence.child_count ==
 					right->as.sequence.child_count &&
 				!memcmp(model->constant_expression_children +
@@ -551,7 +552,8 @@ static pigen_const_expr_id intern_const_sequence(
 	if (!model || !count || !children ||
 		(kind != PIGEN_CONST_EXPR_CONCATENATION &&
 		kind != PIGEN_CONST_EXPR_WIDTH_SUM &&
-		kind != PIGEN_CONST_EXPR_WIDTH_PRODUCT))
+		kind != PIGEN_CONST_EXPR_WIDTH_PRODUCT &&
+		kind != PIGEN_CONST_EXPR_WIDTH_MAXIMUM))
 		return INVALID_ID(pigen_const_expr_id);
 	for (i = 0; i < count; i++)
 		if (!pigen_const_expr_get(model, children[i]))
@@ -626,7 +628,8 @@ static pigen_const_expr_id intern_width_sequence(
 
 	if (!count || !children ||
 		(kind != PIGEN_CONST_EXPR_WIDTH_SUM &&
-		kind != PIGEN_CONST_EXPR_WIDTH_PRODUCT))
+		kind != PIGEN_CONST_EXPR_WIDTH_PRODUCT &&
+		kind != PIGEN_CONST_EXPR_WIDTH_MAXIMUM))
 		return INVALID_ID(pigen_const_expr_id);
 	for (i = 0; i < count; i++)
 		if (!collect_width_terms(model, kind, children[i],
@@ -635,6 +638,39 @@ static pigen_const_expr_id intern_width_sequence(
 			free(terms);
 			return INVALID_ID(pigen_const_expr_id);
 		}
+	if (kind == PIGEN_CONST_EXPR_WIDTH_MAXIMUM)
+	{
+		size_t unique_count = 0;
+		int has_integer = 0;
+		uint64_t maximum_integer = 0;
+
+		for (i = 0; i < term_count; i++)
+		{
+			const pigen_const_expr *known =
+				pigen_const_expr_get(model, terms[i]);
+			size_t j;
+			int duplicate = 0;
+
+			if (known->kind == PIGEN_CONST_EXPR_INTEGER)
+			{
+				if (!has_integer || known->as.integer > maximum_integer)
+					maximum_integer = known->as.integer;
+				has_integer = 1;
+				continue;
+			}
+			for (j = 0; j < unique_count; j++)
+				if (terms[j].index == terms[i].index)
+				{
+					duplicate = 1;
+					break;
+				}
+			if (!duplicate) terms[unique_count++] = terms[i];
+		}
+		if (has_integer && (maximum_integer != 0 || !unique_count))
+			terms[unique_count++] = pigen_const_expr_intern_integer(model,
+				maximum_integer, unsized_integer_data_type);
+		term_count = unique_count;
+	}
 	if (!term_count)
 		result = pigen_const_expr_intern_integer(model,
 			kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ? 1 : 0,
@@ -665,6 +701,13 @@ pigen_const_expr_id pigen_const_expr_intern_width_product(
 {
 	return intern_width_sequence(model, PIGEN_CONST_EXPR_WIDTH_PRODUCT,
 		factors, count);
+}
+
+pigen_const_expr_id pigen_const_expr_intern_width_maximum(
+	pigen_semantic_model *model, const pigen_const_expr_id *values, size_t count)
+{
+	return intern_width_sequence(model, PIGEN_CONST_EXPR_WIDTH_MAXIMUM,
+		values, count);
 }
 
 pigen_const_expr_id pigen_const_expr_intern_concatenation(

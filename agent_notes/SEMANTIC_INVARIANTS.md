@@ -165,6 +165,9 @@ contract stated in `SPEC.md`.
 - Packed-width queries recurse through typedefs and represent multidimensional
   width as a canonical commutative product.  Width algebra is structural and
   never folds symbolic bounds through a host integer.
+- Width maxima share the same canonical sequence interner: nested maxima flatten,
+  literal integers collapse to their greatest value, zero is an identity when
+  another term exists, and symbolic children are deduplicated and sorted.
 - A resolved lvalue has its own stable occurrence identity and points at the
   expression which projects the destination and its type.  A projection lvalue
   owns one assignable base symbol and optional base signal; a concatenation
