@@ -51,7 +51,8 @@ typedef enum {
 	PIGEN_CONST_EXPR_CONCATENATION,
 	PIGEN_CONST_EXPR_WIDTH_SUM,
 	PIGEN_CONST_EXPR_WIDTH_PRODUCT,
-	PIGEN_CONST_EXPR_WIDTH_MAXIMUM
+	PIGEN_CONST_EXPR_WIDTH_MAXIMUM,
+	PIGEN_CONST_EXPR_NUMERICAL_RANGE_WIDTH
 } pigen_const_expr_kind;
 
 typedef uint8_t pigen_bit_state;
@@ -215,6 +216,7 @@ typedef struct {
 			size_t first_child;
 			size_t child_count;
 		} sequence;
+		pigen_numerical_range_width numerical_range_width;
 	} as;
 } pigen_const_expr;
 
@@ -476,13 +478,15 @@ pigen_const_expr_id pigen_const_expr_intern_width_product(
 pigen_const_expr_id pigen_const_expr_intern_width_maximum(
 	pigen_semantic_model *model, const pigen_const_expr_id *values,
 	size_t count);
+pigen_const_expr_id pigen_const_expr_intern_numerical_range_width(
+	pigen_semantic_model *model, pigen_numerical_range_width range);
 const pigen_const_expr_id *pigen_const_expr_children(
 	const pigen_semantic_model *model, size_t first, size_t count);
 const pigen_const_expr *pigen_const_expr_get(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
 const pigen_bit_state *pigen_const_expr_bits(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
-int pigen_const_expr_evaluate_u64(const pigen_semantic_model *model,
+int pigen_const_expr_evaluate_u64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, uint64_t *value);
 int pigen_const_expr_is_symbolic(const pigen_semantic_model *model,
 	pigen_const_expr_id expression);

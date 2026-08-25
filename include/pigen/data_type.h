@@ -2,6 +2,7 @@
 #define PIGEN_DATA_TYPE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "pigen/ids.h"
 #include "pigen/operation.h"
@@ -59,8 +60,19 @@ typedef enum {
 	PIGEN_TYPE_SPELLING_PIGEN
 } pigen_type_spelling_domain;
 
+typedef struct {
+	pigen_binary_operator operator;
+	pigen_numerical_interpretation concrete_interpretation;
+	pigen_const_expr_id concrete_width;
+	pigen_integer_id exact_value;
+	int exact_is_left;
+	int result_is_signed;
+} pigen_numerical_range_width;
+
 pigen_type_spelling_domain pigen_data_type_spelling_domain(
 	const pigen_semantic_model *model, pigen_source_span spelling);
+pigen_type_spelling_domain pigen_data_type_domain(
+	const pigen_semantic_model *model, pigen_data_type_id data_type);
 pigen_data_type_id pigen_data_type_from_spelling(
 	pigen_semantic_model *model, pigen_source_span spelling,
 	pigen_signedness signedness, const pigen_data_type_argument *arguments,
@@ -108,8 +120,11 @@ pigen_data_type_id pigen_data_type_unsigned_integer(
 	pigen_semantic_model *model, pigen_const_expr_id width);
 pigen_data_type_id pigen_data_type_exact_integer(
 	pigen_semantic_model *model, pigen_integer_id value);
-int pigen_data_type_conversion_is_valid(const pigen_semantic_model *model,
+int pigen_data_type_conversion_is_valid(pigen_semantic_model *model,
 	pigen_conversion conversion);
+int pigen_data_type_evaluate_numerical_range_width(
+	pigen_semantic_model *model, pigen_numerical_range_width range,
+	uint64_t *width);
 pigen_integer_id pigen_data_type_exact_value(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
 pigen_data_type_id pigen_data_type_byte(pigen_semantic_model *model);

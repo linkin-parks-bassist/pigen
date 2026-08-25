@@ -151,16 +151,22 @@ depends on parameters. Never clamp a lossless result to satisfy policy.
 Literal interpretation is an explicit analyzer input, separate from
 constant-only admissibility. Pigen runtime expressions and arguments of Pigen
 integer spellings/aliases select the exact domain. Ordinary SystemVerilog
-parameters, packed ranges, and aliases select the SystemVerilog domain. Resolve
-the type spelling or alias owner before walking its arguments; never infer the
-literal domain from whether the expression happens to be constant.
+parameters, packed ranges, and SystemVerilog-family aliases select the
+SystemVerilog domain. Resolve the type spelling or recursively underlying alias
+owner before walking its arguments; notably, a `byte` alias remains in the
+Pigen domain. Never infer literal policy from constant-only admissibility.
 
 For known numerical ranges, the data-type owner computes range endpoints with
 the arbitrary-precision integer catalogue and chooses the narrowest containing
-integer type. Closed symbolic laws remain structural when widths depend on
-parameters. Semantic conversion constructors call back into that owner to
-validate conversion kind and source/target domains, so a hand-built malformed
-record cannot enter either the runtime or constant graph.
+integer type. An exact/concrete operation whose concrete width is parametric
+stores one canonical numerical-range-width node containing the operator,
+concrete family and width, exact value, operand order, and uniformly lossless
+result family. The node evaluates the same endpoint law once parameters are
+known instead of falling back to a magnitude approximation. Power keeps this
+law even when its exact exponent exceeds host `size_t`; one-bit bases resolve
+immediately from exponent parity. Semantic conversion constructors call back
+into the data-type owner and symbolic unsigned-to-signed promotion is accepted
+only when the target width structurally proves the required extra sign bit.
 
 Pipelines, transfers, FSMs, and fabrics consume these services and produce
 common semantic objects. No feature privately reparses names, expressions,

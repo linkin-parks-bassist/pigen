@@ -77,7 +77,8 @@ static pigen_expr_id resolve_constant(resolver *resolver, pigen_scope_id scope,
 	pigen_syntax_expr_id syntax_id)
 {
 	return pigen_resolve_constant_expression(resolver->syntax, resolver->model,
-		scope, syntax_id, resolver->policy, resolver->error);
+		scope, syntax_id, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG, resolver->policy,
+		resolver->error);
 }
 
 static pigen_shape_id resolve_shape(resolver *resolver, pigen_scope_id scope,

@@ -34,8 +34,13 @@ static pigen_const_expr_id normalize_count(pigen_semantic_model *model,
 {
 	const pigen_const_expr *known = pigen_const_expr_get(model, value);
 	pigen_integer_id integer;
+	uint64_t evaluated;
 
 	if (!known) return INVALID_ID(pigen_const_expr_id);
+	if (pigen_const_expr_evaluate_u64(model, value, &evaluated))
+		return evaluated ? pigen_const_expr_intern_integer(model, evaluated,
+			pigen_data_type_unsized_integer(model)) :
+			INVALID_ID(pigen_const_expr_id);
 	integer = pigen_data_type_exact_value(model, known->data_type);
 	if (integer.index != PIGEN_INVALID_ID)
 	{
@@ -53,7 +58,8 @@ static pigen_const_expr_id normalize_count(pigen_semantic_model *model,
 	}
 	if (known->kind == PIGEN_CONST_EXPR_INTEGER && !known->as.integer)
 		return INVALID_ID(pigen_const_expr_id);
-	return value;
+	return pigen_const_expr_is_symbolic(model, value) ? value :
+		INVALID_ID(pigen_const_expr_id);
 }
 
 static pigen_const_expr_id analyze_constant(const pigen_syntax_tree *syntax,
@@ -96,8 +102,6 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 		PIGEN_SIGN_UNSIGNED : PIGEN_SIGN_IMPLICIT;
 	if (syntax_type->base.index != PIGEN_INVALID_ID)
 	{
-		pigen_numerical_interpretation interpretation;
-
 		spelling = token_spelling(syntax, syntax_type->base);
 		spelling_domain = pigen_data_type_spelling_domain(model, spelling);
 		if (spelling_domain == PIGEN_TYPE_SPELLING_UNKNOWN)
@@ -105,13 +109,10 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 			alias = pigen_symbol_lookup(model, scope, spelling);
 			alias_symbol = pigen_symbol_get(model, alias);
 		}
-		interpretation = alias_symbol && alias_symbol->kind == PIGEN_SYMBOL_TYPEDEF ?
-			pigen_data_type_numerical_interpretation(model,
-				alias_symbol->data_type) : PIGEN_NUMERICAL_INVALID;
 		if (spelling_domain == PIGEN_TYPE_SPELLING_PIGEN ||
-			interpretation == PIGEN_NUMERICAL_SIGNED_INTEGER ||
-			interpretation == PIGEN_NUMERICAL_UNSIGNED_INTEGER ||
-			interpretation == PIGEN_NUMERICAL_EXACT_INTEGER)
+			(alias_symbol && alias_symbol->kind == PIGEN_SYMBOL_TYPEDEF &&
+			pigen_data_type_domain(model, alias_symbol->data_type) ==
+				PIGEN_TYPE_SPELLING_PIGEN))
 			literal_domain = PIGEN_LITERAL_DOMAIN_PIGEN;
 	}
 	syntax_arguments = pigen_syntax_type_arguments(&syntax->types,

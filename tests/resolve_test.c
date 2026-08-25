@@ -106,13 +106,13 @@ static void expect_resolve_error(const char *text, const char *expected)
 	pigen_free_sources(&sources);
 }
 
-static uint64_t evaluate_width(const pigen_semantic_model *model,
+static uint64_t evaluate_width(pigen_semantic_model *model,
 	pigen_data_type_id type)
 {
 	uint64_t value;
 
 	assert(pigen_const_expr_evaluate_u64(model,
-		pigen_data_type_packed_width((pigen_semantic_model *)model, type),
+		pigen_data_type_packed_width(model, type),
 		&value));
 	return value;
 }
@@ -737,6 +737,13 @@ int main(void)
 	expect_resolve_error("typedef int[1-1] zero_width_t;\n",
 		"type count must be a positive integer");
 	expect_resolve_error("typedef int[(1-2)] negative_width_t;\n",
+		"type count must be a positive integer");
+	expect_resolve_error("typedef logic[1-1] zero_width_t;\n",
+		"type count must be a positive integer");
+	expect_resolve_error("typedef logic[(1-2)] negative_width_t;\n",
+		"type count must be a positive integer");
+	expect_resolve_error(
+		"typedef byte byte_t; typedef byte_t[(1-2)] negative_width_t;\n",
 		"type count must be a positive integer");
 
 	pigen_free_semantic_model(&inout_model);

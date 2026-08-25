@@ -98,7 +98,8 @@ int main(void)
 		"ua << ds\n"
 		"ua << 4294967296\n"
 		"ua << 18446744073709551615\n"
-		"ua << 18446744073709551616\n";
+		"ua << 18446744073709551616\n"
+		"ds ** 18446744073709551616\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "expressions.pigen",
 		text, strlen(text));
@@ -153,6 +154,7 @@ int main(void)
 	pigen_syntax_expr_id invalid_cast_syntax;
 	pigen_syntax_expr_id oversized_shift_syntax;
 	pigen_syntax_expr_id symbolic_shift_syntax;
+	pigen_syntax_expr_id symbolic_power_syntax;
 	pigen_syntax_expr_id enormous_shift_syntax[3];
 	pigen_expr_id runtime;
 	pigen_expr_id comparison;
@@ -321,6 +323,40 @@ int main(void)
 		unsized_integer_data_type);
 	symbolic_unsigned = pigen_data_type_unsigned_integer(&model,
 		symbolic_width);
+	{
+		pigen_integer_id negative_two = pigen_integer_negate(&model,
+			pigen_integer_intern_u64(&model, 2));
+		pigen_data_type_id exact_negative_two =
+			pigen_data_type_exact_integer(&model, negative_two);
+		pigen_data_type_id symbolic_signed = pigen_data_type_signed_integer(
+			&model, symbolic_width);
+		pigen_const_expr_id promoted_width =
+			pigen_const_expr_intern_width_sum(&model,
+				(pigen_const_expr_id[]){symbolic_width,
+					pigen_const_expr_intern_integer(&model, 1,
+						unsized_integer_data_type)}, 2);
+		pigen_data_type_id promoted_signed = pigen_data_type_signed_integer(
+			&model, promoted_width);
+		pigen_const_expr_id result_width;
+
+		assert(!pigen_data_type_conversion_is_valid(&model,
+			(pigen_conversion){PIGEN_CONVERSION_INTEGER_PROMOTION,
+				symbolic_unsigned, symbolic_signed}));
+		assert(pigen_data_type_conversion_is_valid(&model,
+			(pigen_conversion){PIGEN_CONVERSION_INTEGER_PROMOTION,
+				symbolic_unsigned, promoted_signed}));
+		assert(pigen_data_type_resolve_binary_operation(&model,
+			PIGEN_BINARY_ADD, symbolic_unsigned, exact_negative_two,
+			&binary_resolution));
+		assert(pigen_data_type_numerical_interpretation(&model,
+			binary_resolution.operation.result_data_type) ==
+			PIGEN_NUMERICAL_SIGNED_INTEGER);
+		result_width = pigen_data_type_packed_width(&model,
+			binary_resolution.operation.result_data_type);
+		assert(pigen_const_expr_get(&model, result_width)->kind ==
+			PIGEN_CONST_EXPR_NUMERICAL_RANGE_WIDTH);
+		assert(pigen_const_expr_is_symbolic(&model, result_width));
+	}
 	symbolic_shift_amount = declare_signal(&model, module, scope,
 		symbolic_unsigned,
 		(pigen_source_span){source,
@@ -365,6 +401,7 @@ int main(void)
 	enormous_shift_syntax[0] = parse(&preprocessed, &syntax, 128, 131);
 	enormous_shift_syntax[1] = parse(&preprocessed, &syntax, 131, 134);
 	enormous_shift_syntax[2] = parse(&preprocessed, &syntax, 134, 137);
+	symbolic_power_syntax = parse(&preprocessed, &syntax, 137, 140);
 	{
 		pigen_analyzed_expr_arena analyzed_arena = {0};
 		pigen_analyzed_expr_id analyzed;
@@ -393,6 +430,24 @@ int main(void)
 		assert(pigen_analyzed_expr_get(&analyzed_arena, analyzed)->data_type.index ==
 			unsized_integer_data_type.index);
 		pigen_free_analyzed_expr_arena(&analyzed_arena);
+		{
+			pigen_expr_id runtime_literal = pigen_resolve_expression(&syntax,
+				&model, scope, addition->as.binary.right, &policy, &semantic_error);
+			pigen_expr_id constant_literal = pigen_resolve_constant_expression(
+				&syntax, &model, scope, addition->as.binary.right,
+				PIGEN_LITERAL_DOMAIN_PIGEN, &policy, &semantic_error);
+			const pigen_semantic_expr *runtime_known = pigen_expr_get(&model,
+				runtime_literal);
+			const pigen_semantic_expr *constant_known = pigen_expr_get(&model,
+				constant_literal);
+
+			assert(runtime_known && constant_known);
+			assert(runtime_known->kind == PIGEN_EXPR_EXACT_INTEGER);
+			assert(constant_known->kind == runtime_known->kind);
+			assert(constant_known->data_type.index == runtime_known->data_type.index);
+			assert(pigen_expr_constant(&model, constant_literal).index ==
+				pigen_expr_constant(&model, runtime_literal).index);
+		}
 	}
 
 	intrinsic = pigen_resolve_expression(&syntax, &model, scope,
@@ -498,7 +553,8 @@ int main(void)
 	runtime_constant_cast = pigen_resolve_expression(&syntax, &model, scope,
 		constant_cast_syntax, &policy, &semantic_error);
 	constant_cast = pigen_resolve_constant_expression(&syntax, &model, scope,
-		constant_cast_syntax, &policy, &semantic_error);
+		constant_cast_syntax, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG, &policy,
+		&semantic_error);
 	known = pigen_expr_get(&model, runtime_constant_cast);
 	assert(known && known->kind == PIGEN_EXPR_CONVERSION);
 	assert(known->as.conversion.conversion.kind ==
@@ -555,6 +611,23 @@ int main(void)
 		assert(constraint->maximum_bits == 1024);
 		assert(constraint->width.index == pigen_data_type_packed_width(&model,
 			pigen_expr_get(&model, shifted)->data_type).index);
+	}
+	{
+		size_t constraint_count = model.width_constraint_count;
+		pigen_expr_id powered = pigen_resolve_expression(&syntax, &model, scope,
+			symbolic_power_syntax, &policy, &semantic_error);
+		const pigen_width_constraint *constraint;
+		pigen_const_expr_id result_width;
+
+		assert(powered.index != PIGEN_INVALID_ID);
+		result_width = pigen_data_type_packed_width(&model,
+			pigen_expr_get(&model, powered)->data_type);
+		assert(pigen_const_expr_get(&model, result_width)->kind ==
+			PIGEN_CONST_EXPR_NUMERICAL_RANGE_WIDTH);
+		assert(model.width_constraint_count == constraint_count + 1);
+		constraint = pigen_width_constraint_get(&model, constraint_count);
+		assert(constraint && constraint->maximum_bits == 1024);
+		assert(constraint->width.index == result_width.index);
 	}
 	{
 		size_t i;
@@ -617,7 +690,8 @@ int main(void)
 		pigen_expr_constant(&model, known->as.binary.right)) != NULL);
 	assert(pigen_expr_constant(&model, runtime).index == PIGEN_INVALID_ID);
 	assert(pigen_resolve_constant_expression(&syntax, &model, scope,
-		runtime_syntax, &policy, NULL).index == PIGEN_INVALID_ID);
+		runtime_syntax, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG, &policy, NULL).index ==
+		PIGEN_INVALID_ID);
 
 	comparison = pigen_resolve_expression(&syntax, &model, scope,
 		comparison_syntax, &policy, NULL);
@@ -630,7 +704,7 @@ int main(void)
 	assert(pigen_expr_constant(&model, comparison).index == PIGEN_INVALID_ID);
 
 	constant = pigen_resolve_constant_expression(&syntax, &model, scope,
-		constant_syntax, &policy, NULL);
+		constant_syntax, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG, &policy, NULL);
 	known = pigen_expr_get(&model, constant);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
 	assert(known->data_type.index == unsized_integer_data_type.index);
@@ -650,7 +724,7 @@ int main(void)
 	}
 
 	constant_index = pigen_resolve_constant_expression(&syntax, &model, scope,
-		constant_index_syntax, &policy, NULL);
+		constant_index_syntax, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG, &policy, NULL);
 	known = pigen_expr_get(&model, constant_index);
 	assert(known && known->kind == PIGEN_EXPR_INDEX);
 	assert(known->data_type.index == boolean_type.index);
@@ -667,7 +741,7 @@ int main(void)
 		PIGEN_INVALID_ID);
 
 	constant_range = pigen_resolve_constant_expression(&syntax, &model, scope,
-		constant_range_syntax, &policy, NULL);
+		constant_range_syntax, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG, &policy, NULL);
 	known = pigen_expr_get(&model, constant_range);
 	assert(known && known->kind == PIGEN_EXPR_SELECT);
 	assert(known->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE);
@@ -676,7 +750,8 @@ int main(void)
 		PIGEN_CONST_EXPR_SELECT);
 
 	constant_indexed = pigen_resolve_constant_expression(&syntax, &model,
-		scope, constant_indexed_syntax, &policy, NULL);
+		scope, constant_indexed_syntax, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG,
+		&policy, NULL);
 	known = pigen_expr_get(&model, constant_indexed);
 	assert(known && known->kind == PIGEN_EXPR_SELECT);
 	assert(known->as.select.kind == PIGEN_SEMANTIC_SELECT_INDEXED_UP);
@@ -697,7 +772,7 @@ int main(void)
 		invalid_width_syntax, &policy, NULL).index == PIGEN_INVALID_ID);
 
 	constant_concat = pigen_resolve_constant_expression(&syntax, &model, scope,
-		constant_concat_syntax, &policy, NULL);
+		constant_concat_syntax, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG, &policy, NULL);
 	known = pigen_expr_get(&model, constant_concat);
 	assert(known && known->kind == PIGEN_EXPR_CONCATENATION);
 	assert(known->as.sequence.child_count == 2);

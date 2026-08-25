@@ -168,6 +168,13 @@ contract stated in `SPEC.md`.
   exact worst-case symbolic widths. Boolean-result operations form operands
   only from their inputs and return `bit`. These policies may change inside the
   data-type owner without changing the operation/conversion boundary.
+- Exact/concrete arithmetic derives endpoints with canonical arbitrary-precision
+  integers. If the concrete width is symbolic, its constant DAG contains a
+  canonical numerical-range-width node rather than an approximate sum/product;
+  later evaluation applies the same operator, operand-order, exact-value, and
+  signedness law. Parametric signedness is the narrowest fixed family lossless
+  over every valid positive width. A one-bit power never grows merely because
+  its exact exponent exceeds host width.
 - Expression resolution is two-stage. Temporary analyzed nodes retain syntax,
   provenance, shape, intrinsic data type, constant identity, children, and
   complete operation/conversion decisions. Analysis appends no semantic

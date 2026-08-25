@@ -263,6 +263,19 @@ static int const_expressions_equal(const pigen_semantic_model *model,
 						right->as.sequence.first_child,
 					left->as.sequence.child_count *
 						sizeof(*model->constant_expression_children));
+		case PIGEN_CONST_EXPR_NUMERICAL_RANGE_WIDTH:
+			return left->as.numerical_range_width.operator ==
+					right->as.numerical_range_width.operator &&
+				left->as.numerical_range_width.concrete_interpretation ==
+					right->as.numerical_range_width.concrete_interpretation &&
+				left->as.numerical_range_width.concrete_width.index ==
+					right->as.numerical_range_width.concrete_width.index &&
+				left->as.numerical_range_width.exact_value.index ==
+					right->as.numerical_range_width.exact_value.index &&
+				left->as.numerical_range_width.exact_is_left ==
+					right->as.numerical_range_width.exact_is_left &&
+				left->as.numerical_range_width.result_is_signed ==
+					right->as.numerical_range_width.result_is_signed;
 	}
 	return 0;
 }
@@ -760,6 +773,28 @@ pigen_const_expr_id pigen_const_expr_intern_width_maximum(
 		values, count);
 }
 
+pigen_const_expr_id pigen_const_expr_intern_numerical_range_width(
+	pigen_semantic_model *model, pigen_numerical_range_width range)
+{
+	pigen_const_expr expression = {0};
+
+	if (!model || !pigen_binary_operator_is_valid(range.operator) ||
+		(range.operator != PIGEN_BINARY_ADD &&
+		range.operator != PIGEN_BINARY_SUBTRACT &&
+		range.operator != PIGEN_BINARY_MULTIPLY &&
+		range.operator != PIGEN_BINARY_POWER) ||
+		(range.concrete_interpretation != PIGEN_NUMERICAL_SIGNED_INTEGER &&
+		range.concrete_interpretation != PIGEN_NUMERICAL_UNSIGNED_INTEGER) ||
+		!pigen_const_expr_get(model, range.concrete_width) ||
+		range.exact_value.index == PIGEN_INVALID_ID ||
+		range.exact_value.index >= model->integer_count)
+		return INVALID_ID(pigen_const_expr_id);
+	expression.kind = PIGEN_CONST_EXPR_NUMERICAL_RANGE_WIDTH;
+	expression.data_type = pigen_data_type_unsized_integer(model);
+	expression.as.numerical_range_width = range;
+	return intern_const_expression(model, expression);
+}
+
 pigen_const_expr_id pigen_const_expr_intern_concatenation(
 	pigen_semantic_model *model, const pigen_const_expr_id *children,
 	size_t count, pigen_data_type_id type)
@@ -814,7 +849,7 @@ const pigen_bit_state *pigen_const_expr_bits(
 	return model->literal_states + known->as.bits.first_state;
 }
 
-static int evaluate_u64(const pigen_semantic_model *model,
+static int evaluate_u64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, uint64_t *value, size_t remaining)
 {
 	const pigen_const_expr *known = pigen_const_expr_get(model, expression);
@@ -929,12 +964,15 @@ static int evaluate_u64(const pigen_semantic_model *model,
 			}
 			*value = result;
 			return 1;
+		case PIGEN_CONST_EXPR_NUMERICAL_RANGE_WIDTH:
+			return pigen_data_type_evaluate_numerical_range_width(model,
+				known->as.numerical_range_width, value);
 		default:
 			return 0;
 	}
 }
 
-int pigen_const_expr_evaluate_u64(const pigen_semantic_model *model,
+int pigen_const_expr_evaluate_u64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, uint64_t *value)
 {
 	return model && evaluate_u64(model, expression, value,
@@ -992,6 +1030,9 @@ static int constant_is_symbolic(const pigen_semantic_model *model,
 				if (constant_is_symbolic(model, children[i], remaining - 1))
 					return 1;
 			return 0;
+		case PIGEN_CONST_EXPR_NUMERICAL_RANGE_WIDTH:
+			return constant_is_symbolic(model,
+				known->as.numerical_range_width.concrete_width, remaining - 1);
 		default:
 			return 0;
 	}

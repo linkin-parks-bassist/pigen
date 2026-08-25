@@ -32,31 +32,12 @@ static void assert_conversion(pigen_conversion conversion,
 	assert(conversion.target_data_type.index == target.index);
 }
 
-static uint64_t evaluate_width(const pigen_semantic_model *model,
+static uint64_t evaluate_width(pigen_semantic_model *model,
 	pigen_const_expr_id expression)
 {
-	const pigen_const_expr *known = pigen_const_expr_get(model, expression);
-	const pigen_const_expr_id *children;
 	uint64_t result;
-	size_t i;
 
-	assert(known);
-	if (known->kind == PIGEN_CONST_EXPR_INTEGER) return known->as.integer;
-	assert(known->kind == PIGEN_CONST_EXPR_WIDTH_SUM ||
-		known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ||
-		known->kind == PIGEN_CONST_EXPR_WIDTH_MAXIMUM);
-	children = pigen_const_expr_children(model, known->as.sequence.first_child,
-		known->as.sequence.child_count);
-	assert(children);
-	result = known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ? 1 : 0;
-	for (i = 0; i < known->as.sequence.child_count; i++)
-	{
-		uint64_t child = evaluate_width(model, children[i]);
-
-		if (known->kind == PIGEN_CONST_EXPR_WIDTH_SUM) result += child;
-		else if (known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT) result *= child;
-		else if (child > result) result = child;
-	}
+	assert(pigen_const_expr_evaluate_u64(model, expression, &result));
 	return result;
 }
 
@@ -128,19 +109,31 @@ int main(void)
 	pigen_data_type_id same_signed_8;
 	pigen_data_type_id signed_12;
 	pigen_data_type_id signed_16;
+	pigen_data_type_id signed_1;
+	pigen_data_type_id signed_5;
 	pigen_data_type_id unsigned_8;
 	pigen_data_type_id unsigned_12;
 	pigen_data_type_id unsigned_2;
+	pigen_data_type_id unsigned_1;
+	pigen_data_type_id unsigned_4;
 	pigen_data_type_id exact_one;
 	pigen_data_type_id exact_zero;
+	pigen_data_type_id exact_two;
 	pigen_data_type_id exact_three;
+	pigen_data_type_id exact_negative_two;
+	pigen_data_type_id exact_negative_three;
 	pigen_data_type_id exact_two_hundred_fifty_six;
 	pigen_data_type_id exact_negative_one;
 	pigen_integer_id one;
 	pigen_integer_id zero;
+	pigen_integer_id two;
 	pigen_integer_id three;
 	pigen_integer_id two_hundred_fifty_six;
 	pigen_integer_id negative_one;
+	pigen_integer_id negative_two;
+	pigen_integer_id negative_three;
+	pigen_integer_id beyond_size;
+	pigen_integer_id beyond_size_odd;
 	pigen_data_type_id pigen_byte;
 	pigen_data_type_id byte_alias_a;
 	pigen_data_type_id byte_alias_b;
@@ -160,7 +153,10 @@ int main(void)
 	pigen_data_type_id mixed_concat_type;
 	pigen_const_expr_id width_values[3];
 	pigen_const_expr_id width_8;
+	pigen_const_expr_id width_1;
 	pigen_const_expr_id width_2;
+	pigen_const_expr_id width_4;
+	pigen_const_expr_id width_5;
 	pigen_const_expr_id width_12;
 	pigen_const_expr_id width_16;
 	pigen_const_expr_id width_maximum;
@@ -250,7 +246,13 @@ int main(void)
 		PIGEN_SIGN_UNSIGNED);
 	width_8 = pigen_const_expr_intern_integer(&model, 8,
 		unsized_integer_data_type);
+	width_1 = pigen_const_expr_intern_integer(&model, 1,
+		unsized_integer_data_type);
 	width_2 = pigen_const_expr_intern_integer(&model, 2,
+		unsized_integer_data_type);
+	width_4 = pigen_const_expr_intern_integer(&model, 4,
+		unsized_integer_data_type);
+	width_5 = pigen_const_expr_intern_integer(&model, 5,
 		unsized_integer_data_type);
 	width_12 = pigen_const_expr_intern_integer(&model, 12,
 		unsized_integer_data_type);
@@ -260,9 +262,13 @@ int main(void)
 	same_signed_8 = pigen_data_type_signed_integer(&model, width_8);
 	signed_12 = pigen_data_type_signed_integer(&model, width_12);
 	signed_16 = pigen_data_type_signed_integer(&model, width_16);
+	signed_1 = pigen_data_type_signed_integer(&model, width_1);
+	signed_5 = pigen_data_type_signed_integer(&model, width_5);
 	unsigned_8 = pigen_data_type_unsigned_integer(&model, width_8);
 	unsigned_12 = pigen_data_type_unsigned_integer(&model, width_12);
 	unsigned_2 = pigen_data_type_unsigned_integer(&model, width_2);
+	unsigned_1 = pigen_data_type_unsigned_integer(&model, width_1);
+	unsigned_4 = pigen_data_type_unsigned_integer(&model, width_4);
 	type_argument = (pigen_data_type_argument){PIGEN_DATA_TYPE_ARGUMENT_COUNT,
 		{.count = width_8}};
 	assert(pigen_data_type_from_spelling(&model,
@@ -273,12 +279,21 @@ int main(void)
 		&type_argument, 1).index == unsigned_8.index);
 	zero = pigen_integer_intern_u64(&model, 0);
 	one = pigen_integer_intern_u64(&model, 1);
+	two = pigen_integer_intern_u64(&model, 2);
 	three = pigen_integer_intern_u64(&model, 3);
 	two_hundred_fifty_six = pigen_integer_intern_u64(&model, 256);
 	negative_one = pigen_integer_negate(&model, one);
+	negative_two = pigen_integer_negate(&model, two);
+	negative_three = pigen_integer_negate(&model, three);
+	beyond_size = pigen_integer_shift_left(&model, one, sizeof(size_t) * 8,
+		sizeof(size_t) * 8 + 1);
+	beyond_size_odd = pigen_integer_add(&model, beyond_size, one);
 	exact_zero = pigen_data_type_exact_integer(&model, zero);
 	exact_one = pigen_data_type_exact_integer(&model, one);
+	exact_two = pigen_data_type_exact_integer(&model, two);
 	exact_three = pigen_data_type_exact_integer(&model, three);
+	exact_negative_two = pigen_data_type_exact_integer(&model, negative_two);
+	exact_negative_three = pigen_data_type_exact_integer(&model, negative_three);
 	exact_two_hundred_fifty_six = pigen_data_type_exact_integer(&model,
 		two_hundred_fifty_six);
 	exact_negative_one = pigen_data_type_exact_integer(&model, negative_one);
@@ -448,6 +463,27 @@ int main(void)
 		exact_zero, unsigned_8, &binary_resolution));
 	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
 		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_SUBTRACT,
+		exact_negative_two, unsigned_4, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 6);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_SUBTRACT,
+		unsigned_4, exact_negative_two, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 5);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_SUBTRACT,
+		exact_two, unsigned_4, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 5);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_SUBTRACT,
+		exact_zero, signed_1, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 1);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_MULTIPLY, signed_5, exact_negative_three,
+		&binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 7);
 
 	assert(pigen_data_type_resolve_unary_operation(&model,
 		PIGEN_UNARY_NEGATE, signed_8, &unary_resolution));
@@ -541,6 +577,21 @@ int main(void)
 		PIGEN_BINARY_POWER, unsigned_8, exact_zero, &binary_resolution));
 	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
 		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 1);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, unsigned_1,
+		pigen_data_type_exact_integer(&model, beyond_size), &binary_resolution));
+	assert(binary_resolution.operation.result_data_type.index ==
+		unsigned_1.index);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, signed_1,
+		pigen_data_type_exact_integer(&model, beyond_size), &binary_resolution));
+	assert(binary_resolution.operation.result_data_type.index ==
+		unsigned_1.index);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, signed_1,
+		pigen_data_type_exact_integer(&model, beyond_size_odd),
+		&binary_resolution));
+	assert(binary_resolution.operation.result_data_type.index == signed_1.index);
 	assert(pigen_data_type_resolve_binary_operation(&model,
 		PIGEN_BINARY_SHIFT_LEFT, signed_8, unsigned_8, &binary_resolution));
 	assert(pigen_const_expr_get(&model, pigen_data_type_packed_width(&model,
@@ -940,6 +991,8 @@ int main(void)
 	assert(byte_alias_a.index != PIGEN_INVALID_ID);
 	assert(byte_alias_b.index != PIGEN_INVALID_ID);
 	assert(byte_alias_a.index != byte_alias_b.index);
+	assert(pigen_data_type_domain(&model, byte_alias_a) ==
+		PIGEN_TYPE_SPELLING_PIGEN);
 	assert(pigen_data_type_resolve_binary_operation(&model,
 		PIGEN_BINARY_BITWISE_AND, byte_alias_a, byte_alias_a, &binary_resolution));
 	assert_conversion(binary_resolution.left_conversion,

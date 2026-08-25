@@ -1,6 +1,7 @@
 #ifndef PIGEN_EXPRESSION_RESOLVE_H
 #define PIGEN_EXPRESSION_RESOLVE_H
 
+#include "pigen/expression_analysis.h"
 #include "pigen/semantic.h"
 #include "pigen/semantic_error.h"
 #include "pigen/resolve_policy.h"
@@ -18,6 +19,7 @@ pigen_expr_id pigen_resolve_expression(
 pigen_expr_id pigen_resolve_constant_expression(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression,
+	pigen_literal_domain literal_domain,
 	const pigen_resolve_policy *policy,
 	pigen_semantic_error *error);
 pigen_expr_id pigen_resolve_assignment_value(

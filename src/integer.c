@@ -476,6 +476,15 @@ int pigen_integer_is_negative(const pigen_semantic_model *model,
 	return known && known->negative;
 }
 
+int pigen_integer_is_odd(const pigen_semantic_model *model,
+	pigen_integer_id value_id)
+{
+	const pigen_integer *known = integer_get(model, value_id);
+	const uint32_t *limbs = known ? integer_limbs(model, known) : NULL;
+
+	return known && known->limb_count && limbs && (limbs[0] & 1u);
+}
+
 int pigen_integer_to_size(const pigen_semantic_model *model,
 	pigen_integer_id value_id, size_t *value)
 {
