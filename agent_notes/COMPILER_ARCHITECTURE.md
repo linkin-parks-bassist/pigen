@@ -237,6 +237,17 @@ not enumerate either catalogue.
 The realization boundary is specified in
 `docs/superpowers/specs/2026-08-24-transfer-realization-design.md`.
 
+The next data-type boundary is specified in
+`docs/superpowers/specs/2026-08-25-data-type-policy-design.md`. Pigen's initial
+`int[n]` and `uint[n]` families are two-state integers; implicit mixed-family
+arithmetic is rejected. `byte` is a two-state raw vector with no arithmetic
+interpretation. Operation policy belongs to the data-type owner and receives
+exact operands plus optional expected type; it returns effective operand
+types, conversions, and result type. Context may widen an integer operation
+but never narrows it before the final assignment conversion. These are
+replaceable policy choices, not rules to duplicate in expression or lowering
+passes.
+
 As a rough architecture estimate, the replacement effort is about **25%**
 complete overall: the reusable frontend and semantic foundation is around
 **55%**, but authoritative production cutover is effectively **0%** and the

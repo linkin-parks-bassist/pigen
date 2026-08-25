@@ -138,6 +138,18 @@ contract stated in `SPEC.md`.
   false-alternative expression identities. Identically typed alternatives
   yield that type directly; mixed alternatives remain unresolved until their
   SystemVerilog width, signedness, and state-domain merge is represented.
+- Pigen `int[n]` and `uint[n]` are initially two-state signed and unsigned
+  integer families. Their widths are structural constant-expression identities.
+  Implicit arithmetic does not cross between the families; an explicit cast
+  chooses the interpretation.
+- Pigen `byte` is initially a two-state eight-bit vector without numerical
+  interpretation. It supports structural, bitwise, equality, and logical use,
+  but arithmetic and ordered comparison require an explicit integer cast.
+- Operator and type family jointly determine effective operands and result.
+  Optional expected type is policy input, not a universal coercion rule. The
+  initial integer policy uses a compatible wider expectation but never lets a
+  narrower consumer shrink the operation before final contextual conversion.
+  These policies may change without changing the operation/conversion boundary.
 - Identifier reads, lvalues, concatenations, casts, member selections, bit
   selections, indexed selections, calls, and conditional evaluation are
   distinct expression/use forms.
