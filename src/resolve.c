@@ -76,7 +76,7 @@ static pigen_expr_id resolve_constant(resolver *resolver, pigen_scope_id scope,
 	pigen_syntax_expr_id syntax_id)
 {
 	return pigen_resolve_constant_expression(resolver->syntax, resolver->model,
-		scope, syntax_id);
+		scope, syntax_id, resolver->error);
 }
 
 static pigen_shape_id resolve_shape(resolver *resolver, pigen_scope_id scope,
@@ -518,7 +518,7 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	pigen_expr_id destination_expression = pigen_resolve_expression(
 		resolver->syntax, model, module->scope,
-		assignment->as.nonblocking_assignment.destination);
+		assignment->as.nonblocking_assignment.destination, resolver->error);
 	pigen_lvalue_id destination = pigen_lvalue_resolve(model,
 		destination_expression);
 	pigen_expr_id value;
@@ -532,7 +532,7 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 		return fail_location(resolver, assignment->location,
 			"transfer destination requires a supported lvalue");
 	value = pigen_resolve_expression(resolver->syntax, model, module->scope,
-		assignment->as.nonblocking_assignment.value);
+		assignment->as.nonblocking_assignment.value, resolver->error);
 	if (value.index == PIGEN_INVALID_ID)
 		return fail_location(resolver, assignment->location,
 			"transfer value requires a supported expression");
@@ -566,7 +566,8 @@ static int resolve_if_statement(resolver *resolver,
 	const pigen_semantic_module *module = pigen_module_get(resolver->model,
 		module_id);
 	pigen_expr_id condition = pigen_resolve_expression(resolver->syntax,
-		resolver->model, module->scope, statement->as.if_statement.condition);
+		resolver->model, module->scope, statement->as.if_statement.condition,
+		resolver->error);
 	pigen_predicate_id then_guard;
 	pigen_predicate_id else_guard;
 	pigen_syntax_id then_id = statement->first_child;
@@ -643,7 +644,7 @@ static int add_clocked_process(resolver *resolver,
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	pigen_expr_id clock = pigen_resolve_expression(resolver->syntax, model,
-		module->scope, syntax_node->as.clocked_process.clock);
+		module->scope, syntax_node->as.clocked_process.clock, resolver->error);
 	const pigen_semantic_expr *clock_expression = pigen_expr_get(model, clock);
 	pigen_clock_domain_id domain;
 	pigen_process_id process;

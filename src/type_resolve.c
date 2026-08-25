@@ -1,7 +1,7 @@
 /* One syntax-type to semantic-data-type resolution boundary. */
 #include <stdlib.h>
 
-#include "pigen/expression_resolve.h"
+#include "pigen/expression_analysis.h"
 #include "pigen/type_resolve.h"
 #include "pigen/util.h"
 
@@ -55,6 +55,21 @@ static pigen_const_expr_id normalize_count(pigen_semantic_model *model,
 	return value;
 }
 
+static pigen_const_expr_id analyze_constant(const pigen_syntax_tree *syntax,
+	pigen_semantic_model *model, pigen_scope_id scope,
+	pigen_syntax_expr_id expression, pigen_semantic_error *error)
+{
+	pigen_analyzed_expr_arena arena = {0};
+	pigen_analyzed_expr_id result;
+	pigen_const_expr_id constant = INVALID_ID(pigen_const_expr_id);
+
+	if (pigen_analyze_expression(syntax, model, scope, expression, 1, &arena,
+		&result, error))
+		constant = pigen_analyzed_expr_get(&arena, result)->constant;
+	pigen_free_analyzed_expr_arena(&arena);
+	return constant;
+}
+
 pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model, pigen_scope_id scope,
 	pigen_syntax_type_id syntax_type_id, pigen_semantic_error *error)
@@ -81,21 +96,21 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 			syntax_type->argument_count * sizeof(*arguments));
 	for (i = 0; i < syntax_type->argument_count; i++)
 	{
-		pigen_expr_id left;
-		pigen_expr_id right = INVALID_ID(pigen_expr_id);
+		pigen_const_expr_id left;
+		pigen_const_expr_id right = INVALID_ID(pigen_const_expr_id);
 
 		if (syntax_arguments[i].kind == PIGEN_SYNTAX_TYPE_COUNT)
 		{
-			left = pigen_resolve_constant_expression(syntax, model, scope,
-				syntax_arguments[i].as.count);
+			left = analyze_constant(syntax, model, scope,
+				syntax_arguments[i].as.count, error);
 			arguments[i].kind = PIGEN_DATA_TYPE_ARGUMENT_COUNT;
 		}
 		else
 		{
-			left = pigen_resolve_constant_expression(syntax, model, scope,
-				syntax_arguments[i].as.range.left);
-			right = pigen_resolve_constant_expression(syntax, model, scope,
-				syntax_arguments[i].as.range.right);
+			left = analyze_constant(syntax, model, scope,
+				syntax_arguments[i].as.range.left, error);
+			right = analyze_constant(syntax, model, scope,
+				syntax_arguments[i].as.range.right, error);
 			arguments[i].kind = PIGEN_DATA_TYPE_ARGUMENT_RANGE;
 		}
 		if (left.index == PIGEN_INVALID_ID ||
@@ -108,8 +123,7 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 		}
 		if (arguments[i].kind == PIGEN_DATA_TYPE_ARGUMENT_COUNT)
 		{
-			arguments[i].as.count = normalize_count(model,
-				pigen_expr_constant(model, left));
+			arguments[i].as.count = normalize_count(model, left);
 			if (arguments[i].as.count.index == PIGEN_INVALID_ID)
 			{
 				free(arguments);
@@ -119,8 +133,8 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 		}
 		else
 		{
-			arguments[i].as.range.left = pigen_expr_constant(model, left);
-			arguments[i].as.range.right = pigen_expr_constant(model, right);
+			arguments[i].as.range.left = left;
+			arguments[i].as.range.right = right;
 		}
 	}
 	if (syntax_type->base.index == PIGEN_INVALID_ID)

@@ -13,6 +13,7 @@ PIGEN_ID_TYPE(pigen_macro_id);
 PIGEN_ID_TYPE(pigen_syntax_id);
 PIGEN_ID_TYPE(pigen_syntax_expr_id);
 PIGEN_ID_TYPE(pigen_syntax_type_id);
+PIGEN_ID_TYPE(pigen_analyzed_expr_id);
 PIGEN_ID_TYPE(pigen_scope_id);
 PIGEN_ID_TYPE(pigen_symbol_id);
 PIGEN_ID_TYPE(pigen_data_type_id);

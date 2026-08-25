@@ -43,15 +43,15 @@ predicate-test:
 	/tmp/pigen-predicate-test
 
 expression-resolve-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-expression-resolve-test tests/expression_resolve_test.c src/expression_resolve.c src/type_resolve.c $(SEMANTIC_SOURCES) src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-expression-resolve-test tests/expression_resolve_test.c src/expression_analysis.c src/expression_resolve.c src/type_resolve.c $(SEMANTIC_SOURCES) src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 	/tmp/pigen-expression-resolve-test
 
 expression-use-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-expression-use-test tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_resolve.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+	$(CC) $(CFLAGS) -o /tmp/pigen-expression-use-test tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 	/tmp/pigen-expression-use-test
 
 resolve-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-resolve-test tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+	$(CC) $(CFLAGS) -o /tmp/pigen-resolve-test tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 	/tmp/pigen-resolve-test
 
 fabric-test: pigen

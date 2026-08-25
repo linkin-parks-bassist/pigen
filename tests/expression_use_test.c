@@ -141,36 +141,40 @@ int main(void)
 		&syntax.expressions, &syntax.types, &syntax_nested_concat, &syntax_error));
 	expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_expression);
+		syntax_expression, NULL);
 	lvalue_expression = pigen_resolve_expression(&syntax, &model,
-		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_lvalue);
+		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_lvalue,
+		NULL);
 	index_expression = pigen_resolve_expression(&syntax, &model,
-		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_index);
+		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_index,
+		NULL);
 	index_lvalue_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_index_lvalue);
+		syntax_index_lvalue, NULL);
 	range_expression = pigen_resolve_expression(&syntax, &model,
-		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_range);
+		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_range,
+		NULL);
 	select_lvalue_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_select_lvalue);
+		syntax_select_lvalue, NULL);
 	concat_expression = pigen_resolve_expression(&syntax, &model,
-		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_concat);
+		pigen_module_get(&model, (pigen_module_id){0})->scope, syntax_concat,
+		NULL);
 	invalid_concat_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_invalid_concat);
+		syntax_invalid_concat, NULL);
 	nested_concat_expression = pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_nested_concat);
+		syntax_nested_concat, NULL);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_invalid_index).index == PIGEN_INVALID_ID);
+		syntax_invalid_index, NULL).index == PIGEN_INVALID_ID);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_invalid_width).index == PIGEN_INVALID_ID);
+		syntax_invalid_width, NULL).index == PIGEN_INVALID_ID);
 	assert(pigen_resolve_expression(&syntax, &model,
 		pigen_module_get(&model, (pigen_module_id){0})->scope,
-		syntax_invalid_range).index == PIGEN_INVALID_ID);
+		syntax_invalid_range, NULL).index == PIGEN_INVALID_ID);
 	conditional = pigen_expr_get(&model, expression);
 	indexed = pigen_expr_get(&model, index_expression);
 	assert(conditional && conditional->kind == PIGEN_EXPR_CONDITIONAL);
