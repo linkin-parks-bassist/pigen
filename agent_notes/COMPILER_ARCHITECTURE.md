@@ -148,6 +148,20 @@ retains exact derived widths. Expression resolution receives a positive
 operator, and records a provenance-bearing semantic constraint when the width
 depends on parameters. Never clamp a lossless result to satisfy policy.
 
+Literal interpretation is an explicit analyzer input, separate from
+constant-only admissibility. Pigen runtime expressions and arguments of Pigen
+integer spellings/aliases select the exact domain. Ordinary SystemVerilog
+parameters, packed ranges, and aliases select the SystemVerilog domain. Resolve
+the type spelling or alias owner before walking its arguments; never infer the
+literal domain from whether the expression happens to be constant.
+
+For known numerical ranges, the data-type owner computes range endpoints with
+the arbitrary-precision integer catalogue and chooses the narrowest containing
+integer type. Closed symbolic laws remain structural when widths depend on
+parameters. Semantic conversion constructors call back into that owner to
+validate conversion kind and source/target domains, so a hand-built malformed
+record cannot enter either the runtime or constant graph.
+
 Pipelines, transfers, FSMs, and fabrics consume these services and produce
 common semantic objects. No feature privately reparses names, expressions,
 types, guards, or generated text.

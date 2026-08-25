@@ -96,6 +96,9 @@ static void expect_resolve_error(const char *text, const char *expected)
 		&preprocess_error));
 	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
 	assert(!pigen_resolve_semantics(&syntax, &model, &policy, &error));
+	if (!error.message || !strstr(error.message, expected))
+		fprintf(stderr, "expected error containing `%s`, got `%s`\n", expected,
+			error.message ? error.message : "(none)");
 	assert(error.message && strstr(error.message, expected));
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_tree(&syntax);
@@ -731,6 +734,10 @@ int main(void)
 		"buf int8_t destination; always_ff @(posedge clk) "
 		"destination <= source; endmodule\n",
 		"shape mismatch");
+	expect_resolve_error("typedef int[1-1] zero_width_t;\n",
+		"type count must be a positive integer");
+	expect_resolve_error("typedef int[(1-2)] negative_width_t;\n",
+		"type count must be a positive integer");
 
 	pigen_free_semantic_model(&inout_model);
 	pigen_free_semantic_model(&unknown_model);

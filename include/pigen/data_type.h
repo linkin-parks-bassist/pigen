@@ -108,6 +108,8 @@ pigen_data_type_id pigen_data_type_unsigned_integer(
 	pigen_semantic_model *model, pigen_const_expr_id width);
 pigen_data_type_id pigen_data_type_exact_integer(
 	pigen_semantic_model *model, pigen_integer_id value);
+int pigen_data_type_conversion_is_valid(const pigen_semantic_model *model,
+	pigen_conversion conversion);
 pigen_integer_id pigen_data_type_exact_value(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
 pigen_data_type_id pigen_data_type_byte(pigen_semantic_model *model);

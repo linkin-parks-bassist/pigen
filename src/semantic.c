@@ -335,7 +335,7 @@ pigen_const_expr_id pigen_const_expr_intern_conversion(
 
 	if (!known || !conversion_is_semantic(conversion) ||
 		known->data_type.index != conversion.source_data_type.index ||
-		!pigen_data_type_exists(model, conversion.target_data_type))
+		!pigen_data_type_conversion_is_valid(model, conversion))
 		return INVALID_ID(pigen_const_expr_id);
 	expression.kind = PIGEN_CONST_EXPR_CONVERSION;
 	expression.data_type = conversion.target_data_type;
@@ -1099,7 +1099,7 @@ pigen_expr_id pigen_expr_add_conversion(pigen_semantic_model *model,
 
 	if (!known || !conversion_is_semantic(conversion) ||
 		known->data_type.index != conversion.source_data_type.index ||
-		!pigen_data_type_exists(model, conversion.target_data_type) ||
+		!pigen_data_type_conversion_is_valid(model, conversion) ||
 		!pigen_source_span_valid(model->sources, span) ||
 		!id_capacity_available(model->expression_count))
 		return INVALID_ID(pigen_expr_id);

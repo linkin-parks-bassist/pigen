@@ -64,10 +64,16 @@ static void assert_numerical_width(pigen_semantic_model *model,
 	pigen_data_type_id type, pigen_numerical_interpretation interpretation,
 	uint64_t width)
 {
+	uint64_t actual_width;
+
 	assert(pigen_data_type_numerical_interpretation(model, type) ==
 		interpretation);
-	assert(evaluate_width(model, pigen_data_type_packed_width(model, type)) ==
-		width);
+	actual_width = evaluate_width(model, pigen_data_type_packed_width(model,
+		type));
+	if (actual_width != width)
+		fprintf(stderr, "expected width %llu, got %llu\n",
+			(unsigned long long)width, (unsigned long long)actual_width);
+	assert(actual_width == width);
 }
 
 int main(void)
@@ -128,9 +134,12 @@ int main(void)
 	pigen_data_type_id exact_one;
 	pigen_data_type_id exact_zero;
 	pigen_data_type_id exact_three;
+	pigen_data_type_id exact_two_hundred_fifty_six;
+	pigen_data_type_id exact_negative_one;
 	pigen_integer_id one;
 	pigen_integer_id zero;
 	pigen_integer_id three;
+	pigen_integer_id two_hundred_fifty_six;
 	pigen_integer_id negative_one;
 	pigen_data_type_id pigen_byte;
 	pigen_data_type_id byte_alias_a;
@@ -265,10 +274,14 @@ int main(void)
 	zero = pigen_integer_intern_u64(&model, 0);
 	one = pigen_integer_intern_u64(&model, 1);
 	three = pigen_integer_intern_u64(&model, 3);
+	two_hundred_fifty_six = pigen_integer_intern_u64(&model, 256);
 	negative_one = pigen_integer_negate(&model, one);
 	exact_zero = pigen_data_type_exact_integer(&model, zero);
 	exact_one = pigen_data_type_exact_integer(&model, one);
 	exact_three = pigen_data_type_exact_integer(&model, three);
+	exact_two_hundred_fifty_six = pigen_data_type_exact_integer(&model,
+		two_hundred_fifty_six);
+	exact_negative_one = pigen_data_type_exact_integer(&model, negative_one);
 	assert(pigen_data_type_exact_value(&model, exact_one).index == one.index);
 	assert(pigen_data_type_numerical_interpretation(&model, exact_one) ==
 		PIGEN_NUMERICAL_EXACT_INTEGER);
@@ -362,6 +375,11 @@ int main(void)
 	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
 		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 9);
 	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		unsigned_8, pigen_data_type_exact_integer(&model,
+			pigen_integer_intern_u64(&model, 257)), &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 10);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
 		signed_8, signed_8, &binary_resolution));
 	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
 		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
@@ -402,6 +420,14 @@ int main(void)
 		binary_resolution.operation.right_data_type);
 	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
 		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		unsigned_8, exact_two_hundred_fifty_six, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 9);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
+		unsigned_8, exact_negative_one, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
 	assert(pigen_data_type_resolve_binary_operation(&model,
 		PIGEN_BINARY_MULTIPLY, unsigned_8, exact_three, &binary_resolution));
 	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
@@ -410,10 +436,18 @@ int main(void)
 		PIGEN_BINARY_MULTIPLY, unsigned_8, exact_one, &binary_resolution));
 	assert(binary_resolution.operation.result_data_type.index ==
 		unsigned_8.index);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_MULTIPLY, unsigned_8, exact_zero, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 1);
 	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
 		unsigned_8, exact_zero, &binary_resolution));
 	assert(binary_resolution.operation.result_data_type.index ==
 		unsigned_8.index);
+	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_SUBTRACT,
+		exact_zero, unsigned_8, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 9);
 
 	assert(pigen_data_type_resolve_unary_operation(&model,
 		PIGEN_UNARY_NEGATE, signed_8, &unary_resolution));
@@ -490,6 +524,24 @@ int main(void)
 	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
 		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 24);
 	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, signed_8, exact_three, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_SIGNED_INTEGER, 22);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, signed_8,
+		pigen_data_type_exact_integer(&model,
+			pigen_integer_intern_u64(&model, 2)), &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 15);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, unsigned_2, exact_three, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 5);
+	assert(pigen_data_type_resolve_binary_operation(&model,
+		PIGEN_BINARY_POWER, unsigned_8, exact_zero, &binary_resolution));
+	assert_numerical_width(&model, binary_resolution.operation.result_data_type,
+		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 1);
+	assert(pigen_data_type_resolve_binary_operation(&model,
 		PIGEN_BINARY_SHIFT_LEFT, signed_8, unsigned_8, &binary_resolution));
 	assert(pigen_const_expr_get(&model, pigen_data_type_packed_width(&model,
 		binary_resolution.operation.result_data_type))->kind ==
@@ -560,6 +612,8 @@ int main(void)
 	assert(pigen_lvalue_resolve(&model, converted_expression).index ==
 		PIGEN_INVALID_ID);
 	{
+		pigen_const_expr_id unsigned_constant =
+			pigen_const_expr_intern_integer(&model, 1, unsigned_8);
 		size_t expression_count = model.expression_count;
 		size_t constant_count = model.constant_expression_count;
 
@@ -579,6 +633,17 @@ int main(void)
 			(pigen_conversion){PIGEN_CONVERSION_INVALID, unsigned_2,
 				unsigned_8}, converted_expression, whole).index ==
 			PIGEN_INVALID_ID);
+		assert(pigen_expr_add_conversion(&model,
+			(pigen_conversion){PIGEN_CONVERSION_VECTOR_TO_INTEGER, unsigned_2,
+				unsigned_8}, converted_expression, whole).index ==
+			PIGEN_INVALID_ID);
+		assert(pigen_const_expr_intern_conversion(&model,
+			(pigen_conversion){PIGEN_CONVERSION_INTEGER_PROMOTION, unsigned_2,
+				unsigned_8}, pigen_expr_constant(&model, converted_expression)).index ==
+			PIGEN_INVALID_ID);
+		assert(pigen_const_expr_intern_conversion(&model,
+			(pigen_conversion){PIGEN_CONVERSION_INTEGER_PROMOTION, unsigned_8,
+				signed_8}, unsigned_constant).index == PIGEN_INVALID_ID);
 		assert(model.expression_count == expression_count);
 		assert(model.constant_expression_count == constant_count);
 	}

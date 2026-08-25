@@ -59,6 +59,10 @@ Assignment asks the destination family for one final conversion above the
 complete RHS. Semantic transfers independently require exact final data-type
 and shape identity. A positive resolve policy rejects known excessive generated
 widths and carries parameter-dependent widths as semantic constraints.
+Literal domain is explicit: Pigen expressions and Pigen type counts use exact
+decimals, while ordinary SystemVerilog parameters and structural ranges retain
+SystemVerilog literal rules. Known numerical ranges select the narrowest result,
+and semantic conversion constructors revalidate the owner's conversion record.
 Fresh `make verify` passed for this intrinsic-expression cutover on 2026-08-25.
 
 The structured middle remains unlinked from the production executable. The

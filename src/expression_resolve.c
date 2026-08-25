@@ -145,6 +145,7 @@ static pigen_expr_id materialize(expression_materializer *materializer,
 static pigen_expr_id resolve_with_policy(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression, int constant_only,
+	pigen_literal_domain literal_domain,
 	const pigen_resolve_policy *policy, pigen_semantic_error *error)
 {
 	pigen_analyzed_expr_arena arena = {0};
@@ -158,7 +159,8 @@ static pigen_expr_id resolve_with_policy(
 
 	if (!policy || !policy->maximum_generated_bits ||
 		!pigen_analyze_expression(syntax, model, scope, expression,
-			constant_only, policy, &arena, &analyzed, error))
+			constant_only, literal_domain, policy, &arena,
+			&analyzed, error))
 	{
 		pigen_free_analyzed_expr_arena(&arena);
 		return INVALID_ID(pigen_expr_id);
@@ -195,8 +197,8 @@ pigen_expr_id pigen_resolve_expression(
 	const pigen_resolve_policy *policy,
 	pigen_semantic_error *error)
 {
-	return resolve_with_policy(syntax, model, scope, expression, 0, policy,
-		error);
+	return resolve_with_policy(syntax, model, scope, expression, 0,
+		PIGEN_LITERAL_DOMAIN_PIGEN, policy, error);
 }
 
 pigen_expr_id pigen_resolve_constant_expression(
@@ -205,8 +207,8 @@ pigen_expr_id pigen_resolve_constant_expression(
 	const pigen_resolve_policy *policy,
 	pigen_semantic_error *error)
 {
-	return resolve_with_policy(syntax, model, scope, expression, 1, policy,
-		error);
+	return resolve_with_policy(syntax, model, scope, expression, 1,
+		PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG, policy, error);
 }
 
 pigen_expr_id pigen_resolve_assignment_value(

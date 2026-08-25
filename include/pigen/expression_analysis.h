@@ -13,6 +13,12 @@ typedef enum {
 	PIGEN_ANALYZED_LITERAL_BITS
 } pigen_analyzed_literal_kind;
 
+typedef enum {
+	PIGEN_LITERAL_DOMAIN_INVALID,
+	PIGEN_LITERAL_DOMAIN_PIGEN,
+	PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG
+} pigen_literal_domain;
+
 typedef struct {
 	pigen_syntax_expr_id syntax;
 	pigen_syntax_expr_kind kind;
@@ -78,6 +84,7 @@ typedef struct {
 int pigen_analyze_expression(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model, pigen_scope_id scope,
 	pigen_syntax_expr_id expression, int constant_only,
+	pigen_literal_domain literal_domain,
 	const pigen_resolve_policy *policy,
 	pigen_analyzed_expr_arena *arena, pigen_analyzed_expr_id *result,
 	pigen_semantic_error *error);

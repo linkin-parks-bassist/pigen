@@ -468,7 +468,15 @@ pigen_integer_id pigen_integer_shift_left(pigen_semantic_model *model,
 	return result;
 }
 
-static int integer_to_size(const pigen_semantic_model *model,
+int pigen_integer_is_negative(const pigen_semantic_model *model,
+	pigen_integer_id value_id)
+{
+	const pigen_integer *known = integer_get(model, value_id);
+
+	return known && known->negative;
+}
+
+int pigen_integer_to_size(const pigen_semantic_model *model,
 	pigen_integer_id value_id, size_t *value)
 {
 	const pigen_integer *known = integer_get(model, value_id);
@@ -521,7 +529,7 @@ pigen_integer_id pigen_integer_power(pigen_semantic_model *model,
 	if (negative_one.index == PIGEN_INVALID_ID) return INVALID_ID;
 	if (pigen_integer_compare(model, base_id, negative_one) == 0)
 		return exponent_is_odd ? negative_one : one;
-	if (!integer_to_size(model, exponent_id, &power)) return INVALID_ID;
+	if (!pigen_integer_to_size(model, exponent_id, &power)) return INVALID_ID;
 	result = one;
 	factor = base_id;
 	while (power)

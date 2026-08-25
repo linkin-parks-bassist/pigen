@@ -91,9 +91,11 @@ contract stated in `SPEC.md`.
   semantic expressions with an invalid constant identity.
 - An unsized Pigen decimal is a canonical arbitrary-precision exact integer
   with no signed/unsigned family or implicit hardware width. In the ordinary
-  SystemVerilog constant-expression domain used by parameters and structural
-  ranges, unsized decimals retain SystemVerilog `unsized_integer` semantics;
-  do not erase this domain boundary merely because both use one walker.
+  SystemVerilog domain used by parameters and SystemVerilog structural ranges,
+  unsized decimals retain SystemVerilog `unsized_integer` semantics. Pigen
+  integer type counts use the exact domain and normalize only after proving a
+  known result positive. Literal domain is explicit policy input and is not
+  inferred from constant-only admissibility; both domains use one walker.
 - Every explicitly sized based literal has an exact structural logic type and
   an exact-width four-state value.  Canonical literal identity is determined by
   type and normalized LSB-first `0`/`1`/`x`/`z` states, not source base or host
@@ -175,7 +177,9 @@ contract stated in `SPEC.md`.
 - Runtime and constant conversion topology is isomorphic. A semantic conversion
   preserves shape and owns the corresponding constant conversion when its
   operand is constant. Conversion roots are values, never lvalues. Identity
-  casts validate during analysis and materialize no node.
+  casts validate during analysis and materialize no node. Both runtime and
+  constant conversion constructors reject records whose kind does not match
+  the source and target domains.
 - Casts use shared structural type syntax and the single explicit-conversion
   policy. Pigen spells them `type'(expression)`; numerical-family and
   numerical/raw-vector changes require this explicit boundary.

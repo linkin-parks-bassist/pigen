@@ -32,6 +32,8 @@ int main(void)
 	pigen_integer_id product;
 	pigen_integer_id shifted;
 	pigen_integer_id powered;
+	pigen_integer_id beyond_size;
+	size_t size_value;
 
 	pigen_semantic_init(&model, &sources);
 	zero = decimal(&model, "0");
@@ -81,6 +83,17 @@ int main(void)
 		pigen_integer_negate(&model, decimal(&model, "128"))) == 8);
 	assert(pigen_integer_unsigned_width(&model, zero) == 1);
 	assert(pigen_integer_unsigned_width(&model, negative_huge) == 0);
+	assert(pigen_integer_to_size(&model, zero, &size_value) && !size_value);
+	assert(pigen_integer_to_size(&model,
+		pigen_integer_intern_u64(&model, UINT32_MAX), &size_value) &&
+		size_value == UINT32_MAX);
+	assert(pigen_integer_to_size(&model,
+		pigen_integer_intern_u64(&model, (uint64_t)SIZE_MAX), &size_value) &&
+		size_value == SIZE_MAX);
+	beyond_size = pigen_integer_shift_left(&model, one,
+		sizeof(size_t) * 8, sizeof(size_t) * 8 + 1);
+	assert(beyond_size.index != PIGEN_INVALID_ID);
+	assert(!pigen_integer_to_size(&model, beyond_size, &size_value));
 
 	shifted = pigen_integer_shift_left(&model, one, 127, 128);
 	assert(shifted.index != PIGEN_INVALID_ID);

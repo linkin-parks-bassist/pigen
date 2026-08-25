@@ -95,7 +95,10 @@ int main(void)
 		"uint[8]'(bp)\n"
 		"byte'(8'hff)\n"
 		"ua << sh\n"
-		"ua << ds\n";
+		"ua << ds\n"
+		"ua << 4294967296\n"
+		"ua << 18446744073709551615\n"
+		"ua << 18446744073709551616\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "expressions.pigen",
 		text, strlen(text));
@@ -150,6 +153,7 @@ int main(void)
 	pigen_syntax_expr_id invalid_cast_syntax;
 	pigen_syntax_expr_id oversized_shift_syntax;
 	pigen_syntax_expr_id symbolic_shift_syntax;
+	pigen_syntax_expr_id enormous_shift_syntax[3];
 	pigen_expr_id runtime;
 	pigen_expr_id comparison;
 	pigen_expr_id constant;
@@ -358,16 +362,36 @@ int main(void)
 	invalid_cast_syntax = parse(&preprocessed, &syntax, 117, 122);
 	oversized_shift_syntax = parse(&preprocessed, &syntax, 122, 125);
 	symbolic_shift_syntax = parse(&preprocessed, &syntax, 125, 128);
+	enormous_shift_syntax[0] = parse(&preprocessed, &syntax, 128, 131);
+	enormous_shift_syntax[1] = parse(&preprocessed, &syntax, 131, 134);
+	enormous_shift_syntax[2] = parse(&preprocessed, &syntax, 134, 137);
 	{
 		pigen_analyzed_expr_arena analyzed_arena = {0};
 		pigen_analyzed_expr_id analyzed;
+		const pigen_syntax_expr *addition = pigen_syntax_expr_get(
+			&syntax.expressions, literal_add_syntax);
 		size_t expression_count = model.expression_count;
 
 		assert(pigen_analyze_expression(&syntax, &model, scope,
-			integer_cast_syntax, 0, &policy, &analyzed_arena, &analyzed,
+			integer_cast_syntax, 0, PIGEN_LITERAL_DOMAIN_PIGEN, &policy,
+			&analyzed_arena, &analyzed,
 			&semantic_error));
 		assert(analyzed.index != PIGEN_INVALID_ID);
 		assert(model.expression_count == expression_count);
+		pigen_free_analyzed_expr_arena(&analyzed_arena);
+		assert(addition && addition->kind == PIGEN_SYNTAX_EXPR_BINARY);
+		assert(pigen_analyze_expression(&syntax, &model, scope,
+			addition->as.binary.right, 1, PIGEN_LITERAL_DOMAIN_PIGEN, NULL,
+			&analyzed_arena, &analyzed, &semantic_error));
+		assert(pigen_data_type_numerical_interpretation(&model,
+			pigen_analyzed_expr_get(&analyzed_arena, analyzed)->data_type) ==
+			PIGEN_NUMERICAL_EXACT_INTEGER);
+		pigen_free_analyzed_expr_arena(&analyzed_arena);
+		assert(pigen_analyze_expression(&syntax, &model, scope,
+			addition->as.binary.right, 1, PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG,
+			NULL, &analyzed_arena, &analyzed, &semantic_error));
+		assert(pigen_analyzed_expr_get(&analyzed_arena, analyzed)->data_type.index ==
+			unsized_integer_data_type.index);
 		pigen_free_analyzed_expr_arena(&analyzed_arena);
 	}
 
@@ -531,6 +555,26 @@ int main(void)
 		assert(constraint->maximum_bits == 1024);
 		assert(constraint->width.index == pigen_data_type_packed_width(&model,
 			pigen_expr_get(&model, shifted)->data_type).index);
+	}
+	{
+		size_t i;
+
+		for (i = 0; i < 3; i++)
+		{
+			const pigen_syntax_expr *shift_syntax = pigen_syntax_expr_get(
+				&syntax.expressions, enormous_shift_syntax[i]);
+			size_t expression_count = model.expression_count;
+
+			semantic_error = (pigen_semantic_error){0};
+			assert(pigen_resolve_expression(&syntax, &model, scope,
+				enormous_shift_syntax[i], &policy, &semantic_error).index ==
+				PIGEN_INVALID_ID);
+			assert(model.expression_count == expression_count);
+			assert(semantic_error.message &&
+				strstr(semantic_error.message, "exceeds width limit"));
+			assert(shift_syntax && semantic_error.span.start ==
+				shift_syntax->as.binary.operator_location.source_span.start);
+		}
 	}
 
 	{

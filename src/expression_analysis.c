@@ -14,6 +14,7 @@ typedef struct {
 	pigen_semantic_model *model;
 	pigen_scope_id scope;
 	int constant_only;
+	pigen_literal_domain literal_domain;
 	const pigen_resolve_policy *policy;
 	pigen_analyzed_expr_arena *arena;
 	pigen_semantic_error *error;
@@ -153,6 +154,36 @@ static int check_generated_width(expression_analyzer *analyzer,
 	}
 	return append_constraint(analyzer, (pigen_width_constraint){width,
 		analyzer->policy->maximum_generated_bits, location.source_span});
+}
+
+static int reject_excessive_exact_amount(expression_analyzer *analyzer,
+	pigen_data_type_id base, pigen_data_type_id amount,
+	pigen_binary_operator operator, pigen_syntax_location location)
+{
+	pigen_integer_id value;
+	pigen_integer_id limit;
+	uint64_t base_width;
+
+	if (!analyzer->policy || !generated_width_operator(operator) ||
+		pigen_data_type_numerical_interpretation(analyzer->model, amount) !=
+			PIGEN_NUMERICAL_EXACT_INTEGER)
+		return 0;
+	value = pigen_data_type_exact_value(analyzer->model, amount);
+	if (value.index == PIGEN_INVALID_ID ||
+		pigen_integer_is_negative(analyzer->model, value))
+		return 0;
+	limit = pigen_integer_intern_u64(analyzer->model,
+		analyzer->policy->maximum_generated_bits);
+	if (limit.index == PIGEN_INVALID_ID ||
+		pigen_integer_compare(analyzer->model, value, limit) <= 0)
+		return 0;
+	if (operator == PIGEN_BINARY_POWER &&
+		(!pigen_const_expr_evaluate_u64(analyzer->model,
+			pigen_data_type_packed_width(analyzer->model, base), &base_width) ||
+		base_width <= 1))
+		return 0;
+	fail(analyzer, location, "generated result exceeds width limit");
+	return 1;
 }
 
 static int decimal_size(const char *text, size_t length, size_t *value)
@@ -495,7 +526,8 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 				"invalid integer literal");
 			if (!memchr(text, '\'', length))
 			{
-				if (analyzer->constant_only && literal_u64(text, length, &value))
+				if (analyzer->literal_domain == PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG &&
+					literal_u64(text, length, &value))
 				{
 					node.literal_kind = PIGEN_ANALYZED_LITERAL_INTEGER;
 					node.data_type = pigen_data_type_unsized_integer(analyzer->model);
@@ -617,6 +649,11 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 				analyzer->arena->nodes[right.index].shape.index)
 				return fail(analyzer, syntax->as.binary.operator_location,
 					"binary operands have different shapes");
+			if (reject_excessive_exact_amount(analyzer,
+				analyzer->arena->nodes[left.index].data_type,
+				analyzer->arena->nodes[right.index].data_type, operator,
+				syntax->as.binary.operator_location))
+				return INVALID_ID(pigen_analyzed_expr_id);
 			if (!pigen_data_type_resolve_binary_operation(analyzer->model,
 				operator, analyzer->arena->nodes[left.index].data_type,
 				analyzer->arena->nodes[right.index].data_type,
@@ -876,6 +913,7 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 int pigen_analyze_expression(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model, pigen_scope_id scope,
 	pigen_syntax_expr_id expression, int constant_only,
+	pigen_literal_domain literal_domain,
 	const pigen_resolve_policy *policy,
 	pigen_analyzed_expr_arena *arena, pigen_analyzed_expr_id *result,
 	pigen_semantic_error *error)
@@ -884,12 +922,15 @@ int pigen_analyze_expression(const pigen_syntax_tree *syntax,
 
 	if (result) *result = INVALID_ID(pigen_analyzed_expr_id);
 	if (!syntax || !syntax->expanded || !model || !arena || !result ||
-		!pigen_scope_get(model, scope))
+		!pigen_scope_get(model, scope) ||
+		(literal_domain != PIGEN_LITERAL_DOMAIN_PIGEN &&
+		literal_domain != PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG))
 		return 0;
 	analyzer.syntax = syntax;
 	analyzer.model = model;
 	analyzer.scope = scope;
 	analyzer.constant_only = constant_only;
+	analyzer.literal_domain = literal_domain;
 	analyzer.policy = policy;
 	analyzer.arena = arena;
 	analyzer.error = error;

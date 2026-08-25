@@ -33,11 +33,12 @@ static pigen_const_expr_id normalize_count(pigen_semantic_model *model,
 	pigen_const_expr_id value)
 {
 	const pigen_const_expr *known = pigen_const_expr_get(model, value);
+	pigen_integer_id integer;
 
 	if (!known) return INVALID_ID(pigen_const_expr_id);
-	if (known->kind == PIGEN_CONST_EXPR_EXACT_INTEGER)
+	integer = pigen_data_type_exact_value(model, known->data_type);
+	if (integer.index != PIGEN_INVALID_ID)
 	{
-		pigen_integer_id integer = known->as.exact_integer;
 		const pigen_integer *exact = &model->integers[integer.index];
 		uint64_t normalized;
 
@@ -57,14 +58,15 @@ static pigen_const_expr_id normalize_count(pigen_semantic_model *model,
 
 static pigen_const_expr_id analyze_constant(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model, pigen_scope_id scope,
-	pigen_syntax_expr_id expression, pigen_semantic_error *error)
+	pigen_syntax_expr_id expression, pigen_literal_domain literal_domain,
+	pigen_semantic_error *error)
 {
 	pigen_analyzed_expr_arena arena = {0};
 	pigen_analyzed_expr_id result;
 	pigen_const_expr_id constant = INVALID_ID(pigen_const_expr_id);
 
-	if (pigen_analyze_expression(syntax, model, scope, expression, 1, NULL, &arena,
-		&result, error))
+	if (pigen_analyze_expression(syntax, model, scope, expression, 1,
+		literal_domain, NULL, &arena, &result, error))
 		constant = pigen_analyzed_expr_get(&arena, result)->constant;
 	pigen_free_analyzed_expr_arena(&arena);
 	return constant;
@@ -79,6 +81,11 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 	const pigen_syntax_type_argument *syntax_arguments;
 	pigen_data_type_argument *arguments = NULL;
 	pigen_signedness signedness;
+	pigen_literal_domain literal_domain = PIGEN_LITERAL_DOMAIN_SYSTEMVERILOG;
+	pigen_type_spelling_domain spelling_domain = PIGEN_TYPE_SPELLING_UNKNOWN;
+	pigen_symbol_id alias = INVALID_ID(pigen_symbol_id);
+	const pigen_symbol *alias_symbol = NULL;
+	pigen_source_span spelling = {INVALID_ID(pigen_source_id), 0, 0};
 	pigen_data_type_id result;
 	size_t i;
 
@@ -87,6 +94,26 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 	signedness = syntax_type->signedness == PIGEN_SYNTAX_SIGN_SIGNED ?
 		PIGEN_SIGN_SIGNED : syntax_type->signedness == PIGEN_SYNTAX_SIGN_UNSIGNED ?
 		PIGEN_SIGN_UNSIGNED : PIGEN_SIGN_IMPLICIT;
+	if (syntax_type->base.index != PIGEN_INVALID_ID)
+	{
+		pigen_numerical_interpretation interpretation;
+
+		spelling = token_spelling(syntax, syntax_type->base);
+		spelling_domain = pigen_data_type_spelling_domain(model, spelling);
+		if (spelling_domain == PIGEN_TYPE_SPELLING_UNKNOWN)
+		{
+			alias = pigen_symbol_lookup(model, scope, spelling);
+			alias_symbol = pigen_symbol_get(model, alias);
+		}
+		interpretation = alias_symbol && alias_symbol->kind == PIGEN_SYMBOL_TYPEDEF ?
+			pigen_data_type_numerical_interpretation(model,
+				alias_symbol->data_type) : PIGEN_NUMERICAL_INVALID;
+		if (spelling_domain == PIGEN_TYPE_SPELLING_PIGEN ||
+			interpretation == PIGEN_NUMERICAL_SIGNED_INTEGER ||
+			interpretation == PIGEN_NUMERICAL_UNSIGNED_INTEGER ||
+			interpretation == PIGEN_NUMERICAL_EXACT_INTEGER)
+			literal_domain = PIGEN_LITERAL_DOMAIN_PIGEN;
+	}
 	syntax_arguments = pigen_syntax_type_arguments(&syntax->types,
 		syntax_type->first_argument, syntax_type->argument_count);
 	if (syntax_type->argument_count && !syntax_arguments)
@@ -102,15 +129,15 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 		if (syntax_arguments[i].kind == PIGEN_SYNTAX_TYPE_COUNT)
 		{
 			left = analyze_constant(syntax, model, scope,
-				syntax_arguments[i].as.count, error);
+				syntax_arguments[i].as.count, literal_domain, error);
 			arguments[i].kind = PIGEN_DATA_TYPE_ARGUMENT_COUNT;
 		}
 		else
 		{
 			left = analyze_constant(syntax, model, scope,
-				syntax_arguments[i].as.range.left, error);
+				syntax_arguments[i].as.range.left, literal_domain, error);
 			right = analyze_constant(syntax, model, scope,
-				syntax_arguments[i].as.range.right, error);
+				syntax_arguments[i].as.range.right, literal_domain, error);
 			arguments[i].kind = PIGEN_DATA_TYPE_ARGUMENT_RANGE;
 		}
 		if (left.index == PIGEN_INVALID_ID ||
@@ -142,28 +169,21 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 			arguments, syntax_type->argument_count);
 	else
 	{
-		pigen_source_span spelling = token_spelling(syntax, syntax_type->base);
-		pigen_type_spelling_domain domain = pigen_data_type_spelling_domain(model,
-			spelling);
-
 		result = pigen_data_type_from_spelling(model, spelling, signedness,
 			arguments, syntax_type->argument_count);
 		if (result.index == PIGEN_INVALID_ID &&
-			domain == PIGEN_TYPE_SPELLING_UNKNOWN)
+			spelling_domain == PIGEN_TYPE_SPELLING_UNKNOWN)
 		{
-			pigen_symbol_id alias = pigen_symbol_lookup(model, scope, spelling);
-			const pigen_symbol *symbol = pigen_symbol_get(model, alias);
-
-			if (symbol && symbol->kind == PIGEN_SYMBOL_TYPEDEF)
+			if (alias_symbol && alias_symbol->kind == PIGEN_SYMBOL_TYPEDEF)
 				result = pigen_data_type_alias_with_arguments(model, alias,
-					symbol->data_type, signedness, arguments,
+					alias_symbol->data_type, signedness, arguments,
 					syntax_type->argument_count);
 		}
 		if (result.index == PIGEN_INVALID_ID)
 		{
 			free(arguments);
 			return fail(error, syntax_type->location,
-				domain == PIGEN_TYPE_SPELLING_UNKNOWN ? "unknown type name" :
+				spelling_domain == PIGEN_TYPE_SPELLING_UNKNOWN ? "unknown type name" :
 				"invalid type arguments");
 		}
 	}
