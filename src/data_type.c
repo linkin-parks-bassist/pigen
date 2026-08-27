@@ -622,6 +622,31 @@ static pigen_data_type_id underlying_data_type(
 	return INVALID_ID(pigen_data_type_id);
 }
 
+pigen_unqualified_transfer_policy
+pigen_data_type_unqualified_transfer_policy(
+	const pigen_semantic_model *model, pigen_data_type_id data_type,
+	int is_input)
+{
+	const pigen_data_type *known = data_type_get(model,
+		underlying_data_type(model, data_type));
+
+	if (!known) return PIGEN_UNQUALIFIED_TRANSFER_FORBIDDEN;
+	switch (known->constructor)
+	{
+		case PIGEN_DATA_TYPE_SIGNED_INTEGER:
+		case PIGEN_DATA_TYPE_UNSIGNED_INTEGER:
+			return is_input ? PIGEN_UNQUALIFIED_TRANSFER_ABSTRACT :
+				PIGEN_UNQUALIFIED_TRANSFER_FORBIDDEN;
+		case PIGEN_DATA_TYPE_BIT:
+			return is_input ? PIGEN_UNQUALIFIED_TRANSFER_ABSTRACT :
+				PIGEN_UNQUALIFIED_TRANSFER_STATIC;
+		case PIGEN_DATA_TYPE_LOGIC:
+			return PIGEN_UNQUALIFIED_TRANSFER_STATIC;
+		default:
+			return PIGEN_UNQUALIFIED_TRANSFER_FORBIDDEN;
+	}
+}
+
 pigen_type_spelling_domain pigen_data_type_domain(
 	const pigen_semantic_model *model, pigen_data_type_id data_type)
 {

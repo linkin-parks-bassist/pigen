@@ -29,39 +29,6 @@ static pigen_source_span token_spelling(const pigen_syntax_tree *syntax,
 		(pigen_source_span){INVALID_ID(pigen_source_id), 0, 0};
 }
 
-static pigen_const_expr_id normalize_count(pigen_semantic_model *model,
-	pigen_const_expr_id value)
-{
-	const pigen_const_expr *known = pigen_const_expr_get(model, value);
-	pigen_integer_id integer;
-	uint64_t evaluated;
-
-	if (!known) return INVALID_ID(pigen_const_expr_id);
-	if (pigen_const_expr_evaluate_u64(model, value, &evaluated))
-		return evaluated ? pigen_const_expr_intern_integer(model, evaluated,
-			pigen_data_type_unsized_integer(model)) :
-			INVALID_ID(pigen_const_expr_id);
-	integer = pigen_data_type_exact_value(model, known->data_type);
-	if (integer.index != PIGEN_INVALID_ID)
-	{
-		const pigen_integer *exact = &model->integers[integer.index];
-		uint64_t normalized;
-
-		if (exact->negative || !exact->limb_count || exact->limb_count > 2)
-			return INVALID_ID(pigen_const_expr_id);
-		normalized = model->integer_limbs[exact->first_limb];
-		if (exact->limb_count == 2)
-			normalized |= (uint64_t)model->integer_limbs[exact->first_limb + 1]
-				<< 32;
-		return pigen_const_expr_intern_integer(model, normalized,
-			pigen_data_type_unsized_integer(model));
-	}
-	if (known->kind == PIGEN_CONST_EXPR_INTEGER && !known->as.integer)
-		return INVALID_ID(pigen_const_expr_id);
-	return pigen_const_expr_is_symbolic(model, value) ? value :
-		INVALID_ID(pigen_const_expr_id);
-}
-
 static pigen_const_expr_id analyze_constant(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model, pigen_scope_id scope,
 	pigen_syntax_expr_id expression, pigen_literal_domain literal_domain,
@@ -151,7 +118,7 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 		}
 		if (arguments[i].kind == PIGEN_DATA_TYPE_ARGUMENT_COUNT)
 		{
-			arguments[i].as.count = normalize_count(model, left);
+			arguments[i].as.count = pigen_const_expr_normalize_count(model, left);
 			if (arguments[i].as.count.index == PIGEN_INVALID_ID)
 			{
 				free(arguments);

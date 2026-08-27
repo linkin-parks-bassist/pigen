@@ -60,6 +60,12 @@ typedef enum {
 	PIGEN_TYPE_SPELLING_PIGEN
 } pigen_type_spelling_domain;
 
+typedef enum {
+	PIGEN_UNQUALIFIED_TRANSFER_STATIC,
+	PIGEN_UNQUALIFIED_TRANSFER_ABSTRACT,
+	PIGEN_UNQUALIFIED_TRANSFER_FORBIDDEN
+} pigen_unqualified_transfer_policy;
+
 typedef struct {
 	pigen_binary_operator operator;
 	pigen_numerical_interpretation concrete_interpretation;
@@ -73,6 +79,10 @@ pigen_type_spelling_domain pigen_data_type_spelling_domain(
 	const pigen_semantic_model *model, pigen_source_span spelling);
 pigen_type_spelling_domain pigen_data_type_domain(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
+pigen_unqualified_transfer_policy
+pigen_data_type_unqualified_transfer_policy(
+	const pigen_semantic_model *model, pigen_data_type_id data_type,
+	int is_input);
 pigen_data_type_id pigen_data_type_from_spelling(
 	pigen_semantic_model *model, pigen_source_span spelling,
 	pigen_signedness signedness, const pigen_data_type_argument *arguments,

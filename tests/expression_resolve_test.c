@@ -4,6 +4,7 @@
 
 #include "pigen/expression_analysis.h"
 #include "pigen/expression_resolve.h"
+#include "pigen/type_resolve.h"
 
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
 
@@ -837,6 +838,33 @@ int main(void)
 	known = pigen_expr_get(&model, aliased_compare);
 	assert(known && known->kind == PIGEN_EXPR_BINARY);
 	assert(known->data_type.index == boolean_type.index);
+	{
+		const char count_text[] = "int[0]";
+		pigen_source_id count_source = pigen_source_add(&sources,
+			"count.pigen", count_text, strlen(count_text));
+		pigen_preprocess_result count_preprocessed = {0};
+		pigen_syntax_tree count_syntax = {0};
+		pigen_syntax_error syntax_error = {0};
+		pigen_syntax_type_id count_type = INVALID_ID(pigen_syntax_type_id);
+		size_t after;
+
+		assert(pigen_preprocess(&sources, count_source, NULL,
+			&count_preprocessed, &preprocess_error));
+		count_syntax.expanded = &count_preprocessed.expanded;
+		assert(pigen_parse_type_prefix(&count_preprocessed.expanded, 0,
+			count_preprocessed.expanded.token_count - 1,
+			&count_syntax.expressions, &count_syntax.types, &count_type, &after,
+			&syntax_error));
+		assert(after == count_preprocessed.expanded.token_count - 1);
+		semantic_error = (pigen_semantic_error){0};
+		assert(pigen_resolve_type(&count_syntax, &model, scope, count_type,
+			&semantic_error).index == PIGEN_INVALID_ID);
+		assert(!strcmp(semantic_error.message,
+			"type count must be a positive integer"));
+		pigen_free_syntax_type_arena(&count_syntax.types);
+		pigen_free_syntax_expr_arena(&count_syntax.expressions);
+		pigen_free_preprocess_result(&count_preprocessed);
+	}
 
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_expr_arena(&syntax.expressions);

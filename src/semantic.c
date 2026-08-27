@@ -1045,6 +1045,41 @@ int pigen_const_expr_is_symbolic(const pigen_semantic_model *model,
 		model->constant_expression_count + 1);
 }
 
+pigen_const_expr_id pigen_const_expr_normalize_count(
+	pigen_semantic_model *model, pigen_const_expr_id value)
+{
+	const pigen_const_expr *known;
+	pigen_integer_id integer;
+	uint64_t evaluated;
+
+	if (!model) return INVALID_ID(pigen_const_expr_id);
+	known = pigen_const_expr_get(model, value);
+	if (!known) return INVALID_ID(pigen_const_expr_id);
+	if (pigen_const_expr_evaluate_u64(model, value, &evaluated))
+		return evaluated ? pigen_const_expr_intern_integer(model, evaluated,
+			pigen_data_type_unsized_integer(model)) :
+			INVALID_ID(pigen_const_expr_id);
+	integer = pigen_data_type_exact_value(model, known->data_type);
+	if (integer.index != PIGEN_INVALID_ID)
+	{
+		const pigen_integer *exact = &model->integers[integer.index];
+		uint64_t normalized;
+
+		if (exact->negative || !exact->limb_count || exact->limb_count > 2)
+			return INVALID_ID(pigen_const_expr_id);
+		normalized = model->integer_limbs[exact->first_limb];
+		if (exact->limb_count == 2)
+			normalized |= (uint64_t)model->integer_limbs[exact->first_limb + 1]
+				<< 32;
+		return pigen_const_expr_intern_integer(model, normalized,
+			pigen_data_type_unsized_integer(model));
+	}
+	if (known->kind == PIGEN_CONST_EXPR_INTEGER && !known->as.integer)
+		return INVALID_ID(pigen_const_expr_id);
+	return pigen_const_expr_is_symbolic(model, value) ? value :
+		INVALID_ID(pigen_const_expr_id);
+}
+
 int pigen_width_constraint_add(pigen_semantic_model *model,
 	pigen_const_expr_id width, size_t maximum_bits, pigen_source_span span)
 {

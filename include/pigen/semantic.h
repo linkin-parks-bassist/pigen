@@ -490,6 +490,8 @@ int pigen_const_expr_evaluate_u64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, uint64_t *value);
 int pigen_const_expr_is_symbolic(const pigen_semantic_model *model,
 	pigen_const_expr_id expression);
+pigen_const_expr_id pigen_const_expr_normalize_count(
+	pigen_semantic_model *model, pigen_const_expr_id value);
 int pigen_width_constraint_add(pigen_semantic_model *model,
 	pigen_const_expr_id width, size_t maximum_bits, pigen_source_span span);
 const pigen_width_constraint *pigen_width_constraint_get(
