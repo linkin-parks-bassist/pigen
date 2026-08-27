@@ -184,11 +184,11 @@ int main(void)
 		"module first #(parameter WIDTH = 8, DEPTH = WIDTH / 2, ENABLED = DEPTH >= 4 && !(WIDTH == 0), SELECTED = ENABLED ? DEPTH : WIDTH, HEX = 8'hff, BINARY = 8'b1111_1111, SIGNED_VALUE = 18'sd8192, UNKNOWN_VALUE = 12'hx3z, MASK_DEPTH = HEX == BINARY ? 8'd4 : 8'd2, WIDE_HEX = 80'hffff_ffff_ffff_ffff_ffff, WIDE_DECIMAL = 80'd1208925819614629174706175) (input logic clk, reset, select, input logic [7:0] samples[0:3], masks[4], output reg [7:0] count);\n"
 		"  localparam LAST = WIDTH - 1;\n"
 		"  localparam NONZERO = |WIDTH;\n"
-		"  typedef logic unsigned [LAST:NONZERO] byte_t;\n"
+		"  typedef logic unsigned [LAST:NONZERO] octet_t;\n"
 		"  wire ready;\n"
 		"  logic [WIDTH-1:0] state, next_state;\n"
 		"  logic [7:0] memory [0:3][4];\n"
-		"  buf byte_t left, right, alternate;\n"
+		"  buf octet_t left, right, alternate;\n"
 		"  buf bit gate;\n"
 		"  fifo word_t[MASK_DEPTH] queue;\n"
 		"  always_ff @(posedge clk) begin\n"
@@ -743,7 +743,7 @@ int main(void)
 	expect_resolve_error("typedef logic[(1-2)] negative_width_t;\n",
 		"type count must be a positive integer");
 	expect_resolve_error(
-		"typedef byte byte_t; typedef byte_t[(1-2)] negative_width_t;\n",
+		"typedef bit [7:0] octet_t; typedef octet_t[(1-2)] negative_width_t;\n",
 		"type count must be a positive integer");
 
 	pigen_free_semantic_model(&inout_model);

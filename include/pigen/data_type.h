@@ -127,7 +127,6 @@ int pigen_data_type_evaluate_numerical_range_width(
 	uint64_t *width);
 pigen_integer_id pigen_data_type_exact_value(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
-pigen_data_type_id pigen_data_type_byte(pigen_semantic_model *model);
 pigen_numerical_interpretation pigen_data_type_numerical_interpretation(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
 int pigen_data_type_is_integral(const pigen_semantic_model *model,

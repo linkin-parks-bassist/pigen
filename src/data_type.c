@@ -15,7 +15,6 @@ typedef enum {
 	PIGEN_DATA_TYPE_SIGNED_INTEGER,
 	PIGEN_DATA_TYPE_UNSIGNED_INTEGER,
 	PIGEN_DATA_TYPE_EXACT_INTEGER,
-	PIGEN_DATA_TYPE_BYTE,
 	PIGEN_DATA_TYPE_ALIAS
 } data_type_constructor;
 
@@ -42,8 +41,7 @@ static const primitive_data_type_descriptor primitive_data_types[] = {
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
 	{PIGEN_DATA_TYPE_UNSIGNED_INTEGER, NULL, 0, PIGEN_DATA_TYPE_STATE_TWO,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
-	{PIGEN_DATA_TYPE_EXACT_INTEGER, NULL, 0, PIGEN_DATA_TYPE_STATE_TWO, 0},
-	{PIGEN_DATA_TYPE_BYTE, NULL, 8, PIGEN_DATA_TYPE_STATE_TWO, 0}
+	{PIGEN_DATA_TYPE_EXACT_INTEGER, NULL, 0, PIGEN_DATA_TYPE_STATE_TWO, 0}
 };
 
 struct pigen_data_type {
@@ -148,8 +146,7 @@ static pigen_data_type_id data_type_intern(pigen_semantic_model *model,
 	else if (alias.index != PIGEN_INVALID_ID ||
 		alias_target.index != PIGEN_INVALID_ID ||
 		((constructor == PIGEN_DATA_TYPE_SIGNED_INTEGER ||
-		constructor == PIGEN_DATA_TYPE_UNSIGNED_INTEGER ||
-		constructor == PIGEN_DATA_TYPE_BYTE) !=
+		constructor == PIGEN_DATA_TYPE_UNSIGNED_INTEGER) !=
 		(intrinsic_width.index != PIGEN_INVALID_ID)) ||
 		((constructor == PIGEN_DATA_TYPE_EXACT_INTEGER) !=
 		(exact_value.index != PIGEN_INVALID_ID)))
@@ -463,9 +460,10 @@ pigen_type_spelling_domain pigen_data_type_spelling_domain(
 {
 	if (!model || !model->sources) return PIGEN_TYPE_SPELLING_UNKNOWN;
 	if (spelling_is(model, spelling, "int") ||
-		spelling_is(model, spelling, "uint") ||
-		spelling_is(model, spelling, "byte"))
+		spelling_is(model, spelling, "uint"))
 		return PIGEN_TYPE_SPELLING_PIGEN;
+	if (spelling_is(model, spelling, "byte"))
+		return PIGEN_TYPE_SPELLING_SYSTEMVERILOG;
 	return primitive_from_spelling(model, spelling) ?
 		PIGEN_TYPE_SPELLING_SYSTEMVERILOG : PIGEN_TYPE_SPELLING_UNKNOWN;
 }
@@ -534,9 +532,6 @@ pigen_data_type_id pigen_data_type_from_spelling(
 			pigen_data_type_signed_integer(model, arguments[0].as.count) :
 			pigen_data_type_unsigned_integer(model, arguments[0].as.count);
 	}
-	if (spelling_is(model, spelling, "byte"))
-		return signedness == PIGEN_SIGN_IMPLICIT && !argument_count ?
-			pigen_data_type_byte(model) : INVALID_ID(pigen_data_type_id);
 	if (!primitive_from_spelling(model, spelling))
 		return INVALID_ID(pigen_data_type_id);
 	dimensions = arguments_to_dimensions(model, arguments, argument_count);
@@ -636,8 +631,7 @@ pigen_type_spelling_domain pigen_data_type_domain(
 	if (!known) return PIGEN_TYPE_SPELLING_UNKNOWN;
 	return known->constructor == PIGEN_DATA_TYPE_SIGNED_INTEGER ||
 		known->constructor == PIGEN_DATA_TYPE_UNSIGNED_INTEGER ||
-		known->constructor == PIGEN_DATA_TYPE_EXACT_INTEGER ||
-		known->constructor == PIGEN_DATA_TYPE_BYTE ?
+		known->constructor == PIGEN_DATA_TYPE_EXACT_INTEGER ?
 		PIGEN_TYPE_SPELLING_PIGEN : PIGEN_TYPE_SPELLING_SYSTEMVERILOG;
 }
 
@@ -720,22 +714,6 @@ pigen_integer_id pigen_data_type_exact_value(
 		known->exact_value : INVALID_ID(pigen_integer_id);
 }
 
-pigen_data_type_id pigen_data_type_byte(pigen_semantic_model *model)
-{
-	const primitive_data_type_descriptor *descriptor =
-		primitive_descriptor(PIGEN_DATA_TYPE_BYTE);
-	pigen_const_expr_id width;
-
-	if (!model || !descriptor) return INVALID_ID(pigen_data_type_id);
-	width = pigen_const_expr_intern_integer(model, descriptor->base_width,
-		pigen_data_type_unsized_integer(model));
-	if (width.index == PIGEN_INVALID_ID)
-		return INVALID_ID(pigen_data_type_id);
-	return data_type_intern(model, PIGEN_DATA_TYPE_BYTE, PIGEN_SIGN_UNSIGNED,
-		INVALID_ID(pigen_symbol_id), INVALID_ID(pigen_data_type_id), width,
-		INVALID_ID(pigen_integer_id), NULL, 0);
-}
-
 pigen_numerical_interpretation pigen_data_type_numerical_interpretation(
 	const pigen_semantic_model *model, pigen_data_type_id data_type)
 {
@@ -749,18 +727,7 @@ pigen_numerical_interpretation pigen_data_type_numerical_interpretation(
 		return PIGEN_NUMERICAL_UNSIGNED_INTEGER;
 	if (known->constructor == PIGEN_DATA_TYPE_EXACT_INTEGER)
 		return PIGEN_NUMERICAL_EXACT_INTEGER;
-	if (known->constructor == PIGEN_DATA_TYPE_BYTE)
-		return PIGEN_NUMERICAL_NONE;
 	return PIGEN_NUMERICAL_SYSTEMVERILOG;
-}
-
-static int data_type_is_byte(const pigen_semantic_model *model,
-	pigen_data_type_id data_type)
-{
-	const pigen_data_type *known = data_type_get(model,
-		underlying_data_type(model, data_type));
-
-	return known && known->constructor == PIGEN_DATA_TYPE_BYTE;
 }
 
 static int data_type_is_pigen_integer(const pigen_semantic_model *model,
@@ -777,10 +744,9 @@ static int data_type_is_pigen_integer(const pigen_semantic_model *model,
 static int data_type_is_raw_vector(const pigen_semantic_model *model,
 	pigen_data_type_id data_type)
 {
-	return data_type_is_byte(model, data_type) ||
-		(pigen_data_type_is_integral(model, data_type) &&
+	return pigen_data_type_is_integral(model, data_type) &&
 		pigen_data_type_numerical_interpretation(model, data_type) ==
-			PIGEN_NUMERICAL_SYSTEMVERILOG);
+			PIGEN_NUMERICAL_SYSTEMVERILOG;
 }
 
 static int numerical_is_concrete(pigen_numerical_interpretation interpretation)
@@ -851,7 +817,6 @@ int pigen_data_type_conversion_is_valid(pigen_semantic_model *model,
 		case PIGEN_CONVERSION_EXACT_INTEGER:
 			return source == PIGEN_NUMERICAL_EXACT_INTEGER &&
 				(numerical_is_concrete(target) ||
-				data_type_is_byte(model, conversion.target_data_type) ||
 				pigen_data_type_is_integral(model,
 					conversion.target_data_type));
 		case PIGEN_CONVERSION_INTEGER_PROMOTION:
@@ -944,7 +909,6 @@ int pigen_data_type_resolve_explicit_conversion(
 		target_interpretation != PIGEN_NUMERICAL_EXACT_INTEGER &&
 		(target_interpretation == PIGEN_NUMERICAL_SIGNED_INTEGER ||
 		target_interpretation == PIGEN_NUMERICAL_UNSIGNED_INTEGER ||
-		data_type_is_byte(model, target) ||
 		pigen_data_type_is_integral(model, target)))
 		return conversion_resolve(model, source, target,
 			PIGEN_CONVERSION_EXACT_INTEGER, conversion);
@@ -1005,12 +969,6 @@ static int unary_arithmetic_operator(pigen_unary_operator operator)
 {
 	return operator == PIGEN_UNARY_POSITIVE ||
 		operator == PIGEN_UNARY_NEGATE;
-}
-
-static int unary_reduction_operator(pigen_unary_operator operator)
-{
-	return operator >= PIGEN_UNARY_REDUCTION_AND &&
-		operator <= PIGEN_UNARY_REDUCTION_XNOR;
 }
 
 static int binary_arithmetic_operator(pigen_binary_operator operator)
@@ -1684,7 +1642,6 @@ static int data_type_admits_logical_use(const pigen_semantic_model *model,
 	pigen_data_type_id data_type)
 {
 	return pigen_data_type_is_integral(model, data_type) ||
-		data_type_is_byte(model, data_type) ||
 		pigen_data_type_numerical_interpretation(model, data_type) ==
 			PIGEN_NUMERICAL_EXACT_INTEGER;
 }
@@ -1724,15 +1681,6 @@ int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
 		else if (unary_boolean_result(operator))
 			result = pigen_data_type_boolean(model);
 		else return 0;
-	}
-	else if (data_type_is_byte(model, operand))
-	{
-		if (operator != PIGEN_UNARY_BITWISE_NOT &&
-			operator != PIGEN_UNARY_LOGICAL_NOT &&
-			!unary_reduction_operator(operator))
-			return 0;
-		result = unary_boolean_result(operator) ? pigen_data_type_boolean(model) :
-			operand;
 	}
 	else if (!pigen_data_type_is_integral(model, operand))
 		return 0;
@@ -1924,17 +1872,6 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 				pigen_data_type_boolean(model) : common;
 		}
 	}
-	else if (data_type_is_byte(model, left) || data_type_is_byte(model, right))
-	{
-		if (!data_type_is_byte(model, left) || !data_type_is_byte(model, right) ||
-			(!binary_bitwise_operator(operator) &&
-			!binary_equality_operator(operator) &&
-			!binary_logical_operator(operator)))
-			return 0;
-		result = binary_boolean_result(operator) ?
-			pigen_data_type_boolean(model) :
-			left.index == right.index ? left : pigen_data_type_byte(model);
-	}
 	else
 	{
 		if (!pigen_data_type_is_integral(model, left) ||
@@ -2003,15 +1940,6 @@ int pigen_data_type_resolve_conditional_operation(
 			effective_false = effective_true;
 			result = effective_true;
 		}
-	}
-	else if (data_type_is_byte(model, when_true) ||
-		data_type_is_byte(model, when_false))
-	{
-		if (!data_type_is_byte(model, when_true) ||
-			!data_type_is_byte(model, when_false))
-			return 0;
-		result = when_true.index == when_false.index ? when_true :
-			pigen_data_type_byte(model);
 	}
 	else
 	{

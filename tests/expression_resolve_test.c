@@ -89,11 +89,11 @@ int main(void)
 		"ua + 1\n"
 		"sa + ua\n"
 		"uint[8]'(sa)\n"
-		"byte'(ua)\n"
+		"bit[8]'(ua)\n"
 		"8'hff + ua\n"
 		"uint[8]'(ua)\n"
 		"uint[8]'(bp)\n"
-		"byte'(8'hff)\n"
+		"bit[8]'(8'hff)\n"
 		"ua << sh\n"
 		"ua << ds\n"
 		"ua << 4294967296\n"
@@ -122,7 +122,7 @@ int main(void)
 	pigen_symbol_id signed_b;
 	pigen_symbol_id signed_c;
 	pigen_symbol_id unsigned_a;
-	pigen_symbol_id byte_parameter;
+	pigen_symbol_id vector_parameter;
 	pigen_symbol_id shift_amount;
 	pigen_symbol_id symbolic_shift_amount;
 	pigen_signal_id left_signal;
@@ -147,7 +147,7 @@ int main(void)
 	pigen_syntax_expr_id literal_add_syntax;
 	pigen_syntax_expr_id mixed_add_syntax;
 	pigen_syntax_expr_id integer_cast_syntax;
-	pigen_syntax_expr_id byte_cast_syntax;
+	pigen_syntax_expr_id vector_cast_syntax;
 	pigen_syntax_expr_id invalid_mixed_syntax;
 	pigen_syntax_expr_id identity_cast_syntax;
 	pigen_syntax_expr_id constant_cast_syntax;
@@ -173,7 +173,7 @@ int main(void)
 	pigen_expr_id literal_add;
 	pigen_expr_id mixed_add;
 	pigen_expr_id integer_cast;
-	pigen_expr_id byte_cast;
+	pigen_expr_id vector_cast;
 	pigen_expr_id identity_cast;
 	pigen_expr_id runtime_constant_cast;
 	pigen_expr_id constant_cast;
@@ -306,14 +306,20 @@ int main(void)
 			(size_t)(strstr(text, "ua + 1") - text) + 2},
 		(pigen_syntax_id){6});
 	assert(pigen_symbol_declare(&model, scope, PIGEN_SYMBOL_PARAMETER,
-		pigen_data_type_byte(&model),
+		pigen_data_type_from_spelling(&model,
+			(pigen_source_span){source,
+				(size_t)(strstr(text, "bit") - text),
+				(size_t)(strstr(text, "bit") - text) + strlen("bit")},
+			PIGEN_SIGN_UNSIGNED,
+			&(pigen_data_type_argument){PIGEN_DATA_TYPE_ARGUMENT_COUNT,
+				{.count = width_8}}, 1),
 		(pigen_source_span){source,
 			(size_t)(strstr(text, "bp)") - text),
 			(size_t)(strstr(text, "bp)") - text) + 2},
 		(pigen_source_span){source,
 			(size_t)(strstr(text, "bp)") - text),
 			(size_t)(strstr(text, "bp)") - text) + 2},
-		&byte_parameter, &shadowed) == PIGEN_DECLARE_OK);
+		&vector_parameter, &shadowed) == PIGEN_DECLARE_OK);
 	shift_amount = declare_signal(&model, module, scope, unsigned_11,
 		(pigen_source_span){source,
 			(size_t)(strstr(text, "sh\n") - text),
@@ -388,7 +394,7 @@ int main(void)
 	(void)signed_b;
 	(void)signed_c;
 	(void)unsigned_a;
-	(void)byte_parameter;
+	(void)vector_parameter;
 	(void)shift_amount;
 	(void)symbolic_shift_amount;
 
@@ -412,17 +418,17 @@ int main(void)
 	literal_add_syntax = parse(&preprocessed, &syntax, 79, 82);
 	mixed_add_syntax = parse(&preprocessed, &syntax, 82, 85);
 	integer_cast_syntax = parse(&preprocessed, &syntax, 85, 93);
-	byte_cast_syntax = parse(&preprocessed, &syntax, 93, 98);
-	invalid_mixed_syntax = parse(&preprocessed, &syntax, 98, 101);
-	identity_cast_syntax = parse(&preprocessed, &syntax, 101, 109);
-	constant_cast_syntax = parse(&preprocessed, &syntax, 109, 117);
-	invalid_cast_syntax = parse(&preprocessed, &syntax, 117, 122);
-	oversized_shift_syntax = parse(&preprocessed, &syntax, 122, 125);
-	symbolic_shift_syntax = parse(&preprocessed, &syntax, 125, 128);
-	enormous_shift_syntax[0] = parse(&preprocessed, &syntax, 128, 131);
-	enormous_shift_syntax[1] = parse(&preprocessed, &syntax, 131, 134);
-	enormous_shift_syntax[2] = parse(&preprocessed, &syntax, 134, 137);
-	symbolic_power_syntax = parse(&preprocessed, &syntax, 137, 140);
+	vector_cast_syntax = parse(&preprocessed, &syntax, 93, 101);
+	invalid_mixed_syntax = parse(&preprocessed, &syntax, 101, 104);
+	identity_cast_syntax = parse(&preprocessed, &syntax, 104, 112);
+	constant_cast_syntax = parse(&preprocessed, &syntax, 112, 120);
+	invalid_cast_syntax = parse(&preprocessed, &syntax, 120, 128);
+	oversized_shift_syntax = parse(&preprocessed, &syntax, 128, 131);
+	symbolic_shift_syntax = parse(&preprocessed, &syntax, 131, 134);
+	enormous_shift_syntax[0] = parse(&preprocessed, &syntax, 134, 137);
+	enormous_shift_syntax[1] = parse(&preprocessed, &syntax, 137, 140);
+	enormous_shift_syntax[2] = parse(&preprocessed, &syntax, 140, 143);
+	symbolic_power_syntax = parse(&preprocessed, &syntax, 143, 146);
 	{
 		pigen_analyzed_expr_arena analyzed_arena = {0};
 		pigen_analyzed_expr_id analyzed;
@@ -558,9 +564,9 @@ int main(void)
 	assert(known->data_type.index == unsigned_8.index);
 	assert(pigen_lvalue_resolve(&model, integer_cast).index == PIGEN_INVALID_ID);
 
-	byte_cast = pigen_resolve_expression(&syntax, &model, scope,
-		byte_cast_syntax, &policy, &semantic_error);
-	known = pigen_expr_get(&model, byte_cast);
+	vector_cast = pigen_resolve_expression(&syntax, &model, scope,
+		vector_cast_syntax, &policy, &semantic_error);
+	known = pigen_expr_get(&model, vector_cast);
 	assert(known && known->kind == PIGEN_EXPR_CONVERSION);
 	assert(known->as.conversion.conversion.kind ==
 		PIGEN_CONVERSION_INTEGER_TO_VECTOR);

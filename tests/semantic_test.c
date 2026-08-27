@@ -166,9 +166,7 @@ int main(void)
 		"bit\n"
 		"int\n"
 		"uint\n"
-		"byte\n"
-		"byte_alias_a\n"
-		"byte_alias_b\n";
+		"byte\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "scope.pigen", text,
 		strlen(text));
@@ -177,6 +175,7 @@ int main(void)
 	pigen_source_span second_value = occurrence(source, text, "value", 1);
 	pigen_source_span third_value = occurrence(source, text, "value", 2);
 	pigen_source_span range = occurrence(source, text, "[7:0]", 0);
+	pigen_source_span byte_span = occurrence(source, text, "byte", 0);
 	pigen_semantic_model model;
 	pigen_packed_dimension dimension;
 	pigen_packed_dimension matrix_dimensions[2];
@@ -194,9 +193,9 @@ int main(void)
 	pigen_expr_id second_shape_index;
 	pigen_lvalue_id module_value_lvalue;
 	pigen_lvalue_id scalar_module_value_lvalue;
-	pigen_expr_id scalar_byte_value;
+	pigen_expr_id scalar_vector_value;
 	pigen_expr_id scalar_logic_value;
-	pigen_bit_state zero_byte[8] = {0};
+	pigen_bit_state zero_vector[8] = {0};
 	pigen_data_type_id unsized_integer_data_type;
 	pigen_data_type_id aliased_unsized_integer_type;
 	pigen_data_type_id signed_8;
@@ -228,13 +227,11 @@ int main(void)
 	pigen_integer_id negative_three;
 	pigen_integer_id beyond_size;
 	pigen_integer_id beyond_size_odd;
-	pigen_data_type_id pigen_byte;
-	pigen_data_type_id byte_alias_a;
-	pigen_data_type_id byte_alias_b;
 	pigen_data_type_id signed_integer_alias;
 	pigen_data_type_id boolean_type;
-	pigen_data_type_id byte_type;
-	pigen_data_type_id same_byte_type;
+	pigen_data_type_id bit_8_type;
+	pigen_data_type_id vector_8_type;
+	pigen_data_type_id same_vector_8_type;
 	pigen_data_type_id matrix_type;
 	pigen_data_type_id row_type;
 	pigen_data_type_id element_type;
@@ -258,7 +255,6 @@ int main(void)
 	pigen_const_expr_id nested_width_maximum;
 	pigen_const_expr_id zero_width;
 	pigen_const_expr_id symbolic_width;
-	pigen_const_expr_id nonintegral_width;
 	const pigen_const_expr_id *maximum_children;
 	pigen_unary_resolution unary_resolution;
 	pigen_binary_resolution binary_resolution;
@@ -278,8 +274,6 @@ int main(void)
 	pigen_symbol_id module_symbol;
 	pigen_symbol_id unsized_integer_alias_symbol;
 	pigen_symbol_id signed_integer_alias_symbol;
-	pigen_symbol_id byte_alias_a_symbol;
-	pigen_symbol_id byte_alias_b_symbol;
 	pigen_symbol_id module_value;
 	pigen_symbol_id pipeline_value;
 	pigen_symbol_id first_local;
@@ -394,18 +388,24 @@ int main(void)
 	assert(pigen_data_type_exact_value(&model, exact_one).index == one.index);
 	assert(pigen_data_type_numerical_interpretation(&model, exact_one) ==
 		PIGEN_NUMERICAL_EXACT_INTEGER);
-	pigen_byte = pigen_data_type_byte(&model);
 	bit_type = pigen_data_type_from_spelling(&model,
 		occurrence(source, text, "bit", 0), PIGEN_SIGN_UNSIGNED, NULL, 0);
+	bit_8_type = pigen_data_type_from_spelling(&model,
+		occurrence(source, text, "bit", 0), PIGEN_SIGN_UNSIGNED,
+		&type_argument, 1);
 	assert(pigen_data_type_from_spelling(&model,
 		occurrence(source, text, "int", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
 		PIGEN_INVALID_ID);
 	assert(pigen_data_type_from_spelling(&model,
 		occurrence(source, text, "uint", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
 		PIGEN_INVALID_ID);
-	assert(pigen_data_type_from_spelling(&model,
-		occurrence(source, text, "byte", 0), PIGEN_SIGN_IMPLICIT, NULL, 0).index ==
-		pigen_byte.index);
+	assert(pigen_data_type_spelling_domain(&model, byte_span) ==
+		PIGEN_TYPE_SPELLING_SYSTEMVERILOG);
+	assert(pigen_data_type_from_spelling(&model, byte_span,
+		PIGEN_SIGN_IMPLICIT, NULL, 0).index == PIGEN_INVALID_ID);
+	assert(bit_8_type.index != PIGEN_INVALID_ID);
+	assert(pigen_data_type_domain(&model, bit_8_type) ==
+		PIGEN_TYPE_SPELLING_SYSTEMVERILOG);
 	assert(signed_8.index == same_signed_8.index);
 	assert(signed_8.index != signed_16.index);
 	assert(signed_8.index != unsigned_8.index);
@@ -413,25 +413,20 @@ int main(void)
 		PIGEN_NUMERICAL_SIGNED_INTEGER);
 	assert(pigen_data_type_numerical_interpretation(&model, unsigned_8) ==
 		PIGEN_NUMERICAL_UNSIGNED_INTEGER);
-	assert(pigen_data_type_numerical_interpretation(&model, pigen_byte) ==
-		PIGEN_NUMERICAL_NONE);
 	assert(pigen_data_type_state_domain(&model, signed_8) ==
 		PIGEN_DATA_TYPE_STATE_TWO);
 	assert(pigen_data_type_state_domain(&model, unsigned_8) ==
 		PIGEN_DATA_TYPE_STATE_TWO);
-	assert(pigen_data_type_state_domain(&model, pigen_byte) ==
+	assert(pigen_data_type_state_domain(&model, bit_8_type) ==
 		PIGEN_DATA_TYPE_STATE_TWO);
-	assert(pigen_const_expr_get(&model,
-		pigen_data_type_packed_width(&model, pigen_byte))->as.integer == 8);
+	assert(evaluate_width(&model,
+		pigen_data_type_packed_width(&model, bit_8_type)) == 8);
 	assert(pigen_data_type_packed_element(&model, signed_8).index ==
 		bit_type.index);
-	assert(pigen_data_type_packed_element(&model, pigen_byte).index ==
+	assert(pigen_data_type_packed_element(&model, bit_8_type).index ==
 		bit_type.index);
 	assert(pigen_data_type_signed_integer(&model,
 		INVALID_ID(pigen_const_expr_id)).index == PIGEN_INVALID_ID);
-	nonintegral_width = pigen_const_expr_intern_integer(&model, 8, pigen_byte);
-	assert(pigen_data_type_signed_integer(&model, nonintegral_width).index ==
-		PIGEN_INVALID_ID);
 	assert(pigen_data_type_resolve_assignment_conversion(&model,
 		signed_8, signed_8, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_IDENTITY);
@@ -448,7 +443,7 @@ int main(void)
 		signed_8, unsigned_8, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_INVALID);
 	assert(!pigen_data_type_resolve_assignment_conversion(&model,
-		pigen_byte, unsigned_8, &conversion));
+		bit_8_type, unsigned_8, &conversion));
 	assert(!pigen_data_type_resolve_assignment_conversion(&model,
 		INVALID_ID(pigen_data_type_id), signed_8, &conversion));
 	assert(!pigen_data_type_resolve_assignment_conversion(&model,
@@ -462,21 +457,21 @@ int main(void)
 	assert(conversion.source_data_type.index == signed_8.index);
 	assert(conversion.target_data_type.index == unsigned_12.index);
 	assert(pigen_data_type_resolve_explicit_conversion(&model,
-		pigen_byte, unsigned_8, &conversion));
+		bit_8_type, unsigned_8, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_VECTOR_TO_INTEGER);
 	assert(pigen_data_type_resolve_explicit_conversion(&model,
-		pigen_byte, signed_12, &conversion));
+		bit_8_type, signed_12, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_VECTOR_TO_INTEGER);
 	assert(pigen_data_type_resolve_explicit_conversion(&model,
-		unsigned_8, pigen_byte, &conversion));
+		unsigned_8, bit_8_type, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_INTEGER_TO_VECTOR);
 	assert(pigen_data_type_resolve_explicit_conversion(&model,
-		unsigned_12, pigen_byte, &conversion));
+		unsigned_12, bit_8_type, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_INTEGER_TO_VECTOR);
 	assert(!pigen_data_type_resolve_explicit_conversion(&model,
-		INVALID_ID(pigen_data_type_id), pigen_byte, &conversion));
+		INVALID_ID(pigen_data_type_id), bit_8_type, &conversion));
 	assert(!pigen_data_type_resolve_explicit_conversion(&model,
-		pigen_byte, signed_8, NULL));
+		bit_8_type, signed_8, NULL));
 
 	/* Pigen numerical operations derive intrinsic, lossless result types. */
 	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
@@ -787,22 +782,20 @@ int main(void)
 	assert_numerical_width(&model,
 		conditional_resolution.operation.result_data_type,
 		PIGEN_NUMERICAL_UNSIGNED_INTEGER, 2);
-	assert(!pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_ADD,
-		pigen_byte, pigen_byte, &binary_resolution));
 	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_AND, pigen_byte, pigen_byte,
+		PIGEN_BINARY_BITWISE_AND, bit_8_type, bit_8_type,
 		&binary_resolution));
 	assert(binary_resolution.operation.result_data_type.index ==
-		pigen_byte.index);
+		bit_8_type.index);
 	assert(pigen_data_type_resolve_unary_operation(&model,
-		PIGEN_UNARY_REDUCTION_XOR, pigen_byte, &unary_resolution));
+		PIGEN_UNARY_REDUCTION_XOR, bit_8_type, &unary_resolution));
 	assert(unary_resolution.operation.result_data_type.index ==
 		boolean_type.index);
 	assert(pigen_data_type_resolve_assignment_conversion(&model,
 		exact_three, unsigned_8, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_EXACT_INTEGER);
 	assert(pigen_data_type_resolve_explicit_conversion(&model,
-		exact_three, pigen_byte, &conversion));
+		exact_three, bit_8_type, &conversion));
 	assert(conversion.kind == PIGEN_CONVERSION_EXACT_INTEGER);
 	assert(pigen_data_type_packed_width(&model, exact_three).index ==
 		PIGEN_INVALID_ID);
@@ -879,10 +872,10 @@ int main(void)
 		pigen_data_type_packed_select(&model, signed_8, width_8, width_8,
 			PIGEN_SEMANTIC_SELECT_RANGE)) == PIGEN_DATA_TYPE_STATE_TWO);
 	assert(pigen_data_type_numerical_interpretation(&model,
-		pigen_data_type_packed_select(&model, pigen_byte, width_8, width_8,
+		pigen_data_type_packed_select(&model, bit_8_type, width_8, width_8,
 			PIGEN_SEMANTIC_SELECT_RANGE)) == PIGEN_NUMERICAL_SYSTEMVERILOG);
 	assert(pigen_data_type_state_domain(&model,
-		pigen_data_type_packed_select(&model, pigen_byte, width_8, width_8,
+		pigen_data_type_packed_select(&model, bit_8_type, width_8, width_8,
 			PIGEN_SEMANTIC_SELECT_RANGE)) == PIGEN_DATA_TYPE_STATE_TWO);
 	signal_dimensions[0] = (pigen_shape_dimension){
 		PIGEN_SHAPE_DIMENSION_COUNT,
@@ -931,14 +924,14 @@ int main(void)
 	dimension = (pigen_packed_dimension){
 		pigen_expr_constant(&model, left_bound),
 		pigen_expr_constant(&model, right_bound)};
-	byte_type = pigen_data_type_implicit(&model, PIGEN_SIGN_UNSIGNED,
+	vector_8_type = pigen_data_type_implicit(&model, PIGEN_SIGN_UNSIGNED,
 		&dimension, 1);
-	same_byte_type = pigen_data_type_implicit(&model, PIGEN_SIGN_UNSIGNED,
-		&dimension, 1);
-	assert(byte_type.index != PIGEN_INVALID_ID);
-	assert(byte_type.index == same_byte_type.index);
-	assert(pigen_data_type_dimension_count(&model, byte_type) == 1);
-	assert(pigen_data_type_dimensions(&model, byte_type)->left.index ==
+	same_vector_8_type = pigen_data_type_implicit(&model,
+		PIGEN_SIGN_UNSIGNED, &dimension, 1);
+	assert(vector_8_type.index != PIGEN_INVALID_ID);
+	assert(vector_8_type.index == same_vector_8_type.index);
+	assert(pigen_data_type_dimension_count(&model, vector_8_type) == 1);
+	assert(pigen_data_type_dimensions(&model, vector_8_type)->left.index ==
 		dimension.left.index);
 	matrix_dimensions[0] = dimension;
 	matrix_dimensions[1] = dimension;
@@ -971,18 +964,9 @@ int main(void)
 	{
 		const pigen_packed_dimension *selected_dimensions =
 			pigen_data_type_dimensions(&model, selected_type);
-		const pigen_const_expr *upper =
-			pigen_const_expr_get(&model, selected_dimensions[0].left);
-		const pigen_const_expr *width;
-		assert(upper && upper->kind == PIGEN_CONST_EXPR_BINARY &&
-			upper->as.binary.operation.operator == PIGEN_BINARY_SUBTRACT);
-		width = pigen_const_expr_get(&model, upper->as.binary.left);
-		assert(width && width->kind == PIGEN_CONST_EXPR_SELECT_WIDTH &&
-			width->as.select_width.kind == PIGEN_SEMANTIC_SELECT_RANGE &&
-			width->as.select_width.left.index ==
-				pigen_expr_constant(&model, left_bound).index &&
-			width->as.select_width.right.index ==
-				pigen_expr_constant(&model, right_bound).index);
+
+		assert(evaluate_width(&model,
+			pigen_data_type_packed_width(&model, selected_type)) == 64);
 		assert(selected_dimensions[1].left.index == dimension.left.index);
 		assert(selected_dimensions[1].right.index == dimension.right.index);
 	}
@@ -1021,38 +1005,39 @@ int main(void)
 	mixed_concat_type = pigen_data_type_concatenation(&model, concat_types, 2);
 	assert(pigen_data_type_state_domain(&model, mixed_concat_type) ==
 		PIGEN_DATA_TYPE_STATE_FOUR);
-	concat_types[0] = pigen_byte;
-	concat_types[1] = pigen_byte;
+	concat_types[0] = bit_8_type;
+	concat_types[1] = bit_8_type;
 	mixed_concat_type = pigen_data_type_concatenation(&model, concat_types, 2);
 	assert(pigen_data_type_numerical_interpretation(&model, mixed_concat_type) ==
 		PIGEN_NUMERICAL_SYSTEMVERILOG);
 	{
-		const pigen_packed_dimension *byte_concat_dimension =
+		const pigen_packed_dimension *vector_concat_dimension =
 			pigen_data_type_dimensions(&model, mixed_concat_type);
-		const pigen_const_expr *byte_concat_upper;
-		const pigen_const_expr *byte_concat_sum;
-		const pigen_const_expr_id *byte_concat_terms;
+		const pigen_const_expr *vector_concat_upper;
+		const pigen_const_expr *vector_concat_sum;
+		const pigen_const_expr_id *vector_concat_terms;
 
 		assert(pigen_data_type_dimension_count(&model, mixed_concat_type) == 1);
 		assert(pigen_const_expr_get(&model,
 			pigen_data_type_packed_width(&model, mixed_concat_type))->kind ==
 			PIGEN_CONST_EXPR_SELECT_WIDTH);
-		byte_concat_upper = pigen_const_expr_get(&model,
-			byte_concat_dimension->left);
-		assert(byte_concat_upper &&
-			byte_concat_upper->kind == PIGEN_CONST_EXPR_BINARY &&
-			byte_concat_upper->as.binary.operation.operator ==
+		vector_concat_upper = pigen_const_expr_get(&model,
+			vector_concat_dimension->left);
+		assert(vector_concat_upper &&
+			vector_concat_upper->kind == PIGEN_CONST_EXPR_BINARY &&
+			vector_concat_upper->as.binary.operation.operator ==
 				PIGEN_BINARY_SUBTRACT);
-		byte_concat_sum = pigen_const_expr_get(&model,
-			byte_concat_upper->as.binary.left);
-		assert(byte_concat_sum &&
-			byte_concat_sum->kind == PIGEN_CONST_EXPR_WIDTH_SUM &&
-			byte_concat_sum->as.sequence.child_count == 2);
-		byte_concat_terms = pigen_const_expr_children(&model,
-			byte_concat_sum->as.sequence.first_child,
-			byte_concat_sum->as.sequence.child_count);
-		assert(byte_concat_terms && byte_concat_terms[0].index == width_8.index &&
-			byte_concat_terms[1].index == width_8.index);
+		vector_concat_sum = pigen_const_expr_get(&model,
+			vector_concat_upper->as.binary.left);
+		assert(vector_concat_sum &&
+			vector_concat_sum->kind == PIGEN_CONST_EXPR_WIDTH_SUM &&
+			vector_concat_sum->as.sequence.child_count == 2);
+		vector_concat_terms = pigen_const_expr_children(&model,
+			vector_concat_sum->as.sequence.first_child,
+			vector_concat_sum->as.sequence.child_count);
+		assert(vector_concat_terms &&
+			evaluate_width(&model, vector_concat_terms[0]) == 8 &&
+			evaluate_width(&model, vector_concat_terms[1]) == 8);
 	}
 	assert(pigen_data_type_packed_width(&model, matrix_type).index !=
 		PIGEN_INVALID_ID);
@@ -1140,95 +1125,8 @@ int main(void)
 		whole, &signed_integer_alias_symbol, NULL) == PIGEN_DECLARE_OK);
 	signed_integer_alias = pigen_data_type_alias(&model,
 		signed_integer_alias_symbol, signed_8, PIGEN_SIGN_IMPLICIT, NULL, 0);
-	assert(pigen_symbol_declare(&model, model.compilation_scope,
-		PIGEN_SYMBOL_TYPEDEF, pigen_byte,
-		occurrence(source, text, "byte_alias_a", 0), whole,
-		&byte_alias_a_symbol, NULL) == PIGEN_DECLARE_OK);
-	byte_alias_a = pigen_data_type_alias(&model, byte_alias_a_symbol,
-		pigen_byte, PIGEN_SIGN_IMPLICIT, NULL, 0);
-	assert(pigen_symbol_declare(&model, model.compilation_scope,
-		PIGEN_SYMBOL_TYPEDEF, pigen_byte,
-		occurrence(source, text, "byte_alias_b", 0), whole,
-		&byte_alias_b_symbol, NULL) == PIGEN_DECLARE_OK);
-	byte_alias_b = pigen_data_type_alias(&model, byte_alias_b_symbol,
-		pigen_byte, PIGEN_SIGN_IMPLICIT, NULL, 0);
 	assert(aliased_unsized_integer_type.index != PIGEN_INVALID_ID);
 	assert(signed_integer_alias.index != PIGEN_INVALID_ID);
-	assert(byte_alias_a.index != PIGEN_INVALID_ID);
-	assert(byte_alias_b.index != PIGEN_INVALID_ID);
-	assert(byte_alias_a.index != byte_alias_b.index);
-	assert(pigen_data_type_domain(&model, byte_alias_a) ==
-		PIGEN_TYPE_SPELLING_PIGEN);
-	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_AND, byte_alias_a, byte_alias_a, &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert(binary_resolution.operation.result_data_type.index ==
-		byte_alias_a.index);
-	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_AND, byte_alias_a, byte_alias_b, &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_b, byte_alias_b);
-	assert(binary_resolution.operation.left_data_type.index ==
-		byte_alias_a.index);
-	assert(binary_resolution.operation.right_data_type.index ==
-		byte_alias_b.index);
-	assert(binary_resolution.operation.result_data_type.index == pigen_byte.index);
-	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_BITWISE_OR, byte_alias_a, pigen_byte, &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(binary_resolution.operation.result_data_type.index == pigen_byte.index);
-	assert(pigen_data_type_resolve_binary_operation(&model, PIGEN_BINARY_EQUAL,
-		byte_alias_a, byte_alias_b, &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_b, byte_alias_b);
-	assert(binary_resolution.operation.result_data_type.index ==
-		boolean_type.index);
-	assert(pigen_data_type_resolve_binary_operation(&model,
-		PIGEN_BINARY_LOGICAL_OR, byte_alias_a, pigen_byte, &binary_resolution));
-	assert_conversion(binary_resolution.left_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert_conversion(binary_resolution.right_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(binary_resolution.operation.result_data_type.index ==
-		boolean_type.index);
-	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
-		byte_alias_a, byte_alias_a, &conditional_resolution));
-	assert_conversion(conditional_resolution.when_true_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert_conversion(conditional_resolution.when_false_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert(conditional_resolution.operation.result_data_type.index ==
-		byte_alias_a.index);
-	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
-		byte_alias_a, byte_alias_b, &conditional_resolution));
-	assert_conversion(conditional_resolution.when_true_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert_conversion(conditional_resolution.when_false_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_b, byte_alias_b);
-	assert(conditional_resolution.operation.when_true_data_type.index ==
-		byte_alias_a.index);
-	assert(conditional_resolution.operation.when_false_data_type.index ==
-		byte_alias_b.index);
-	assert(conditional_resolution.operation.result_data_type.index ==
-		pigen_byte.index);
-	assert(pigen_data_type_resolve_conditional_operation(&model, signed_8,
-		byte_alias_a, pigen_byte, &conditional_resolution));
-	assert_conversion(conditional_resolution.when_true_conversion,
-		PIGEN_CONVERSION_IDENTITY, byte_alias_a, byte_alias_a);
-	assert_conversion(conditional_resolution.when_false_conversion,
-		PIGEN_CONVERSION_IDENTITY, pigen_byte, pigen_byte);
-	assert(conditional_resolution.operation.result_data_type.index ==
-		pigen_byte.index);
 	assert(pigen_data_type_alias_target(&model,
 		aliased_unsized_integer_type).index ==
 		unsized_integer_data_type.index);
@@ -1332,17 +1230,17 @@ int main(void)
 		PIGEN_INVALID_ID);
 
 	assert(pigen_symbol_declare(&model, module_scope, PIGEN_SYMBOL_SIGNAL,
-		byte_type, first_value, whole, &module_value, &shadowed) == PIGEN_DECLARE_OK);
+		vector_8_type, first_value, whole, &module_value, &shadowed) == PIGEN_DECLARE_OK);
 	assert(shadowed.index == PIGEN_INVALID_ID);
 	module_value_signal = pigen_signal_add(&model, (pigen_syntax_id){1},
-		module, module_value, byte_type, signal_shape,
+		module, module_value, vector_8_type, signal_shape,
 		INVALID_ID(pigen_expr_id),
 		PIGEN_TRANSFER_TYPE_LOGIC, PIGEN_SEMANTIC_INTERNAL, whole);
 	assert(module_value_signal.index != PIGEN_INVALID_ID);
 	assert(pigen_signal_get(&model, module_value_signal)->shape.index ==
 		signal_shape.index);
 	module_value_expression = pigen_expr_add_symbol(&model, module_value,
-		byte_type, first_value);
+		vector_8_type, first_value);
 	assert(pigen_expr_get(&model, module_value_expression)->shape.index ==
 		signal_shape.index);
 	shaped_concatenation_children[0] = module_value_expression;
@@ -1352,13 +1250,13 @@ int main(void)
 	first_shape_index = pigen_expr_add_index(&model, module_value_expression,
 		right_bound, first_value);
 	assert(pigen_expr_get(&model, first_shape_index)->data_type.index ==
-		byte_type.index);
+		vector_8_type.index);
 	assert(pigen_expr_get(&model, first_shape_index)->shape.index ==
 		tail_shape.index);
 	second_shape_index = pigen_expr_add_index(&model, first_shape_index,
 		right_bound, first_value);
 	assert(pigen_expr_get(&model, second_shape_index)->data_type.index ==
-		byte_type.index);
+		vector_8_type.index);
 	assert(pigen_expr_get(&model, second_shape_index)->shape.index ==
 		scalar_shape.index);
 	assert(pigen_expr_add_select(&model, module_value_expression, left_bound,
@@ -1384,17 +1282,17 @@ int main(void)
 	test_process = pigen_process_add(&model, (pigen_syntax_id){9}, module,
 		test_domain, module_value_expression, whole);
 	assert(test_process.index != PIGEN_INVALID_ID);
-	scalar_byte_value = pigen_expr_add_bits(&model, zero_byte, 8, byte_type,
+	scalar_vector_value = pigen_expr_add_bits(&model, zero_vector, 8, vector_8_type,
 		first_value);
-	assert(scalar_byte_value.index != PIGEN_INVALID_ID);
+	assert(scalar_vector_value.index != PIGEN_INVALID_ID);
 	assert(pigen_transfer_add(&model, (pigen_syntax_id){10}, module,
-		test_process, module_value_lvalue, scalar_byte_value,
+		test_process, module_value_lvalue, scalar_vector_value,
 		(pigen_predicate_id){0}, test_domain, NULL, 0, whole).index ==
 		PIGEN_INVALID_ID);
 	scalar_module_value_lvalue = pigen_lvalue_resolve(&model,
 		second_shape_index);
 	assert(scalar_module_value_lvalue.index != PIGEN_INVALID_ID);
-	scalar_logic_value = pigen_expr_add_bits(&model, zero_byte, 8,
+	scalar_logic_value = pigen_expr_add_bits(&model, zero_vector, 8,
 		sized_logic_type, first_value);
 	assert(scalar_logic_value.index != PIGEN_INVALID_ID);
 	assert(pigen_transfer_add(&model, (pigen_syntax_id){11}, module,
@@ -1402,18 +1300,18 @@ int main(void)
 		(pigen_predicate_id){0}, test_domain, NULL, 0, whole).index ==
 		PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, pipeline_scope, PIGEN_SYMBOL_SIGNAL,
-		byte_type, second_value, whole, &pipeline_value, &shadowed) == PIGEN_DECLARE_OK);
+		vector_8_type, second_value, whole, &pipeline_value, &shadowed) == PIGEN_DECLARE_OK);
 	assert(shadowed.index == module_value.index);
 	pipeline_value_signal = pigen_signal_add(&model, (pigen_syntax_id){2},
-		module, pipeline_value, byte_type, scalar_shape,
+		module, pipeline_value, vector_8_type, scalar_shape,
 		INVALID_ID(pigen_expr_id),
 		PIGEN_TRANSFER_TYPE_LOGIC, PIGEN_SEMANTIC_INTERNAL, whole);
 	assert(pipeline_value_signal.index != PIGEN_INVALID_ID);
 	assert(pigen_symbol_declare(&model, first_stage, PIGEN_SYMBOL_SIGNAL,
-		byte_type, third_value, whole, &first_local, &shadowed) == PIGEN_DECLARE_OK);
+		vector_8_type, third_value, whole, &first_local, &shadowed) == PIGEN_DECLARE_OK);
 	assert(shadowed.index == pipeline_value.index);
 	first_local_signal = pigen_signal_add(&model, (pigen_syntax_id){3},
-		module, first_local, byte_type, scalar_shape,
+		module, first_local, vector_8_type, scalar_shape,
 		INVALID_ID(pigen_expr_id),
 		PIGEN_TRANSFER_TYPE_LOGIC, PIGEN_SEMANTIC_INTERNAL, whole);
 	assert(first_local_signal.index != PIGEN_INVALID_ID);
@@ -1423,9 +1321,9 @@ int main(void)
 	found = pigen_symbol_lookup(&model, second_stage, first_value);
 	assert(found.index == pipeline_value.index);
 	assert(pigen_symbol_declare(&model, pipeline_scope, PIGEN_SYMBOL_SIGNAL,
-		byte_type, third_value, whole, &found, NULL) == PIGEN_DECLARE_DUPLICATE);
+		vector_8_type, third_value, whole, &found, NULL) == PIGEN_DECLARE_DUPLICATE);
 	assert(found.index == pipeline_value.index);
-	assert(model.symbol_count == 8);
+	assert(model.symbol_count == 6);
 	assert(model.signal_count == 3);
 
 	for (i = 0; i < 64; i++)
@@ -1445,7 +1343,7 @@ int main(void)
 		assert(pigen_symbol_declare(&model, child, PIGEN_SYMBOL_TYPEDEF,
 			distinct_type, first_value, whole, NULL, NULL) == PIGEN_DECLARE_OK);
 	}
-	assert(pigen_data_type_dimension_count(&model, byte_type) == 1);
+	assert(pigen_data_type_dimension_count(&model, vector_8_type) == 1);
 	assert(pigen_symbol_get(&model, module_value)->scope.index == module_scope.index);
 	assert(pigen_symbol_lookup(&model, first_stage, second_value).index ==
 		first_local.index);
