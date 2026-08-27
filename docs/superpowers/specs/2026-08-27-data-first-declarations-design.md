@@ -338,8 +338,9 @@ Removal checks prove:
 - no static-specific declaration node, parser helper, or resolver remains;
 - no Pigen `byte` constructor, API, capability branch, test, example, or current
   note remains; and
-- no transfer-first Pigen fixture remains outside historical design/plan
-  documents.
+- no transfer-first Pigen fixture remains in the shared-frontend tests; the
+  production-prototype fixtures remain quarantined until the later vertical
+  lowering cutover.
 
 Finally, `make clean && make verify` must pass. Because production integration
 is deliberately out of scope, this gate proves the shared frontend cutover and
