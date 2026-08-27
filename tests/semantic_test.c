@@ -1194,6 +1194,14 @@ int main(void)
 	assert(pigen_data_type_unqualified_transfer_policy(&model, boolean_type, 0) ==
 		PIGEN_UNQUALIFIED_TRANSFER_STATIC);
 	assert(pigen_data_type_unqualified_transfer_policy(&model,
+		unsized_integer_data_type, 1) == PIGEN_UNQUALIFIED_TRANSFER_STATIC);
+	assert(pigen_data_type_unqualified_transfer_policy(&model,
+		unsized_integer_data_type, 0) == PIGEN_UNQUALIFIED_TRANSFER_STATIC);
+	assert(pigen_data_type_unqualified_transfer_policy(&model,
+		aliased_unsized_integer_type, 1) == PIGEN_UNQUALIFIED_TRANSFER_STATIC);
+	assert(pigen_data_type_unqualified_transfer_policy(&model,
+		aliased_unsized_integer_type, 0) == PIGEN_UNQUALIFIED_TRANSFER_STATIC);
+	assert(pigen_data_type_unqualified_transfer_policy(&model,
 		signed_integer_alias, 1) == PIGEN_UNQUALIFIED_TRANSFER_ABSTRACT);
 	assert(pigen_data_type_unqualified_transfer_policy(&model,
 		signed_integer_alias, 0) == PIGEN_UNQUALIFIED_TRANSFER_FORBIDDEN);
