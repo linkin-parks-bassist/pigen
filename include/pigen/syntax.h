@@ -11,8 +11,6 @@ typedef enum {
 	PIGEN_SYNTAX_MODULE,
 	PIGEN_SYNTAX_PARAMETER,
 	PIGEN_SYNTAX_TYPEDEF,
-	PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATION,
-	PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR,
 	PIGEN_SYNTAX_SIGNAL_DECLARATION,
 	PIGEN_SYNTAX_SIGNAL_DECLARATOR,
 	PIGEN_SYNTAX_CLOCKED_PROCESS,
@@ -58,6 +56,12 @@ typedef struct {
 } pigen_syntax_signal_declarator;
 
 typedef struct {
+	pigen_transfer_type transfer_type;
+	pigen_syntax_location location;
+	pigen_syntax_expr_id argument;
+} pigen_syntax_transfer_type_occurrence;
+
+typedef struct {
 	pigen_syntax_kind kind;
 	pigen_syntax_location location;
 	pigen_syntax_id parent;
@@ -77,15 +81,9 @@ typedef struct {
 		} type_definition;
 		struct {
 			pigen_syntax_direction direction;
-			pigen_transfer_type transfer_type;
-			pigen_syntax_type_id type;
-		} static_signal_declaration;
-		pigen_syntax_signal_declarator static_signal_declarator;
-		struct {
-			pigen_transfer_type transfer_type;
-			pigen_syntax_direction direction;
-			pigen_syntax_type_id payload;
-			pigen_syntax_expr_id transfer_argument;
+			pigen_syntax_type_id data_type;
+			int has_transfer_type;
+			pigen_syntax_transfer_type_occurrence transfer_type;
 		} signal_declaration;
 		pigen_syntax_signal_declarator signal_declarator;
 		struct {

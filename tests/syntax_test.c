@@ -4,6 +4,12 @@
 
 #include "pigen/syntax.h"
 
+typedef struct {
+	pigen_preprocess_result preprocessed;
+	pigen_syntax_tree tree;
+	pigen_syntax_error error;
+} parsed_fixture;
+
 static int span_is(const pigen_source_manager *sources, pigen_source_span span,
 	const char *expected)
 {
@@ -33,359 +39,436 @@ static int expression_is(const pigen_source_manager *sources,
 	return known && span_is(sources, known->location.source_span, expected);
 }
 
-int main(void)
+static int parse_fixture(pigen_source_manager *sources, const char *name,
+	const char *text, parsed_fixture *fixture)
 {
-	const char casts[] =
+	pigen_source_id source = pigen_source_add(sources, name, text, strlen(text));
+	pigen_preprocess_error preprocess_error = {0};
+
+	assert(source.index != PIGEN_INVALID_ID);
+	assert(pigen_preprocess(sources, source, NULL, &fixture->preprocessed,
+		&preprocess_error));
+	return pigen_parse_syntax(&fixture->preprocessed.expanded, &fixture->tree,
+		&fixture->error);
+}
+
+static void free_fixture(parsed_fixture *fixture)
+{
+	pigen_free_syntax_tree(&fixture->tree);
+	pigen_free_preprocess_result(&fixture->preprocessed);
+	*fixture = (parsed_fixture){0};
+}
+
+static const pigen_syntax_node *fixture_module(const parsed_fixture *fixture)
+{
+	const pigen_syntax_node *root = pigen_syntax_get(&fixture->tree,
+		(pigen_syntax_id){0});
+	pigen_syntax_id child;
+
+	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
+	for (child = root->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&fixture->tree, child);
+		assert(node);
+		if (node->kind == PIGEN_SYNTAX_MODULE) return node;
+		child = node->next_sibling;
+	}
+	return NULL;
+}
+
+static const pigen_syntax_node *find_declarator(const parsed_fixture *fixture,
+	const pigen_syntax_node *module, const char *name,
+	const pigen_syntax_node **declaration)
+{
+	pigen_syntax_id child;
+
+	for (child = module->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&fixture->tree, child);
+		pigen_syntax_id declarator;
+		assert(node);
+		if (node->kind != PIGEN_SYNTAX_SIGNAL_DECLARATION)
+		{
+			child = node->next_sibling;
+			continue;
+		}
+		for (declarator = node->first_child;
+			declarator.index != PIGEN_INVALID_ID; )
+		{
+			const pigen_syntax_node *known = pigen_syntax_get(&fixture->tree,
+				declarator);
+			assert(known && known->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR);
+			if (token_is(&fixture->preprocessed.expanded,
+				known->as.signal_declarator.name, name))
+			{
+				if (declaration) *declaration = node;
+				return known;
+			}
+			declarator = known->next_sibling;
+		}
+		child = node->next_sibling;
+	}
+	return NULL;
+}
+
+static void assert_opaque_without_arena_leakage(pigen_source_manager *sources,
+	const char *name, const char *text)
+{
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const pigen_syntax_node *opaque;
+
+	assert(parse_fixture(sources, name, text, &fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	opaque = pigen_syntax_get(&fixture.tree, module->first_child);
+	assert(opaque && opaque->kind == PIGEN_SYNTAX_OPAQUE);
+	assert(opaque->next_sibling.index == PIGEN_INVALID_ID);
+	assert(span_is(sources, opaque->location.source_span, text));
+	assert(fixture.tree.node_count == 3);
+	assert(fixture.tree.expressions.node_count == 0);
+	assert(fixture.tree.expressions.child_count == 0);
+	assert(fixture.tree.types.node_count == 0);
+	assert(fixture.tree.types.argument_count == 0);
+	assert(fixture.tree.shape_dimension_count == 0);
+	free_fixture(&fixture);
+}
+
+static void assert_rejected_at(pigen_source_manager *sources, const char *name,
+	const char *text, const char *expected_span)
+{
+	parsed_fixture fixture = {0};
+
+	assert(!parse_fixture(sources, name, text, &fixture));
+	assert(fixture.error.message);
+	assert(span_is(sources, fixture.error.span, expected_span));
+	free_fixture(&fixture);
+}
+
+static void test_cast_syntax(pigen_source_manager *sources)
+{
+	const char text[] =
 		"uint[8]'(value) word_t'(value) logic [15:0]'(value) "
 		"uint[]'(value) logic[15:]'(value) uint[8]'value (value)'(value)";
+	pigen_source_id source = pigen_source_add(sources, "casts.pigen", text,
+		strlen(text));
+	pigen_preprocess_result preprocessed = {0};
+	pigen_preprocess_error preprocess_error = {0};
+	pigen_syntax_expr_arena expressions = {0};
+	pigen_syntax_type_arena types = {0};
+	pigen_syntax_expr_id expression;
+	pigen_syntax_error error = {0};
+	const pigen_syntax_expr *node;
+	const pigen_syntax_type *type;
+	const pigen_syntax_type_argument *argument;
+
+	assert(pigen_preprocess(sources, source, NULL, &preprocessed,
+		&preprocess_error));
+	assert(pigen_parse_expression(&preprocessed.expanded, 0, 8,
+		&expressions, &types, &expression, &error));
+	node = pigen_syntax_expr_get(&expressions, expression);
+	assert(node && node->kind == PIGEN_SYNTAX_EXPR_CAST);
+	type = pigen_syntax_type_get(&types, node->as.cast.type);
+	assert(type && type->argument_count == 1);
+	argument = pigen_syntax_type_arguments(&types, type->first_argument,
+		type->argument_count);
+	assert(argument && argument->kind == PIGEN_SYNTAX_TYPE_COUNT);
+	assert(span_is(sources, node->location.source_span, "uint[8]'(value)"));
+	assert(pigen_parse_expression(&preprocessed.expanded, 8, 13,
+		&expressions, &types, &expression, &error));
+	node = pigen_syntax_expr_get(&expressions, expression);
+	type = pigen_syntax_type_get(&types, node->as.cast.type);
+	assert(type && !type->argument_count &&
+		token_is(&preprocessed.expanded, type->base, "word_t"));
+	assert(pigen_parse_expression(&preprocessed.expanded, 13, 23,
+		&expressions, &types, &expression, &error));
+	node = pigen_syntax_expr_get(&expressions, expression);
+	type = pigen_syntax_type_get(&types, node->as.cast.type);
+	argument = pigen_syntax_type_arguments(&types, type->first_argument,
+		type->argument_count);
+	assert(type && type->argument_count == 1 && argument &&
+		argument->kind == PIGEN_SYNTAX_TYPE_RANGE);
+	assert(!pigen_parse_expression(&preprocessed.expanded, 23, 30,
+		&expressions, &types, &expression, &error));
+	assert(!pigen_parse_expression(&preprocessed.expanded, 30, 39,
+		&expressions, &types, &expression, &error));
+	assert(!pigen_parse_expression(&preprocessed.expanded, 39, 45,
+		&expressions, &types, &expression, &error));
+	assert(!pigen_parse_expression(&preprocessed.expanded, 45, 52,
+		&expressions, &types, &expression, &error));
+	pigen_free_syntax_expr_arena(&expressions);
+	pigen_free_syntax_type_arena(&types);
+	pigen_free_preprocess_result(&preprocessed);
+}
+
+static void test_data_first_declarations(pigen_source_manager *sources)
+{
 	const char text[] =
-		"package prefix; localparam module = 1; endpackage\n"
-		"typedef logic [31:0] global_word_t;\n"
-		"module signals #(parameter WIDTH = 8, DEPTH = WIDTH + 1) (input logic clk, input logic [7:0] samples[0:3], masks[4]);\n"
-		"  localparam PULSE_W = WIDTH * 2;\n"
-		"  typedef bit [3:0] nibble_t;\n"
-		"  buf signed [WIDTH-1:0] left, right;\n"
-		"  fifo packet_t[DEPTH] queue;\n"
-		"  port logic unsigned [15:0] pulse;\n"
-		"  logic [7:0] memory [0:3][4];\n"
-		"  always @(posedge clk) begin\n"
-		"    if (clk)\n"
-		"      if (clk)\n"
-		"        right <= left;\n"
-		"      else\n"
-		"        left <= right;\n"
-		"    pulse <= uint[8]'(pulse);\n"
-		"  end\n"
-		"endmodule\n"
-		"module ordinary #(parameter int X = 1);\n"
-		"  localparam logic [3:0] Y = 4;\n"
-		"  logic [X-1:0] passthrough;\n"
+		"module declarations #(\n"
+		"\tparameter DEPTH = 8,\n"
+		"\tparameter LANES = 2\n"
+		") (\n"
+		"\tinput int[16] sample,\n"
+		"\tinput uint[8] opcode,\n"
+		"\tinput bit flag,\n"
+		"\tinput int[16] buf queued_sample,\n"
+		"\toutput int[16] buf result,\n"
+		"\toutput logic [7:0] ordinary,\n"
+		"\tinput bit[8] wire ansi_scalar, ansi_count[LANES], ansi_range[3:0]\n"
+		");\n"
+		"\ttypedef bit[8] packet_t;\n"
+		"\tint[16] buf left, right;\n"
+		"\tbit[8] wire mask;\n"
+		"\tpacket_t fifo[DEPTH] queue[LANES], alternate[3:0];\n"
+		"\tbit logic tag;\n"
+		"\twire [7:0] adapter_wire;\n"
+		"\toutput reg adapter_reg;\n"
+		"\toutput [7:0] adapter_implicit;\n"
+		"\talways @(posedge flag) begin\n"
+		"\t\tright <= left;\n"
+		"\tend\n"
 		"endmodule\n";
-	const char invalid[] =
-		"module bad; fifo [7:0] queue; endmodule\n";
-	const char rollback[] =
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const pigen_syntax_node *declaration;
+	const pigen_syntax_node *declarator;
+	const pigen_syntax_node *queue_declaration;
+	const pigen_syntax_type *type;
+	const pigen_syntax_type_argument *type_argument;
+	const pigen_syntax_shape_dimension *shape;
+	pigen_syntax_id child;
+	size_t declaration_count = 0;
+	size_t declarator_count = 0;
+	size_t clocked_process_count = 0;
+
+	assert(parse_fixture(sources, "declarations.pigen", text, &fixture));
+	module = fixture_module(&fixture);
+	assert(module && token_is(&fixture.preprocessed.expanded,
+		module->as.module.name, "declarations"));
+	for (child = module->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&fixture.tree, child);
+		pigen_syntax_id declarator_id;
+		assert(node);
+		if (node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION)
+		{
+			declaration_count++;
+			for (declarator_id = node->first_child;
+				declarator_id.index != PIGEN_INVALID_ID; )
+			{
+				const pigen_syntax_node *known = pigen_syntax_get(&fixture.tree,
+					declarator_id);
+				assert(known && known->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR);
+				assert(known->parent.index == child.index);
+				declarator_count++;
+				declarator_id = known->next_sibling;
+			}
+		}
+		else if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS)
+		{
+			const pigen_syntax_node *block = pigen_syntax_get(&fixture.tree,
+				node->first_child);
+			const pigen_syntax_node *assignment;
+			assert(block && block->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK);
+			assignment = pigen_syntax_get(&fixture.tree, block->first_child);
+			assert(assignment && assignment->kind ==
+				PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
+			assert(expression_is(sources, &fixture.tree,
+				assignment->as.nonblocking_assignment.destination, "right"));
+			assert(expression_is(sources, &fixture.tree,
+				assignment->as.nonblocking_assignment.value, "left"));
+			clocked_process_count++;
+		}
+		child = node->next_sibling;
+	}
+	assert(declaration_count == 14);
+	assert(declarator_count == 18);
+	assert(clocked_process_count == 1);
+
+	declarator = find_declarator(&fixture, module, "left", &declaration);
+	assert(declarator && declaration);
+	type = pigen_syntax_type_get(&fixture.tree.types,
+		declaration->as.signal_declaration.data_type);
+	assert(type && token_is(&fixture.preprocessed.expanded, type->base, "int"));
+	assert(type->argument_count == 1);
+	type_argument = pigen_syntax_type_arguments(&fixture.tree.types,
+		type->first_argument, type->argument_count);
+	assert(type_argument && type_argument->kind == PIGEN_SYNTAX_TYPE_COUNT);
+	assert(expression_is(sources, &fixture.tree, type_argument->as.count, "16"));
+	assert(declaration->as.signal_declaration.has_transfer_type);
+	assert(declaration->as.signal_declaration.transfer_type.transfer_type ==
+		PIGEN_TRANSFER_TYPE_BUF);
+	assert(declaration->as.signal_declaration.transfer_type.argument.index ==
+		PIGEN_INVALID_ID);
+
+	declarator = find_declarator(&fixture, module, "queue", &queue_declaration);
+	assert(declarator && queue_declaration);
+	assert(queue_declaration->as.signal_declaration.has_transfer_type);
+	assert(queue_declaration->as.signal_declaration.transfer_type.transfer_type ==
+		PIGEN_TRANSFER_TYPE_FIFO);
+	assert(span_is(sources, queue_declaration->as.signal_declaration.
+		transfer_type.location.source_span, "fifo"));
+	assert(expression_is(sources, &fixture.tree, queue_declaration->as.
+		signal_declaration.transfer_type.argument, "DEPTH"));
+	assert(pigen_syntax_expr_get(&fixture.tree.expressions,
+		queue_declaration->as.signal_declaration.transfer_type.argument)->
+		location.source_span.start != queue_declaration->as.signal_declaration.
+		transfer_type.location.source_span.start);
+	shape = pigen_syntax_declarator_shape_dimensions(&fixture.tree, declarator);
+	assert(shape && declarator->as.signal_declarator.dimension_count == 1);
+	assert(shape[0].form == PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT);
+	assert(expression_is(sources, &fixture.tree, shape[0].as.count, "LANES"));
+	declarator = find_declarator(&fixture, module, "alternate", &declaration);
+	assert(declarator && declaration == queue_declaration);
+	shape = pigen_syntax_declarator_shape_dimensions(&fixture.tree, declarator);
+	assert(shape && declarator->as.signal_declarator.dimension_count == 1);
+	assert(shape[0].form == PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE);
+	assert(expression_is(sources, &fixture.tree, shape[0].as.range.left, "3"));
+	assert(expression_is(sources, &fixture.tree, shape[0].as.range.right, "0"));
+
+	declarator = find_declarator(&fixture, module, "sample", &declaration);
+	assert(declarator && declaration &&
+		!declaration->as.signal_declaration.has_transfer_type);
+	assert(declaration->as.signal_declaration.transfer_type.argument.index ==
+		PIGEN_INVALID_ID);
+	declarator = find_declarator(&fixture, module, "opcode", &declaration);
+	assert(declarator && declaration &&
+		!declaration->as.signal_declaration.has_transfer_type);
+	assert(declaration->as.signal_declaration.transfer_type.argument.index ==
+		PIGEN_INVALID_ID);
+	declarator = find_declarator(&fixture, module, "flag", &declaration);
+	assert(declarator && declaration &&
+		!declaration->as.signal_declaration.has_transfer_type);
+	assert(declaration->as.signal_declaration.transfer_type.argument.index ==
+		PIGEN_INVALID_ID);
+
+	declarator = find_declarator(&fixture, module, "ansi_scalar", &declaration);
+	assert(declarator && declaration);
+	assert(declarator->as.signal_declarator.dimension_count == 0);
+	declarator = pigen_syntax_get(&fixture.tree, declarator->next_sibling);
+	assert(declarator && token_is(&fixture.preprocessed.expanded,
+		declarator->as.signal_declarator.name, "ansi_count"));
+	shape = pigen_syntax_declarator_shape_dimensions(&fixture.tree, declarator);
+	assert(shape && shape[0].form == PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT);
+	assert(expression_is(sources, &fixture.tree, shape[0].as.count, "LANES"));
+	declarator = pigen_syntax_get(&fixture.tree, declarator->next_sibling);
+	assert(declarator && token_is(&fixture.preprocessed.expanded,
+		declarator->as.signal_declarator.name, "ansi_range"));
+	shape = pigen_syntax_declarator_shape_dimensions(&fixture.tree, declarator);
+	assert(shape && shape[0].form == PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE);
+	assert(expression_is(sources, &fixture.tree, shape[0].as.range.left, "3"));
+	assert(expression_is(sources, &fixture.tree, shape[0].as.range.right, "0"));
+	assert(declarator->next_sibling.index == PIGEN_INVALID_ID);
+
+	declarator = find_declarator(&fixture, module, "adapter_wire", &declaration);
+	assert(declarator && declaration &&
+		declaration->as.signal_declaration.has_transfer_type);
+	assert(declaration->as.signal_declaration.transfer_type.transfer_type ==
+		PIGEN_TRANSFER_TYPE_WIRE);
+	assert(span_is(sources, declaration->as.signal_declaration.transfer_type.
+		location.source_span, "wire"));
+	type = pigen_syntax_type_get(&fixture.tree.types,
+		declaration->as.signal_declaration.data_type);
+	assert(type && type->base.index == PIGEN_INVALID_ID &&
+		type->argument_count == 1);
+	type_argument = pigen_syntax_type_arguments(&fixture.tree.types,
+		type->first_argument, type->argument_count);
+	assert(type_argument && type_argument->kind == PIGEN_SYNTAX_TYPE_RANGE);
+	declarator = find_declarator(&fixture, module, "adapter_reg", &declaration);
+	assert(declarator && declaration &&
+		declaration->as.signal_declaration.has_transfer_type);
+	assert(declaration->as.signal_declaration.transfer_type.transfer_type ==
+		PIGEN_TRANSFER_TYPE_REG);
+	type = pigen_syntax_type_get(&fixture.tree.types,
+		declaration->as.signal_declaration.data_type);
+	assert(type && type->base.index == PIGEN_INVALID_ID &&
+		type->argument_count == 0);
+	declarator = find_declarator(&fixture, module, "adapter_implicit",
+		&declaration);
+	assert(declarator && declaration &&
+		!declaration->as.signal_declaration.has_transfer_type);
+	type = pigen_syntax_type_get(&fixture.tree.types,
+		declaration->as.signal_declaration.data_type);
+	assert(type && type->base.index == PIGEN_INVALID_ID &&
+		type->argument_count == 1);
+	type_argument = pigen_syntax_type_arguments(&fixture.tree.types,
+		type->first_argument, type->argument_count);
+	assert(type_argument && type_argument->kind == PIGEN_SYNTAX_TYPE_RANGE);
+
+	free_fixture(&fixture);
+}
+
+static void test_transactional_and_clean_break_syntax(
+	pigen_source_manager *sources)
+{
+	assert_opaque_without_arena_leakage(sources, "ordinary_byte.pigen",
+		"module ordinary_byte; byte ordinary_value; endmodule");
+	assert_opaque_without_arena_leakage(sources, "ordinary_initializer.pigen",
+		"module ordinary_initializer; logic [7:0] ordinary = 8'h5a; endmodule");
+	assert_rejected_at(sources, "old_order.pigen",
+		"module old_order; buf int[16] old_order; endmodule", "buf");
+	assert_rejected_at(sources, "pigen_initializer.pigen",
+		"module pigen_initializer; int[16] buf value = 0; endmodule", "=");
+	assert_rejected_at(sources, "missing_depth.pigen",
+		"module missing_depth; packet_t fifo queue; endmodule", "fifo");
+	assert_rejected_at(sources, "empty_depth.pigen",
+		"module empty_depth; packet_t fifo[] queue; endmodule", "[");
+	assert_rejected_at(sources, "repeated_depth.pigen",
+		"module repeated_depth; packet_t fifo[4][2] queue; endmodule", "[");
+	assert_rejected_at(sources, "unexpected_transfer_argument.pigen",
+		"module unexpected_transfer_argument; bit[8] buf[2] value; endmodule",
+		"[");
+	assert_rejected_at(sources, "unknown_transfer.pigen",
+		"module unknown_transfer; bit[8] mystery value; endmodule", "value");
+	assert_rejected_at(sources, "directionless_dynamic_port.pigen",
+		"module directionless_dynamic_port(bit[8] buf value); endmodule", "bit");
+}
+
+static void test_process_rollback(pigen_source_manager *sources)
+{
+	const char text[] =
 		"module rollback(input logic clk);\n"
-		"  buf bit left, right;\n"
+		"  bit buf left, right;\n"
 		"  always @(posedge clk) begin\n"
 		"    right <= left;\n"
 		"    $display(\"opaque\");\n"
 		"  end\n"
-		"endmodule\n";
-	pigen_source_manager sources = {0};
-	pigen_source_id source = pigen_source_add(&sources, "syntax.pigen", text,
-		strlen(text));
-	pigen_source_id bad_source = pigen_source_add(&sources, "bad.pigen", invalid,
-		strlen(invalid));
-	pigen_source_id rollback_source = pigen_source_add(&sources,
-		"rollback.pigen", rollback, strlen(rollback));
-	pigen_source_id cast_source = pigen_source_add(&sources, "casts.pigen",
-		casts, strlen(casts));
-	pigen_syntax_tree tree = {0};
-	pigen_syntax_tree bad_tree = {0};
-	pigen_syntax_tree rollback_tree = {0};
-	pigen_preprocess_result preprocessed = {0};
-	pigen_preprocess_result bad_preprocessed = {0};
-	pigen_preprocess_result rollback_preprocessed = {0};
-	pigen_preprocess_result cast_preprocessed = {0};
-	pigen_preprocess_error preprocess_error = {0};
-	pigen_syntax_error error = {0};
-	const pigen_syntax_node *root;
+		"endmodule";
+	parsed_fixture fixture = {0};
 	const pigen_syntax_node *module;
-	const pigen_syntax_node *node;
-	pigen_syntax_id at;
-	pigen_syntax_id module_id;
-	size_t signals = 0;
-	size_t opaques = 0;
-	size_t typedefs = 0;
-	size_t parameters = 0;
-	size_t static_declarations = 0;
-	size_t clocked_processes = 0;
-	size_t assignments = 0;
-	int found_memory = 0;
-	int found_samples = 0;
-	int found_masks = 0;
-	pigen_syntax_expr_arena cast_expressions = {0};
-	pigen_syntax_type_arena cast_types = {0};
-	pigen_syntax_expr_id cast_expression;
-	const pigen_syntax_expr *cast_node;
-	const pigen_syntax_type *cast_type;
-	const pigen_syntax_type_argument *cast_argument;
+	pigen_syntax_id child;
+	size_t clocked_process_count = 0;
 
-	assert(pigen_preprocess(&sources, cast_source, NULL, &cast_preprocessed,
-		&preprocess_error));
-	assert(pigen_parse_expression(&cast_preprocessed.expanded, 0, 8,
-		&cast_expressions, &cast_types, &cast_expression, &error));
-	cast_node = pigen_syntax_expr_get(&cast_expressions, cast_expression);
-	assert(cast_node && cast_node->kind == PIGEN_SYNTAX_EXPR_CAST);
-	cast_type = pigen_syntax_type_get(&cast_types, cast_node->as.cast.type);
-	assert(cast_type && cast_type->argument_count == 1);
-	cast_argument = pigen_syntax_type_arguments(&cast_types,
-		cast_type->first_argument, cast_type->argument_count);
-	assert(cast_argument && cast_argument->kind == PIGEN_SYNTAX_TYPE_COUNT);
-	assert(expression_is(&sources, &(pigen_syntax_tree){
-		.expressions = cast_expressions}, cast_node->as.cast.value, "value"));
-	assert(span_is(&sources, cast_node->location.source_span,
-		"uint[8]'(value)"));
-	assert(pigen_parse_expression(&cast_preprocessed.expanded, 8, 13,
-		&cast_expressions, &cast_types, &cast_expression, &error));
-	cast_node = pigen_syntax_expr_get(&cast_expressions, cast_expression);
-	cast_type = pigen_syntax_type_get(&cast_types, cast_node->as.cast.type);
-	assert(cast_type && !cast_type->argument_count &&
-		token_is(&cast_preprocessed.expanded, cast_type->base, "word_t"));
-	assert(pigen_parse_expression(&cast_preprocessed.expanded, 13, 23,
-		&cast_expressions, &cast_types, &cast_expression, &error));
-	cast_node = pigen_syntax_expr_get(&cast_expressions, cast_expression);
-	cast_type = pigen_syntax_type_get(&cast_types, cast_node->as.cast.type);
-	cast_argument = pigen_syntax_type_arguments(&cast_types,
-		cast_type->first_argument, cast_type->argument_count);
-	assert(cast_type && cast_type->argument_count == 1 && cast_argument &&
-		cast_argument->kind == PIGEN_SYNTAX_TYPE_RANGE);
-	assert(!pigen_parse_expression(&cast_preprocessed.expanded, 23, 30,
-		&cast_expressions, &cast_types, &cast_expression, &error));
-	assert(!pigen_parse_expression(&cast_preprocessed.expanded, 30, 39,
-		&cast_expressions, &cast_types, &cast_expression, &error));
-	assert(!pigen_parse_expression(&cast_preprocessed.expanded, 39, 45,
-		&cast_expressions, &cast_types, &cast_expression, &error));
-	assert(!pigen_parse_expression(&cast_preprocessed.expanded, 45, 52,
-		&cast_expressions, &cast_types, &cast_expression, &error));
-
-	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
-		&preprocess_error));
-	assert(pigen_parse_syntax(&preprocessed.expanded, &tree, &error));
-	root = pigen_syntax_get(&tree, (pigen_syntax_id){0});
-	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
-	at = root->first_child;
-	assert(pigen_syntax_get(&tree, at)->kind == PIGEN_SYNTAX_OPAQUE);
-	while (pigen_syntax_get(&tree, at)->kind != PIGEN_SYNTAX_MODULE)
+	assert(parse_fixture(sources, "rollback.pigen", text, &fixture));
+	module = fixture_module(&fixture);
+	assert(module);
+	for (child = module->first_child; child.index != PIGEN_INVALID_ID; )
 	{
-		if (pigen_syntax_get(&tree, at)->kind == PIGEN_SYNTAX_TYPEDEF)
-			typedefs++;
-		at = pigen_syntax_get(&tree, at)->next_sibling;
-	}
-	module_id = at;
-	module = pigen_syntax_get(&tree, at);
-	assert(module && module->kind == PIGEN_SYNTAX_MODULE);
-	assert(token_is(&preprocessed.expanded, module->as.module.name, "signals"));
-
-	for (at = module->first_child; at.index != PIGEN_INVALID_ID;
-		at = node->next_sibling)
-	{
-		node = pigen_syntax_get(&tree, at);
-		assert(node && node->parent.index == module_id.index);
-		if (node->kind == PIGEN_SYNTAX_OPAQUE)
-		{
-			opaques++;
-			continue;
-		}
-		if (node->kind == PIGEN_SYNTAX_TYPEDEF)
-		{
-			typedefs++;
-			assert(token_is(&preprocessed.expanded, node->as.type_definition.name,
-				"nibble_t"));
-			continue;
-		}
-		if (node->kind == PIGEN_SYNTAX_PARAMETER)
-		{
-			parameters++;
-			if (token_is(&preprocessed.expanded, node->as.parameter.name,
-				"PULSE_W"))
-			{
-				assert(node->as.parameter.is_local);
-				assert(expression_is(&sources, &tree,
-					node->as.parameter.value, "WIDTH * 2"));
-			}
-			else
-				assert(!node->as.parameter.is_local);
-			continue;
-		}
-		if (node->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATION)
-		{
-			for (pigen_syntax_id declarator_id = node->first_child;
-				declarator_id.index != PIGEN_INVALID_ID; )
-			{
-				const pigen_syntax_node *declarator = pigen_syntax_get(&tree,
-					declarator_id);
-				const pigen_syntax_shape_dimension *shape_dimensions =
-					pigen_syntax_declarator_shape_dimensions(&tree, declarator);
-				assert(declarator && declarator->kind ==
-					PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR);
-				if (token_is(&preprocessed.expanded,
-					declarator->as.static_signal_declarator.name, "clk"))
-					assert(!shape_dimensions);
-				else if (token_is(&preprocessed.expanded,
-					declarator->as.static_signal_declarator.name, "memory"))
-				{
-					assert(shape_dimensions && declarator->as.
-						static_signal_declarator.dimension_count == 2);
-					assert(shape_dimensions[0].form ==
-						PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE);
-					assert(shape_dimensions[1].form ==
-						PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT);
-					found_memory = 1;
-				}
-				else if (token_is(&preprocessed.expanded,
-					declarator->as.static_signal_declarator.name, "samples"))
-				{
-					assert(shape_dimensions && shape_dimensions[0].form ==
-						PIGEN_SYNTAX_SHAPE_DIMENSION_RANGE);
-					found_samples = 1;
-				}
-				else
-				{
-					assert(token_is(&preprocessed.expanded,
-						declarator->as.static_signal_declarator.name, "masks"));
-					assert(shape_dimensions && shape_dimensions[0].form ==
-						PIGEN_SYNTAX_SHAPE_DIMENSION_COUNT);
-					found_masks = 1;
-				}
-				declarator_id = declarator->next_sibling;
-			}
-			assert(token_is(&preprocessed.expanded,
-				pigen_syntax_type_get(&tree.types,
-					node->as.static_signal_declaration.type)->base, "logic"));
-			static_declarations++;
-			continue;
-		}
-		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS)
-		{
-			const pigen_syntax_node *block = pigen_syntax_get(&tree,
-				node->first_child);
-			const pigen_syntax_node *outer_if;
-			const pigen_syntax_node *inner_if;
-			const pigen_syntax_node *assignment;
-			assert(node->as.clocked_process.edge == PIGEN_EDGE_POSEDGE);
-			assert(expression_is(&sources, &tree,
-				node->as.clocked_process.clock, "clk"));
-			assert(block && block->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK &&
-				block->parent.index == at.index);
-			outer_if = pigen_syntax_get(&tree, block->first_child);
-			assert(outer_if && outer_if->kind == PIGEN_SYNTAX_IF_STATEMENT &&
-				!outer_if->as.if_statement.has_else);
-			inner_if = pigen_syntax_get(&tree, outer_if->first_child);
-			assert(inner_if && inner_if->kind == PIGEN_SYNTAX_IF_STATEMENT &&
-				inner_if->as.if_statement.has_else);
-			assignment = pigen_syntax_get(&tree, inner_if->first_child);
-			assert(assignment &&
-				assignment->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT &&
-				assignment->parent.index == outer_if->first_child.index);
-			assert(expression_is(&sources, &tree,
-				assignment->as.nonblocking_assignment.destination, "right"));
-			assert(expression_is(&sources, &tree,
-				assignment->as.nonblocking_assignment.value, "left"));
-			assignment = pigen_syntax_get(&tree, assignment->next_sibling);
-			assert(assignment &&
-				assignment->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
-			assert(expression_is(&sources, &tree,
-				assignment->as.nonblocking_assignment.destination, "left"));
-			assert(expression_is(&sources, &tree,
-				assignment->as.nonblocking_assignment.value, "right"));
-			assert(assignment->next_sibling.index == PIGEN_INVALID_ID);
-			assignment = pigen_syntax_get(&tree, outer_if->next_sibling);
-			assert(assignment &&
-				assignment->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
-			cast_node = pigen_syntax_expr_get(&tree.expressions,
-				assignment->as.nonblocking_assignment.value);
-			assert(cast_node && cast_node->kind == PIGEN_SYNTAX_EXPR_CAST);
-			cast_type = pigen_syntax_type_get(&tree.types,
-				cast_node->as.cast.type);
-			assert(cast_type && cast_type->argument_count == 1);
-			clocked_processes++;
-			assignments += 3;
-			continue;
-		}
-		assert(node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION);
-		for (pigen_syntax_id declarator_id = node->first_child;
-			declarator_id.index != PIGEN_INVALID_ID; )
-		{
-			const pigen_syntax_node *declarator =
-				pigen_syntax_get(&tree, declarator_id);
-			assert(declarator &&
-				declarator->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR);
-			assert(declarator->parent.index == at.index);
-			signals++;
-			if (token_is(&preprocessed.expanded,
-				declarator->as.signal_declarator.name, "left"))
-			{
-				const pigen_syntax_type *type = pigen_syntax_type_get(&tree.types,
-					node->as.signal_declaration.payload);
-				const pigen_syntax_type_argument *argument =
-					pigen_syntax_type_arguments(&tree.types,
-						type->first_argument, type->argument_count);
-				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_BUF);
-				assert(type->signedness ==
-					PIGEN_SYNTAX_SIGN_SIGNED);
-				assert(argument && argument->kind == PIGEN_SYNTAX_TYPE_RANGE &&
-					expression_is(&sources, &tree, argument->as.range.left,
-						"WIDTH-1") && expression_is(&sources, &tree,
-						argument->as.range.right, "0"));
-			}
-			else if (token_is(&preprocessed.expanded,
-				declarator->as.signal_declarator.name, "queue"))
-			{
-				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_FIFO);
-				assert(token_is(&preprocessed.expanded,
-					pigen_syntax_type_get(&tree.types,
-						node->as.signal_declaration.payload)->base, "packet_t"));
-				assert(expression_is(&sources, &tree,
-					node->as.signal_declaration.transfer_argument,
-					"DEPTH"));
-			}
-			else if (token_is(&preprocessed.expanded,
-				declarator->as.signal_declarator.name, "pulse"))
-			{
-				assert(node->as.signal_declaration.transfer_type == PIGEN_TRANSFER_TYPE_PORT);
-				assert(token_is(&preprocessed.expanded,
-					pigen_syntax_type_get(&tree.types,
-						node->as.signal_declaration.payload)->base, "logic"));
-				assert(pigen_syntax_type_get(&tree.types,
-					node->as.signal_declaration.payload)->signedness ==
-					PIGEN_SYNTAX_SIGN_UNSIGNED);
-			}
-			declarator_id = declarator->next_sibling;
-		}
-	}
-	assert(signals == 4);
-	assert(typedefs == 2);
-	assert(parameters == 3);
-	assert(static_declarations == 3);
-	assert(found_memory && found_samples && found_masks);
-	assert(clocked_processes == 1);
-	assert(assignments == 3);
-	assert(opaques >= 1);
-
-	assert(pigen_preprocess(&sources, bad_source, NULL, &bad_preprocessed,
-		&preprocess_error));
-	assert(!pigen_parse_syntax(&bad_preprocessed.expanded, &bad_tree, &error));
-	assert(error.message && strstr(error.message, "depth"));
-
-	assert(pigen_preprocess(&sources, rollback_source, NULL,
-		&rollback_preprocessed, &preprocess_error));
-	assert(pigen_parse_syntax(&rollback_preprocessed.expanded, &rollback_tree,
-		&error));
-	root = pigen_syntax_get(&rollback_tree, (pigen_syntax_id){0});
-	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
-	module = pigen_syntax_get(&rollback_tree, root->first_child);
-	assert(module && module->kind == PIGEN_SYNTAX_MODULE);
-	clocked_processes = 0;
-	for (at = module->first_child; at.index != PIGEN_INVALID_ID;
-		at = node->next_sibling)
-	{
-		node = pigen_syntax_get(&rollback_tree, at);
+		const pigen_syntax_node *node = pigen_syntax_get(&fixture.tree, child);
 		assert(node);
-		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS) clocked_processes++;
+		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS)
+			clocked_process_count++;
+		child = node->next_sibling;
 	}
-	assert(!clocked_processes);
-	assert(rollback_tree.expressions.node_count == 0);
-	pigen_free_syntax_tree(&bad_tree);
-	pigen_free_syntax_tree(&rollback_tree);
-	pigen_free_syntax_tree(&tree);
-	pigen_free_syntax_expr_arena(&cast_expressions);
-	pigen_free_syntax_type_arena(&cast_types);
-	pigen_free_preprocess_result(&bad_preprocessed);
-	pigen_free_preprocess_result(&rollback_preprocessed);
-	pigen_free_preprocess_result(&preprocessed);
-	pigen_free_preprocess_result(&cast_preprocessed);
+	assert(!clocked_process_count);
+	assert(fixture.tree.expressions.node_count == 0);
+	assert(fixture.tree.expressions.child_count == 0);
+	assert(fixture.tree.types.node_count == 2);
+	assert(fixture.tree.types.argument_count == 0);
+	assert(fixture.tree.shape_dimension_count == 0);
+	free_fixture(&fixture);
+}
+
+int main(void)
+{
+	pigen_source_manager sources = {0};
+
+	test_cast_syntax(&sources);
+	test_data_first_declarations(&sources);
+	test_transactional_and_clean_break_syntax(&sources);
+	test_process_rollback(&sources);
 	pigen_free_sources(&sources);
-	puts("PASS: declarations and recursive clocked controls have structured syntax");
+	puts("PASS: data-first declarations use one transactional syntax topology");
 	return 0;
 }
