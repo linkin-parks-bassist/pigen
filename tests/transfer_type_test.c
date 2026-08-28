@@ -61,14 +61,19 @@ int main(void)
 	assert(!pigen_transfer_type_is_valid((pigen_transfer_type)99));
 	assert(abstract_descriptor && !abstract_descriptor->spelling &&
 		!abstract_descriptor->is_concrete && !abstract_descriptor->is_static &&
+		!abstract_descriptor->is_systemverilog_prefix &&
 		!abstract_descriptor->accepts_write &&
 		abstract_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE);
 	assert(wire_descriptor && !strcmp(wire_descriptor->spelling, "wire") &&
 		wire_descriptor->is_concrete && wire_descriptor->is_static &&
+		wire_descriptor->is_systemverilog_prefix &&
 		!wire_descriptor->accepts_write &&
 		wire_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE);
+	assert(reg_descriptor->is_systemverilog_prefix);
+	assert(!logic_descriptor->is_systemverilog_prefix);
 	assert(buf_descriptor && !strcmp(buf_descriptor->spelling, "buf") &&
 		buf_descriptor->is_concrete && !buf_descriptor->is_static &&
+		!buf_descriptor->is_systemverilog_prefix &&
 		buf_descriptor->accepts_write &&
 		buf_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE);
 	assert(port_descriptor && !strcmp(port_descriptor->spelling, "port") &&
@@ -76,8 +81,11 @@ int main(void)
 		port_descriptor->ready_constant == 1);
 	assert(fifo_descriptor && !strcmp(fifo_descriptor->spelling, "fifo") &&
 		fifo_descriptor->is_concrete && !fifo_descriptor->is_static &&
+		!fifo_descriptor->is_systemverilog_prefix &&
 		fifo_descriptor->accepts_write &&
 		fifo_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH);
+	assert(!port_descriptor->is_systemverilog_prefix);
+	assert(!skid_descriptor->is_systemverilog_prefix);
 	assert(abstract_descriptor->realization ==
 		PIGEN_TRANSFER_REALIZATION_BOUNDARY);
 	assert(wire_descriptor->realization ==

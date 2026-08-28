@@ -163,6 +163,16 @@ static int transfer_type_at(const syntax_parser *parser, size_t at,
 	return descriptor && descriptor->is_concrete;
 }
 
+static int systemverilog_prefix_transfer_type_at(
+	const syntax_parser *parser, size_t at, pigen_transfer_type *transfer_type)
+{
+	const pigen_transfer_type_descriptor *descriptor;
+
+	if (!transfer_type_at(parser, at, transfer_type)) return 0;
+	descriptor = pigen_transfer_type_descriptor_get(*transfer_type);
+	return descriptor && descriptor->is_systemverilog_prefix;
+}
+
 static size_t matching_bracket(const syntax_parser *parser, size_t open,
 	size_t limit)
 {
@@ -406,8 +416,8 @@ static declaration_parse_result parse_systemverilog_static_declaration(
 	pigen_syntax_type_id data_type;
 	pigen_transfer_type prefix_transfer_type;
 	size_t prefix_transfer_at = at;
-	int has_prefix_transfer = token_is(parser, at, "wire") ||
-		token_is(parser, at, "reg");
+	int has_prefix_transfer = systemverilog_prefix_transfer_type_at(parser, at,
+		&prefix_transfer_type);
 	int has_static_prefix = has_prefix_transfer || token_is(parser, at, "logic") ||
 		token_is(parser, at, "bit") || token_is(parser, at, "signed") ||
 		token_is(parser, at, "unsigned") || token_is(parser, at, "[") ||
@@ -418,8 +428,6 @@ static declaration_parse_result parse_systemverilog_static_declaration(
 	if (!has_static_prefix) return DECLARATION_NOT_RECOGNIZED;
 	if (has_prefix_transfer)
 	{
-		if (!transfer_type_at(parser, at, &prefix_transfer_type))
-			return DECLARATION_NOT_RECOGNIZED;
 		at++;
 		if (declarator_candidate(parser, at, limit))
 		{
@@ -1084,6 +1092,20 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 					at = semicolon + 1;
 					item_start = 1;
 					continue;
+				}
+				restore_checkpoint(parser, checkpoint);
+			}
+			else
+			{
+				checkpoint = save_checkpoint(parser);
+				result = parse_data_first_declaration(parser, at, after, 0,
+					&declaration, &decisive);
+				if (result == DECLARATION_INVALID) return 0;
+				if (result == DECLARATION_RECOGNIZED && decisive)
+				{
+					restore_checkpoint(parser, checkpoint);
+					return fail(parser, after,
+						"signal declaration requires `;`");
 				}
 				restore_checkpoint(parser, checkpoint);
 			}

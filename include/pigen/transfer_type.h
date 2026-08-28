@@ -65,6 +65,7 @@ typedef struct {
 	const char *spelling;
 	int is_concrete;
 	int is_static;
+	int is_systemverilog_prefix;
 	int accepts_write;
 	pigen_transfer_parameter parameter;
 	pigen_transfer_realization realization;

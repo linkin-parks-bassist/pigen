@@ -405,7 +405,8 @@ static void test_transactional_and_clean_break_syntax(
 	assert_opaque_without_arena_leakage(sources, "ordinary_byte.pigen",
 		"module ordinary_byte; byte ordinary_value; endmodule");
 	assert_opaque_without_arena_leakage(sources, "ordinary_initializer.pigen",
-		"module ordinary_initializer; logic [7:0] ordinary = 8'h5a; endmodule");
+		"module ordinary_initializer; logic [{WIDTH, LANES + 1}:0] "
+		"ordinary[LANES + 1] = 8'h5a; endmodule");
 	assert_rejected_at(sources, "old_order.pigen",
 		"module old_order; buf int[16] old_order; endmodule", "buf");
 	assert_rejected_at(sources, "pigen_initializer.pigen",
@@ -432,7 +433,7 @@ static void test_process_rollback(pigen_source_manager *sources)
 		"  bit buf left, right;\n"
 		"  always @(posedge clk) begin\n"
 		"    right <= left;\n"
-		"    $display(\"opaque\");\n"
+		"    left <= right + ;\n"
 		"  end\n"
 		"endmodule";
 	parsed_fixture fixture = {0};
@@ -452,12 +453,22 @@ static void test_process_rollback(pigen_source_manager *sources)
 		child = node->next_sibling;
 	}
 	assert(!clocked_process_count);
+	assert(fixture.tree.node_count == 10);
 	assert(fixture.tree.expressions.node_count == 0);
 	assert(fixture.tree.expressions.child_count == 0);
 	assert(fixture.tree.types.node_count == 2);
 	assert(fixture.tree.types.argument_count == 0);
 	assert(fixture.tree.shape_dimension_count == 0);
+	assert(fixture.error.origin.index == PIGEN_INVALID_ID);
+	assert(fixture.error.span.source.index == PIGEN_INVALID_ID);
+	assert(!fixture.error.message);
 	free_fixture(&fixture);
+}
+
+static void test_missing_pigen_terminator(pigen_source_manager *sources)
+{
+	assert_rejected_at(sources, "missing_terminator.pigen",
+		"module missing_terminator; int[16] buf value endmodule", "endmodule");
 }
 
 int main(void)
@@ -468,6 +479,7 @@ int main(void)
 	test_data_first_declarations(&sources);
 	test_transactional_and_clean_break_syntax(&sources);
 	test_process_rollback(&sources);
+	test_missing_pigen_terminator(&sources);
 	pigen_free_sources(&sources);
 	puts("PASS: data-first declarations use one transactional syntax topology");
 	return 0;
