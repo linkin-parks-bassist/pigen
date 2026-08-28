@@ -118,6 +118,12 @@ explicitly named `pigen_prototype_transfer_descriptor`; it is a temporary
 quarantined duplicate, not a second shared catalogue. Do not migrate its
 fixtures to the structured parser piecemeal.
 
+The prototype pipeline rewrite also emits a private textual `ingress` and
+models it in the production table. `ingress` is a lowering endpoint, not a
+Pigen transfer type: never add it to the common transfer catalogue. Keep it
+quarantined until structured pipeline lowering replaces that textual side
+channel with ordinary signal incidence and RTL-IR endpoints.
+
 ## Next cutover
 
 The next step is a narrow semantic-to-elastic-RTL vertical slice: one resolved
