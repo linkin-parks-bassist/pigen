@@ -309,9 +309,16 @@ static void test_declaration_resolution_matrix(void)
 		}
 		if (signal->transfer_type == PIGEN_TRANSFER_TYPE_FIFO)
 		{
+			const pigen_semantic_expr *argument_expression = pigen_expr_get(&model,
+				signal->transfer_argument);
 			uint64_t depth;
 
 			assert(signal->transfer_argument.index != PIGEN_INVALID_ID);
+			assert(argument_expression &&
+				argument_expression->kind == PIGEN_EXPR_EXACT_INTEGER);
+			assert(pigen_data_type_numerical_interpretation(&model,
+				argument_expression->data_type) ==
+				PIGEN_NUMERICAL_EXACT_INTEGER);
 			assert(pigen_const_expr_evaluate_u64(&model,
 				pigen_expr_constant(&model, signal->transfer_argument), &depth));
 			assert(depth == 8);
