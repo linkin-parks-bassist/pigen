@@ -106,6 +106,45 @@ static void expect_resolve_error(const char *text, const char *expected)
 	pigen_free_sources(&sources);
 }
 
+typedef struct {
+	const char *source;
+	const char *message;
+	const char *span;
+} resolve_failure;
+
+static void expect_resolve_failure(resolve_failure failure)
+{
+	pigen_source_manager sources = {0};
+	pigen_source_id source = pigen_source_add(&sources, "failure.pigen",
+		failure.source, strlen(failure.source));
+	pigen_preprocess_result preprocessed = {0};
+	pigen_preprocess_error preprocess_error = {0};
+	pigen_syntax_tree syntax = {0};
+	pigen_syntax_error syntax_error = {0};
+	pigen_semantic_model model;
+	pigen_semantic_error error = {0};
+	pigen_resolve_policy policy = {.maximum_generated_bits = 1024};
+
+	assert(source.index != PIGEN_INVALID_ID);
+	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
+		&preprocess_error));
+	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
+	assert(!pigen_resolve_semantics(&syntax, &model, &policy, &error));
+	if (!error.message || !strstr(error.message, failure.message) ||
+		!span_is(&sources, error.span, failure.span))
+		fprintf(stderr,
+			"expected `%s` at `%s`, got `%s` at byte range %zu:%zu\n",
+			failure.message, failure.span,
+			error.message ? error.message : "(none)",
+			error.span.start, error.span.end);
+	assert(error.message && strstr(error.message, failure.message));
+	assert(span_is(&sources, error.span, failure.span));
+	pigen_free_semantic_model(&model);
+	pigen_free_syntax_tree(&syntax);
+	pigen_free_preprocess_result(&preprocessed);
+	pigen_free_sources(&sources);
+}
+
 static uint64_t evaluate_width(pigen_semantic_model *model,
 	pigen_data_type_id type)
 {
@@ -117,6 +156,209 @@ static uint64_t evaluate_width(pigen_semantic_model *model,
 	return value;
 }
 
+static void test_declaration_resolution_matrix(void)
+{
+	const char text[] =
+		"typedef int[16] sample_t;\n"
+		"typedef bit flag_t;\n"
+		"module resolved (\n"
+		"  input int[16] abstract_integer,\n"
+		"  input uint[8] abstract_unsigned,\n"
+		"  input bit abstract_bit,\n"
+		"  input sample_t abstract_alias,\n"
+		"  input int[16] buf constrained_input,\n"
+		"  output bit static_bit,\n"
+		"  output logic [7:0] static_logic\n"
+		");\n"
+		"  int[16] buf buffered;\n"
+		"  uint[24] skid response;\n"
+		"  bit port finished;\n"
+		"  bit[8] logic tag;\n"
+		"  sample_t fifo[8] pending[2];\n"
+		"  bit wire net_value;\n"
+		"  bit reg variable_value;\n"
+		"endmodule\n"
+		"module static_defaults (\n"
+		"  input logic static_input,\n"
+		"  inout logic static_inout,\n"
+		"  output [7:0] implicit_output,\n"
+		"  inout wire [7:0] written_static_inout\n"
+		");\n"
+		"  logic internal_default;\n"
+		"endmodule\n";
+	typedef struct {
+		const char *name;
+		pigen_transfer_type transfer_type;
+		pigen_semantic_direction direction;
+		uint64_t width;
+		pigen_numerical_interpretation numerical_interpretation;
+		pigen_state_domain state_domain;
+		const char *alias;
+		uint64_t shape_count;
+	} signal_expectation;
+	static const signal_expectation expectations[] = {
+		{"abstract_integer", PIGEN_TRANSFER_TYPE_ABSTRACT,
+			PIGEN_SEMANTIC_INPUT, 16, PIGEN_NUMERICAL_SIGNED_INTEGER,
+			PIGEN_DATA_TYPE_STATE_TWO, NULL, 0},
+		{"abstract_unsigned", PIGEN_TRANSFER_TYPE_ABSTRACT,
+			PIGEN_SEMANTIC_INPUT, 8, PIGEN_NUMERICAL_UNSIGNED_INTEGER,
+			PIGEN_DATA_TYPE_STATE_TWO, NULL, 0},
+		{"abstract_bit", PIGEN_TRANSFER_TYPE_ABSTRACT,
+			PIGEN_SEMANTIC_INPUT, 1, PIGEN_NUMERICAL_SYSTEMVERILOG,
+			PIGEN_DATA_TYPE_STATE_TWO, NULL, 0},
+		{"abstract_alias", PIGEN_TRANSFER_TYPE_ABSTRACT,
+			PIGEN_SEMANTIC_INPUT, 16, PIGEN_NUMERICAL_SIGNED_INTEGER,
+			PIGEN_DATA_TYPE_STATE_TWO, "sample_t", 0},
+		{"constrained_input", PIGEN_TRANSFER_TYPE_BUF,
+			PIGEN_SEMANTIC_INPUT, 16, PIGEN_NUMERICAL_SIGNED_INTEGER,
+			PIGEN_DATA_TYPE_STATE_TWO, NULL, 0},
+		{"static_bit", PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_OUTPUT, 1, PIGEN_NUMERICAL_SYSTEMVERILOG,
+			PIGEN_DATA_TYPE_STATE_TWO, NULL, 0},
+		{"static_logic", PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_OUTPUT, 8, PIGEN_NUMERICAL_SYSTEMVERILOG,
+			PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"buffered", PIGEN_TRANSFER_TYPE_BUF, PIGEN_SEMANTIC_INTERNAL,
+			16, PIGEN_NUMERICAL_SIGNED_INTEGER, PIGEN_DATA_TYPE_STATE_TWO,
+			NULL, 0},
+		{"response", PIGEN_TRANSFER_TYPE_SKID, PIGEN_SEMANTIC_INTERNAL,
+			24, PIGEN_NUMERICAL_UNSIGNED_INTEGER, PIGEN_DATA_TYPE_STATE_TWO,
+			NULL, 0},
+		{"finished", PIGEN_TRANSFER_TYPE_PORT, PIGEN_SEMANTIC_INTERNAL,
+			1, PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_TWO,
+			NULL, 0},
+		{"tag", PIGEN_TRANSFER_TYPE_LOGIC, PIGEN_SEMANTIC_INTERNAL,
+			8, PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_TWO,
+			NULL, 0},
+		{"pending", PIGEN_TRANSFER_TYPE_FIFO, PIGEN_SEMANTIC_INTERNAL,
+			16, PIGEN_NUMERICAL_SIGNED_INTEGER, PIGEN_DATA_TYPE_STATE_TWO,
+			"sample_t", 2},
+		{"net_value", PIGEN_TRANSFER_TYPE_WIRE, PIGEN_SEMANTIC_INTERNAL,
+			1, PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_TWO,
+			NULL, 0},
+		{"variable_value", PIGEN_TRANSFER_TYPE_REG,
+			PIGEN_SEMANTIC_INTERNAL, 1, PIGEN_NUMERICAL_SYSTEMVERILOG,
+			PIGEN_DATA_TYPE_STATE_TWO, NULL, 0},
+		{"static_input", PIGEN_TRANSFER_TYPE_WIRE, PIGEN_SEMANTIC_INPUT,
+			1, PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR,
+			NULL, 0},
+		{"static_inout", PIGEN_TRANSFER_TYPE_WIRE, PIGEN_SEMANTIC_INOUT,
+			1, PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR,
+			NULL, 0},
+		{"implicit_output", PIGEN_TRANSFER_TYPE_WIRE,
+			PIGEN_SEMANTIC_OUTPUT, 8, PIGEN_NUMERICAL_SYSTEMVERILOG,
+			PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"written_static_inout", PIGEN_TRANSFER_TYPE_WIRE,
+			PIGEN_SEMANTIC_INOUT, 8, PIGEN_NUMERICAL_SYSTEMVERILOG,
+			PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"internal_default", PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INTERNAL, 1, PIGEN_NUMERICAL_SYSTEMVERILOG,
+			PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0}
+	};
+	pigen_source_manager sources = {0};
+	pigen_source_id source = pigen_source_add(&sources, "matrix.pigen", text,
+		strlen(text));
+	pigen_preprocess_result preprocessed = {0};
+	pigen_preprocess_error preprocess_error = {0};
+	pigen_syntax_tree syntax = {0};
+	pigen_syntax_error syntax_error = {0};
+	pigen_semantic_model model;
+	pigen_semantic_error error = {0};
+	pigen_resolve_policy policy = {.maximum_generated_bits = 1024};
+	size_t i;
+
+	assert(source.index != PIGEN_INVALID_ID);
+	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
+		&preprocess_error));
+	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
+	assert(pigen_resolve_semantics(&syntax, &model, &policy, &error));
+	assert(model.signal_count == sizeof(expectations) / sizeof(*expectations));
+	for (i = 0; i < sizeof(expectations) / sizeof(*expectations); i++)
+	{
+		const signal_expectation *expected = &expectations[i];
+		const pigen_semantic_signal *signal = find_signal(&sources, &model,
+			expected->name);
+		const pigen_semantic_shape *shape;
+		pigen_symbol_id alias;
+
+		assert(signal);
+		assert(pigen_data_type_exists(&model, signal->data_type));
+		assert(evaluate_width(&model, signal->data_type) == expected->width);
+		assert(pigen_data_type_numerical_interpretation(&model,
+			signal->data_type) == expected->numerical_interpretation);
+		assert(pigen_data_type_state_domain(&model, signal->data_type) ==
+			expected->state_domain);
+		alias = pigen_data_type_alias_symbol(&model, signal->data_type);
+		if (expected->alias)
+			assert(alias.index != PIGEN_INVALID_ID && span_is(&sources,
+				pigen_symbol_get(&model, alias)->name, expected->alias));
+		else assert(alias.index == PIGEN_INVALID_ID);
+		assert(signal->transfer_type == expected->transfer_type);
+		assert(signal->direction == expected->direction);
+		shape = pigen_shape_get(&model, signal->shape);
+		assert(shape && shape->dimension_count == !!expected->shape_count);
+		if (expected->shape_count)
+		{
+			const pigen_shape_dimension *dimension =
+				pigen_shape_dimensions(&model, signal->shape);
+			uint64_t count;
+
+			assert(dimension && dimension->form == PIGEN_SHAPE_DIMENSION_COUNT);
+			assert(pigen_const_expr_evaluate_u64(&model, dimension->as.count,
+				&count) && count == expected->shape_count);
+		}
+		if (signal->transfer_type == PIGEN_TRANSFER_TYPE_FIFO)
+		{
+			uint64_t depth;
+
+			assert(signal->transfer_argument.index != PIGEN_INVALID_ID);
+			assert(pigen_const_expr_evaluate_u64(&model,
+				pigen_expr_constant(&model, signal->transfer_argument), &depth));
+			assert(depth == 8);
+		}
+		else assert(signal->transfer_argument.index == PIGEN_INVALID_ID);
+	}
+	pigen_free_semantic_model(&model);
+	pigen_free_syntax_tree(&syntax);
+	pigen_free_preprocess_result(&preprocessed);
+	pigen_free_sources(&sources);
+}
+
+static void test_declaration_failure_matrix(void)
+{
+	static const resolve_failure failures[] = {
+		{"module bad; int[8] missing_internal_transfer; endmodule\n",
+			"forbids an omitted transfer realization", "int[8]"},
+		{"module bad; output int[8] missing_output_transfer; endmodule\n",
+			"unqualified output transfer policy is unresolved", "int[8]"},
+		{"module bad; inout int[8] buf dynamic_inout; endmodule\n",
+			"dynamic transfer type cannot be inout", "buf"},
+		{"typedef bit[8] packet_t; module bad; "
+			"packet_t fifo[0] zero_depth; endmodule\n",
+			"transfer depth must be a positive count", "0"},
+		{"typedef bit[8] packet_t; module bad; "
+			"packet_t fifo[-1] negative_depth; endmodule\n",
+			"transfer depth must be a positive count", "-1"},
+		{"typedef bit[8] packet_t; module bad; bit logic runtime_signal; "
+			"packet_t fifo[runtime_signal] nonconstant_depth; endmodule\n",
+			"transfer depth requires a constant expression", "runtime_signal"}
+	};
+	static const resolve_failure preserved_failures[] = {
+		{"module bad; bit wire repeated; bit reg repeated; endmodule\n",
+			"duplicate module declaration", "repeated"},
+		{"module bad; bit logic runtime_signal; "
+			"bit wire shaped[runtime_signal]; endmodule\n",
+			"signal dimension requires constant expressions", "[runtime_signal]"}
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(failures) / sizeof(*failures); i++)
+		expect_resolve_failure(failures[i]);
+	for (i = 0; i < sizeof(preserved_failures) /
+		sizeof(*preserved_failures); i++)
+		expect_resolve_failure(preserved_failures[i]);
+}
+
 static void test_typed_assignments(void)
 {
 	const char text[] =
@@ -125,10 +367,10 @@ static void test_typed_assignments(void)
 		"typedef int[24] int24_t;\n"
 		"typedef uint[16] uint16_t;\n"
 		"module typed(input logic clk);\n"
-		"  buf int8_t a0, b0, c0, a1, b1, c1, a2, b2, c2;\n"
-		"  buf int16_t low;\n"
-		"  buf int24_t wide;\n"
-		"  buf uint16_t changed;\n"
+		"  int8_t buf a0, b0, c0, a1, b1, c1, a2, b2, c2;\n"
+		"  int16_t buf low;\n"
+		"  int24_t buf wide;\n"
+		"  uint16_t buf changed;\n"
 		"  always_ff @(posedge clk) begin\n"
 		"    low <= (a0 + b0) * c0;\n"
 		"    wide <= (a1 + b1) * c1;\n"
@@ -188,9 +430,9 @@ int main(void)
 		"  wire ready;\n"
 		"  logic [WIDTH-1:0] state, next_state;\n"
 		"  logic [7:0] memory [0:3][4];\n"
-		"  buf octet_t left, right, alternate;\n"
-		"  buf bit gate;\n"
-		"  fifo word_t[MASK_DEPTH] queue;\n"
+		"  octet_t buf left, right, alternate;\n"
+		"  bit buf gate;\n"
+		"  word_t fifo[MASK_DEPTH] queue;\n"
 		"  always_ff @(posedge clk) begin\n"
 		"    if (select) begin\n"
 		"      if (gate) begin right <= left; end\n"
@@ -200,14 +442,14 @@ int main(void)
 		"  always @(posedge clk) state <= next_state;\n"
 		"endmodule\n"
 		"module second;\n"
-		"  port bit [0:0] pulse;\n"
+		"  bit [0:0] port pulse;\n"
 		"endmodule\n";
 	const char duplicate[] =
 		"module same; endmodule module same; endmodule\n";
 	const char unknown[] =
-		"module unknown; buf missing_t value; endmodule\n";
+		"module unknown; missing_t buf value; endmodule\n";
 	const char inout[] =
-		"module bidirectional; inout buf [7:0] value; endmodule\n";
+		"module bidirectional; inout bit[8] buf value; endmodule\n";
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "resolve.pigen", text,
 		strlen(text));
@@ -690,48 +932,48 @@ int main(void)
 	assert(pigen_parse_syntax(&inout_preprocessed.expanded, &inout_syntax, &syntax_error));
 	assert(!pigen_resolve_semantics(&inout_syntax, &inout_model, &policy,
 		&error));
-	assert(error.message && strstr(error.message, "not inout"));
+	assert(error.message && strstr(error.message, "cannot be inout"));
 
 	expect_resolve_error(
 		"module bad(input logic clk); wire x; logic y; "
 		"always @(posedge clk) x <= y; endmodule\n",
 		"not a writable");
 	expect_resolve_error(
-		"module bad(input logic clk, input buf [7:0] x); "
+		"module bad(input logic clk, input logic [7:0] buf x); "
 		"always @(posedge clk) x <= 8'h0; endmodule\n",
 		"not a writable");
 	expect_resolve_error(
-		"module bad(input logic clk); buf [7:0] x; "
+		"module bad(input logic clk); logic [7:0] buf x; "
 		"always @(posedge clk) x <= x; endmodule\n",
 		"cannot source its destination");
 	expect_resolve_error(
-		"module bad(input logic clk_a, clk_b); buf [7:0] x, y; "
+		"module bad(input logic clk_a, clk_b); logic [7:0] buf x, y; "
 		"always @(posedge clk_a) y <= x; "
 		"always @(posedge clk_b) y <= x; endmodule\n",
 		"across clock domains");
 	expect_resolve_error(
-		"module bad(input logic clk); buf [7:0] x, y, z; "
+		"module bad(input logic clk); logic [7:0] buf x, y, z; "
 		"always @(posedge clk) begin y <= x; z <= x; end endmodule\n",
 		"nonexclusive consumers");
 	expect_resolve_error(
-		"module bad(input logic clk); buf [7:0] x, y, z; "
+		"module bad(input logic clk); logic [7:0] buf x, y, z; "
 		"always @(posedge clk) begin y <= x; y <= z; end endmodule\n",
 		"nonexclusive producers");
 	expect_resolve_error(
-		"module bad(input logic clk); buf bit x[2]; buf bit y[3]; "
+		"module bad(input logic clk); bit buf x[2]; bit buf y[3]; "
 		"always @(posedge clk) y <= x; endmodule\n",
 		"shape mismatch");
 	test_typed_assignments();
 	expect_resolve_error(
 		"typedef int[8] int8_t; typedef uint[8] uint8_t; "
-		"module changed(input logic clk); buf int8_t source; "
-		"buf uint8_t destination; always_ff @(posedge clk) "
+		"module changed(input logic clk); int8_t buf source; "
+		"uint8_t buf destination; always_ff @(posedge clk) "
 		"destination <= source; endmodule\n",
 		"compatible");
 	expect_resolve_error(
 		"typedef int[8] int8_t; "
-		"module shaped(input logic clk); buf int8_t source[2]; "
-		"buf int8_t destination; always_ff @(posedge clk) "
+		"module shaped(input logic clk); int8_t buf source[2]; "
+		"int8_t buf destination; always_ff @(posedge clk) "
 		"destination <= source; endmodule\n",
 		"shape mismatch");
 	expect_resolve_error("typedef int[1-1] zero_width_t;\n",
@@ -745,6 +987,8 @@ int main(void)
 	expect_resolve_error(
 		"typedef bit [7:0] octet_t; typedef octet_t[(1-2)] negative_width_t;\n",
 		"type count must be a positive integer");
+	test_declaration_resolution_matrix();
+	test_declaration_failure_matrix();
 
 	pigen_free_semantic_model(&inout_model);
 	pigen_free_semantic_model(&unknown_model);

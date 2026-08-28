@@ -123,6 +123,22 @@ After the one-arena, canonical-shape, structured declarator-shape, canonical
 transfer-descriptor, and realization cutovers, `make verify` completed
 successfully on 2026-08-24. This proves the current
 replacement-middle tests and production behavioral suite still pass; it does
-not prove the architecture cutover complete. In particular, the complete
-target data-first declaration grammar, generic input specialization, RTL IR,
-and production integration remain open.
+not prove the architecture cutover complete. In particular, generic input
+specialization, RTL IR, and production integration remain open.
+
+## Unified declaration resolution
+
+On 2026-08-28, Rowan replaced the split static/general declaration resolvers
+with one data-first semantic path. Resolution now fixes the data type before
+asking its owner for the omitted-transfer policy; `resolve.c` interprets only
+that property and never enumerates data-type constructors. Written transfer
+types are validated through their descriptors, and descriptor parameters are
+resolved generically in the Pigen literal domain. The semantic signal retains
+the written transfer identity and transfer-argument expression.
+
+Static defaults are structural: input and `inout` default to `wire`, internal
+signals to `logic`, explicitly based outputs to `logic`, and implicit outputs
+to `wire`. Dynamic `inout` is rejected at its written transfer occurrence;
+ordinary static `inout` remains supported. All declarators now share one shape,
+symbol, duplicate-diagnostic, and signal-construction loop. Resolver tests fix
+the data/transfer/direction/argument/shape matrix and diagnostic provenance.

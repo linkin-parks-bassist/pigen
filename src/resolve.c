@@ -90,12 +90,9 @@ static pigen_shape_id resolve_shape(resolver *resolver, pigen_scope_id scope,
 	pigen_shape_id result;
 	size_t i;
 
-	if (declarator->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR)
-		syntax_declarator = &declarator->as.signal_declarator;
-	else if (declarator->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR)
-		syntax_declarator = &declarator->as.static_signal_declarator;
-	else
+	if (declarator->kind != PIGEN_SYNTAX_SIGNAL_DECLARATOR)
 		return INVALID_ID(pigen_shape_id);
+	syntax_declarator = &declarator->as.signal_declarator;
 	if (!syntax_declarator->dimension_count)
 		return pigen_semantic_scalar_shape(resolver->model);
 	syntax_dimensions = pigen_syntax_declarator_shape_dimensions(
@@ -145,17 +142,6 @@ static pigen_shape_id resolve_shape(resolver *resolver, pigen_scope_id scope,
 	return result;
 }
 
-static pigen_transfer_type semantic_transfer_type(
-	pigen_transfer_type transfer_type)
-{
-	const pigen_transfer_type_descriptor *descriptor =
-		pigen_transfer_type_descriptor_get(transfer_type);
-
-	if (!descriptor || !descriptor->is_concrete || descriptor->is_static)
-		pigen_fail("invalid transfer type for this signal");
-	return transfer_type;
-}
-
 static pigen_semantic_direction semantic_direction(pigen_syntax_direction direction)
 {
 	switch (direction)
@@ -168,18 +154,6 @@ static pigen_semantic_direction semantic_direction(pigen_syntax_direction direct
 	pigen_fail("invalid syntax signal direction");
 	return PIGEN_SEMANTIC_INTERNAL;
 }
-
-static pigen_transfer_type resolve_static_transfer_type(
-	pigen_transfer_type transfer_type)
-{
-	const pigen_transfer_type_descriptor *descriptor =
-		pigen_transfer_type_descriptor_get(transfer_type);
-
-	if (!descriptor || !descriptor->is_concrete || !descriptor->is_static)
-		pigen_fail("invalid static transfer type");
-	return transfer_type;
-}
-
 static int add_parameter(resolver *resolver, pigen_module_id module_id,
 	pigen_syntax_id syntax_id, const pigen_syntax_node *syntax_node)
 {
@@ -215,39 +189,133 @@ static int add_parameter(resolver *resolver, pigen_module_id module_id,
 	return 1;
 }
 
+static int resolve_transfer_argument(resolver *resolver, pigen_scope_id scope,
+	const pigen_transfer_type_descriptor *descriptor,
+	const pigen_syntax_transfer_type_occurrence *occurrence,
+	pigen_expr_id *argument)
+{
+	const pigen_syntax_expr *syntax_argument;
+	pigen_const_expr_id constant;
+
+	*argument = INVALID_ID(pigen_expr_id);
+	switch (descriptor->parameter)
+	{
+		case PIGEN_TRANSFER_PARAMETER_NONE:
+			if (occurrence->argument.index != PIGEN_INVALID_ID)
+				return fail_location(resolver, occurrence->location,
+					"transfer type does not accept an argument");
+			return 1;
+		case PIGEN_TRANSFER_PARAMETER_DEPTH:
+			if (occurrence->argument.index == PIGEN_INVALID_ID)
+				return fail_location(resolver, occurrence->location,
+					"transfer type requires a depth argument");
+			syntax_argument = pigen_syntax_expr_get(&resolver->syntax->expressions,
+				occurrence->argument);
+			if (!syntax_argument)
+				return fail_location(resolver, occurrence->location,
+					"transfer type requires a depth argument");
+			*argument = pigen_resolve_constant_expression(resolver->syntax,
+				resolver->model, scope, occurrence->argument,
+				PIGEN_LITERAL_DOMAIN_PIGEN, resolver->policy, resolver->error);
+			if (argument->index == PIGEN_INVALID_ID)
+				return fail_location(resolver, syntax_argument->location,
+					"transfer depth requires a constant expression");
+			constant = pigen_expr_constant(resolver->model, *argument);
+			if (pigen_const_expr_normalize_count(resolver->model, constant).index ==
+				PIGEN_INVALID_ID)
+				return fail_location(resolver, syntax_argument->location,
+					"transfer depth must be a positive count");
+			return 1;
+	}
+	return fail_location(resolver, occurrence->location,
+		"unsupported transfer parameter form");
+}
+
+static int resolve_written_transfer(resolver *resolver, pigen_scope_id scope,
+	const pigen_syntax_node *declaration, pigen_transfer_type *transfer_type,
+	pigen_expr_id *transfer_argument)
+{
+	const pigen_syntax_transfer_type_occurrence *occurrence =
+		&declaration->as.signal_declaration.transfer_type;
+	const pigen_transfer_type_descriptor *descriptor =
+		pigen_transfer_type_descriptor_get(occurrence->transfer_type);
+
+	if (!descriptor || !descriptor->is_concrete)
+		return fail_location(resolver, occurrence->location,
+			"signal transfer type must be concrete");
+	if (declaration->as.signal_declaration.direction == PIGEN_DIRECTION_INOUT &&
+		!descriptor->is_static)
+		return fail_location(resolver, occurrence->location,
+			"dynamic transfer type cannot be inout");
+	if (!resolve_transfer_argument(resolver, scope, descriptor, occurrence,
+		transfer_argument)) return 0;
+	*transfer_type = occurrence->transfer_type;
+	return 1;
+}
+
+static int resolve_omitted_transfer(resolver *resolver,
+	const pigen_syntax_node *declaration, const pigen_syntax_type *syntax_type,
+	pigen_data_type_id data_type, pigen_transfer_type *transfer_type)
+{
+	pigen_syntax_direction direction =
+		declaration->as.signal_declaration.direction;
+	pigen_unqualified_transfer_policy policy =
+		pigen_data_type_unqualified_transfer_policy(resolver->model, data_type,
+			direction == PIGEN_DIRECTION_INPUT);
+
+	switch (policy)
+	{
+		case PIGEN_UNQUALIFIED_TRANSFER_ABSTRACT:
+			*transfer_type = PIGEN_TRANSFER_TYPE_ABSTRACT;
+			return 1;
+		case PIGEN_UNQUALIFIED_TRANSFER_FORBIDDEN:
+			return fail_location(resolver, syntax_type->location,
+				direction == PIGEN_DIRECTION_OUTPUT ?
+					"unqualified output transfer policy is unresolved" :
+					"data type forbids an omitted transfer realization");
+		case PIGEN_UNQUALIFIED_TRANSFER_STATIC:
+			if (direction == PIGEN_DIRECTION_INPUT ||
+				direction == PIGEN_DIRECTION_INOUT)
+				*transfer_type = PIGEN_TRANSFER_TYPE_WIRE;
+			else if (direction == PIGEN_DIRECTION_INTERNAL)
+				*transfer_type = PIGEN_TRANSFER_TYPE_LOGIC;
+			else if (direction == PIGEN_DIRECTION_OUTPUT)
+				*transfer_type = syntax_type->base.index == PIGEN_INVALID_ID ?
+					PIGEN_TRANSFER_TYPE_WIRE : PIGEN_TRANSFER_TYPE_LOGIC;
+			else return fail_location(resolver, declaration->location,
+				"invalid signal direction");
+			return 1;
+	}
+	return fail_location(resolver, syntax_type->location,
+		"invalid unqualified transfer policy");
+}
+
 static int add_signal_declaration(resolver *resolver,
 	pigen_module_id module_id, const pigen_syntax_node *syntax_node)
 {
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
-	const pigen_transfer_type_descriptor *descriptor =
-		pigen_transfer_type_descriptor_get(
-			syntax_node->as.signal_declaration.transfer_type);
+	const pigen_syntax_type *syntax_type = pigen_syntax_type_get(
+		&resolver->syntax->types, syntax_node->as.signal_declaration.data_type);
 	pigen_data_type_id data_type;
+	pigen_transfer_type transfer_type;
 	pigen_expr_id transfer_argument = INVALID_ID(pigen_expr_id);
 	pigen_syntax_id declarator_id;
 
-	if (!descriptor)
+	if (!syntax_type)
 		return fail_location(resolver, syntax_node->location,
-			"invalid signal transfer type");
-	if (syntax_node->as.signal_declaration.direction == PIGEN_DIRECTION_INOUT)
-		return fail_location(resolver, syntax_node->location,
-			"signal ports must be input or output, not inout");
-	data_type = pigen_resolve_type(resolver->syntax, resolver->model, module->scope,
-		syntax_node->as.signal_declaration.payload, resolver->error);
+			"invalid signal data type");
+	data_type = pigen_resolve_type(resolver->syntax, model, module->scope,
+		syntax_node->as.signal_declaration.data_type, resolver->error);
 	if (data_type.index == PIGEN_INVALID_ID) return 0;
-	if (descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH)
+	if (syntax_node->as.signal_declaration.has_transfer_type)
 	{
-		const pigen_syntax_expr *depth_syntax = pigen_syntax_expr_get(
-			&resolver->syntax->expressions,
-			syntax_node->as.signal_declaration.transfer_argument);
-		transfer_argument = resolve_constant(resolver, module->scope,
-			syntax_node->as.signal_declaration.transfer_argument);
-		if (transfer_argument.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, depth_syntax ? depth_syntax->location :
-				syntax_node->location,
-				"transfer depth requires a constant expression");
+		if (!resolve_written_transfer(resolver, module->scope, syntax_node,
+			&transfer_type, &transfer_argument)) return 0;
 	}
+	else if (!resolve_omitted_transfer(resolver, syntax_node, syntax_type,
+		data_type, &transfer_type)) return 0;
+
 	for (declarator_id = syntax_node->first_child;
 		declarator_id.index != PIGEN_INVALID_ID; )
 	{
@@ -258,79 +326,24 @@ static int add_signal_declaration(resolver *resolver,
 		pigen_shape_id shape;
 		pigen_declare_result declared;
 
-		if (!declarator ||
-			declarator->kind != PIGEN_SYNTAX_SIGNAL_DECLARATOR)
+		if (!declarator || declarator->kind != PIGEN_SYNTAX_SIGNAL_DECLARATOR)
 			return fail_location(resolver, syntax_node->location,
 				"invalid signal declarator");
 		shape = resolve_shape(resolver, module->scope, declarator);
 		if (shape.index == PIGEN_INVALID_ID) return 0;
 		declared = pigen_symbol_declare(model, module->scope,
 			PIGEN_SYMBOL_SIGNAL, data_type,
-			token_spelling(resolver,
-				declarator->as.signal_declarator.name),
-			syntax_node->location.source_span,
-			&symbol, NULL);
+			token_spelling(resolver, declarator->as.signal_declarator.name),
+			syntax_node->location.source_span, &symbol, NULL);
 		if (declared == PIGEN_DECLARE_DUPLICATE)
-			return fail_token(resolver,
-				declarator->as.signal_declarator.name,
+			return fail_token(resolver, declarator->as.signal_declarator.name,
 				"duplicate module declaration");
 		if (declared != PIGEN_DECLARE_OK)
 			return fail_location(resolver, syntax_node->location,
 				"invalid signal declaration");
 		signal = pigen_signal_add(model, declarator_id, module_id, symbol,
-			data_type, shape, transfer_argument,
-			semantic_transfer_type(
-				syntax_node->as.signal_declaration.transfer_type),
-			semantic_direction(
-				syntax_node->as.signal_declaration.direction),
-			syntax_node->location.source_span);
-		if (signal.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, declarator->location,
-				"invalid signal semantic object");
-		declarator_id = declarator->next_sibling;
-	}
-	return 1;
-}
-
-static int add_static_signal_declaration(resolver *resolver,
-	pigen_module_id module_id, const pigen_syntax_node *syntax_node)
-{
-	pigen_semantic_model *model = resolver->model;
-	const pigen_semantic_module *module = pigen_module_get(model, module_id);
-	pigen_data_type_id type = pigen_resolve_type(resolver->syntax, resolver->model, module->scope,
-		syntax_node->as.static_signal_declaration.type, resolver->error);
-	pigen_syntax_id declarator_id;
-
-	if (type.index == PIGEN_INVALID_ID) return 0;
-	for (declarator_id = syntax_node->first_child;
-		declarator_id.index != PIGEN_INVALID_ID; )
-	{
-		const pigen_syntax_node *declarator = pigen_syntax_get(resolver->syntax,
-			declarator_id);
-		pigen_symbol_id symbol;
-		pigen_signal_id signal;
-		pigen_shape_id shape;
-		pigen_declare_result declared;
-
-		if (!declarator || declarator->kind != PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATOR)
-			return fail_location(resolver, syntax_node->location,
-				"invalid signal declarator");
-		shape = resolve_shape(resolver, module->scope, declarator);
-		if (shape.index == PIGEN_INVALID_ID) return 0;
-		declared = pigen_symbol_declare(model, module->scope,
-			PIGEN_SYMBOL_SIGNAL, type,
-			token_spelling(resolver, declarator->as.static_signal_declarator.name),
-			syntax_node->location.source_span, &symbol, NULL);
-		if (declared == PIGEN_DECLARE_DUPLICATE)
-			return fail_token(resolver, declarator->as.static_signal_declarator.name,
-				"duplicate module declaration");
-		if (declared != PIGEN_DECLARE_OK)
-			return fail_location(resolver, syntax_node->location,
-				"invalid signal declaration");
-		signal = pigen_signal_add(model, declarator_id, module_id, symbol, type,
-			shape, INVALID_ID(pigen_expr_id),
-			resolve_static_transfer_type(syntax_node->as.static_signal_declaration.transfer_type),
-			semantic_direction(syntax_node->as.static_signal_declaration.direction),
+			data_type, shape, transfer_argument, transfer_type,
+			semantic_direction(syntax_node->as.signal_declaration.direction),
 			syntax_node->location.source_span);
 		if (signal.index == PIGEN_INVALID_ID)
 			return fail_location(resolver, declarator->location,
@@ -719,8 +732,6 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 			!add_parameter(resolver, module_id, child, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_TYPEDEF &&
 			!add_typedef(resolver, scope, node)) return 0;
-		if (node->kind == PIGEN_SYNTAX_STATIC_SIGNAL_DECLARATION &&
-			!add_static_signal_declaration(resolver, module_id, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION &&
 			!add_signal_declaration(resolver, module_id, node)) return 0;
 		child = node->next_sibling;

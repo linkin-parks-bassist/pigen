@@ -25,7 +25,7 @@ int main(void)
 {
 	const char text[] =
 		"module uses #(parameter TOP = 6, WIDTH = 3);\n"
-		"  buf [7:0] left, right;\n"
+		"  logic [7:0] buf left, right;\n"
 		"endmodule\n"
 		"left ? right : left\n"
 		"(right)\n"

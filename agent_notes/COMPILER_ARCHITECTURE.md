@@ -80,8 +80,8 @@ consume those decisions; they do not switch independently over `int`, `uint`,
 catalogue, canonical interning, aliases, packed layout and projection, symbolic
 width algebra, state and numerical domains, conversion policy, and unary,
 binary, and conditional operation resolution. Shared type syntax resolves
-`int[n]`, `uint[n]`, `bit`, and `byte` in casts and typedefs; recognizing them
-at the start of data-first signal declarations remains the next syntax slice.
+`int[n]`, `uint[n]`, `bit`, and `byte` in casts, typedefs, and data-first signal
+declarations.
 A compile-time descriptor table owns shared primitive facts; parameterized and
 operation-specific rules remain ordinary private code. Constructor tags, raw
 interning, descriptors, and canonical records are private to `src/data_type.c`;
@@ -208,8 +208,8 @@ The unlinked replacement modules already provide:
 - conditional compilation and recursive include provenance;
 - a partial hierarchical syntax tree with explicit opaque nodes;
 - ordered declarator count/range dimensions resolved to canonical shapes;
-- source-order parameters, typedefs, ordinary declarations, and prototype
-  `buf`/`port`/`fifo`/`skid` declarations;
+- source-order parameters, typedefs, and unified data-first signal declarations
+  with optional descriptor-owned transfer types;
 - scopes, symbols, stable identities, and structural packed data types;
 - canonical structural shape identities shared by signals and expressions;
 - a shared expression parser with structural operators, concatenations,
@@ -293,8 +293,7 @@ lossless mixed-family promotion where a unique common representation exists.
 policy receives intrinsic operands only and returns effective operand types,
 conversions, and result type. Ari completed exact literals, intrinsic sizing,
 two-stage resolution, casts, assignment boundaries, and resource constraints
-on 2026-08-25. Source-visible data-first declarations, lowering, and production
-integration remain open.
+on 2026-08-25. Lowering and production integration remain open.
 
 As a rough architecture estimate, the replacement effort is about **25%**
 complete overall: the reusable frontend and semantic foundation is around
@@ -304,9 +303,8 @@ estimate, not line-count progress.
 
 ## Remaining cutover boundary
 
-The structured frontend still lacks complete target data-first declarations, generic
-input specialization, the complete target data-first declaration grammar,
-cases, atomic blocks, signal actions,
+The structured frontend still lacks generic input specialization, cases,
+atomic blocks, signal actions,
 pipelines, FSMs, instances, and fabrics. Expression typing still lacks several
 SystemVerilog contextual and aggregate forms. Preprocessing still lacks token
 concatenation, stringification, and required advanced macro arguments.
