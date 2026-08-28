@@ -13,6 +13,33 @@ static int span_is(const pigen_source_manager *sources, pigen_source_span span,
 	return text && length == strlen(expected) && !memcmp(text, expected, length);
 }
 
+static size_t source_occurrence_start(const char *source, const char *expected,
+	size_t occurrence)
+{
+	const char *at = source;
+	size_t i;
+
+	assert(occurrence);
+	for (i = 0; i < occurrence; i++)
+	{
+		at = strstr(at, expected);
+		assert(at);
+		if (i + 1 < occurrence) at++;
+	}
+	return (size_t)(at - source);
+}
+
+static int span_is_source_occurrence(const pigen_source_manager *sources,
+	pigen_source_span span, pigen_source_id source_id, const char *source,
+	const char *expected, size_t occurrence)
+{
+	size_t start = source_occurrence_start(source, expected, occurrence);
+
+	return span.source.index == source_id.index &&
+		span_is(sources, span, expected) && span.start == start &&
+		span.end == start + strlen(expected);
+}
+
 static const pigen_semantic_signal *find_signal(
 	const pigen_source_manager *sources, const pigen_semantic_model *model,
 	const char *name)
@@ -110,6 +137,7 @@ typedef struct {
 	const char *source;
 	const char *message;
 	const char *span;
+	size_t span_occurrence;
 } resolve_failure;
 
 static void expect_resolve_failure(resolve_failure failure)
@@ -124,6 +152,8 @@ static void expect_resolve_failure(resolve_failure failure)
 	pigen_semantic_model model;
 	pigen_semantic_error error = {0};
 	pigen_resolve_policy policy = {.maximum_generated_bits = 1024};
+	size_t expected_start = source_occurrence_start(failure.source, failure.span,
+		failure.span_occurrence);
 
 	assert(source.index != PIGEN_INVALID_ID);
 	assert(pigen_preprocess(&sources, source, NULL, &preprocessed,
@@ -131,14 +161,18 @@ static void expect_resolve_failure(resolve_failure failure)
 	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
 	assert(!pigen_resolve_semantics(&syntax, &model, &policy, &error));
 	if (!error.message || strcmp(error.message, failure.message) ||
-		!span_is(&sources, error.span, failure.span))
+		!span_is_source_occurrence(&sources, error.span, source, failure.source,
+			failure.span, failure.span_occurrence))
 		fprintf(stderr,
-			"expected `%s` at `%s`, got `%s` at byte range %zu:%zu\n",
-			failure.message, failure.span,
+			"expected `%s` at `%s` occurrence %zu, byte range %zu:%zu; "
+			"got `%s` at byte range %zu:%zu\n",
+			failure.message, failure.span, failure.span_occurrence, expected_start,
+			expected_start + strlen(failure.span),
 			error.message ? error.message : "(none)",
 			error.span.start, error.span.end);
 	assert(error.message && !strcmp(error.message, failure.message));
-	assert(span_is(&sources, error.span, failure.span));
+	assert(span_is_source_occurrence(&sources, error.span, source, failure.source,
+		failure.span, failure.span_occurrence));
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_tree(&syntax);
 	pigen_free_preprocess_result(&preprocessed);
@@ -371,29 +405,29 @@ static void test_declaration_failure_matrix(void)
 {
 	static const resolve_failure failures[] = {
 		{"module bad; int[8] missing_internal_transfer; endmodule\n",
-			"data type forbids an omitted transfer realization", "int[8]"},
+			"data type forbids an omitted transfer realization", "int[8]", 1},
 		{"module bad; output int[8] missing_output_transfer; endmodule\n",
-			"unqualified output transfer policy is unresolved", "int[8]"},
+			"unqualified output transfer policy is unresolved", "int[8]", 1},
 		{"module bad; inout int[8] buf dynamic_inout; endmodule\n",
-			"dynamic transfer type cannot be inout", "buf"},
+			"dynamic transfer type cannot be inout", "buf", 1},
 		{"typedef bit[8] packet_t; module bad; "
 			"packet_t fifo[0] zero_depth; endmodule\n",
-			"transfer depth must be a positive count", "0"},
+			"transfer depth must be a positive count", "0", 1},
 		{"typedef bit[8] packet_t; module bad; "
 			"packet_t fifo[-1] negative_depth; endmodule\n",
-			"transfer depth must be a positive count", "-1"},
+			"transfer depth must be a positive count", "-1", 1},
 		{"typedef bit[8] packet_t; module bad; bit logic runtime_signal; "
 			"packet_t fifo[runtime_signal] nonconstant_depth; endmodule\n",
-			"transfer depth requires a constant expression", "runtime_signal"}
+			"transfer depth requires a constant expression", "runtime_signal", 2}
 	};
 	static const resolve_failure preserved_failures[] = {
 		{"module bad; bit wire repeated, repeated; endmodule\n",
-			"duplicate module declaration", "repeated"},
+			"duplicate module declaration", "repeated", 2},
 		{"module bad; bit logic runtime_signal; "
 			"bit wire shaped[runtime_signal]; endmodule\n",
-			"signal dimension requires constant expressions", "[runtime_signal]"},
+			"signal dimension requires constant expressions", "[runtime_signal]", 1},
 		{"module bad; bit wire empty_shape[0]; endmodule\n",
-			"signal dimension must be a positive count", "[0]"}
+			"signal dimension must be a positive count", "[0]", 1}
 	};
 	size_t i;
 

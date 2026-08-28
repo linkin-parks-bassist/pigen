@@ -5,6 +5,7 @@
 #include "pigen/syntax.h"
 
 typedef struct {
+	pigen_source_id source;
 	pigen_preprocess_result preprocessed;
 	pigen_syntax_tree tree;
 	pigen_syntax_error error;
@@ -24,6 +25,7 @@ typedef struct {
 	const char *source;
 	const char *message;
 	const char *span;
+	size_t span_occurrence;
 } syntax_failure;
 
 static int span_is(const pigen_source_manager *sources, pigen_source_span span,
@@ -32,6 +34,33 @@ static int span_is(const pigen_source_manager *sources, pigen_source_span span,
 	size_t length;
 	const char *text = pigen_source_span_text(sources, span, &length);
 	return text && length == strlen(expected) && !memcmp(text, expected, length);
+}
+
+static size_t source_occurrence_start(const char *source, const char *expected,
+	size_t occurrence)
+{
+	const char *at = source;
+	size_t i;
+
+	assert(occurrence);
+	for (i = 0; i < occurrence; i++)
+	{
+		at = strstr(at, expected);
+		assert(at);
+		if (i + 1 < occurrence) at++;
+	}
+	return (size_t)(at - source);
+}
+
+static int span_is_source_occurrence(const pigen_source_manager *sources,
+	pigen_source_span span, pigen_source_id source_id, const char *source,
+	const char *expected, size_t occurrence)
+{
+	size_t start = source_occurrence_start(source, expected, occurrence);
+
+	return span.source.index == source_id.index &&
+		span_is(sources, span, expected) && span.start == start &&
+		span.end == start + strlen(expected);
 }
 
 static int token_is(const pigen_expanded_source *source,
@@ -62,6 +91,7 @@ static int parse_fixture(pigen_source_manager *sources, const char *name,
 	pigen_preprocess_error preprocess_error = {0};
 
 	assert(source.index != PIGEN_INVALID_ID);
+	fixture->source = source;
 	assert(pigen_preprocess(sources, source, NULL, &fixture->preprocessed,
 		&preprocess_error));
 	return pigen_parse_syntax(&fixture->preprocessed.expanded, &fixture->tree,
@@ -178,17 +208,24 @@ static void assert_syntax_failure(pigen_source_manager *sources,
 	syntax_failure failure)
 {
 	parsed_fixture fixture = {0};
+	size_t expected_start = source_occurrence_start(failure.source, failure.span,
+		failure.span_occurrence);
 
 	assert(!parse_fixture(sources, failure.name, failure.source, &fixture));
 	if (!fixture.error.message || strcmp(fixture.error.message, failure.message) ||
-		!span_is(sources, fixture.error.span, failure.span))
-		fprintf(stderr, "expected `%s` at `%s`, got `%s` at byte range %zu:%zu\n",
-			failure.message, failure.span,
+		!span_is_source_occurrence(sources, fixture.error.span, fixture.source,
+			failure.source, failure.span, failure.span_occurrence))
+		fprintf(stderr,
+			"expected `%s` at `%s` occurrence %zu, byte range %zu:%zu; "
+			"got `%s` at byte range %zu:%zu\n",
+			failure.message, failure.span, failure.span_occurrence, expected_start,
+			expected_start + strlen(failure.span),
 			fixture.error.message ? fixture.error.message : "(none)",
 			fixture.error.span.start, fixture.error.span.end);
 	assert(fixture.error.message &&
 		!strcmp(fixture.error.message, failure.message));
-	assert(span_is(sources, fixture.error.span, failure.span));
+	assert(span_is_source_occurrence(sources, fixture.error.span, fixture.source,
+		failure.source, failure.span, failure.span_occurrence));
 	free_fixture(&fixture);
 }
 
@@ -530,32 +567,32 @@ static void test_transactional_and_clean_break_syntax(
 	static const syntax_failure failures[] = {
 		{"missing_depth.pigen",
 			"module missing_depth; packet_t fifo queue; endmodule",
-			"transfer type requires a depth argument", "fifo"},
+			"transfer type requires a depth argument", "fifo", 1},
 		{"empty_depth.pigen",
 			"module empty_depth; packet_t fifo[] queue; endmodule",
-			"transfer depth requires an expression", "["},
+			"transfer depth requires an expression", "[", 1},
 		{"repeated_depth.pigen",
 			"module repeated_depth; packet_t fifo[4][2] queue; endmodule",
-			"transfer type accepts exactly one argument", "["},
+			"transfer type accepts exactly one argument", "[", 2},
 		{"unexpected_transfer_argument.pigen",
 			"module unexpected_transfer_argument; bit[8] buf[2] value; "
-			"endmodule", "transfer type does not accept an argument", "["},
+			"endmodule", "transfer type does not accept an argument", "[", 2},
 		{"missing_declarator.pigen",
 			"module missing_declarator; bit[8] buf; endmodule",
-			"declaration requires a signal name", ";"},
+			"declaration requires a signal name", ";", 2},
 		{"invalid_continuation.pigen",
 			"module invalid_continuation; bit[8] buf first, second + third; "
 			"endmodule",
-			"expected `,` or declaration terminator after signal name", "+"},
+			"expected `,` or declaration terminator after signal name", "+", 1},
 		{"pigen_initializer.pigen",
 			"module pigen_initializer; int[16] buf value = 0; endmodule",
-			"expected `,` or declaration terminator after signal name", "="},
+			"expected `,` or declaration terminator after signal name", "=", 1},
 		{"unknown_transfer.pigen",
 			"module unknown_transfer; bit[8] mystery value; endmodule",
-			"expected `,` or declaration terminator after signal name", "value"},
+			"expected `,` or declaration terminator after signal name", "value", 1},
 		{"directionless_dynamic_port.pigen",
 			"module directionless_dynamic_port(bit[8] buf value); endmodule",
-			"ANSI dynamic signal port requires `input` or `output`", "bit"}
+			"ANSI dynamic signal port requires `input` or `output`", "bit", 1}
 	};
 	size_t i;
 
@@ -610,7 +647,7 @@ static void test_missing_pigen_terminator(pigen_source_manager *sources)
 	assert_syntax_failure(sources, (syntax_failure){
 		"missing_terminator.pigen",
 		"module missing_terminator; int[16] buf value endmodule",
-		"signal declaration requires `;`", "endmodule"});
+		"signal declaration requires `;`", "endmodule", 1});
 }
 
 int main(void)
