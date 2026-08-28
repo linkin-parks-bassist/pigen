@@ -1,128 +1,87 @@
 # Signal model
 
-Every runtime datum in Pigen is a **signal**. A signal is the product of three
-independent semantic components:
+Every runtime datum in Pigen is a **signal**:
 
 ```text
 signal = data type × transfer type × declarator shape
 ```
 
-The data type describes the carried bits. The transfer type describes the
-signal's temporal transfer law: validity, readiness, storage, consumption, and
-production. The declarator shape describes scalar or array extent. None may be
-recovered from source spelling after resolution.
+The data type describes the carried bits and their interpretation. The
+transfer type describes temporal validity, readiness, storage, consumption,
+and production. The declarator shape is the ordered scalar/array extent after
+the name. Packed dimensions belong to the data type; post-name dimensions
+belong to shape. None of these facts is reconstructed from rendered text after
+resolution.
+
+The current Pigen primitive data types are `int[n]`, `uint[n]`, and `bit`.
+Use `bit[8]` for neutral eight-bit storage. `byte` is not a Pigen primitive:
+ordinary SystemVerilog `byte` remains its distinct signed eight-bit type and is
+kept in the SystemVerilog spelling domain rather than mapped to `bit[8]`.
 
 The concrete transfer types are `wire`, `reg`, `logic`, `buf`, `port`, `fifo`,
 and `skid`. `wire`, `reg`, and `logic` are **static transfer types**, or
-**statics** informally. Their transfer-control laws are constant:
+**statics** informally. `wire` is always valid and never ready as a procedural
+destination; `reg` and `logic` are always valid and ready, and their reads do
+not consume. Static laws are the constant cases of the same transfer algebra,
+not exceptions to it.
 
-- `wire` is always valid and is never ready as a procedural destination;
-- `reg` and `logic` are always valid and always ready, and reads do not consume.
+Every Pigen module input exposes payload and valid into the module and ready
+out. An unqualified input has an abstract transfer type; a written transfer
+type constrains connection compatibility without changing the receiving body's
+uniform consumption model. Constant static laws may later lower to ties, but
+the signal and transfer type remain explicit semantically. Internal signals
+and outputs follow the unqualified-transfer policy owned by their data type;
+where that policy is unresolved or forbidden, the source must write a concrete
+realization.
 
-Static behavior is not outside or beneath the transfer model. It is the
-constant case of the same model, just as the empty set is still a set. The word
-`dynamic` may denote the complement when a contrast is unavoidable, but
-ordinary writing should simply say "transfer type."
+`net` retains its SystemVerilog realization meaning. It is not an umbrella noun
+for Pigen signals. Likewise, a backend variable, queue, elastic slot, or
+boundary interface is a realization of a signal, not its identity.
 
-Every module input is a signal with payload, valid, and ready at its boundary.
-A unqualified input has an abstract transfer type constrained by this universal
-interface. An explicit transfer type constrains the connection and makes an
-incompatible connection erroneous; it does not give the receiving body a
-different consumption model. An input does not need to know whether its peer
-is a register, wire, buffer, or queue. It sees the same transfer interface and
-can stimulate or stall the external dataflow through ready.
+## Compiler laws
 
-The meaning of a module may therefore depend parametrically on its connection
-context without its body depending on the peer's realization. This is intended
-to improve modularity and reuse. Verification must cover specialization at
-module boundaries rather than weakening this abstraction.
+- There is one signal arena and one signal symbol binding for ordinary
+  SystemVerilog and Pigen signals.
+- Each resolved signal owns data type, concrete or abstract transfer type,
+  canonical shape, direction, provenance, and a generic transfer argument.
+- Written transfer occurrence and omission are distinct syntax states. An
+  omitted occurrence is not a guessed transfer keyword.
+- The transfer descriptor owns argument form and interpretation. `fifo[8]` is
+  FIFO depth; it is never the payload width or a declarator dimension.
+- The data-type owner alone decides what an omitted transfer occurrence means.
+  Declaration syntax and resolution never enumerate primitive families.
+- A transfer type may be concrete or abstract; it is never absent after
+  resolution.
+- Shape dimensions are colonless counts or explicit ranges. Scalar is the
+  canonical empty shape. Indexing consumes leading unpacked shape before
+  packed data; unsupported shaped slicing rejects rather than flattens.
+- Expression-use and transfer-incidence analysis retain statics as signal
+  identities. Transfer laws decide consumer, producer, ownership, and domain
+  roles.
+- Surface terminology is `signal`, `data type`, `transfer type`, `declarator
+  shape`, and `static`. `kind` is not a language-level synonym for transfer
+  type.
 
-A connected static may permit its constant validity or readiness law to be
-folded into emitted `1'b0` or `1'b1` ties. That lowering optimization never
-erases the signal or its transfer type from the semantic model. There is no
-Pigen signal without formally defined valid and ready behavior.
+For example:
 
-`net` retains its SystemVerilog meaning: it is one possible emitted realization
-of a signal. It is not Pigen's umbrella noun. Likewise, a backend register,
-queue, or combinational connection is a realization decision, not the identity
-of the source signal.
+```systemverilog
+int[16] fifo[8] pending[lanes];
+```
 
-`byte` is an unsigned eight-bit bit-vector. It is not an integer type and has
-no arithmetic signedness.
+has data type `int[16]`, transfer type `fifo` with descriptor-owned depth `8`,
+and declarator shape `[lanes]`.
 
-## Compiler consequences
+## Cutover boundary
 
-- There is one signal identity space and one signal arena. Ordinary
-  SystemVerilog nets and variables do not occupy a parallel semantic species.
-- Each resolved signal owns its data type, transfer type, shape, direction,
-  provenance, and generic transfer argument. The transfer-type descriptor owns
-  the argument's meaning; `fifo` currently interprets it as a constant depth.
-- A transfer type may be concrete or abstract; it is never absent.
-- Expression-use analysis records signal identities for statics as well as
-  stateful signals. Transfer incidence likewise includes all participating
-  signals. Transfer-type laws decide which incidences consume, produce, bind a
-  domain, require ownership, or lower to constants.
-- Surface and internal terminology use `signal`, `transfer type`, and `static`.
-  The discarded narrower umbrella term is removed rather than retained as an
-  alias. `kind` is not a language-level synonym for transfer type; internal
-  enum discriminators may still use a conventional tag field where unrelated
-  to this vocabulary.
+Ari's 2026-08-27 shared-frontend cutover implements these declaration laws in
+one structured syntax topology and one semantic resolver. It deletes Pigen
+`byte`, retains ordinary SystemVerilog `byte` as reserved/opaque where
+unsupported, and keeps abstract input policy in the data-type owner.
 
-This note records decisions made by David and organized by Ariadne during the
-architecture audit of 2026-08-21.
+The structured frontend is not yet linked into `./pigen`. Production fixtures
+remain on the prototype parser only until the narrow semantic-to-elastic-RTL
+vertical slice supplies adapters, RTL IR, and emission. Do not create a bridge,
+dual parser, or fallback in the meantime.
 
-## Cutover record
-
-On 2026-08-21, Ariadne merged the replacement compiler middle's former static
-and general semantic arenas. `pigen_signal_id`, `pigen_semantic_signal`, and
-`PIGEN_SYMBOL_SIGNAL` are now the sole runtime identities and bindings. This
-includes signals declared in nested module-owned scopes: lexical ownership does
-not create a second semantic species or prevent module ownership.
-
-Every analyzed direct transfer now retains every participating signal and
-separates syntactic read/write incidence from semantic consumer/producer roles.
-The latter, clock-domain binding, and exclusivity checks are driven through the
-central transfer-type descriptor. Statics therefore remain visible in the
-incidence graph while their trivial laws avoid false consumption, production,
-ownership, and domain constraints.
-
-The unified signal and expression records now carry canonical `pigen_shape_id`
-values. A shape owns an ordered list of dimensions; a dimension is either a
-colonless count expression or an explicit left/right range. Structurally equal
-lists intern to the same identity, while the full dimension records remain
-available for diagnostics and resolution. Scalar is the canonical empty shape.
-Packed dimensions remain in the data type; unpacked declarator dimensions form
-the shape. This preserves locality through one direct ID while avoiding
-duplicated dimension lists across signals and expressions.
-
-Recognized declarators now parse their post-name brackets once into ordered
-syntax-shape dimensions. Semantic resolution requires constant expressions,
-interns the resulting shape, and attaches its ID to the signal. A symbol
-expression inherits that same ID, and direct transfers reject unequal shape
-IDs without rendering either shape back to text. Indexing consumes the leading
-unpacked shape dimension while preserving the data type; packed indexing begins
-only at scalar shape. Unpacked slices and concatenations currently reject
-shaped operands rather than silently flattening them.
-
-The canonical descriptor catalogue owns spelling, classification, parameter
-form, write eligibility, constant valid/ready laws, consumption, production,
-ownership, domain binding, and the mapping from each transfer type to a
-backend-neutral realization identity. Boundaries, combinational nets,
-procedural variables, elastic slots, pulse registers, parameterized queues,
-and skid queues retain distinct structural meaning. Capacity source, ready
-dependency, occupancy, and reset behavior are explicit properties; backend
-module names and generated interfaces are not semantic data. Syntax
-recognition, resolution, signal validation, assignability, incidence, and
-domain binding query the catalogue.
-
-After the realization cutover, phase 1 of `PLAN.md` is complete. The next work
-is the centralized primitive data-type algebra and the remaining shared
-frontend required by the first vertical RTL slice.
-
-After the one-arena, canonical-shape, structured declarator-shape, canonical
-transfer-descriptor, and realization cutovers, `make verify` completed
-successfully on 2026-08-24. This proves the current
-replacement-middle tests and production behavioral suite still pass; it does
-not prove the architecture cutover complete. In particular, the complete
-target data-first declaration grammar, generic input specialization, RTL IR,
-and production integration remain open.
+This model was fixed by David and organized by Ari; Rowan compacted the durable
+record on 2026-08-28.

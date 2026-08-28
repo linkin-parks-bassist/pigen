@@ -9,6 +9,11 @@ examples, and tests together. No prior Pigen form or implementation path has
 compatibility status. Ordinary SystemVerilog compatibility remains the distinct
 contract stated in `SPEC.md`.
 
+Ari's 2026-08-27 cutover establishes one source-visible data-first declaration
+topology and one semantic resolver in the shared frontend. This does not yet
+integrate that frontend with `./pigen`; production fixtures remain quarantined
+on the prototype parser until vertical RTL lowering becomes authoritative.
+
 ## Cross-cutting invariants
 
 - Every source file has a stable `SourceId`. Syntax provenance is a half-open
@@ -123,7 +128,7 @@ contract stated in `SPEC.md`.
   members.
 - The compiler's private 32-bit type for unsized integer expressions is
   `unsized_integer`. It is infrastructure for literal and width-expression
-  semantics, not the planned source-level `int[n]` primitive.
+  semantics, not the source-level `int[n]` primitive.
 - Structured syntax stores the written base-type token, or absence for an
   implicit base. It does not classify primitive versus typedef. Primitive
   spelling is recognized only by the data-type subsystem during resolution;
@@ -150,9 +155,10 @@ contract stated in `SPEC.md`.
   Mixed-family operands are legal when the operation owner can form one unique
   lossless common representation; signed operands sign-extend and unsigned
   operands zero-extend. Assignment never uses that promotion to change family.
-- Pigen `byte` is initially a two-state eight-bit vector without numerical
-  interpretation. It supports structural, bitwise, equality, and logical use,
-  but arithmetic and ordered comparison require an explicit integer cast.
+- The current Pigen primitive families are `int[n]`, `uint[n]`, and `bit`.
+  Neutral eight-bit storage is `bit[8]`. Ordinary SystemVerilog `byte` remains
+  a distinct signed type in the SystemVerilog spelling domain; it is neither a
+  Pigen primitive nor a `bit[8]` alias.
 - The data-type owner keeps Pigen integer widths as intrinsic canonical
   constant-expression identities and exposes alias-transparent numerical
   interpretation, fail-closed conversions, and family-owned operation
@@ -261,6 +267,8 @@ contract stated in `SPEC.md`.
 - Data type, transfer type, and declarator shape are independent semantic
   identities. A rendered SystemVerilog declaration never stands in for that
   product.
+- A written transfer occurrence and an omitted occurrence are distinct syntax
+  states. Syntax does not invent a concrete transfer type for omission.
 - A parsed declarator owns an ordered syntax-shape list whose dimensions are
   either colonless counts or explicit ranges. Resolution requires constant
   dimension expressions and interns the list as one canonical `ShapeId`.
@@ -281,7 +289,10 @@ contract stated in `SPEC.md`.
   concrete transfer types.
 - A signal carries a generic transfer-argument identity. The descriptor defines
   whether it is absent or a constant depth expression; no general signal API
-  exposes a FIFO-specific field.
+  exposes a FIFO-specific field. Thus `int[16] fifo[8] pending[lanes];` keeps
+  FIFO depth `8` independent of data width and declarator shape `[lanes]`.
+- The data-type owner decides unqualified-transfer policy after the data type
+  resolves. Declaration resolution never enumerates primitive families.
 - A signal's transfer-type descriptor names one backend-neutral realization.
   The realization owner states capacity source, ready dependency, occupancy,
   and reset behavior. General semantic passes do not enumerate realization

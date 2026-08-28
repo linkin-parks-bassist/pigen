@@ -11,11 +11,13 @@ not change SystemVerilog simulation timing.
 
 This document specifies the intended v1 language. The compiler is pre-release
 and is being moved onto a structured implementation; it does not yet accept
-every form specified here. In particular, data-first declarations, generic
-input endpoints, and inline width-inferred fabrics are not implemented. The
-currently accepted transfer-type-first declarations and top-level fixed-width
-fabric blocks are prototype syntax to be replaced, not alternate language
-forms. Implementation lag does not change the language contract.
+every form specified here. The shared structured frontend parses and resolves
+source-visible data-first declarations and abstract input endpoints. It is not
+yet connected to `./pigen`, whose production parser and lowering remain a
+prototype until the semantic-to-elastic-RTL vertical slice replaces them.
+Data-first declarations are the only specified Pigen form; production
+implementation lag does not create an alternate language contract. Inline
+width-inferred fabrics also remain unimplemented.
 
 ## SystemVerilog compatibility contract
 
@@ -223,18 +225,21 @@ data-type  transfer-type  declarator
 ```
 
 Every signal has an independent data type, transfer type, and declarator shape.
-The initial Pigen data types are:
+The current Pigen primitive data types are:
 
 - `int[n]`: an `n`-bit signed integer;
 - `uint[n]`: an `n`-bit unsigned integer;
-- `bit`: a one-bit value;
-- `byte`: an unsigned eight-bit bit-vector.
+- `bit`: a one-bit value, with `bit[n]` denoting an `n`-bit neutral packed
+  bit-vector.
 
-`byte` is not an integer and has no arithmetic signedness. The two-state or
-four-state policy of the initial types is not yet fixed. Until it is, programs
-whose meaning depends on that property are outside the accepted v1 subset. The
-data-type algebra is open to later scalar, aggregate, enum, and user-defined
-types.
+Ordinary SystemVerilog `byte` remains the distinct signed eight-bit integral
+type defined by SystemVerilog. It is not a Pigen primitive and is not mapped to
+`bit[8]`. Ordinary `byte` declarations retain SystemVerilog ownership and
+remain lossless opaque syntax where the structured frontend does not yet model
+them. The two-state or four-state policy of the initial Pigen types is not yet
+fixed. Until it is, programs whose meaning depends on that property are outside
+the accepted v1 subset. The data-type algebra is open to later scalar,
+aggregate, enum, and user-defined types.
 
 The concrete transfer types are `wire`, `reg`, `logic`, `buf`, `port`, `fifo`,
 and `skid`. `wire`, `reg`, and `logic` are static transfer types, called
@@ -242,8 +247,8 @@ and `skid`. `wire`, `reg`, and `logic` are static transfer types, called
 full members of the same transfer-type algebra. Static behavior is the trivial
 case of the general transfer behavior, not an exception to it. The complement
 may be called dynamic when contrast is necessary, but ordinary writing simply
-says transfer type. FIFO capacity requires a transfer-type parameter; its
-data-first surface spelling remains to be specified.
+says transfer type. FIFO capacity is the descriptor-owned transfer argument in
+`fifo[depth]`; it is independent of packed data width and declarator shape.
 
 Examples of the declaration order are:
 
@@ -252,7 +257,13 @@ int[16] buf sample;
 uint[24] skid response;
 bit port finished;
 int[16] buf lanes[8];
+int[16] fifo[8] pending[lanes];
 ```
+
+The last declaration exhibits the complete product: `int[16]` is the data
+type, `fifo[8]` is the transfer type and its depth argument, and `[lanes]` is
+the declarator shape. The depth never becomes a payload dimension or an
+unpacked array dimension.
 
 A colonless bracket in a declaration-dimension position is a count. It lowers
 structurally as `[X]` to the SystemVerilog range `[X-1:0]`. On a data type it
@@ -307,10 +318,13 @@ not an erasure of the signal or its transfer type from the semantic model. A
 module can therefore stimulate or stall external dataflow through ready while
 remaining parametric over its peer's realization.
 
-The unqualified-output contract has not yet been chosen. Until it is specified,
-Pigen outputs require an explicit transfer type. Their consumer is likewise
-unknown to the sending module; the output exposes payload, valid, and ready
-according to the selected local realization.
+Unqualified-transfer policy belongs to the resolved data type. For the current
+Pigen primitives, unqualified inputs resolve to the abstract transfer type.
+Internal `int[n]` and `uint[n]` signals require a written transfer realization;
+`bit` may take its data-type-owned static default. Unqualified Pigen integer
+outputs remain unresolved and therefore require an explicit transfer type.
+Their consumer is likewise unknown to the sending module; the output exposes
+payload, valid, and ready according to the selected local realization.
 
 For internal signals and explicitly realized outputs, the transfer laws
 are:
@@ -488,8 +502,8 @@ end
 ```
 
 lowers to an unconditional `bram_port <= mem[address];` clocked assignment;
-`bram_port` is valid on the next cycle only when `read_enable` was true.  A
-port has one Pigen producer.
+`bram_port` is valid on the next cycle only when `read_enable` was true. Each
+`port` has one Pigen producer.
 
 An ordinary sequential storage write can consume a signal source directly:
 
@@ -629,6 +643,13 @@ paths are structurally exclusive.  A `goto` never implicitly waits for a
 signal transfer; use `accepts` when it must.
 
 ## Lowering requirements
+
+The rules in this section describe target lowering. The shared frontend does
+not yet feed the production executable: semantic-to-elastic-RTL adapters, RTL
+IR, and terminal SystemVerilog emission are the next vertical implementation
+slice. Until that cutover, `./pigen` continues to use its quarantined prototype
+parser and lowering and does not accept the data-first examples in this
+specification.
 
 Every buffered declaration lowers to a dedicated primitive instance; storage
 state machines are never inlined. Reset clears primitive occupancy. Payload

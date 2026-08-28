@@ -35,7 +35,9 @@ middle. Completed prototype behavior is evidence, not architecture.
   connections without changing the receiving body's uniform handshake model.
 - Static ready/valid laws may lower to constants and disappear from emitted RTL
   where context permits. They remain explicit in semantic analysis.
-- `byte` is an unsigned eight-bit bit-vector, not an integer.
+- The current Pigen primitives are `int[n]`, `uint[n]`, and `bit`. Neutral
+  eight-bit storage is `bit[8]`; ordinary SystemVerilog `byte` remains its
+  distinct signed type and is not a Pigen alias.
 - A net is a SystemVerilog realization category, not Pigen's umbrella semantic
   object. Backend storage and wiring choices never replace signal identity.
 
@@ -63,14 +65,17 @@ Literal domain is explicit: Pigen expressions and Pigen type counts use exact
 decimals, while ordinary SystemVerilog parameters and structural ranges retain
 SystemVerilog literal rules. Known numerical ranges select the narrowest result,
 and semantic conversion constructors revalidate the owner's conversion record.
-Fresh `make verify` passed for this intrinsic-expression cutover on 2026-08-25.
+The shared frontend now parses and resolves source-visible data-first
+declarations through one topology. It preserves written transfer occurrence
+versus omission, asks the data-type owner for omitted-transfer policy, and asks
+the transfer descriptor to interpret arguments such as FIFO depth. Pigen
+`byte` has been deleted without reinterpreting ordinary SystemVerilog `byte`.
 
 The structured middle remains unlinked from the production executable. The
 production compiler still uses rewritten source, generated names, marker
-comments, rescanning, and feature-local models. Source-visible data-first
-`int[n]`, `uint[n]`, `bit`, and `byte` declarations are deliberately the next
-frontend slice; tests currently reach those semantic types through shared type
-syntax and typedefs. There is no elastic RTL IR or terminal structured emitter.
+comments, rescanning, and feature-local models. There is no elastic RTL IR,
+semantic-to-RTL adapter, or terminal structured emitter. The next step is the
+narrow semantic-to-elastic-RTL vertical slice, not another frontend bridge.
 
 ## Architecture cutover
 
@@ -104,10 +109,16 @@ syntax and typedefs. There is no elastic RTL IR or terminal structured emitter.
   signed and unsigned arithmetic, shifts, widening, and future fixed-point
   scaling are decided once and carried forward structurally. RTL lowering of
   those decisions remains part of the vertical slice.
-- [ ] Parse target data-first declarations and declaration shapes structurally.
-- [ ] Preserve ordinary SystemVerilog declarations without reinterpreting
+- [x] Delete Pigen `byte`; reserve ordinary SystemVerilog `byte` to its own
+  spelling domain without lowering it to `bit[8]`.
+- [x] Parse target data-first declarations and declaration shapes structurally
+  through one shared signal-declaration topology.
+- [x] Preserve written transfer occurrence and omission as distinct syntax
+  states, with descriptor-owned transfer arguments including FIFO depth.
+- [x] Preserve supported ordinary SystemVerilog declarations without reinterpreting
   explicit ranges or unrelated expression indexing.
-- [ ] Represent generic input boundaries and explicit transfer-type constraints.
+- [x] Represent abstract unqualified input boundaries and explicit
+  transfer-type constraints through data-type-owned omission policy.
 - [ ] Complete parameter, type, aggregate, array, and expression forms required
   by accepted Pigen constructs; reject an unsupported form at its original
   span rather than scanning opaque text.
@@ -116,6 +127,8 @@ syntax and typedefs. There is no elastic RTL IR or terminal structured emitter.
 
 ### 3. Establish one complete vertical lowering slice
 
+- [ ] Define the elastic RTL IR and the narrow semantic-to-RTL adapters for one
+  resolved module slice.
 - [ ] Lower one module, its declarations, one clocked process, and direct atomic
   transfers through syntax, resolution, semantic validation, incidence graph,
   elastic RTL IR, and SystemVerilog emission.
@@ -127,6 +140,8 @@ syntax and typedefs. There is no elastic RTL IR or terminal structured emitter.
   action, domain, ownership, stall, and throughput behavior.
 - [ ] Delete the corresponding production textual scanners and emitters when
   the structured slice becomes authoritative.
+- [ ] Connect that structured slice to the production executable and make its
+  SystemVerilog emitter authoritative for the covered forms.
 
 ### 4. Migrate pipelines
 

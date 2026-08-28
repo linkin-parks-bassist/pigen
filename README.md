@@ -12,7 +12,12 @@ clocks, storage, timing boundaries and cycle behaviour remain explicit. What
 Pigen takes away is the repeated flow-control bookkeeping that tends to bury the
 actual design.
 
-Pigen compiles `.pigen` files to readable, synthesizable SystemVerilog.
+Pigen compiles `.pigen` files to readable, synthesizable SystemVerilog. This
+README describes the target language. The shared structured frontend already
+parses and resolves the data-first declarations shown below, but `./pigen` is
+not yet connected to that frontend. The production executable will adopt this
+syntax with the first semantic-to-elastic-RTL vertical lowering slice; until
+then, use [`USER_GUIDE.md`](USER_GUIDE.md) for its runnable prototype subset.
 
 ## Transfer types
 
@@ -46,25 +51,39 @@ where the connection context permits.
 ## Data types
 
 The data type says what bits a signal carries and how operations interpret
-them; the transfer type says how that value exists in time. Pigen's initial
-data types are signed `int[n]`, unsigned `uint[n]`, one-bit `bit`, and unsigned
-eight-bit `byte`. A width after a data type is compact packed-width notation,
-so `bit[32]` is a neutral 32-bit value.
+them; the transfer type says how that value exists in time. Pigen's current
+primitive data types are signed `int[n]`, unsigned `uint[n]`, and one-bit
+`bit`. A count after `bit` is compact packed-width notation, so `bit[8]` is a
+neutral eight-bit value and `bit[32]` is a neutral 32-bit value.
 
-Declarations put the data type first and the transfer type immediately before
-the signal name:
+Every runtime datum is a signal with three independent components:
+
+```text
+signal = data type × transfer type × declarator shape
+```
+
+Declarations put the data type first, then the transfer type and any argument,
+then the signal name and its declarator shape:
 
 ```systemverilog
 bit[32] wire address;
 int[16] buf sample;
 uint[24] port result;
-byte logic tag;
+bit[8] logic tag;
+int[16] fifo[8] pending[lanes];
 ```
 
-Every signal has both types. An unqualified module input has an abstract
-transfer type specialized by its connection; an explicit transfer type
-constrains what may connect to it. The precise grammar is in
-[`SPEC.md`](SPEC.md).
+In the last declaration, `int[16]` is the data type, `fifo[8]` is a FIFO
+transfer type with depth eight, and `[lanes]` is the declarator shape. FIFO
+depth is storage behavior, not a payload or array dimension.
+
+An unqualified Pigen module input has an abstract transfer type specialized by
+its connection, while an explicit transfer type constrains what may connect to
+it. Internal and output `int[n]` and `uint[n]` signals require an explicit
+realization; `bit` may use its data-type-owned static default where the
+specification permits. Ordinary SystemVerilog `byte` remains its distinct
+signed eight-bit integral type. It is neither a Pigen primitive nor an alias
+for `bit[8]`. The precise rules are in [`SPEC.md`](SPEC.md).
 
 ## The transfer is the fundamental unit
 
@@ -96,13 +115,13 @@ module packet_path
     (
         input  logic        clk,
         input  logic        reset,
-        input  buf [31:0]   incoming,
-        output buf [31:0]   outgoing
+        input  bit[32] buf  incoming,
+        output bit[32] buf  outgoing
     );
 
-    reg  [31:0] decoded;
-    skid [31:0] timing_break;
-    fifo [31:0][8] pending;
+    bit[32] reg     decoded;
+    bit[32] skid    timing_break;
+    bit[32] fifo[8] pending;
 
     always_ff @(posedge clk) begin
         decoded      <= incoming;
@@ -280,7 +299,7 @@ retains its widths, signedness, scheduling, reset and cycle behaviour when
 processed by Pigen. Pigen syntax may change freely while the project is young;
 unrelated SystemVerilog does not.
 
-## Build and try it
+## Build and try the production prototype
 
 A C compiler and `make` are enough to build Pigen. The full verification suite
 also uses Icarus Verilog and Verilator.
@@ -291,6 +310,11 @@ make
 ./pigen network.pigen -o network.sv --diagram network.svg
 make verify
 ```
+
+These commands build and exercise the current production prototype. Its
+accepted syntax is documented in [`USER_GUIDE.md`](USER_GUIDE.md); the
+data-first target examples in this README become executable when the vertical
+RTL-lowering slice connects the shared frontend to `./pigen`.
 
 Generated designs use the small primitives in
 [`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv).

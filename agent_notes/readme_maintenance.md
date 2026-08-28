@@ -1,40 +1,37 @@
 # README maintenance
 
-`README.md` is the short public introduction to Pigen. Its job is to explain
-why the project exists and make the central idea legible to a hardware designer,
-not to summarize the compiler architecture, specification, plan, or development
-process.
+`README.md` is the short public introduction to Pigen. Explain why the project
+exists and make the transfer model legible to a hardware designer; do not turn
+it into a compiler architecture or development diary.
 
 Front-load transfer types. They are Pigen's defining feature: ordinary
-SystemVerilog signals and elastic storage elements share one ready/valid
-transfer interface, and `<=` performs that transfer. Examples should make the
-resulting uniformity and removal of handshake bookkeeping concrete.
+SystemVerilog signals and elastic storage share one ready/valid transfer
+interface, and `<=` performs that transfer. Examples should make the removal of
+handshake bookkeeping concrete.
 
-The README's large-scale order should nevertheless reveal that Pigen extends
-Verilog's type system before it introduces the higher-level syntax built from
-those types. Give data types a short section after the main transfer-type
-explanation and before pipelines, fabrics, and FSMs. Roughly four-fifths of the
-type-system emphasis belongs to transfer types; data types need only establish
-`int[n]`, `uint[n]`, `bit`, `byte`, and the `[n]` width shorthand. Explain a
-surface rule once before examples need it rather than interrupting a later
-feature section with a backward reference.
+The type-system introduction must nevertheless state the full product once:
 
-Assume readers already know that Verilog has data types. Mention declaration
-syntax only as much as examples require, and leave primitive rules, signedness,
-packing, arrays, and other exact language semantics to `SPEC.md`. Never expose
-compiler terms such as canonical identity, declarator shape, alias record, or
-semantic lowering in the opening pitch. Syntactic sugar must not compete with
-the transfer-type idea for attention.
+```text
+signal = data type × transfer type × declarator shape
+```
 
-Keep the tone direct and technical without becoming exhaustive or promotional.
-Architecture status belongs in `PLAN.md` and `agent_notes/`; currently accepted
-syntax belongs in `USER_GUIDE.md`. The README may link to those documents rather
-than reproducing them. Do not add AI acknowledgements or development-process
-copy unless David explicitly wants it there.
+Keep the data-type section brief. The current Pigen primitives are `int[n]`,
+`uint[n]`, and `bit`; use `bit[8]` for neutral eight-bit examples. Ordinary
+SystemVerilog `byte` is a distinct signed type, never a Pigen alias. Use
+`int[16] fifo[8] pending[lanes];` when depth/shape separation needs to be
+explicit.
 
-Runnable snippets must use syntax accepted by the current compiler unless they
-are plainly labelled as intended syntax.
+Leave canonical identities, alias records, expression resolution, and RTL IR
+to `SPEC.md`, `PLAN.md`, and `agent_notes/`. The public README should explain
+abstract unqualified inputs and the need to realize internal/output signals
+where data-type policy requires it, but not narrate the implementation APIs.
 
-Prefer the concise state form in FSM examples. If an example genuinely needs a
-multi-statement state, format its opener as `state name: begin` on one line;
-never dangle the state body's `begin` beneath the state label.
+Keep the tone direct, technical, and unpromotional. Historical architecture
+status belongs in approved records; current status belongs in `PLAN.md`. Until
+the vertical RTL slice connects the structured frontend to `./pigen`, clearly
+label data-first snippets as target language and point runnable production
+users to `USER_GUIDE.md`. Never show transfer-first syntax as the public Pigen
+language.
+
+Prefer the concise state form in FSM examples. If a state needs multiple
+statements, write `state name: begin` on one line.
