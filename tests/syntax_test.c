@@ -10,6 +10,22 @@ typedef struct {
 	pigen_syntax_error error;
 } parsed_fixture;
 
+typedef struct {
+	size_t syntax_nodes;
+	size_t expression_nodes;
+	size_t expression_children;
+	size_t type_nodes;
+	size_t type_arguments;
+	size_t shape_dimensions;
+} syntax_arena_counts;
+
+typedef struct {
+	const char *name;
+	const char *source;
+	const char *message;
+	const char *span;
+} syntax_failure;
+
 static int span_is(const pigen_source_manager *sources, pigen_source_span span,
 	const char *expected)
 {
@@ -57,6 +73,30 @@ static void free_fixture(parsed_fixture *fixture)
 	pigen_free_syntax_tree(&fixture->tree);
 	pigen_free_preprocess_result(&fixture->preprocessed);
 	*fixture = (parsed_fixture){0};
+}
+
+static syntax_arena_counts snapshot_syntax_arenas(
+	const pigen_syntax_tree *tree)
+{
+	return (syntax_arena_counts){
+		.syntax_nodes = tree->node_count,
+		.expression_nodes = tree->expressions.node_count,
+		.expression_children = tree->expressions.child_count,
+		.type_nodes = tree->types.node_count,
+		.type_arguments = tree->types.argument_count,
+		.shape_dimensions = tree->shape_dimension_count
+	};
+}
+
+static void assert_syntax_arena_counts(syntax_arena_counts actual,
+	syntax_arena_counts expected)
+{
+	assert(actual.syntax_nodes == expected.syntax_nodes);
+	assert(actual.expression_nodes == expected.expression_nodes);
+	assert(actual.expression_children == expected.expression_children);
+	assert(actual.type_nodes == expected.type_nodes);
+	assert(actual.type_arguments == expected.type_arguments);
+	assert(actual.shape_dimensions == expected.shape_dimensions);
 }
 
 static const pigen_syntax_node *fixture_module(const parsed_fixture *fixture)
@@ -117,32 +157,38 @@ static void assert_opaque_without_arena_leakage(pigen_source_manager *sources,
 	parsed_fixture fixture = {0};
 	const pigen_syntax_node *module;
 	const pigen_syntax_node *opaque;
+	const syntax_arena_counts expected = {.syntax_nodes = 3};
 
 	assert(parse_fixture(sources, name, text, &fixture));
 	assert(!fixture.error.message);
 	module = fixture_module(&fixture);
 	assert(module);
 	opaque = pigen_syntax_get(&fixture.tree, module->first_child);
+	if (!opaque || opaque->kind != PIGEN_SYNTAX_OPAQUE ||
+		opaque->next_sibling.index != PIGEN_INVALID_ID)
+		fprintf(stderr, "expected `%s` to remain one opaque syntax region\n", name);
 	assert(opaque && opaque->kind == PIGEN_SYNTAX_OPAQUE);
 	assert(opaque->next_sibling.index == PIGEN_INVALID_ID);
 	assert(span_is(sources, opaque->location.source_span, text));
-	assert(fixture.tree.node_count == 3);
-	assert(fixture.tree.expressions.node_count == 0);
-	assert(fixture.tree.expressions.child_count == 0);
-	assert(fixture.tree.types.node_count == 0);
-	assert(fixture.tree.types.argument_count == 0);
-	assert(fixture.tree.shape_dimension_count == 0);
+	assert_syntax_arena_counts(snapshot_syntax_arenas(&fixture.tree), expected);
 	free_fixture(&fixture);
 }
 
-static void assert_rejected_at(pigen_source_manager *sources, const char *name,
-	const char *text, const char *expected_span)
+static void assert_syntax_failure(pigen_source_manager *sources,
+	syntax_failure failure)
 {
 	parsed_fixture fixture = {0};
 
-	assert(!parse_fixture(sources, name, text, &fixture));
-	assert(fixture.error.message);
-	assert(span_is(sources, fixture.error.span, expected_span));
+	assert(!parse_fixture(sources, failure.name, failure.source, &fixture));
+	if (!fixture.error.message || strcmp(fixture.error.message, failure.message) ||
+		!span_is(sources, fixture.error.span, failure.span))
+		fprintf(stderr, "expected `%s` at `%s`, got `%s` at byte range %zu:%zu\n",
+			failure.message, failure.span,
+			fixture.error.message ? fixture.error.message : "(none)",
+			fixture.error.span.start, fixture.error.span.end);
+	assert(fixture.error.message &&
+		!strcmp(fixture.error.message, failure.message));
+	assert(span_is(sources, fixture.error.span, failure.span));
 	free_fixture(&fixture);
 }
 
@@ -399,31 +445,125 @@ static void test_data_first_declarations(pigen_source_manager *sources)
 	free_fixture(&fixture);
 }
 
+static void test_ordinary_systemverilog_preservation_matrix(
+	pigen_source_manager *sources)
+{
+	const char text[] =
+		"module ordinary_preservation;\n"
+		"  wire scalar_wire;\n"
+		"  wire [7:0] ranged_wire;\n"
+		"  reg signed [15:0] variable;\n"
+		"  logic [3:0] internal_logic;\n"
+		"  bit internal_bit;\n"
+		"  input wire [7:0] input_wire;\n"
+		"  input logic [7:0] input_logic;\n"
+		"  output reg [7:0] output_reg;\n"
+		"  output logic [7:0] output_logic;\n"
+		"  inout wire bidirectional;\n"
+		"endmodule\n";
+	typedef struct {
+		const char *name;
+		int has_written_transfer;
+		pigen_transfer_type transfer_type;
+	} ordinary_expectation;
+	static const ordinary_expectation expectations[] = {
+		{"scalar_wire", 1, PIGEN_TRANSFER_TYPE_WIRE},
+		{"ranged_wire", 1, PIGEN_TRANSFER_TYPE_WIRE},
+		{"variable", 1, PIGEN_TRANSFER_TYPE_REG},
+		{"internal_logic", 0, PIGEN_TRANSFER_TYPE_ABSTRACT},
+		{"internal_bit", 0, PIGEN_TRANSFER_TYPE_ABSTRACT},
+		{"input_wire", 1, PIGEN_TRANSFER_TYPE_WIRE},
+		{"input_logic", 0, PIGEN_TRANSFER_TYPE_ABSTRACT},
+		{"output_reg", 1, PIGEN_TRANSFER_TYPE_REG},
+		{"output_logic", 0, PIGEN_TRANSFER_TYPE_ABSTRACT},
+		{"bidirectional", 1, PIGEN_TRANSFER_TYPE_WIRE}
+	};
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	size_t i;
+
+	assert(parse_fixture(sources, "ordinary_preservation.sv", text, &fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	for (i = 0; i < sizeof(expectations) / sizeof(*expectations); i++)
+	{
+		const ordinary_expectation *expected = &expectations[i];
+		const pigen_syntax_node *declaration;
+		const pigen_syntax_node *declarator = find_declarator(&fixture, module,
+			expected->name, &declaration);
+
+		assert(declarator && declaration);
+		assert(declaration->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION);
+		assert(declarator->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR);
+		assert(declarator->parent.index ==
+			(size_t)(declaration - fixture.tree.nodes));
+		assert(declaration->as.signal_declaration.has_transfer_type ==
+			expected->has_written_transfer);
+		if (expected->has_written_transfer)
+			assert(declaration->as.signal_declaration.transfer_type.transfer_type ==
+				expected->transfer_type);
+	}
+	free_fixture(&fixture);
+}
+
 static void test_transactional_and_clean_break_syntax(
 	pigen_source_manager *sources)
 {
-	assert_opaque_without_arena_leakage(sources, "ordinary_byte.pigen",
-		"module ordinary_byte; byte ordinary_value; endmodule");
-	assert_opaque_without_arena_leakage(sources, "ordinary_initializer.pigen",
-		"module ordinary_initializer; logic [{WIDTH, LANES + 1}:0] "
-		"ordinary[LANES + 1] = 8'h5a; endmodule");
-	assert_rejected_at(sources, "old_order.pigen",
-		"module old_order; buf int[16] old_order; endmodule", "buf");
-	assert_rejected_at(sources, "pigen_initializer.pigen",
-		"module pigen_initializer; int[16] buf value = 0; endmodule", "=");
-	assert_rejected_at(sources, "missing_depth.pigen",
-		"module missing_depth; packet_t fifo queue; endmodule", "fifo");
-	assert_rejected_at(sources, "empty_depth.pigen",
-		"module empty_depth; packet_t fifo[] queue; endmodule", "[");
-	assert_rejected_at(sources, "repeated_depth.pigen",
-		"module repeated_depth; packet_t fifo[4][2] queue; endmodule", "[");
-	assert_rejected_at(sources, "unexpected_transfer_argument.pigen",
-		"module unexpected_transfer_argument; bit[8] buf[2] value; endmodule",
-		"[");
-	assert_rejected_at(sources, "unknown_transfer.pigen",
-		"module unknown_transfer; bit[8] mystery value; endmodule", "value");
-	assert_rejected_at(sources, "directionless_dynamic_port.pigen",
-		"module directionless_dynamic_port(bit[8] buf value); endmodule", "bit");
+	typedef struct {
+		const char *name;
+		const char *source;
+	} opaque_case;
+	static const opaque_case opaque_cases[] = {
+		{"ordinary_byte.sv",
+			"module ordinary_byte; byte ordinary_value; endmodule"},
+		{"ordinary_interface_port.sv",
+			"module ordinary_interface_port(input bus_if.master endpoint); "
+			"endmodule"},
+		{"ordinary_initializer.sv",
+			"module ordinary_initializer; logic [{WIDTH, LANES + 1}:0] "
+			"ordinary[LANES + 1] = 8'h5a; endmodule"},
+		{"ordinary_aggregate.sv",
+			"module ordinary_aggregate; struct packed { logic [3:0] tag; "
+			"logic flag; } packet; endmodule"}
+	};
+	static const syntax_failure failures[] = {
+		{"missing_depth.pigen",
+			"module missing_depth; packet_t fifo queue; endmodule",
+			"transfer type requires a depth argument", "fifo"},
+		{"empty_depth.pigen",
+			"module empty_depth; packet_t fifo[] queue; endmodule",
+			"transfer depth requires an expression", "["},
+		{"repeated_depth.pigen",
+			"module repeated_depth; packet_t fifo[4][2] queue; endmodule",
+			"transfer type accepts exactly one argument", "["},
+		{"unexpected_transfer_argument.pigen",
+			"module unexpected_transfer_argument; bit[8] buf[2] value; "
+			"endmodule", "transfer type does not accept an argument", "["},
+		{"missing_declarator.pigen",
+			"module missing_declarator; bit[8] buf; endmodule",
+			"declaration requires a signal name", ";"},
+		{"invalid_continuation.pigen",
+			"module invalid_continuation; bit[8] buf first, second + third; "
+			"endmodule",
+			"expected `,` or declaration terminator after signal name", "+"},
+		{"pigen_initializer.pigen",
+			"module pigen_initializer; int[16] buf value = 0; endmodule",
+			"expected `,` or declaration terminator after signal name", "="},
+		{"unknown_transfer.pigen",
+			"module unknown_transfer; bit[8] mystery value; endmodule",
+			"expected `,` or declaration terminator after signal name", "value"},
+		{"directionless_dynamic_port.pigen",
+			"module directionless_dynamic_port(bit[8] buf value); endmodule",
+			"ANSI dynamic signal port requires `input` or `output`", "bit"}
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(opaque_cases) / sizeof(*opaque_cases); i++)
+		assert_opaque_without_arena_leakage(sources, opaque_cases[i].name,
+			opaque_cases[i].source);
+	for (i = 0; i < sizeof(failures) / sizeof(*failures); i++)
+		assert_syntax_failure(sources, failures[i]);
 }
 
 static void test_process_rollback(pigen_source_manager *sources)
@@ -467,8 +607,10 @@ static void test_process_rollback(pigen_source_manager *sources)
 
 static void test_missing_pigen_terminator(pigen_source_manager *sources)
 {
-	assert_rejected_at(sources, "missing_terminator.pigen",
-		"module missing_terminator; int[16] buf value endmodule", "endmodule");
+	assert_syntax_failure(sources, (syntax_failure){
+		"missing_terminator.pigen",
+		"module missing_terminator; int[16] buf value endmodule",
+		"signal declaration requires `;`", "endmodule"});
 }
 
 int main(void)
@@ -477,6 +619,7 @@ int main(void)
 
 	test_cast_syntax(&sources);
 	test_data_first_declarations(&sources);
+	test_ordinary_systemverilog_preservation_matrix(&sources);
 	test_transactional_and_clean_break_syntax(&sources);
 	test_process_rollback(&sources);
 	test_missing_pigen_terminator(&sources);

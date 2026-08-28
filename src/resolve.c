@@ -125,7 +125,17 @@ static pigen_shape_id resolve_shape(resolver *resolver, pigen_scope_id scope,
 			return INVALID_ID(pigen_shape_id);
 		}
 		if (dimensions[i].form == PIGEN_SHAPE_DIMENSION_COUNT)
-			dimensions[i].as.count = pigen_expr_constant(resolver->model, left);
+		{
+			dimensions[i].as.count = pigen_const_expr_normalize_count(
+				resolver->model, pigen_expr_constant(resolver->model, left));
+			if (dimensions[i].as.count.index == PIGEN_INVALID_ID)
+			{
+				free(dimensions);
+				fail_location(resolver, syntax_dimensions[i].location,
+					"signal dimension must be a positive count");
+				return INVALID_ID(pigen_shape_id);
+			}
+		}
 		else
 		{
 			dimensions[i].as.range.left =

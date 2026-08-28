@@ -130,14 +130,14 @@ static void expect_resolve_failure(resolve_failure failure)
 		&preprocess_error));
 	assert(pigen_parse_syntax(&preprocessed.expanded, &syntax, &syntax_error));
 	assert(!pigen_resolve_semantics(&syntax, &model, &policy, &error));
-	if (!error.message || !strstr(error.message, failure.message) ||
+	if (!error.message || strcmp(error.message, failure.message) ||
 		!span_is(&sources, error.span, failure.span))
 		fprintf(stderr,
 			"expected `%s` at `%s`, got `%s` at byte range %zu:%zu\n",
 			failure.message, failure.span,
 			error.message ? error.message : "(none)",
 			error.span.start, error.span.end);
-	assert(error.message && strstr(error.message, failure.message));
+	assert(error.message && !strcmp(error.message, failure.message));
 	assert(span_is(&sources, error.span, failure.span));
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_tree(&syntax);
@@ -185,6 +185,18 @@ static void test_declaration_resolution_matrix(void)
 		"  inout wire [7:0] written_static_inout\n"
 		");\n"
 		"  logic internal_default;\n"
+		"endmodule\n"
+		"module ordinary_preserved;\n"
+		"  wire scalar_wire;\n"
+		"  wire [7:0] ranged_wire;\n"
+		"  reg signed [15:0] variable;\n"
+		"  logic [3:0] internal_logic;\n"
+		"  bit internal_bit;\n"
+		"  input wire [7:0] input_wire;\n"
+		"  input logic [7:0] input_logic;\n"
+		"  output reg [7:0] output_reg;\n"
+		"  output logic [7:0] output_logic;\n"
+		"  inout wire bidirectional;\n"
 		"endmodule\n";
 	typedef struct {
 		const char *name;
@@ -253,7 +265,31 @@ static void test_declaration_resolution_matrix(void)
 			PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
 		{"internal_default", PIGEN_TRANSFER_TYPE_LOGIC,
 			PIGEN_SEMANTIC_INTERNAL, 1, PIGEN_NUMERICAL_SYSTEMVERILOG,
-			PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0}
+			PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"scalar_wire", PIGEN_TRANSFER_TYPE_WIRE, PIGEN_SEMANTIC_INTERNAL,
+			1, PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR,
+			NULL, 0},
+		{"ranged_wire", PIGEN_TRANSFER_TYPE_WIRE, PIGEN_SEMANTIC_INTERNAL,
+			8, PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR,
+			NULL, 0},
+		{"variable", PIGEN_TRANSFER_TYPE_REG, PIGEN_SEMANTIC_INTERNAL, 16,
+			PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"internal_logic", PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INTERNAL, 4, PIGEN_NUMERICAL_SYSTEMVERILOG,
+			PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"internal_bit", PIGEN_TRANSFER_TYPE_LOGIC, PIGEN_SEMANTIC_INTERNAL,
+			1, PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_TWO,
+			NULL, 0},
+		{"input_wire", PIGEN_TRANSFER_TYPE_WIRE, PIGEN_SEMANTIC_INPUT, 8,
+			PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"input_logic", PIGEN_TRANSFER_TYPE_WIRE, PIGEN_SEMANTIC_INPUT, 8,
+			PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"output_reg", PIGEN_TRANSFER_TYPE_REG, PIGEN_SEMANTIC_OUTPUT, 8,
+			PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"output_logic", PIGEN_TRANSFER_TYPE_LOGIC, PIGEN_SEMANTIC_OUTPUT, 8,
+			PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0},
+		{"bidirectional", PIGEN_TRANSFER_TYPE_WIRE, PIGEN_SEMANTIC_INOUT, 1,
+			PIGEN_NUMERICAL_SYSTEMVERILOG, PIGEN_DATA_TYPE_STATE_FOUR, NULL, 0}
 	};
 	pigen_source_manager sources = {0};
 	pigen_source_id source = pigen_source_add(&sources, "matrix.pigen", text,
@@ -335,7 +371,7 @@ static void test_declaration_failure_matrix(void)
 {
 	static const resolve_failure failures[] = {
 		{"module bad; int[8] missing_internal_transfer; endmodule\n",
-			"forbids an omitted transfer realization", "int[8]"},
+			"data type forbids an omitted transfer realization", "int[8]"},
 		{"module bad; output int[8] missing_output_transfer; endmodule\n",
 			"unqualified output transfer policy is unresolved", "int[8]"},
 		{"module bad; inout int[8] buf dynamic_inout; endmodule\n",
@@ -351,11 +387,13 @@ static void test_declaration_failure_matrix(void)
 			"transfer depth requires a constant expression", "runtime_signal"}
 	};
 	static const resolve_failure preserved_failures[] = {
-		{"module bad; bit wire repeated; bit reg repeated; endmodule\n",
+		{"module bad; bit wire repeated, repeated; endmodule\n",
 			"duplicate module declaration", "repeated"},
 		{"module bad; bit logic runtime_signal; "
 			"bit wire shaped[runtime_signal]; endmodule\n",
-			"signal dimension requires constant expressions", "[runtime_signal]"}
+			"signal dimension requires constant expressions", "[runtime_signal]"},
+		{"module bad; bit wire empty_shape[0]; endmodule\n",
+			"signal dimension must be a positive count", "[0]"}
 	};
 	size_t i;
 
@@ -967,7 +1005,7 @@ int main(void)
 		"always @(posedge clk) begin y <= x; y <= z; end endmodule\n",
 		"nonexclusive producers");
 	expect_resolve_error(
-		"module bad(input logic clk); bit buf x[2]; bit buf y[3]; "
+		"module bad(input logic clk); bit buf x [2]; bit buf y [3]; "
 		"always @(posedge clk) y <= x; endmodule\n",
 		"shape mismatch");
 	test_typed_assignments();
@@ -979,7 +1017,7 @@ int main(void)
 		"compatible");
 	expect_resolve_error(
 		"typedef int[8] int8_t; "
-		"module shaped(input logic clk); int8_t buf source[2]; "
+		"module shaped(input logic clk); int8_t buf source [2]; "
 		"int8_t buf destination; always_ff @(posedge clk) "
 		"destination <= source; endmodule\n",
 		"shape mismatch");

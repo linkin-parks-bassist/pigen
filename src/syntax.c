@@ -1004,6 +1004,7 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 {
 	size_t at = first;
 	size_t depth = 0;
+	size_t brace_depth = 0;
 	int item_start = 1;
 
 	while (at < after)
@@ -1110,13 +1111,16 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 				restore_checkpoint(parser, checkpoint);
 			}
 		}
-		if (block_opener(parser, at)) depth++;
+		if (token_is(parser, at, "{")) brace_depth++;
+		else if (token_is(parser, at, "}") && brace_depth) brace_depth--;
+		else if (block_opener(parser, at)) depth++;
 		else if (block_closer(parser, at))
 		{
 			if (depth) depth--;
 			if (!depth) item_start = 1;
 		}
-		else if (!depth && token_is(parser, at, ";")) item_start = 1;
+		else if (!depth && !brace_depth && token_is(parser, at, ";"))
+			item_start = 1;
 		else if (item_start) item_start = 0;
 		at++;
 	}
