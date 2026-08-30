@@ -256,6 +256,33 @@ static void assert_syntax_failure(pigen_source_manager *sources,
 	free_fixture(&fixture);
 }
 
+static void assert_syntax_eof_failure(pigen_source_manager *sources,
+	const char *name, const char *source, const char *message)
+{
+	parsed_fixture fixture = {0};
+	size_t boundary = strlen(source);
+	int parsed = parse_fixture(sources, name, source, &fixture);
+
+	if (parsed)
+		fprintf(stderr, "expected `%s` to fail syntax parsing\n", name);
+	assert(!parsed);
+	if (!fixture.error.message || strcmp(fixture.error.message, message) ||
+		fixture.error.span.source.index != fixture.source.index ||
+		fixture.error.span.start != boundary ||
+		fixture.error.span.end != boundary)
+		fprintf(stderr,
+			"expected `%s` at end of source, byte %zu; got `%s` at byte "
+			"range %zu:%zu\n",
+			message, boundary,
+			fixture.error.message ? fixture.error.message : "(none)",
+			fixture.error.span.start, fixture.error.span.end);
+	assert(fixture.error.message && !strcmp(fixture.error.message, message));
+	assert(fixture.error.span.source.index == fixture.source.index);
+	assert(fixture.error.span.start == boundary);
+	assert(fixture.error.span.end == boundary);
+	free_fixture(&fixture);
+}
+
 static void test_cast_syntax(pigen_source_manager *sources)
 {
 	const char text[] =
@@ -587,6 +614,13 @@ static void test_contextual_leading_transfer_spelling(
 		"transfer_first.pigen",
 		"module transfer_first; buf int[16] old_order; endmodule",
 		"data type must precede the transfer type", "buf", 1});
+	assert_syntax_failure(sources, (syntax_failure){
+		"unterminated_transfer_first.pigen",
+		"module unterminated_transfer_first; buf int[16] old_order endmodule",
+		"data type must precede the transfer type", "buf", 1});
+	assert_opaque_without_arena_leakage(sources, "unterminated_buf_gate.sv",
+		"module unterminated_buf_gate; "
+		"buf gate_instance(output_signal, input_signal) endmodule");
 	assert(parse_fixture(sources, "ambiguous_ports.sv", ansi_text, &fixture));
 	assert(!fixture.error.message);
 	module = fixture_module(&fixture);
@@ -624,6 +658,35 @@ static void test_affirmative_declaration_ownership(
 	free_fixture(&fixture);
 }
 
+static void test_opaque_typedef_shadow_barrier(pigen_source_manager *sources)
+{
+	const char text[] =
+		"typedef int[16] sample_t;\n"
+		"typedef int[8] other_t;\n"
+		"module opaque_shadow;\n"
+		"  input sample_t before_shadow;\n"
+		"  typedef byte sample_t;\n"
+		"  input sample_t after_shadow;\n"
+		"  input other_t unrelated;\n"
+		"endmodule\n";
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const pigen_syntax_node *declaration;
+
+	assert(parse_fixture(sources, "opaque_typedef_shadow.sv", text, &fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	assert(find_declarator(&fixture, module, "before_shadow", &declaration));
+	assert(declaration && declaration->as.signal_declaration.direction ==
+		PIGEN_DIRECTION_INPUT);
+	assert(!find_declarator(&fixture, module, "after_shadow", NULL));
+	assert(find_declarator(&fixture, module, "unrelated", &declaration));
+	assert(declaration && declaration->as.signal_declaration.direction ==
+		PIGEN_DIRECTION_INPUT);
+	free_fixture(&fixture);
+}
+
 static void test_transactional_typedef_ownership(
 	pigen_source_manager *sources)
 {
@@ -642,6 +705,13 @@ static void test_transactional_typedef_ownership(
 	assert_compilation_unit_opaque_without_arena_leakage(sources,
 		"ordinary_aggregate_typedef.sv",
 		"typedef struct packed { logic [3:0] tag; logic flag; } packet_t;");
+	assert_compilation_unit_opaque_without_arena_leakage(sources,
+		"ordinary_array_typedef.sv",
+		"typedef logic [3:0] word_t [0:1];");
+	assert_opaque_without_arena_leakage(sources,
+		"module_array_typedef.sv",
+		"module module_array_typedef; "
+		"typedef logic [3:0] word_t [0:1]; endmodule");
 	assert(parse_fixture(sources, "opaque_alias_name.sv", opaque_alias_text,
 		&fixture));
 	assert(!fixture.error.message);
@@ -654,6 +724,10 @@ static void test_transactional_typedef_ownership(
 	assert_syntax_failure(sources, (syntax_failure){
 		"malformed_pigen_typedef.pigen", "typedef int[16] ;",
 		"typedef requires a name", ";", 1});
+	assert_syntax_failure(sources, (syntax_failure){
+		"unsupported_pigen_typedef_shape.pigen",
+		"typedef int[16] sample_t [0:1];",
+		"typedef permits exactly one name", "[", 2});
 }
 
 static void test_transactional_and_clean_break_syntax(
@@ -760,6 +834,15 @@ static void test_missing_pigen_terminator(pigen_source_manager *sources)
 		"missing_terminator.pigen",
 		"module missing_terminator; int[16] buf value endmodule",
 		"signal declaration requires `;`", "endmodule", 1});
+	assert_syntax_failure(sources, (syntax_failure){
+		"missing_module_typedef_terminator.pigen",
+		"module missing_module_typedef_terminator; "
+		"typedef int[16] sample_t endmodule",
+		"typedef declaration requires `;`", "endmodule", 1});
+	assert_syntax_eof_failure(sources,
+		"missing_unit_typedef_terminator.pigen",
+		"typedef int[16] sample_t",
+		"typedef declaration requires `;`");
 }
 
 int main(void)
@@ -771,6 +854,7 @@ int main(void)
 	test_ordinary_systemverilog_preservation_matrix(&sources);
 	test_contextual_leading_transfer_spelling(&sources);
 	test_affirmative_declaration_ownership(&sources);
+	test_opaque_typedef_shadow_barrier(&sources);
 	test_transactional_typedef_ownership(&sources);
 	test_transactional_and_clean_break_syntax(&sources);
 	test_process_rollback(&sources);

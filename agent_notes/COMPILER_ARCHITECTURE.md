@@ -109,12 +109,14 @@ Supported ordinary SystemVerilog declarations use the same topology. Ada
 tightened the declaration boundary after final compatibility review: syntax
 commits only a written post-type transfer, a colonless Pigen count, the narrow
 ordinary-static adapter, or a previously accepted structured typedef name.
-The typedef-name query is source ordered and scope aware; unsupported typedefs
-roll back every syntax arena and introduce no eligible name. Leading transfer
-spellings reject only when a following eligible data type and declarator make
-the deleted transfer-first form unmistakable, so ordinary `buf` gates and
-ambiguous port names remain lossless. Malformed decisive Pigen syntax still
-diagnoses at its owning source span rather than falling back to opacity.
+The typedef-name query is source ordered and lexically shadowing. Ada's
+residual pass made unsupported typedefs roll back every syntax arena and, only
+when their transaction structurally identifies the introduced name, record an
+opaque shadow barrier rather than an eligible type. Leading transfer spellings
+reject only when a following eligible data type and declarator make the deleted
+transfer-first form unmistakable, so ordinary `buf` gates and ambiguous port
+names remain lossless. Malformed decisive Pigen syntax still diagnoses at its
+owning source span rather than falling back to opacity.
 
 The structured modules are not linked into `./pigen`. Production fixtures must
 therefore remain on the quarantined prototype parser until the first vertical

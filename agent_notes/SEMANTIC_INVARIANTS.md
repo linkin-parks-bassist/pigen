@@ -136,8 +136,10 @@ on the prototype parser until vertical RTL lowering becomes authoritative.
 - Declaration eligibility is an affirmative type-syntax decision, distinct
   from semantic family policy. Colonless counts, written post-type transfers,
   supported ordinary-static syntax, and source-order accepted structured
-  typedef names enter the shared topology; other forms remain opaque. An
-  opaque typedef rolls back every syntax arena and introduces no eligible name.
+  typedef names enter the shared topology; other forms remain opaque. An opaque
+  typedef rolls back every syntax arena and introduces no eligible name; when
+  its transaction structurally identifies the introduced name, it records only
+  a lexical shadow barrier which prevents fallback to an outer eligible alias.
 - A canonical alias stores its typedef symbol identity and its resolved target
   data-type identity. Alias-aware width, projection, state-domain, and
   operation queries follow the stored target; they do not query the symbol

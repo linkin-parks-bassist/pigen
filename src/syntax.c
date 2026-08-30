@@ -9,18 +9,24 @@
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
 #define INVALID_SYNTAX ((pigen_syntax_id){PIGEN_INVALID_ID})
 
+typedef enum {
+	TYPEDEF_NAME_ELIGIBLE,
+	TYPEDEF_NAME_OPAQUE_SHADOW
+} typedef_name_fact_kind;
+
 typedef struct {
 	pigen_token_id name;
 	pigen_syntax_id scope;
-} structured_type_name;
+	typedef_name_fact_kind kind;
+} typedef_name_fact;
 
 typedef struct {
 	const pigen_expanded_source *expanded;
 	pigen_syntax_tree *tree;
 	pigen_syntax_error *error;
-	structured_type_name *structured_type_names;
-	size_t structured_type_name_count;
-	size_t structured_type_name_capacity;
+	typedef_name_fact *typedef_name_facts;
+	size_t typedef_name_fact_count;
+	size_t typedef_name_fact_capacity;
 } syntax_parser;
 
 typedef struct {
@@ -114,40 +120,50 @@ static int tokens_equal(const syntax_parser *parser, pigen_token_id left,
 		!memcmp(left_text, right_text, left_length);
 }
 
+static const typedef_name_fact *typedef_name_fact_in_scope(
+	const syntax_parser *parser, pigen_token_id name, pigen_syntax_id scope)
+{
+	size_t i = parser->typedef_name_fact_count;
+
+	while (i)
+	{
+		const typedef_name_fact *known = &parser->typedef_name_facts[--i];
+		if (known->scope.index == scope.index &&
+			tokens_equal(parser, known->name, name))
+			return known;
+	}
+	return NULL;
+}
+
 static int structured_type_name_exists(void *context, pigen_token_id name)
 {
 	const structured_type_query *query = context;
-	size_t i;
+	const typedef_name_fact *known;
 
 	if (!query || !query->parser) return 0;
-	for (i = 0; i < query->parser->structured_type_name_count; i++)
-	{
-		const structured_type_name *known =
-			&query->parser->structured_type_names[i];
-		if ((known->scope.index == 0 ||
-			known->scope.index == query->scope.index) &&
-			tokens_equal(query->parser, known->name, name))
-			return 1;
-	}
-	return 0;
+	known = typedef_name_fact_in_scope(query->parser, name, query->scope);
+	if (!known && query->scope.index != 0)
+		known = typedef_name_fact_in_scope(query->parser, name,
+			(pigen_syntax_id){0});
+	return known && known->kind == TYPEDEF_NAME_ELIGIBLE;
 }
 
-static void add_structured_type_name(syntax_parser *parser,
-	pigen_token_id name, pigen_syntax_id scope)
+static void add_typedef_name_fact(syntax_parser *parser,
+	pigen_token_id name, pigen_syntax_id scope, typedef_name_fact_kind kind)
 {
-	if (parser->structured_type_name_count ==
-		parser->structured_type_name_capacity)
+	if (parser->typedef_name_fact_count ==
+		parser->typedef_name_fact_capacity)
 	{
-		parser->structured_type_name_capacity =
-			parser->structured_type_name_capacity ?
-			parser->structured_type_name_capacity * 2 : 8;
-		parser->structured_type_names = pigen_resize(
-			parser->structured_type_names,
-			parser->structured_type_name_capacity *
-				sizeof(*parser->structured_type_names));
+		parser->typedef_name_fact_capacity =
+			parser->typedef_name_fact_capacity ?
+			parser->typedef_name_fact_capacity * 2 : 8;
+		parser->typedef_name_facts = pigen_resize(
+			parser->typedef_name_facts,
+			parser->typedef_name_fact_capacity *
+				sizeof(*parser->typedef_name_facts));
 	}
-	parser->structured_type_names[parser->structured_type_name_count++] =
-		(structured_type_name){name, scope};
+	parser->typedef_name_facts[parser->typedef_name_fact_count++] =
+		(typedef_name_fact){name, scope, kind};
 }
 
 static pigen_syntax_type_ownership declaration_type_ownership(
@@ -639,6 +655,28 @@ static void commit_declaration(syntax_parser *parser, pigen_syntax_id module,
 	*opaque_cursor = declaration_after;
 }
 
+static int decisive_typedef_without_terminator(syntax_parser *parser,
+	pigen_syntax_id parent, size_t start, size_t boundary)
+{
+	syntax_checkpoint checkpoint = save_checkpoint(parser);
+	pigen_syntax_type_id type;
+	pigen_syntax_type_ownership ownership;
+	size_t name;
+	int decisive = 0;
+
+	if (pigen_parse_type_prefix(parser->expanded, start + 1, boundary,
+		&parser->tree->expressions, &parser->tree->types, &type, &name,
+		parser->error))
+	{
+		ownership = declaration_type_ownership(parser, parent, type);
+		decisive = (ownership == PIGEN_SYNTAX_TYPE_PIGEN ||
+			ownership == PIGEN_SYNTAX_TYPE_STRUCTURED) &&
+			identifier(parser, name) && name + 1 == boundary;
+	}
+	restore_checkpoint(parser, checkpoint);
+	return decisive;
+}
+
 static declaration_parse_result parse_typedef(syntax_parser *parser,
 	pigen_syntax_id parent,
 	size_t start, size_t semicolon, syntax_cursor *opaque_cursor)
@@ -659,6 +697,9 @@ static declaration_parse_result parse_typedef(syntax_parser *parser,
 	if (ownership == PIGEN_SYNTAX_TYPE_UNOWNED)
 	{
 		restore_checkpoint(parser, checkpoint);
+		if (declarator_candidate(parser, name, semicolon))
+			add_typedef_name_fact(parser, (pigen_token_id){(uint32_t)name},
+				parent, TYPEDEF_NAME_OPAQUE_SHADOW);
 		return DECLARATION_NOT_RECOGNIZED;
 	}
 	if (!identifier(parser, name))
@@ -668,6 +709,17 @@ static declaration_parse_result parse_typedef(syntax_parser *parser,
 	}
 	if (name + 1 != semicolon)
 	{
+		if (ownership == PIGEN_SYNTAX_TYPE_SYSTEMVERILOG)
+		{
+			int introduced_name = declarator_candidate(parser, name, semicolon);
+
+			restore_checkpoint(parser, checkpoint);
+			if (introduced_name)
+				add_typedef_name_fact(parser,
+					(pigen_token_id){(uint32_t)name}, parent,
+					TYPEDEF_NAME_OPAQUE_SHADOW);
+			return DECLARATION_NOT_RECOGNIZED;
+		}
 		fail(parser, name + 1, "typedef permits exactly one name");
 		return DECLARATION_INVALID;
 	}
@@ -680,7 +732,8 @@ static declaration_parse_result parse_typedef(syntax_parser *parser,
 	node.as.type_definition.type = type;
 	id = add_node(parser, node);
 	add_child(parser, parent, id);
-	add_structured_type_name(parser, node.as.type_definition.name, parent);
+	add_typedef_name_fact(parser, node.as.type_definition.name, parent,
+		TYPEDEF_NAME_ELIGIBLE);
 	*opaque_cursor = semicolon + 1;
 	return DECLARATION_RECOGNIZED;
 }
@@ -1135,7 +1188,12 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			size_t semicolon = top_level_token(parser, at, after, ";");
 			declaration_parse_result result;
 			if (semicolon == after)
+			{
+				if (decisive_typedef_without_terminator(parser, module, at, after))
+					return fail(parser, after,
+						"typedef declaration requires `;`");
 				return fail(parser, at, "unterminated typedef declaration");
+			}
 			result = parse_typedef(parser, module, at, semicolon, opaque_cursor);
 			if (result == DECLARATION_INVALID) return 0;
 			at = semicolon + 1;
@@ -1190,6 +1248,10 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			}
 			else
 			{
+				if (leading_transfer_first_declaration(parser, module, type_at,
+					after))
+					return fail(parser, type_at,
+						"data type must precede the transfer type");
 				checkpoint = save_checkpoint(parser);
 				result = parse_data_first_declaration(parser, module, at, after, 0,
 					&declaration, &decisive);
@@ -1329,13 +1391,20 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 			if (semicolon == source->token_count ||
 				token_at(&parser, semicolon)->kind == PIGEN_TOKEN_EOF)
 			{
-				free(parser.structured_type_names);
+				size_t boundary = source->token_count - 1;
+				int decisive = decisive_typedef_without_terminator(&parser, root,
+					at, boundary);
+
+				if (decisive)
+					fail(&parser, boundary,
+						"typedef declaration requires `;`");
+				free(parser.typedef_name_facts);
 				return 0;
 			}
 			result = parse_typedef(&parser, root, at, semicolon, &opaque_cursor);
 			if (result == DECLARATION_INVALID)
 			{
-				free(parser.structured_type_names);
+				free(parser.typedef_name_facts);
 				return 0;
 			}
 			at = semicolon + 1;
@@ -1345,13 +1414,13 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 		add_opaque(&parser, root, opaque_cursor, at);
 		if (!parse_module(&parser, root, at, &at))
 		{
-			free(parser.structured_type_names);
+			free(parser.typedef_name_facts);
 			return 0;
 		}
 		opaque_cursor = at;
 	}
 	add_opaque(&parser, root, opaque_cursor, at);
-	free(parser.structured_type_names);
+	free(parser.typedef_name_facts);
 	return 1;
 }
 
