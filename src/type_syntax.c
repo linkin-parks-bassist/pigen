@@ -214,6 +214,37 @@ done:
 	return ok;
 }
 
+pigen_syntax_type_ownership pigen_syntax_type_declaration_ownership(
+	const pigen_expanded_source *source, const pigen_syntax_type_arena *arena,
+	pigen_syntax_type_id type, pigen_syntax_type_name_query structured_name,
+	void *structured_name_context)
+{
+	const pigen_syntax_type *known = pigen_syntax_type_get(arena, type);
+	const pigen_syntax_type_argument *arguments;
+	size_t i;
+
+	if (!source || !known) return PIGEN_SYNTAX_TYPE_UNOWNED;
+	arguments = pigen_syntax_type_arguments(arena, known->first_argument,
+		known->argument_count);
+	if (known->argument_count && !arguments)
+		return PIGEN_SYNTAX_TYPE_UNOWNED;
+	for (i = 0; i < known->argument_count; i++)
+		if (arguments[i].kind == PIGEN_SYNTAX_TYPE_COUNT)
+			return PIGEN_SYNTAX_TYPE_PIGEN;
+	if (known->base.index != PIGEN_INVALID_ID && structured_name &&
+		structured_name(structured_name_context, known->base))
+		return PIGEN_SYNTAX_TYPE_STRUCTURED;
+	if (known->base.index != PIGEN_INVALID_ID &&
+		(token_is(source, known->base.index, "logic") ||
+			token_is(source, known->base.index, "bit")))
+		return PIGEN_SYNTAX_TYPE_SYSTEMVERILOG;
+	if (known->base.index == PIGEN_INVALID_ID &&
+		(known->signedness != PIGEN_SYNTAX_SIGN_IMPLICIT ||
+			known->argument_count))
+		return PIGEN_SYNTAX_TYPE_SYSTEMVERILOG;
+	return PIGEN_SYNTAX_TYPE_UNOWNED;
+}
+
 const pigen_syntax_type *pigen_syntax_type_get(
 	const pigen_syntax_type_arena *arena, pigen_syntax_type_id type)
 {

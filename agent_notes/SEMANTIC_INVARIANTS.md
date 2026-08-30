@@ -133,6 +133,11 @@ on the prototype parser until vertical RTL lowering becomes authoritative.
   implicit base. It does not classify primitive versus typedef. Primitive
   spelling is recognized only by the data-type subsystem during resolution;
   typedef lookup handles spellings that are not primitives.
+- Declaration eligibility is an affirmative type-syntax decision, distinct
+  from semantic family policy. Colonless counts, written post-type transfers,
+  supported ordinary-static syntax, and source-order accepted structured
+  typedef names enter the shared topology; other forms remain opaque. An
+  opaque typedef rolls back every syntax arena and introduces no eligible name.
 - A canonical alias stores its typedef symbol identity and its resolved target
   data-type identity. Alias-aware width, projection, state-domain, and
   operation queries follow the stored target; they do not query the symbol

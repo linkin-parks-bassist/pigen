@@ -204,14 +204,41 @@ static void assert_opaque_without_arena_leakage(pigen_source_manager *sources,
 	free_fixture(&fixture);
 }
 
+static void assert_compilation_unit_opaque_without_arena_leakage(
+	pigen_source_manager *sources, const char *name, const char *text)
+{
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *root;
+	const pigen_syntax_node *opaque;
+	const syntax_arena_counts expected = {.syntax_nodes = 2};
+
+	assert(parse_fixture(sources, name, text, &fixture));
+	assert(!fixture.error.message);
+	root = pigen_syntax_get(&fixture.tree, (pigen_syntax_id){0});
+	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
+	opaque = pigen_syntax_get(&fixture.tree, root->first_child);
+	if (!opaque || opaque->kind != PIGEN_SYNTAX_OPAQUE ||
+		opaque->next_sibling.index != PIGEN_INVALID_ID)
+		fprintf(stderr, "expected `%s` to remain one compilation-unit opaque "
+			"syntax region\n", name);
+	assert(opaque && opaque->kind == PIGEN_SYNTAX_OPAQUE);
+	assert(opaque->next_sibling.index == PIGEN_INVALID_ID);
+	assert(span_is(sources, opaque->location.source_span, text));
+	assert_syntax_arena_counts(snapshot_syntax_arenas(&fixture.tree), expected);
+	free_fixture(&fixture);
+}
+
 static void assert_syntax_failure(pigen_source_manager *sources,
 	syntax_failure failure)
 {
 	parsed_fixture fixture = {0};
 	size_t expected_start = source_occurrence_start(failure.source, failure.span,
 		failure.span_occurrence);
+	int parsed = parse_fixture(sources, failure.name, failure.source, &fixture);
 
-	assert(!parse_fixture(sources, failure.name, failure.source, &fixture));
+	if (parsed)
+		fprintf(stderr, "expected `%s` to fail syntax parsing\n", failure.name);
+	assert(!parsed);
 	if (!fixture.error.message || strcmp(fixture.error.message, failure.message) ||
 		!span_is_source_occurrence(sources, fixture.error.span, fixture.source,
 			failure.source, failure.span, failure.span_occurrence))
@@ -544,6 +571,91 @@ static void test_ordinary_systemverilog_preservation_matrix(
 	free_fixture(&fixture);
 }
 
+static void test_contextual_leading_transfer_spelling(
+	pigen_source_manager *sources)
+{
+	const char ansi_text[] =
+		"module ambiguous_ports(input buf, output port); endmodule";
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const pigen_syntax_node *declaration;
+
+	assert_opaque_without_arena_leakage(sources, "ordinary_buf_gate.sv",
+		"module ordinary_buf_gate; "
+		"buf gate_instance(output_signal, input_signal); endmodule");
+	assert_syntax_failure(sources, (syntax_failure){
+		"transfer_first.pigen",
+		"module transfer_first; buf int[16] old_order; endmodule",
+		"data type must precede the transfer type", "buf", 1});
+	assert(parse_fixture(sources, "ambiguous_ports.sv", ansi_text, &fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	assert(find_declarator(&fixture, module, "buf", &declaration));
+	assert(declaration && !declaration->as.signal_declaration.has_transfer_type);
+	assert(find_declarator(&fixture, module, "port", &declaration));
+	assert(declaration && !declaration->as.signal_declaration.has_transfer_type);
+	free_fixture(&fixture);
+}
+
+static void test_affirmative_declaration_ownership(
+	pigen_source_manager *sources)
+{
+	const char alias_text[] =
+		"typedef int[16] sample_t; "
+		"module alias_port(input sample_t endpoint); endmodule";
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const pigen_syntax_node *declaration;
+
+	assert_opaque_without_arena_leakage(sources, "ordinary_int.sv",
+		"module ordinary_int; int value; endmodule");
+	assert_opaque_without_arena_leakage(sources, "ordinary_interface.sv",
+		"module ordinary_interface(input bus_if endpoint); endmodule");
+	assert(parse_fixture(sources, "structured_alias.pigen", alias_text,
+		&fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	assert(find_declarator(&fixture, module, "endpoint", &declaration));
+	assert(declaration && declaration->as.signal_declaration.direction ==
+		PIGEN_DIRECTION_INPUT);
+	assert(!declaration->as.signal_declaration.has_transfer_type);
+	free_fixture(&fixture);
+}
+
+static void test_transactional_typedef_ownership(
+	pigen_source_manager *sources)
+{
+	const char opaque_alias_text[] =
+		"typedef byte byte_t; "
+		"module opaque_alias(input byte_t endpoint); endmodule";
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const syntax_arena_counts opaque_alias_counts = {.syntax_nodes = 4};
+
+	assert_compilation_unit_opaque_without_arena_leakage(sources,
+		"ordinary_byte_typedef.sv", "typedef byte byte_t;");
+	assert_opaque_without_arena_leakage(sources,
+		"module_byte_typedef.sv",
+		"module module_byte_typedef; typedef byte byte_t; endmodule");
+	assert_compilation_unit_opaque_without_arena_leakage(sources,
+		"ordinary_aggregate_typedef.sv",
+		"typedef struct packed { logic [3:0] tag; logic flag; } packet_t;");
+	assert(parse_fixture(sources, "opaque_alias_name.sv", opaque_alias_text,
+		&fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	assert(!find_declarator(&fixture, module, "endpoint", NULL));
+	assert_syntax_arena_counts(snapshot_syntax_arenas(&fixture.tree),
+		opaque_alias_counts);
+	free_fixture(&fixture);
+	assert_syntax_failure(sources, (syntax_failure){
+		"malformed_pigen_typedef.pigen", "typedef int[16] ;",
+		"typedef requires a name", ";", 1});
+}
+
 static void test_transactional_and_clean_break_syntax(
 	pigen_source_manager *sources)
 {
@@ -657,6 +769,9 @@ int main(void)
 	test_cast_syntax(&sources);
 	test_data_first_declarations(&sources);
 	test_ordinary_systemverilog_preservation_matrix(&sources);
+	test_contextual_leading_transfer_spelling(&sources);
+	test_affirmative_declaration_ownership(&sources);
+	test_transactional_typedef_ownership(&sources);
 	test_transactional_and_clean_break_syntax(&sources);
 	test_process_rollback(&sources);
 	test_missing_pigen_terminator(&sources);

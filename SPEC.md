@@ -236,10 +236,8 @@ Ordinary SystemVerilog `byte` remains the distinct signed eight-bit integral
 type defined by SystemVerilog. It is not a Pigen primitive and is not mapped to
 `bit[8]`. Ordinary `byte` declarations retain SystemVerilog ownership and
 remain lossless opaque syntax where the structured frontend does not yet model
-them. The two-state or four-state policy of the initial Pigen types is not yet
-fixed. Until it is, programs whose meaning depends on that property are outside
-the accepted v1 subset. The data-type algebra is open to later scalar,
-aggregate, enum, and user-defined types.
+them. `bit`, `int[n]`, and `uint[n]` are two-state. The data-type algebra is
+open to later scalar, aggregate, enum, and user-defined types.
 
 The concrete transfer types are `wire`, `reg`, `logic`, `buf`, `port`, `fifo`,
 and `skid`. `wire`, `reg`, and `logic` are static transfer types, called

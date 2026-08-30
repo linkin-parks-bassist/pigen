@@ -105,11 +105,16 @@ omission, abstract Pigen inputs, descriptor-owned FIFO depth, and post-name
 declarator shape independently. The resolver contains no primitive-family
 declaration switch.
 
-Supported ordinary SystemVerilog declarations use the same topology. Ordinary
-forms which the structured frontend does not model, including ordinary
-`byte`, remain transactional, lossless opaque syntax. Malformed decisive
-Pigen syntax is diagnosed at its owning source span rather than falling back
-to opacity.
+Supported ordinary SystemVerilog declarations use the same topology. Ada
+tightened the declaration boundary after final compatibility review: syntax
+commits only a written post-type transfer, a colonless Pigen count, the narrow
+ordinary-static adapter, or a previously accepted structured typedef name.
+The typedef-name query is source ordered and scope aware; unsupported typedefs
+roll back every syntax arena and introduce no eligible name. Leading transfer
+spellings reject only when a following eligible data type and declarator make
+the deleted transfer-first form unmistakable, so ordinary `buf` gates and
+ambiguous port names remain lossless. Malformed decisive Pigen syntax still
+diagnoses at its owning source span rather than falling back to opacity.
 
 The structured modules are not linked into `./pigen`. Production fixtures must
 therefore remain on the quarantined prototype parser until the first vertical
@@ -153,4 +158,5 @@ Before a replacement patch, identify the owning invariant, structured input and
 output, provenance path, downstream consumers, and states made unrepresentable.
 Verify current behavior and the absence of a textual semantic side channel.
 
-Rowan compacted this note during the 2026-08-28 documentation cutover.
+Rowan compacted this note during the 2026-08-28 documentation cutover; Ada
+recorded the final declaration-ownership compatibility boundary on 2026-08-30.
