@@ -139,6 +139,15 @@ through explicit adapters, elastic RTL IR, and terminal SystemVerilog emission.
 RTL IR, adapters, production integration, pipelines, FSMs, fabrics, and their
 structured emission remain pending.
 
+Ada resumed this cutover on 2026-09-01. David confirmed that the existing
+specification, plan, and notes remain the approved architecture and that work
+should proceed from this boundary through completion of the overhaul. The
+vertical-slice design fixes an ordered compilation-output model: opaque
+ordinary SystemVerilog spans remain outside elastic RTL IR and are copied only
+at the terminal boundary, while structured output items refer to RTL module
+identities. See
+`docs/superpowers/specs/2026-09-01-elastic-rtl-vertical-slice-design.md`.
+
 Never link the partial frontend as an additional validator. A structured slice
 becomes authoritative only when its corresponding textual parser, scanner, and
 emitter are deleted in the same change. Historical approved documents in
