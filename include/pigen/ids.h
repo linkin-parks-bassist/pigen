@@ -33,7 +33,14 @@ PIGEN_ID_TYPE(pigen_pipeline_id);
 PIGEN_ID_TYPE(pigen_stage_id);
 PIGEN_ID_TYPE(pigen_fsm_id);
 PIGEN_ID_TYPE(pigen_fabric_id);
-PIGEN_ID_TYPE(pigen_rtl_id);
+PIGEN_ID_TYPE(pigen_rtl_type_id);
+PIGEN_ID_TYPE(pigen_rtl_expr_id);
+PIGEN_ID_TYPE(pigen_rtl_object_id);
+PIGEN_ID_TYPE(pigen_rtl_instance_id);
+PIGEN_ID_TYPE(pigen_rtl_equation_id);
+PIGEN_ID_TYPE(pigen_rtl_update_id);
+PIGEN_ID_TYPE(pigen_rtl_process_id);
+PIGEN_ID_TYPE(pigen_rtl_module_id);
 
 #undef PIGEN_ID_TYPE
 
