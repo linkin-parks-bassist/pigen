@@ -14,7 +14,7 @@ Task 1 is implemented and awaiting review in PR 1. include/pigen/ids.h defines e
 
 The current origin-only constructors are foundations for the richer approved records in later tasks. Invalid-zero applies to enum kinds when introduced. tests/rtl_test.c covers empty-model rejection, distinct per-kind identities, synthetic origin, growth and out-of-range rejection. Task 2 is next.
 
-Proof: (verified at _)
+Proof: (verified at 2026-09-14T20:51:13+10:00)
 
 ```bash
 make rtl-test
