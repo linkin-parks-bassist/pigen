@@ -2,7 +2,8 @@
 status: "unverified"
 created_at: "2026-09-14T19:25:23+10:00"
 scope: "local"
-source: "Codex /root authorized host sysfs GPU samples 2026-09-14; host ps/cwd checks; existing local worker monitoring leaf"
+source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
+updated_at: "2026-09-14T20:48:46+10:00"
 ---
 
-On the Linux AMD host, sample /sys/class/drm/card[0-9]/device/gpu_busy_percent repeatedly from an authorized host-visible command. The Codex sandbox process namespace cannot establish host worker liveness. A running OpenCode PID is not evidence of active GPU inference. On 2026-09-14 at 19:25:04, 19:25:06 and 19:25:08 Australia/Sydney, card1 reported 0 percent GPU busy in all three samples. This establishes idle GPU samples, not task completion or exclusive attribution to Qwen. If inference activity remains uncertain, inspect the exact existing OpenCode session and backend metrics without launching a second worker. The general host procedure belongs in personal tooling knowledge; this leaf records the Pigen status-check context because global writes are outside current authority.
+On this AMD Linux host, repeatedly sample /sys/class/drm/card[0-9]/device/gpu_busy_percent. A surviving OpenCode PID does not establish active inference; GPU activity does not establish implementation progress or exclusive attribution to Qwen. Inspect the exact session status, recent tool calls, backend stream and changed files alongside GPU samples. Host-visible commands are available under the current unrestricted permissions. Check /tmp/pigen-qwen-current-resume for the active observable worker directory and its view.json/session identity. Do not launch a second inference worker while another is active.

@@ -2,11 +2,11 @@
 status: "unverified"
 created_at: "2026-09-13T15:03:21+10:00"
 scope: "local"
-source: "AGENTS.md; agent_notes/workstation_handoff.md"
+source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
 ingested_by: "Codex /root"
 checked_at: "2026-09-13T15:07:12+10:00"
 review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-13T15:07:34+10:00"
+updated_at: "2026-09-14T20:48:47+10:00"
 ---
 
-The immutable local Kestrel Interface snapshot is /home/david/reference_projects/kestrel-interface-ab1b88db9612 at commit ab1b88db9612cf177d991a9855bbdbe56f0b1244. It is evidence of David's C syntax, naming, ownership, modularity and hardware-near architecture; never modify it or treat it as a source donor/dependency. Availability is instructed by AGENTS, not host-probed in this ingestion.
+The immutable local Kestrel Interface snapshot is /home/david/reference_projects/kestrel-interface-ab1b88db9612 at commit ab1b88db9612cf177d991a9855bbdbe56f0b1244. It is evidence of David's C syntax, naming, ownership, modularity and hardware-near architecture; never modify it or treat it as a source donor/dependency. The snapshot is a style reference, never an implementation dependency.

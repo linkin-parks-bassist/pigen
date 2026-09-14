@@ -2,11 +2,15 @@
 status: "unverified"
 created_at: "2026-09-13T15:05:00+10:00"
 scope: "local"
-source: "SPEC/PLAN/architecture/semantic invariants/Ari/editorial notes linear retirement audit; David knowledge-tree-only instruction 2026-09-14"
+source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
 ingested_by: "Codex /root"
 checked_at: "2026-09-13T15:07:12+10:00"
 review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:39:58+10:00"
+updated_at: "2026-09-14T20:48:46+10:00"
 ---
 
-David authorized a thorough audit and retirement of all repository docs, notes and local AGENTS.md on 2026-09-14. Checked local semantic knowledge is the current answer authority: what/is/the/spec.md and its law owners give intended language; how/to/write/runnable/prototype/declarations.md and prototype-fabric/build/options owners give runnable quarantined behavior; what/is/the/plan.md and elastic/rtl/task/{one..twelve} give execution order/contracts; state/next give current truth; owner/invariant/progression/cutover leaves carry architecture. Retired document filenames in source metadata identify historical evidence, not mandatory paths to read or live authorities. Historical design/plan cutover leaves distinguish rejected policies and their surviving contracts. Current user/session instructions outrank knowledge; global /home/david/AGENTS.md remains applicable. New question->kt first, resolve semantic misses, verify eligible proof assertions and update the owning answer before unrelated work. Do not enumerate or read every leaf or retired original as startup preparation.
+The local knowledge tree is the sole project documentation authority. Start with the precise question through kt; read its checked owner answer and only the relevant code. The spec and language-law owners define intent; prototype/build/options owners describe executable behavior; the plan and elastic RTL task owners define approved work; state and next record current implementation and action. Current user instructions outrank stored knowledge; global /home/david/AGENTS.md applies.
+
+Keep current answers, invariants, sole ownership, rationale, truthful evidence, present boundaries and actionable unresolved decisions. Delete obsolete policies, completed implementation sequences, session transcripts, migration ledgers and redundant answers. Amend the existing owner when reality changes; do not retain an outdated answer beside its replacement. Provenance identifies evidence, never a mandatory document reread. Narrow passing proofs certify their assertions, not whole leaves.
+
+Use concise hardware-facing language and direct semantic routes. Keep APIs with their owners, distinguish intended language from executable support and identify the current safe action. Use the assigned agent name in handoffs. Do not recreate docs, agent_notes, root Markdown or local AGENTS.md, enumerate the tree as preparation, or fetch deleted originals to work on a current task.
