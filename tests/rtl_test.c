@@ -104,7 +104,7 @@ int main(void)
 	{
 		pigen_rtl_type bits4 = {
 			PIGEN_SIGN_UNSIGNED, PIGEN_DATA_TYPE_STATE_TWO, 4,
-			INVALID_ID(pigen_rtl_expr_id), first};
+			INVALID_ID(pigen_rtl_expr_id), first, NULL, 0};
 		pigen_rtl_type bits4_later = bits4;
 		pigen_rtl_type bits8 = bits4;
 		pigen_rtl_type int4 = bits4;
@@ -326,6 +326,92 @@ int main(void)
 		expression_count = model.expression_count;
 		child_arena_count = model.expression_child_count;
 		assert(expression_count == 11 && child_arena_count == 15);
+	}
+
+	{
+		pigen_rtl_type descriptor = {.signedness = PIGEN_SIGN_UNSIGNED,
+			.state_domain = PIGEN_DATA_TYPE_STATE_FOUR, .width = 130,
+			.width_expression = INVALID_ID(pigen_rtl_expr_id)};
+		pigen_rtl_type_id scalar = pigen_rtl_type_intern(&model, &descriptor);
+		pigen_rtl_expr_id seven = pigen_rtl_expr_add_integer(&model, scalar, 7, first);
+		pigen_rtl_expr_id zero = pigen_rtl_expr_add_integer(&model, scalar, 0, first);
+		pigen_rtl_packed_dimension dims[] = {
+			{{7, INVALID_ID(pigen_rtl_expr_id)}, {0, INVALID_ID(pigen_rtl_expr_id)}},
+			{{-2, INVALID_ID(pigen_rtl_expr_id)}, {0, seven}}};
+		descriptor.dimensions = dims;
+		descriptor.dimension_count = 2;
+		pigen_rtl_type_id descending = pigen_rtl_type_intern(&model, &descriptor);
+		assert(!IS_INVALID(descending));
+		assert(SAME_ID(descending, pigen_rtl_type_intern(&model, &descriptor)));
+		dims[0].left.value = 0;
+		dims[0].right.value = 7;
+		pigen_rtl_type_id ascending = pigen_rtl_type_intern(&model, &descriptor);
+		assert(!SAME_ID(descending, ascending));
+		assert(pigen_rtl_type_get(&model, descending)->dimensions[0].left.value == 7);
+		dims[1].right.expression = zero;
+		assert(!SAME_ID(ascending, pigen_rtl_type_intern(&model, &descriptor)));
+		size_t before_types = model.type_count;
+		dims[1].right.expression = INVALID_ID(pigen_rtl_expr_id);
+		dims[1].left.expression = (pigen_rtl_expr_id){model.expression_count};
+		assert(IS_INVALID(pigen_rtl_type_intern(&model, &descriptor)));
+		assert(model.type_count == before_types);
+		descriptor.dimensions = NULL;
+		assert(IS_INVALID(pigen_rtl_type_intern(&model, &descriptor)));
+		descriptor.dimension_count = 0;
+		descriptor.width_expression = seven;
+		pigen_rtl_type_id symbolic = pigen_rtl_type_intern(&model, &descriptor);
+		descriptor.width = 99;
+		assert(SAME_ID(symbolic, pigen_rtl_type_intern(&model, &descriptor)));
+
+
+		pigen_rtl_literal_word words[] = {{1, 2, 4}, {UINT64_MAX, 0, 0}, {3, 0, 0}};
+		pigen_rtl_expr_id wide = pigen_rtl_expr_add_literal(&model,
+			PIGEN_RTL_EXPR_BITS, scalar, words, 130, 0, second);
+		assert(!IS_INVALID(wide));
+		words[0].value = 0;
+		const pigen_rtl_expr *literal = pigen_rtl_expr_get(&model, wide);
+		assert(literal->literal_bit_count == 130 && literal->literal_words[0].value == 1);
+		assert(literal->literal_words[0].x_mask == 2 && literal->literal_words[0].z_mask == 4);
+		assert(literal->literal_words[2].value == 3 && literal->origin.start == second.start);
+		words[0].x_mask = words[0].z_mask = 0;
+		pigen_rtl_expr_id negative = pigen_rtl_expr_add_literal(&model,
+			PIGEN_RTL_EXPR_INTEGER, scalar, words, 130, 1, first);
+		assert(!IS_INVALID(negative) && pigen_rtl_expr_get(&model, negative)->literal_negative);
+		size_t before_expr = model.expression_count, before_children = model.expression_child_count;
+		words[2].value = 4;
+		assert(IS_INVALID(pigen_rtl_expr_add_literal(&model, PIGEN_RTL_EXPR_BITS,
+			scalar, words, 130, 0, first)));
+		words[2].value = 3;
+		words[0].x_mask = words[0].z_mask = 1;
+		assert(IS_INVALID(pigen_rtl_expr_add_literal(&model, PIGEN_RTL_EXPR_BITS,
+			scalar, words, 130, 0, first)));
+		words[0].x_mask = 1;
+		words[0].z_mask = 0;
+		descriptor.state_domain = PIGEN_DATA_TYPE_STATE_TWO;
+		descriptor.width_expression = INVALID_ID(pigen_rtl_expr_id);
+		pigen_rtl_type_id two_state = pigen_rtl_type_intern(&model, &descriptor);
+		assert(IS_INVALID(pigen_rtl_expr_add_literal(&model, PIGEN_RTL_EXPR_BITS,
+			two_state, words, 130, 0, first)));
+		assert(IS_INVALID(pigen_rtl_expr_add_literal(&model, PIGEN_RTL_EXPR_INTEGER,
+			scalar, words, 130, 0, first)));
+		assert(IS_INVALID(pigen_rtl_expr_add_literal(&model, PIGEN_RTL_EXPR_BITS,
+			scalar, NULL, 130, 0, first)));
+		assert(IS_INVALID(pigen_rtl_expr_add_literal(&model, PIGEN_RTL_EXPR_BITS,
+			scalar, words, 0, 0, first)));
+		assert(model.expression_count == before_expr && model.expression_child_count == before_children);
+
+		pigen_rtl_expr_id parts[8];
+		for (size_t i = 0; i < 8; ++i) parts[i] = i % 2 ? seven : zero;
+		pigen_rtl_expr_id concat = pigen_rtl_expr_add_concatenation(&model, scalar, parts, 8, first);
+		/* Fill the arena so reusing its own child slice must grow it. */
+		while (model.expression_child_count + 8 <= model.expression_child_capacity)
+			assert(!IS_INVALID(pigen_rtl_expr_add_concatenation(&model, scalar, parts, 8, first)));
+		size_t n;
+		const pigen_rtl_expr_id *children = pigen_rtl_expr_children(&model, concat, &n);
+		pigen_rtl_expr_id copied = pigen_rtl_expr_add_concatenation(&model, scalar, children, n, second);
+		children = pigen_rtl_expr_children(&model, copied, &n);
+		assert(n == 8);
+		for (size_t i = 0; i < n; ++i) assert(SAME_ID(children[i], parts[i]));
 	}
 
 	pigen_free_rtl_model(&model);

@@ -8,12 +8,34 @@
 #include "pigen/ids.h"
 #include "pigen/source.h"
 
+/* A bound is either a concrete signed value or a resolved RTL expression.
+ * The value field is ignored when expression is valid. */
+typedef struct {
+	int64_t value;
+	pigen_rtl_expr_id expression;
+} pigen_rtl_bound;
+
+typedef struct {
+	pigen_rtl_bound left;
+	pigen_rtl_bound right;
+} pigen_rtl_packed_dimension;
+
+/* Least-significant word first. X/Z masks are disjoint; value bits under
+ * either mask are zero. Integer literals use sign and magnitude. */
+typedef struct {
+	uint64_t value;
+	uint64_t x_mask;
+	uint64_t z_mask;
+} pigen_rtl_literal_word;
+
 typedef struct {
 	pigen_signedness signedness;
 	pigen_state_domain state_domain;
 	uint64_t width;
 	pigen_rtl_expr_id width_expression;
 	pigen_source_span origin;
+	const pigen_rtl_packed_dimension *dimensions;
+	size_t dimension_count;
 } pigen_rtl_type;
 
 typedef enum {
@@ -34,7 +56,10 @@ typedef struct {
 	pigen_rtl_expr_kind kind;
 	pigen_rtl_type_id type;
 	pigen_source_span origin;
-	uint64_t value;
+	uint64_t value; /* Low word, for the uint64_t convenience constructors. */
+	const pigen_rtl_literal_word *literal_words;
+	size_t literal_bit_count;
+	int literal_negative;
 	pigen_rtl_object_id object;
 	size_t first_child;
 	size_t child_count;
@@ -123,6 +148,12 @@ pigen_rtl_expr_id pigen_rtl_expr_add(pigen_rtl_model *model,
 	pigen_source_span origin);
 const pigen_rtl_expr *pigen_rtl_expr_get(const pigen_rtl_model *model,
 	pigen_rtl_expr_id expression);
+/* Constructors copy dimensions, literal words and child slices into model
+ * ownership. Accessor pointers expire on arena growth; IDs remain stable. */
+pigen_rtl_expr_id pigen_rtl_expr_add_literal(pigen_rtl_model *model,
+	pigen_rtl_expr_kind kind, pigen_rtl_type_id type,
+	const pigen_rtl_literal_word *words, size_t bit_count, int negative,
+	pigen_source_span origin);
 pigen_rtl_expr_id pigen_rtl_expr_add_integer(pigen_rtl_model *model,
 	pigen_rtl_type_id type, uint64_t value, pigen_source_span origin);
 pigen_rtl_expr_id pigen_rtl_expr_add_bits(pigen_rtl_model *model,
