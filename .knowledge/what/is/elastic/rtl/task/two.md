@@ -2,11 +2,11 @@
 status: "unverified"
 created_at: "2026-09-13T15:05:47+10:00"
 scope: "local"
-source: "commit a44a8b2; green make rtl-test and all eleven foundation targets; PR 3 open 2026-09-14T22:46+10:00"
+source: "Codex /root commit 7593604; inspected RTL implementation; test-first regressions; eleven foundation gates; ASan/UBSan RTL tests"
 ingested_by: "Codex /root"
 checked_at: "2026-09-13T15:07:12+10:00"
 review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T22:53:35+10:00"
+updated_at: "2026-09-14T23:01:28+10:00"
 updated_by: "opencode"
 ---
 
@@ -15,3 +15,7 @@ Canonical RTL types and expressions. Add interned RTL types, immutable typed/spa
 Implemented on elastic-rtl-task-2-kt as commit a44a8b2 on 2026-09-14. Evidence: make rtl-test is green (both PASS lines) and all eleven structured C foundation targets are green. PR 3 is open against knowledge-docs-cutover and awaits review; it is not merged. Full make verify still fails on the unrelated Icarus pipeline crash (owner: why/does/pipeline/verification/currently/fail.md), which is out of scope for this task.
 
 Approved Task 2 touches only include/pigen/rtl.h, src/rtl.c and tests/rtl_test.c. Consumes Task 1 identities and resolved operation/conversion records. APIs include pigen_rtl_type_intern(model, type), pigen_rtl_expr_add_concatenation(model, type, children, count, span), and pigen_rtl_expr_children(model, expr). Intern identical types to one identity; preserve ordered children exactly. Public kind enum begins PIGEN_RTL_EXPR_INVALID then INTEGER, BITS, OBJECT, UNARY, BINARY, CONDITIONAL, CONVERSION, INDEX, SELECT, CONCATENATION. Every node stores kind, type and provenance span; sequence children belong to one append-only arena. Types carry emitted packed layout, signedness, state domain and structural symbolic bounds/width expressions. Nodes store resolved operation/conversion records, never operator text. Validate types, operands, objects, selectors and every child before append. Invalid references must leave both expression and child counts unchanged. Exercise every kind, literal values, object references, explicit conversions, provenance and ordered concatenations. Work test-first: observe the intended failing new API test, implement, run make rtl-test, git diff --check, inspect status, stage only the three named files and make a coherent green-task commit. Do not attach this to production.
+
+Task 2 review corrections are implemented in commit 7593604. expr_append validates all identities and copies child slices before resizing either arena, including slices returned by pigen_rtl_expr_children. Child capacity growth checks allocation-size limits. pigen_rtl_type owns a copied ordered array of packed dimensions, each with signed concrete or resolved-expression bounds; interning compares bound identity/order and ignores concrete value fields when a symbolic identity is present. Width expressions likewise supersede the concrete width field. Bound and width identities reject invalid expression records. Literal nodes own least-significant-word-first value/X/Z records and a bit count; integer values use signed magnitude, bits disallow negative sign, and integer/two-state literals reject X/Z. Overlapping masks, nonzero value under masks and nonzero padding bits are rejected before append. The uint64_t constructors remain convenience wrappers. Model teardown frees dimensions and literals. Constructors copy borrowed inputs; arena accessor pointers expire on growth while IDs remain stable.
+
+Evidence: tests/rtl_test.c failed first on the missing new representation/API, then passed. Regressions cover reused child slices forcing growth, ascending versus descending dimensions, copied dimensions, symbolic identity, invalid bound rollback, 130-bit signed integers and four-state bits, copied literal ownership/provenance and invalid masks/padding/state. All eleven foundation targets pass; final RTL test passes with AddressSanitizer and UndefinedBehaviorSanitizer; git diff --check passes. PR 3 awaits review and remains unmerged.
