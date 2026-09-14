@@ -6,7 +6,7 @@ source: "Codex /root commit 7593604; inspected RTL implementation; test-first re
 ingested_by: "Codex /root"
 checked_at: "2026-09-14T17:13:16+10:00"
 review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T23:01:28+10:00"
+updated_at: "2026-09-14T23:01:38+10:00"
 updated_by: "opencode"
 ---
 
@@ -17,4 +17,3 @@ Elastic RTL Task 1 is implemented. Task 2 is implemented on elastic-rtl-task-2-k
 The local tree is the sole project documentation authority; local docs, notes, root Markdown and AGENTS.md are absent. Obsolete history is excluded. The immutable Kestrel reference and global AGENTS.md remain applicable.
 
 Current verification: all eleven structured C foundation targets pass. Full make verify fails when Icarus compiles the pipeline fixture with segmentation fault/exit 139, reproduced by make pipeline-test; the cause remains unresolved in why/does/pipeline/verification/currently/fail.md. No full-suite success is claimed.
-
