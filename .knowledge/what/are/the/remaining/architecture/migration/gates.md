@@ -1,0 +1,16 @@
+---
+status: "unverified"
+created_at: "2026-09-14T20:40:26+10:00"
+scope: "local"
+source: "PLAN.md every checked and unchecked architecture/migration/release item; audit 2026-09-14"
+---
+
+The fixed signal-model work is complete: one signal arena/binding, independent data/transfer/shape/direction/provenance/parameters, descriptor laws and realization families, all signals including statics in use/incidence, and removal of superseded terminology. The shared frontend completed data-type owner algebra, intrinsic operations/decisions, byte removal, data-first structural declarations, written-versus-omitted transfers, ordinary supported declarations and abstract inputs/FIFO arguments. Remaining frontend work is parameter/type/aggregate/array/expression forms required by accepted Pigen constructs, and macro concatenation/stringification/required arguments without weakening provenance; unsupported dependencies diagnose original spans instead of inspecting opaque text.
+
+Next complete the quarantined elastic RTL tasks, then retained core semantics: one resolved module/declarations/clocked process/direct atomic transfer route; semantic sizing/signedness/aggregate checks; whole-unit ready graph; current projection/concat/co-slice/validity/domain/ownership/stall/throughput laws. Production connection and corresponding scanner deletion wait until all retained features migrate.
+
+Pipeline gates: common identities for pipeline/stage/field/incoming/outgoing/external/reset/yield; parent-module lowering through common incidence/RTL; guarded execution, private scopes/shadow errors, atomic external inputs/reset/repartition/one-item-per-cycle; both stage statement forms; data-first implicit/explicit-buf-only fields; decisive biquad_bank integration, then delete rewriting. FSM gates: shared state/initial/transition/priority/guard/action identities, normal single/multi-statement state bodies, common RTL control and deletion of textual FSM lowering.
+
+Fabric gates: child-module instance/port/type resolution before analysis and surface-independent identities; inline parent-owned two-component endpoints replacing top-level fixed-width units; per-connection type compatibility and no PAYLOAD_W contract; retain blind endpoints/exclusive direct/many-to-one arbitration/balanced topology/relative routes/reachability/buffered ready breaks/manifests/SVG from one model; then delete top-level parsing/text lowering. Final backend gates: RTL-only structured SV input, centralized collision-safe names/semantic provenance, remove all marker comments/generated-name lookup/rewrites/string equality/duplicate feature resolvers and prototype-only syntax/examples/tests/APIs/files; editorial current knowledge replaces old notes.
+
+Compatibility and release gates require representative pure/mixed SV simulation before/after, audit every rejection into explicit deliberate contract or accidental bug, clean make verify with warnings-as-errors, appropriate behavioral/diagnostic/backpressure/atomicity/throughput coverage for every accepted specified construct, exact original-span diagnostics, localized primitive evolution and deterministic SV/SVG. Deferred/preserved language ideas are in their own owner; they are not active tasks. These are acceptance contracts, not a claim that all gates have passed.
