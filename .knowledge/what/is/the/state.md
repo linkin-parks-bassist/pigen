@@ -2,11 +2,11 @@
 status: "unverified"
 created_at: "2026-09-13T15:00:33+10:00"
 scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
+source: "Current observable Qwen session/status and host GPU samples; current-only cleanup commit e73dfee, Codex /root 2026-09-14"
 ingested_by: "Codex /root"
 checked_at: "2026-09-14T17:13:16+10:00"
 review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:48:46+10:00"
+updated_at: "2026-09-14T20:50:43+10:00"
 updated_by: "opencode"
 ---
 
@@ -18,4 +18,4 @@ The local tree is the sole project documentation authority; local docs, notes, r
 
 Current verification: all eleven structured C foundation targets pass. Full make verify fails when Icarus compiles the pipeline fixture with segmentation fault/exit 139, reproduced by make pipeline-test; the cause remains unresolved in why/does/pipeline/verification/currently/fail.md. No full-suite success is claimed.
 
-Qwen is stopped while Codex /root removes obsolete tree content. Resume only through a fresh focused kt Task 2 session after the cleanup is committed; state and next must be updated with its actual identity and status.
+Qwen is running in fresh session ses_f60760319ffe426UpRFpjPJAQo on elastic-rtl-task-2-kt, based on current-only cutover e73dfee. Observable view: /tmp/pigen-qwen-current-1789383014/view.json; current pointer: /tmp/pigen-qwen-current-resume. The session reports busy and GPU samples are 71%, 94%, 98%. Its focused kt Task 2 brief requires a failing-test-first implementation milestone; no Task 2 implementation result has been established. Codex /root maintains the current handoff; update status from actual acceptance evidence.
