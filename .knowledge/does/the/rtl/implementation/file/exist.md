@@ -12,7 +12,7 @@ updated_by: "opencode"
 
 Yes: src/rtl.c and include/pigen/rtl.h exist in this checkout since commit 30ac091 (elastic RTL Task 1, pull request 1). This narrow presence fact does not by itself prove every structured-backend status assertion; the ready/output/emitter/composer interfaces remain absent. Run the predicate from repository root.
 
-Proof: (verified at 2026-09-14T19:38:05+10:00)
+Proof: (verified at 2026-09-14T20:51:13+10:00)
 
 ```bash
 test -e src/rtl.c && test -e include/pigen/rtl.h
