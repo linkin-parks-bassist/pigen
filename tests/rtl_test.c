@@ -414,6 +414,277 @@ int main(void)
 		for (size_t i = 0; i < n; ++i) assert(SAME_ID(children[i], parts[i]));
 	}
 
+	{
+		/* Task 3: modules and resolved hardware with owner ranges. */
+		pigen_rtl_module_id a;
+		pigen_rtl_module_id b;
+		pigen_rtl_module_id bad_module;
+		pigen_rtl_object_id in_a;
+		pigen_rtl_object_id internal_a;
+		pigen_rtl_object_id out_a;
+		pigen_rtl_object_id in_b;
+		pigen_rtl_object_id orphan;
+		pigen_rtl_object_id bad_object;
+		pigen_rtl_equation_id eq_a;
+		pigen_rtl_equation_id bad_equation;
+		pigen_rtl_instance_id inst_a;
+		pigen_rtl_instance_id bad_instance;
+		pigen_rtl_update_id u1;
+		pigen_rtl_update_id u2;
+		pigen_rtl_update_id bad_update;
+		pigen_rtl_process_id proc_a;
+		pigen_rtl_process_id bad_process;
+		pigen_rtl_expr_id params[3] = {expression, expression, expression};
+		pigen_rtl_object_id conns[3];
+		pigen_rtl_update_id ups[2];
+		size_t obj_before;
+		size_t inst_before;
+		size_t eq_before;
+		size_t proc_before;
+		size_t up_before;
+		size_t param_before;
+		size_t conn_before;
+		const pigen_rtl_module *record;
+		const pigen_rtl_object *obj;
+		const pigen_rtl_instance *inst;
+		const pigen_rtl_equation *eq;
+		const pigen_rtl_update *up;
+		const pigen_rtl_process *pr;
+		const pigen_rtl_expr_id *param_ids;
+		const pigen_rtl_object_id *conn_ids;
+		pigen_module_id sem_a = {101};
+		pigen_module_id sem_b = {102};
+
+		a = pigen_rtl_module_add_with_owner(&model, sem_a, first);
+		assert(!IS_INVALID(a));
+		obj_before = model.object_count;
+		inst_before = model.instance_count;
+		eq_before = model.equation_count;
+		proc_before = model.process_count;
+		up_before = model.update_count;
+		param_before = model.instance_parameter_count;
+		conn_before = model.instance_connection_count;
+
+		in_a = pigen_rtl_object_add_with_owner(&model, a,
+			PIGEN_RTL_OBJECT_VARIABLE, type, PIGEN_SEMANTIC_INPUT,
+			(pigen_signal_id){501}, first);
+		assert(!IS_INVALID(in_a));
+		internal_a = pigen_rtl_object_add_with_owner(&model, a,
+			PIGEN_RTL_OBJECT_VARIABLE, type, PIGEN_SEMANTIC_INTERNAL,
+			INVALID_ID(pigen_signal_id), second);
+		assert(!IS_INVALID(internal_a));
+		out_a = pigen_rtl_object_add_with_owner(&model, a,
+			PIGEN_RTL_OBJECT_MEMORY, type, PIGEN_SEMANTIC_OUTPUT,
+			(pigen_signal_id){503}, second);
+		assert(!IS_INVALID(out_a));
+		eq_a = pigen_rtl_equation_add_with_owner(&model, a, internal_a,
+			expression, first);
+		assert(!IS_INVALID(eq_a));
+		conns[0] = in_a;
+		conns[1] = out_a;
+		conns[2] = internal_a;
+		inst_a = pigen_rtl_instance_add_with_owner(&model, a,
+			(pigen_module_id){105}, params, 3, conns, 3, second);
+		assert(!IS_INVALID(inst_a));
+		u1 = pigen_rtl_update_add_with_owner(&model, a, in_a, expression,
+			second);
+		assert(!IS_INVALID(u1));
+		u2 = pigen_rtl_update_add_with_owner(&model, a, out_a, expression,
+			second);
+		assert(!IS_INVALID(u2));
+		ups[0] = u1;
+		ups[1] = u2;
+		proc_a = pigen_rtl_process_add_with_owner(&model, a, expression,
+			PIGEN_SEMANTIC_POSEDGE, ups, 2, second);
+		assert(!IS_INVALID(proc_a));
+
+		record = pigen_rtl_module_get(&model, a);
+		assert(record && record->origin.start == 7 &&
+			record->origin.end == 11 &&
+			record->semantic_module.index == 101);
+		assert(record->objects.first == obj_before &&
+			record->objects.count == 3);
+		assert(record->instances.first == inst_before &&
+			record->instances.count == 1);
+		assert(record->equations.first == eq_before &&
+			record->equations.count == 1);
+		assert(record->processes.first == proc_before &&
+			record->processes.count == 1);
+		obj = pigen_rtl_object_get(&model, in_a);
+		assert(obj && obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
+			SAME_ID(obj->module, a) &&
+			obj->semantic_signal.index == 501 &&
+			obj->direction == PIGEN_SEMANTIC_INPUT);
+		obj = pigen_rtl_object_get(&model, internal_a);
+		assert(obj && IS_INVALID(obj->semantic_signal) &&
+			obj->direction == PIGEN_SEMANTIC_INTERNAL);
+		obj = pigen_rtl_object_get(&model, out_a);
+		assert(obj && obj->kind == PIGEN_RTL_OBJECT_MEMORY &&
+			obj->direction == PIGEN_SEMANTIC_OUTPUT);
+		inst = pigen_rtl_instance_get(&model, inst_a);
+		assert(inst && SAME_ID(inst->module, a) &&
+			inst->semantic_module.index == 105 &&
+			inst->parameters.first == param_before &&
+			inst->parameters.count == 3 &&
+			inst->connections.first == conn_before &&
+			inst->connections.count == 3);
+		param_ids = model.instance_parameters + param_before;
+		assert(SAME_ID(param_ids[0], expression) &&
+			SAME_ID(param_ids[1], expression) &&
+			SAME_ID(param_ids[2], expression));
+		conn_ids = model.instance_connections + conn_before;
+		assert(SAME_ID(conn_ids[0], in_a) && SAME_ID(conn_ids[1], out_a) &&
+			SAME_ID(conn_ids[2], internal_a));
+		eq = pigen_rtl_equation_get(&model, eq_a);
+		assert(eq && SAME_ID(eq->module, a) &&
+			SAME_ID(eq->destination, internal_a) &&
+			SAME_ID(eq->value, expression));
+		up = pigen_rtl_update_get(&model, u1);
+		assert(up && SAME_ID(up->module, a) &&
+			SAME_ID(up->destination, in_a));
+		pr = pigen_rtl_process_get(&model, proc_a);
+		assert(pr && SAME_ID(pr->module, a) &&
+			SAME_ID(pr->clock, expression) &&
+			pr->edge == PIGEN_SEMANTIC_POSEDGE &&
+			pr->updates.first == up_before && pr->updates.count == 2);
+
+		/* A second module owns disjoint ranges; synthetic provenance is
+		 * carried, not resolved. */
+		b = pigen_rtl_module_add_with_owner(&model, sem_b, second);
+		assert(!IS_INVALID(b));
+		in_b = pigen_rtl_object_add_with_owner(&model, b,
+			PIGEN_RTL_OBJECT_VARIABLE, type, PIGEN_SEMANTIC_INPUT,
+			(pigen_signal_id){507}, second);
+		assert(!IS_INVALID(in_b));
+		record = pigen_rtl_module_get(&model, b);
+		assert(record && record->semantic_module.index == 102 &&
+			record->objects.first == obj_before + 3 &&
+			record->objects.count == 1 && !record->instances.count &&
+			!record->equations.count && !record->processes.count);
+		orphan = pigen_rtl_object_add_with_owner(&model, b,
+			PIGEN_RTL_OBJECT_MEMORY, type, PIGEN_SEMANTIC_INOUT,
+			INVALID_ID(pigen_signal_id), second);
+		assert(!IS_INVALID(orphan));
+		record = pigen_rtl_module_get(&model, b);
+		assert(record->objects.count == 2 &&
+			record->objects.first == obj_before + 3);
+		assert(pigen_rtl_object_get(&model, orphan)->origin.source.index ==
+			PIGEN_INVALID_ID);
+		record = pigen_rtl_module_get(&model, a);
+		assert(record->objects.count == 3 &&
+			record->objects.first == obj_before);
+
+		/* Cross-module destinations are rejected; nothing is published and
+		 * no earlier range shifts. */
+		bad_equation = pigen_rtl_equation_add_with_owner(&model, a, in_b,
+			expression, second);
+		assert(IS_INVALID(bad_equation));
+		assert(model.equation_count == eq_before + 1);
+		assert(model.object_count == obj_before + 4);
+		record = pigen_rtl_module_get(&model, a);
+		assert(record->equations.count == 1 &&
+			record->equations.first == eq_before &&
+			record->objects.count == 3 &&
+			record->objects.first == obj_before);
+		{
+			pigen_rtl_object_id foreign_conns[3] = {in_a, out_a, in_b};
+
+			bad_instance = pigen_rtl_instance_add_with_owner(&model, a,
+				(pigen_module_id){106}, params, 3, foreign_conns, 3,
+				second);
+		}
+		assert(IS_INVALID(bad_instance));
+		assert(model.instance_count == inst_before + 1);
+		assert(model.instance_parameter_count == param_before + 3);
+		assert(model.instance_connection_count == conn_before + 3);
+		record = pigen_rtl_module_get(&model, a);
+		assert(record->instances.count == 1 &&
+			record->instances.first == inst_before);
+		bad_update = pigen_rtl_update_add_with_owner(&model, a, in_b,
+			expression, second);
+		assert(IS_INVALID(bad_update));
+		assert(model.update_count == up_before + 2);
+		assert(model.process_count == proc_before + 1);
+		record = pigen_rtl_module_get(&model, a);
+		assert(record->processes.count == 1 &&
+			record->processes.first == proc_before);
+		pr = pigen_rtl_process_get(&model, proc_a);
+		assert(pr->updates.count == 2 && pr->updates.first == up_before);
+		{
+			pigen_rtl_update_id u_b;
+			pigen_rtl_update_id foreign_ups[2] = {u1, u2};
+
+			u_b = pigen_rtl_update_add_with_owner(&model, b, in_b,
+				expression, second);
+			assert(!IS_INVALID(u_b));
+			foreign_ups[1] = u_b;
+			bad_process = pigen_rtl_process_add_with_owner(&model, a,
+				expression, PIGEN_SEMANTIC_NEGEDGE, foreign_ups, 2,
+				second);
+			assert(IS_INVALID(bad_process));
+		}
+		assert(model.update_count == up_before + 3);
+		assert(model.process_count == proc_before + 1);
+		record = pigen_rtl_module_get(&model, b);
+		assert(record->objects.count == 2 &&
+			record->objects.first == obj_before + 3 &&
+			!record->instances.count && !record->equations.count &&
+			!record->processes.count);
+		assert(model.object_count == obj_before + 4);
+		assert(model.instance_count == inst_before + 1);
+
+		/* Owner identity is validated before publication: invalid owners
+		 * publish nothing, and invalid children fail the whole add. */
+		bad_module = pigen_rtl_module_add_with_owner(&model,
+			INVALID_ID(pigen_module_id), second);
+		bad_object = pigen_rtl_object_add_with_owner(&model,
+			INVALID_ID(pigen_rtl_module_id), PIGEN_RTL_OBJECT_VARIABLE,
+			type, PIGEN_SEMANTIC_INPUT, (pigen_signal_id){509}, second);
+		bad_equation = pigen_rtl_equation_add_with_owner(&model, a,
+			INVALID_ID(pigen_rtl_object_id), expression, second);
+		{
+			pigen_rtl_object_id foreign_conns[3] = {in_a, out_a, in_b};
+
+			bad_instance = pigen_rtl_instance_add_with_owner(&model, a,
+				(pigen_module_id){107}, params, 3, foreign_conns, 3,
+				second);
+		}
+		bad_update = pigen_rtl_update_add_with_owner(&model, a, out_a,
+			INVALID_ID(pigen_rtl_expr_id), second);
+		bad_process = pigen_rtl_process_add_with_owner(&model, a,
+			INVALID_ID(pigen_rtl_expr_id), PIGEN_SEMANTIC_POSEDGE,
+			ups, 2, second);
+		assert(IS_INVALID(bad_module) && IS_INVALID(bad_object) &&
+			IS_INVALID(bad_equation) && IS_INVALID(bad_instance) &&
+			IS_INVALID(bad_update) && IS_INVALID(bad_process));
+		{
+			pigen_rtl_module_id missing_mod =
+				(pigen_rtl_module_id){model.module_count};
+
+			assert(IS_INVALID(pigen_rtl_object_add_with_owner(&model,
+				missing_mod, PIGEN_RTL_OBJECT_VARIABLE, type,
+				PIGEN_SEMANTIC_INPUT, (pigen_signal_id){512},
+				second)));
+			assert(IS_INVALID(pigen_rtl_equation_add_with_owner(&model,
+				missing_mod, internal_a, expression, second)));
+			assert(IS_INVALID(pigen_rtl_instance_add_with_owner(&model,
+				missing_mod, (pigen_module_id){108}, params, 3,
+				conns, 3, second)));
+			assert(IS_INVALID(pigen_rtl_update_add_with_owner(&model,
+				missing_mod, in_a, expression, second)));
+			assert(IS_INVALID(pigen_rtl_process_add_with_owner(&model,
+				missing_mod, expression, PIGEN_SEMANTIC_POSEDGE,
+				ups, 2, second)));
+		}
+		assert(model.module_count == 2 && model.object_count ==
+			obj_before + 4 && model.instance_count == inst_before + 1 &&
+			model.equation_count == eq_before + 1 &&
+			model.update_count == up_before + 3 &&
+			model.process_count == proc_before + 1 &&
+			model.instance_parameter_count == param_before + 3 &&
+			model.instance_connection_count == conn_before + 3);
+	}
+
 	pigen_free_rtl_model(&model);
 	assert(!model.types && !model.type_count && !model.type_capacity);
 	assert(!model.expressions && !model.expression_count &&
