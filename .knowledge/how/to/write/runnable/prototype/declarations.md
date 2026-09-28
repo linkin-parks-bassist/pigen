@@ -1,8 +1,6 @@
 ---
-status: "unverified"
-created_at: "2026-09-14T20:35:24+10:00"
-scope: "local"
-source: "USER_GUIDE.md Start here, Pipelines, Choose the transfer type, Module boundaries, Fixed-point; retirement audit Codex /root 2026-09-14"
+status: green
+revised_at: "2026-09-14T20:35:24+10:00"
 ---
 
 The unlinked production executable still accepts transfer-first prototype declarations: `buf [15:0] work;`, `fifo [31:0][16] requests;`, `skid [31:0] response;`, `port [31:0] bram_result;`. FIFO spelling puts payload range before depth; reversing them is invalid. Signed payloads use `buf signed [23:0] sample;` or `fifo signed [23:0][4] samples;`; emitted payload and primitive type parameters retain signedness. `$signed` is an intentional reinterpretation. These forms are quarantined executable behavior, never an alternate specified Pigen language or compatibility promise. Target declarations are data-first and must replace them when one complete structured production path is ready.

@@ -1,12 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:04:57+10:00"
-scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:48:47+10:00"
+status: green
+revised_at: "2026-09-14T20:48:47+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 The owner in transfer_type.c maps abstract->boundary, wire->combinational net, reg/logic->procedural variable, buf->elastic slot, port->pulse register, fifo->parameterized queue, skid->skid queue. Each source descriptor names exactly one backend-neutral realization. The realization descriptor has capacity_source (none/fixed/argument), fixed_capacity, ready_dependency (external/constant/downstream/occupancy), has_occupancy and reset (none/procedural/empty).

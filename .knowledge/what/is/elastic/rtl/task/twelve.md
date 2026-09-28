@@ -1,12 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:05:52+10:00"
-scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:48:47+10:00"
+status: green
+revised_at: "2026-09-14T20:48:47+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 Verification and durable boundary. After the slice is implemented, run the clean structured C/backend/vertical-slice suite, make verify and side-channel/source-enum/quarantine checks. Investigate tracked generated changes; expected production effect is none. Update the current state/plan/next and invariant owners only for implemented and tested unlinked RTL work. Production integration, full core, pipelines, FSMs and fabrics remain pending until their own gates pass. This is approved future work, not implemented status.

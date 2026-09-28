@@ -1,12 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:03:15+10:00"
-scope: "local"
-source: "Full intrinsic-expression design/plan 2026-08-25 and semantic invariants; documentation audit Codex /root 2026-09-14"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:38:04+10:00"
+status: green
+revised_at: "2026-09-14T20:38:04+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 Unsized Pigen decimals are arbitrary-precision exact integers with no implicit signed family or hardware width, also used for Pigen type/transfer counts. Ordinary SV parameters/ranges retain SV unsized_integer rules. Literal domain is explicit policy input to one walker, independent of constant-only admissibility. Sized based literals retain normalized exact-width four-state raw bit vectors and need casts for Pigen arithmetic.

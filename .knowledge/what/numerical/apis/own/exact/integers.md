@@ -1,12 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:04:54+10:00"
-scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:48:47+10:00"
+status: green
+revised_at: "2026-09-14T20:48:47+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 integer.h exposes decimal/u64 interning, negate/add/subtract/multiply, bounded shift/power, comparison/sign/zero/parity, checked conversions to size/u64 and signed/unsigned width queries. Exact integer identities belong to semantic model. Host extraction can fail without limiting the underlying exact value. Resource-bounded construction is distinct from language arithmetic meaning.

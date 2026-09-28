@@ -1,9 +1,6 @@
 ---
-status: "unverified"
-created_at: "2026-09-14T20:40:26+10:00"
-scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
-updated_at: "2026-09-14T20:48:47+10:00"
+status: green
+revised_at: "2026-09-14T20:48:47+10:00"
 ---
 
 The fixed signal-model work is complete: one signal arena/binding, independent data/transfer/shape/direction/provenance/parameters, descriptor laws and realization families, all signals including statics in use/incidence, and owned transfer terminology. The shared frontend completed data-type owner algebra, intrinsic operations/decisions, the current primitive spelling domain, data-first structural declarations, written-versus-omitted transfers, ordinary supported declarations and abstract inputs/FIFO arguments. Remaining frontend work is parameter/type/aggregate/array/expression forms required by accepted Pigen constructs, and macro concatenation/stringification/required arguments without weakening provenance; unsupported dependencies diagnose original spans instead of inspecting opaque text.

@@ -1,16 +1,10 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:00:33+10:00"
-scope: "local"
-source: "David's explicit direct linear commit/push instruction, 2026-09-14; current Git history and previous workflow audited"
-ingested_by: "Codex /root"
+status: green
+revised_at: "2026-09-28T17:23:59+10:00"
 checked_at: "2026-09-14T17:13:16+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T23:16:09+10:00"
-updated_by: "opencode"
 ---
 
-The approved immediate work is the quarantined elastic RTL vertical slice. Task 1's distinct IDs and arena and Task 2 canonical types and expressions are implemented; Task 2 review fixes are in 7593604. Tasks 3–12 remain approved future work: module hardware and owner ranges; collision-safe names; owner-based type/expression adapters; realization-owned declarations; whole-unit ready graph; atomic transfers sharing one fire; exact ordered output; terminal SV emission; quarantined composition/simulation; verification and accurate status. Exact contracts live in what/is/elastic/rtl/task/{one..twelve}.md.
+The approved immediate work is the quarantined elastic RTL vertical slice. Task 1's distinct IDs and arena and Task 2 canonical types and expressions are implemented; Task 2 review fixes are in 7593604. Tasks 3–12 remain approved future work: module hardware and owner ranges; collision-safe names; owner-based type/expression adapters; realization-owned declarations; whole-unit ready graph; atomic transfers sharing one fire; exact ordered output; terminal SV emission; quarantined composition/simulation; verification and accurate status. Exact contracts live in what/is/elastic/rtl/task/{one..twelve}.md. The next step is Task 3 (what/is/elastic/rtl/task/three.md): module objects, instances, equations, processes and enabled updates with owner ranges, test-first with relevant gates, coherent commits and direct linear pushes to master, preserving production quarantine.
 
 Lowering consumes validated identities and backend-neutral realization properties. RTL contains resolved hardware only; opaque SV occupies ordered spans copied at terminal emission. Multi-arena builders restore all counts on failure; semantic owners decide widths, types and conversions.
 

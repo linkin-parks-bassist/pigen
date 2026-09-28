@@ -1,9 +1,6 @@
 ---
-status: "unverified"
-created_at: "2026-09-14T20:35:24+10:00"
-scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
-updated_at: "2026-09-14T20:48:47+10:00"
+status: green
+revised_at: "2026-09-14T20:48:47+10:00"
 ---
 
 The project collaboration discipline is to hold Pigen's coherent language/compiler shape, not maximize plausible local features. Treat corrections as evidence of generating principles: generalize the reason rather than patch the accident. Bring technical judgment; challenge attractive ideas against hardware, current laws and prospective changes. David owns consequential language/public-contract/architecture choices; present analyzed alternatives, costs and a recommendation. Ordinary implementation inside a chosen plan proceeds without repeated ceremonial questions. After a decision propagate one coherent model through contract, code, tests and examples; delete the rejected path.

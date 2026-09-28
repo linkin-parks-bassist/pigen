@@ -1,13 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:05:47+10:00"
-scope: "local"
-source: "David's explicit direct linear commit/push instruction, 2026-09-14; current Git history and previous workflow audited"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T23:16:10+10:00"
-updated_by: "opencode"
+status: green
+revised_at: "2026-09-14T23:16:10+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 Canonical RTL types and expressions. Add interned RTL types, immutable typed/spanned expression nodes and ordered child arena in rtl.h/rtl.c/rtl_test.c. Nodes cover integer/bits/object/unary/binary/conditional/conversion/index/select/concat. Store resolved operation/conversion records, not text. Gate: interning identity, child order, all node kinds/provenance, and invalid identity rejection with unchanged expression/child counts; make rtl-test.

@@ -1,9 +1,6 @@
 ---
-status: "unverified"
-created_at: "2026-09-14T20:35:24+10:00"
-scope: "local"
-source: "David's explicit direct linear commit/push instruction, 2026-09-14; current Git history and previous workflow audited"
-updated_at: "2026-09-14T23:16:09+10:00"
+status: green
+revised_at: "2026-09-14T23:16:09+10:00"
 ---
 
 For approved implementation make coherent commits after appropriate checks and push directly to master in linear history. David explicitly removed the topic-branch, PR and merge-approval workflow on 2026-09-14. Do not require PRs or a separate review gate. Disclose no unrelated material. This personal project excludes employer, partner and customer material. Current user instructions and permissions govern.

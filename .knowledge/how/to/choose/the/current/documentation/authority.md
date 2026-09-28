@@ -1,12 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:05:00+10:00"
-scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:48:46+10:00"
+status: green
+revised_at: "2026-09-14T20:48:46+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 The local knowledge tree is the sole project documentation authority. Start with the precise question through kt; read its checked owner answer and only the relevant code. The spec and language-law owners define intent; prototype/build/options owners describe executable behavior; the plan and elastic RTL task owners define approved work; state and next record current implementation and action. Current user instructions outrank stored knowledge; global /home/david/AGENTS.md applies.

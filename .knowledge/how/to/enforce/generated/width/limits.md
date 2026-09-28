@@ -1,12 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:03:15+10:00"
-scope: "local"
-source: "Full intrinsic-expression design/plan 2026-08-25 and semantic invariants; documentation audit Codex /root 2026-09-14"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:38:04+10:00"
+status: green
+revised_at: "2026-09-14T20:38:04+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 A positive resolve policy rejects excessive known generated widths at the operator, never clamps semantic meaning. Symbolic widths carry explicit width<=limit constraints with provenance; known width evaluation overflow fails closed. Width algebra uses exact structural constants and fixed uint64_t evaluation rather than host size_t.

@@ -1,12 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:05:51+10:00"
-scope: "local"
-source: "2026-09-01 approved elastic RTL design/plan full section audit; current code baseline; David documentation retirement 2026-09-14"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:36:21+10:00"
+status: green
+revised_at: "2026-09-14T20:36:21+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 Terminal SV emitter. Create sv_emit.h/sv_emit.c/sv_emit_test.c. Precedence-aware rendering uses RTL kind/operator/type records and final names. Copy bounded opaque spans exactly in output order; never tokenize/search or query semantic owners. Gate: mixed golden output with signed conversion/concat/primitive/guard; malformed coverage/unnamed refs/bad spans leave no partial output; no strstr/strchr/symbol/data-type/transfer-type lookup matches; make sv-emit-test output-model-test rtl-test. This is approved future work, not implemented status.

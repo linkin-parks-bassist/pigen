@@ -1,12 +1,7 @@
 ---
-status: "unverified"
-created_at: "2026-09-13T15:04:51+10:00"
-scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
-ingested_by: "Codex /root"
-checked_at: "2026-09-13T15:07:12+10:00"
-review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:48:47+10:00"
+status: green
+revised_at: "2026-09-14T20:48:47+10:00"
+checked_at: '2026-09-13T15:07:12+10:00'
 ---
 
 Unified declaration carries direction, structural data-type syntax ID and has_transfer_type. A written occurrence separately stores transfer identity, own location and argument expression. Declarators have name token and ordered shape-dimension range. Dimension is tagged count or explicit range. Multiple declarators share declaration type/transfer/argument but own their shapes.
