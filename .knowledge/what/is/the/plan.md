@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-09-28T23:26:54+10:00"
+revised_at: "2026-09-29T08:19:49+10:00"
 checked_at: "2026-09-14T17:13:16+10:00"
 ---
 
@@ -10,4 +10,4 @@ Remaining approved work, in order: Task 4 collision-safe names; Task 5 owner-bas
 
 Lowering consumes validated identities and backend-neutral realization properties. RTL contains resolved hardware only; opaque SV occupies ordered spans copied at terminal emission. Multi-arena builders restore all counts on failure; semantic owners decide widths, types and conversions.
 
-After the RTL slice, complete retained core, pipeline, FSM, child-instance and fabric migration and compatibility gates at what/are/the/remaining/architecture/migration/gates.md. Production waits until every retained subsystem uses one structured path and corresponding textual machinery is deleted in the same change. No validator bridge, fallback, second dialect or per-file choice. Work in narrow checked commits directly on master and push in linear history; David removed the PR workflow on 2026-09-14. Maintain current state and next in the tree.
+After the RTL slice, complete retained core, pipeline, FSM, child-instance and fabric migration and compatibility gates at what/are/the/remaining/architecture/migration/gates.md. Production waits until every retained subsystem uses one structured path and corresponding textual machinery is deleted in the same change. No validator bridge, fallback, second dialect or per-file choice. Use ordinary branches and worktrees where they help isolate or parallelize narrow checked work; no linear-history or direct-master workflow is required. Maintain current state and next in the tree.
