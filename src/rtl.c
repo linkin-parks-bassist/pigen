@@ -598,6 +598,92 @@ const pigen_rtl_module *pigen_rtl_module_get(const pigen_rtl_model *model,
 	return &model->modules[module.index];
 }
 
+/* Task 3 planned constructors. Stubs return the unimplemented error and
+ * touch no arena; owner validation and range publication arrive with the
+ * Task 3 implementation. */
+pigen_rtl_module_id pigen_rtl_module_add_with_owner(pigen_rtl_model *model,
+	pigen_module_id semantic_module, pigen_source_span span)
+{
+	(void)model;
+	(void)semantic_module;
+	(void)span;
+	return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+}
+
+pigen_rtl_object_id pigen_rtl_object_add_with_owner(pigen_rtl_model *model,
+	pigen_rtl_module_id module, pigen_rtl_object_kind kind,
+	pigen_rtl_type_id type, pigen_semantic_direction direction,
+	pigen_signal_id semantic_signal, pigen_source_span span)
+{
+	(void)model;
+	(void)module;
+	(void)kind;
+	(void)type;
+	(void)direction;
+	(void)semantic_signal;
+	(void)span;
+	return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+}
+
+pigen_rtl_equation_id pigen_rtl_equation_add_with_owner(
+	pigen_rtl_model *model, pigen_rtl_module_id module,
+	pigen_rtl_object_id destination, pigen_rtl_expr_id value,
+	pigen_source_span span)
+{
+	(void)model;
+	(void)module;
+	(void)destination;
+	(void)value;
+	(void)span;
+	return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
+}
+
+pigen_rtl_instance_id pigen_rtl_instance_add_with_owner(
+	pigen_rtl_model *model, pigen_rtl_module_id module,
+	pigen_module_id semantic_module,
+	const pigen_rtl_expr_id *parameters, size_t parameter_count,
+	const pigen_rtl_object_id *connections, size_t connection_count,
+	pigen_source_span span)
+{
+	(void)model;
+	(void)module;
+	(void)semantic_module;
+	(void)parameters;
+	(void)parameter_count;
+	(void)connections;
+	(void)connection_count;
+	(void)span;
+	return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+}
+
+pigen_rtl_update_id pigen_rtl_update_add_with_owner(pigen_rtl_model *model,
+	pigen_rtl_module_id module, pigen_rtl_object_id destination,
+	pigen_rtl_expr_id value, pigen_source_span span)
+{
+	(void)model;
+	(void)module;
+	(void)destination;
+	(void)value;
+	(void)span;
+	return (pigen_rtl_update_id){PIGEN_INVALID_ID};
+}
+
+pigen_rtl_process_id pigen_rtl_process_add_with_owner(
+	pigen_rtl_model *model, pigen_rtl_module_id module,
+	pigen_rtl_expr_id clock_expression, pigen_semantic_edge edge,
+	const pigen_rtl_update_id *updates, size_t update_count,
+	pigen_source_span span)
+{
+	(void)model;
+	(void)module;
+	(void)clock_expression;
+	(void)edge;
+	(void)updates;
+	(void)update_count;
+	(void)span;
+	return (pigen_rtl_process_id){PIGEN_INVALID_ID};
+}
+
 void pigen_free_rtl_model(pigen_rtl_model *model)
 {
 	for (size_t i = 0; i < model->type_count; ++i)
@@ -613,5 +699,7 @@ void pigen_free_rtl_model(pigen_rtl_model *model)
 	free(model->updates);
 	free(model->processes);
 	free(model->modules);
+	free(model->instance_parameters);
+	free(model->instance_connections);
 	*model = (pigen_rtl_model){0};
 }
