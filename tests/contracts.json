@@ -1,0 +1,148 @@
+[
+  {
+    "covers": ["src/source.c", "src/util.c"],
+    "command": ["make", "source-test"]
+  },
+  {
+    "covers": ["src/preprocess.c", "src/lexer.c", "src/source.c", "src/util.c"],
+    "command": ["make", "preprocess-test"]
+  },
+  {
+    "covers": ["src/transfer_type.c"],
+    "command": ["make", "transfer-type-test"]
+  },
+  {
+    "covers": [
+      "src/transfer_type.c",
+      "src/syntax.c",
+      "src/type_syntax.c",
+      "src/expression.c",
+      "src/preprocess.c",
+      "src/lexer.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": ["make", "syntax-model-test"]
+  },
+  {
+    "covers": [
+      "src/operation.c",
+      "src/transfer_type.c",
+      "src/integer.c",
+      "src/data_type.c",
+      "src/semantic.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": ["make", "integer-test"]
+  },
+  {
+    "covers": [
+      "src/operation.c",
+      "src/transfer_type.c",
+      "src/integer.c",
+      "src/data_type.c",
+      "src/semantic.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": ["make", "semantic-test"]
+  },
+  {
+    "covers": [
+      "src/predicate.c",
+      "src/operation.c",
+      "src/transfer_type.c",
+      "src/integer.c",
+      "src/data_type.c",
+      "src/semantic.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": ["make", "predicate-test"]
+  },
+  {
+    "covers": [
+      "src/expression_analysis.c",
+      "src/expression_resolve.c",
+      "src/type_resolve.c",
+      "src/operation.c",
+      "src/transfer_type.c",
+      "src/integer.c",
+      "src/data_type.c",
+      "src/semantic.c",
+      "src/type_syntax.c",
+      "src/expression.c",
+      "src/preprocess.c",
+      "src/lexer.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": ["make", "expression-resolve-test"]
+  },
+  {
+    "covers": [
+      "src/expression_use.c",
+      "src/predicate.c",
+      "src/resolve.c",
+      "src/type_resolve.c",
+      "src/expression_analysis.c",
+      "src/expression_resolve.c",
+      "src/operation.c",
+      "src/transfer_type.c",
+      "src/integer.c",
+      "src/data_type.c",
+      "src/semantic.c",
+      "src/syntax.c",
+      "src/type_syntax.c",
+      "src/expression.c",
+      "src/preprocess.c",
+      "src/lexer.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": ["make", "expression-use-test"]
+  },
+  {
+    "covers": [
+      "src/resolve.c",
+      "src/type_resolve.c",
+      "src/expression_analysis.c",
+      "src/expression_resolve.c",
+      "src/expression_use.c",
+      "src/predicate.c",
+      "src/operation.c",
+      "src/transfer_type.c",
+      "src/integer.c",
+      "src/data_type.c",
+      "src/semantic.c",
+      "src/syntax.c",
+      "src/type_syntax.c",
+      "src/expression.c",
+      "src/preprocess.c",
+      "src/lexer.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": ["make", "resolve-test"]
+  },
+  {
+    "covers": ["src/rtl.c", "src/source.c", "src/util.c"],
+    "command": ["make", "rtl-test"]
+  },
+  {
+    "covers": [
+      "src/pigen.c",
+      "src/blocks.c",
+      "src/assignments.c",
+      "src/declarations.c",
+      "src/procedural.c",
+      "src/transfer.c",
+      "src/pipeline.c",
+      "src/fsm.c",
+      "src/lexer.c",
+      "src/util.c"
+    ],
+    "command": ["make", "pigen", "fabric-test", "core-language-test"]
+  }
+]
