@@ -598,16 +598,49 @@ const pigen_rtl_module *pigen_rtl_module_get(const pigen_rtl_model *model,
 	return &model->modules[module.index];
 }
 
-/* Task 3 planned constructors. Stubs return the unimplemented error and
- * touch no arena; owner validation and range publication arrive with the
- * Task 3 implementation. */
+/* Task 3 resolved-hardware constructors. Owner identity is validated before
+ * any arena is touched, so a failing add publishes nothing: arena counts and
+ * every existing owner range stay unchanged. */
+static int range_append(pigen_rtl_record_range *range, size_t *count,
+	size_t additions)
+{
+	if (additions > SIZE_MAX - *count)
+		return 0;
+	if (*count < range->count ||
+		*count - range->first != range->count)
+		return 0;
+	if (additions > SIZE_MAX - range->first - range->count)
+		return 0;
+	range->count += additions;
+	*count += additions;
+	return 1;
+}
+
 pigen_rtl_module_id pigen_rtl_module_add_with_owner(pigen_rtl_model *model,
 	pigen_module_id semantic_module, pigen_source_span span)
 {
-	(void)model;
-	(void)semantic_module;
-	(void)span;
-	return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	pigen_rtl_module *record;
+	pigen_rtl_module_id result;
+
+	if (!model || semantic_module.index == PIGEN_INVALID_ID ||
+		model->module_count == PIGEN_INVALID_ID)
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	if (model->module_count == model->module_capacity)
+	{
+		model->module_capacity =
+			model->module_capacity ? model->module_capacity * 2 : 8;
+		model->modules = pigen_resize(model->modules,
+			model->module_capacity * sizeof(*model->modules));
+	}
+	result.index = (uint32_t)model->module_count;
+	record = &model->modules[model->module_count++];
+	record->origin = span;
+	record->semantic_module = semantic_module;
+	record->objects = (pigen_rtl_record_range){model->object_count, 0};
+	record->instances = (pigen_rtl_record_range){model->instance_count, 0};
+	record->equations = (pigen_rtl_record_range){model->equation_count, 0};
+	record->processes = (pigen_rtl_record_range){model->process_count, 0};
+	return result;
 }
 
 pigen_rtl_object_id pigen_rtl_object_add_with_owner(pigen_rtl_model *model,
@@ -615,14 +648,40 @@ pigen_rtl_object_id pigen_rtl_object_add_with_owner(pigen_rtl_model *model,
 	pigen_rtl_type_id type, pigen_semantic_direction direction,
 	pigen_signal_id semantic_signal, pigen_source_span span)
 {
-	(void)model;
-	(void)module;
-	(void)kind;
-	(void)type;
-	(void)direction;
-	(void)semantic_signal;
-	(void)span;
-	return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	pigen_rtl_module *owner;
+	pigen_rtl_object *record;
+	pigen_rtl_object_id result;
+
+	if (!model || !pigen_rtl_type_get(model, type) ||
+		kind < PIGEN_RTL_OBJECT_VARIABLE || kind > PIGEN_RTL_OBJECT_MEMORY ||
+		direction < PIGEN_SEMANTIC_INTERNAL ||
+		direction > PIGEN_SEMANTIC_INOUT ||
+		model->object_count == PIGEN_INVALID_ID)
+		return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	if (!pigen_rtl_module_get(model, module) ||
+		model->modules[module.index].objects.first +
+			model->modules[module.index].objects.count !=
+		model->object_count)
+		return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	owner = &model->modules[module.index];
+	if (model->object_count == model->object_capacity)
+	{
+		model->object_capacity =
+			model->object_capacity ? model->object_capacity * 2 : 8;
+		model->objects = pigen_resize(model->objects,
+			model->object_capacity * sizeof(*model->objects));
+	}
+	result.index = (uint32_t)model->object_count;
+	record = &model->objects[model->object_count++];
+	*record = (pigen_rtl_object){0};
+	record->origin = span;
+	record->kind = kind;
+	record->type = type;
+	record->direction = direction;
+	record->semantic_signal = semantic_signal;
+	record->module = module;
+	owner->objects.count += 1;
+	return result;
 }
 
 pigen_rtl_equation_id pigen_rtl_equation_add_with_owner(
@@ -630,12 +689,40 @@ pigen_rtl_equation_id pigen_rtl_equation_add_with_owner(
 	pigen_rtl_object_id destination, pigen_rtl_expr_id value,
 	pigen_source_span span)
 {
-	(void)model;
-	(void)module;
-	(void)destination;
-	(void)value;
-	(void)span;
-	return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
+	pigen_rtl_module *owner;
+	const pigen_rtl_object *dest;
+	pigen_rtl_equation *record;
+	pigen_rtl_equation_id result;
+
+	if (!model || !pigen_rtl_expr_get(model, value) ||
+		model->equation_count == PIGEN_INVALID_ID)
+		return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
+	dest = pigen_rtl_object_get(model, destination);
+	if (!dest)
+		return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
+	if (dest->module.index != module.index ||
+		!pigen_rtl_module_get(model, module) ||
+		model->modules[module.index].equations.first +
+			model->modules[module.index].equations.count !=
+		model->equation_count)
+		return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
+	owner = &model->modules[module.index];
+	if (model->equation_count == model->equation_capacity)
+	{
+		model->equation_capacity =
+			model->equation_capacity ? model->equation_capacity * 2 : 8;
+		model->equations = pigen_resize(model->equations,
+			model->equation_capacity * sizeof(*model->equations));
+	}
+	result.index = (uint32_t)model->equation_count;
+	record = &model->equations[model->equation_count++];
+	*record = (pigen_rtl_equation){0};
+	record->origin = span;
+	record->destination = destination;
+	record->value = value;
+	record->module = module;
+	owner->equations.count += 1;
+	return result;
 }
 
 pigen_rtl_instance_id pigen_rtl_instance_add_with_owner(
@@ -645,27 +732,119 @@ pigen_rtl_instance_id pigen_rtl_instance_add_with_owner(
 	const pigen_rtl_object_id *connections, size_t connection_count,
 	pigen_source_span span)
 {
-	(void)model;
-	(void)module;
-	(void)semantic_module;
-	(void)parameters;
-	(void)parameter_count;
-	(void)connections;
-	(void)connection_count;
-	(void)span;
-	return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+	pigen_rtl_module *owner;
+	pigen_rtl_instance *record;
+	pigen_rtl_instance_id result;
+	size_t i;
+
+	if (!model || semantic_module.index == PIGEN_INVALID_ID ||
+		(parameter_count && !parameters) ||
+		(connection_count && !connections) ||
+		model->instance_count == PIGEN_INVALID_ID)
+		return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+	if (!pigen_rtl_module_get(model, module))
+		return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+	owner = &model->modules[module.index];
+	for (i = 0; i < parameter_count; i++)
+		if (!pigen_rtl_expr_get(model, parameters[i]))
+			return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+	for (i = 0; i < connection_count; i++)
+	{
+		const pigen_rtl_object *connection =
+			pigen_rtl_object_get(model, connections[i]);
+		if (!connection ||
+			connection->module.index != module.index)
+			return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+	}
+	if (owner->instances.first + owner->instances.count !=
+		model->instance_count)
+		return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+	if (model->instance_count == model->instance_capacity)
+	{
+		model->instance_capacity =
+			model->instance_capacity ? model->instance_capacity * 2 : 8;
+		model->instances = pigen_resize(model->instances,
+			model->instance_capacity * sizeof(*model->instances));
+	}
+	{
+		pigen_rtl_record_range parameter_range =
+			(pigen_rtl_record_range){model->instance_parameter_count, 0};
+		pigen_rtl_record_range connection_range =
+			(pigen_rtl_record_range){model->instance_connection_count, 0};
+
+		if (parameter_count && !range_append(&parameter_range,
+			&model->instance_parameter_count, parameter_count))
+			return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+		if (connection_count && !range_append(&connection_range,
+			&model->instance_connection_count, connection_count))
+		{
+			model->instance_parameter_count = parameter_range.first;
+			return (pigen_rtl_instance_id){PIGEN_INVALID_ID};
+		}
+		if (parameter_count)
+		{
+			model->instance_parameters = pigen_resize(
+				model->instance_parameters,
+				model->instance_parameter_count *
+				sizeof(*model->instance_parameters));
+			memcpy(model->instance_parameters + parameter_range.first,
+				parameters, parameter_count * sizeof(*parameters));
+		}
+		if (connection_count)
+		{
+			model->instance_connections = pigen_resize(
+				model->instance_connections,
+				model->instance_connection_count *
+				sizeof(*model->instance_connections));
+			memcpy(model->instance_connections + connection_range.first,
+				connections, connection_count * sizeof(*connections));
+		}
+		record = &model->instances[model->instance_count];
+		result.index = (uint32_t)model->instance_count;
+		*record = (pigen_rtl_instance){0};
+		record->origin = span;
+		record->semantic_module = semantic_module;
+		record->module = module;
+		record->parameters = parameter_range;
+		record->connections = connection_range;
+		model->instance_count += 1;
+		owner->instances.count += 1;
+	}
+	return result;
 }
 
 pigen_rtl_update_id pigen_rtl_update_add_with_owner(pigen_rtl_model *model,
 	pigen_rtl_module_id module, pigen_rtl_object_id destination,
 	pigen_rtl_expr_id value, pigen_source_span span)
 {
-	(void)model;
-	(void)module;
-	(void)destination;
-	(void)value;
-	(void)span;
-	return (pigen_rtl_update_id){PIGEN_INVALID_ID};
+	const pigen_rtl_object *dest;
+	pigen_rtl_update *record;
+	pigen_rtl_update_id result;
+
+	if (!model || !pigen_rtl_expr_get(model, value) ||
+		model->update_count == PIGEN_INVALID_ID)
+		return (pigen_rtl_update_id){PIGEN_INVALID_ID};
+	dest = pigen_rtl_object_get(model, destination);
+	if (!dest)
+		return (pigen_rtl_update_id){PIGEN_INVALID_ID};
+	if (dest->module.index != module.index ||
+		!pigen_rtl_module_get(model, module))
+		return (pigen_rtl_update_id){PIGEN_INVALID_ID};
+	if (model->update_count == model->update_capacity)
+	{
+		model->update_capacity =
+			model->update_capacity ? model->update_capacity * 2 : 8;
+		model->updates = pigen_resize(model->updates,
+			model->update_capacity * sizeof(*model->updates));
+	}
+	result.index = (uint32_t)model->update_count;
+	record = &model->updates[model->update_count++];
+	*record = (pigen_rtl_update){0};
+	record->origin = span;
+	record->destination = destination;
+	record->value = value;
+	record->module = module;
+	return result;
 }
 
 pigen_rtl_process_id pigen_rtl_process_add_with_owner(
@@ -674,14 +853,48 @@ pigen_rtl_process_id pigen_rtl_process_add_with_owner(
 	const pigen_rtl_update_id *updates, size_t update_count,
 	pigen_source_span span)
 {
-	(void)model;
-	(void)module;
-	(void)clock_expression;
-	(void)edge;
-	(void)updates;
-	(void)update_count;
-	(void)span;
-	return (pigen_rtl_process_id){PIGEN_INVALID_ID};
+	pigen_rtl_module *owner;
+	pigen_rtl_process *record;
+	pigen_rtl_process_id result;
+	size_t i;
+
+	if (!model || !pigen_rtl_expr_get(model, clock_expression) ||
+		edge < PIGEN_SEMANTIC_POSEDGE || edge > PIGEN_SEMANTIC_NEGEDGE ||
+		(update_count && !updates) ||
+		model->process_count == PIGEN_INVALID_ID)
+		return (pigen_rtl_process_id){PIGEN_INVALID_ID};
+	for (i = 0; i < update_count; i++)
+	{
+		const pigen_rtl_update *update =
+			pigen_rtl_update_get(model, updates[i]);
+		if (!update || update->module.index != module.index)
+			return (pigen_rtl_process_id){PIGEN_INVALID_ID};
+	}
+	if (!pigen_rtl_module_get(model, module) ||
+		model->modules[module.index].processes.first +
+			model->modules[module.index].processes.count !=
+		model->process_count)
+		return (pigen_rtl_process_id){PIGEN_INVALID_ID};
+	owner = &model->modules[module.index];
+	if (model->process_count == model->process_capacity)
+	{
+		model->process_capacity =
+			model->process_capacity ? model->process_capacity * 2 : 8;
+		model->processes = pigen_resize(model->processes,
+			model->process_capacity * sizeof(*model->processes));
+	}
+	result.index = (uint32_t)model->process_count;
+	record = &model->processes[model->process_count++];
+	*record = (pigen_rtl_process){0};
+	record->origin = span;
+	record->clock = clock_expression;
+	record->edge = edge;
+	record->updates =
+		(pigen_rtl_record_range){model->update_count - update_count,
+		update_count};
+	record->module = module;
+	owner->processes.count += 1;
+	return result;
 }
 
 void pigen_free_rtl_model(pigen_rtl_model *model)
