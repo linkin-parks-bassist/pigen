@@ -563,7 +563,7 @@ int main(void)
 			!record->equations.count && !record->processes.count);
 		orphan = pigen_rtl_object_add_with_owner(&model, b,
 			PIGEN_RTL_OBJECT_MEMORY, type, PIGEN_SEMANTIC_INOUT,
-			INVALID_ID(pigen_signal_id), second);
+			INVALID_ID(pigen_signal_id), synthetic);
 		assert(!IS_INVALID(orphan));
 		record = pigen_rtl_module_get(&model, b);
 		assert(record->objects.count == 2 &&
@@ -580,7 +580,7 @@ int main(void)
 			expression, second);
 		assert(IS_INVALID(bad_equation));
 		assert(model.equation_count == eq_before + 1);
-		assert(model.object_count == obj_before + 4);
+		assert(model.object_count == obj_before + 5);
 		record = pigen_rtl_module_get(&model, a);
 		assert(record->equations.count == 1 &&
 			record->equations.first == eq_before &&
@@ -630,7 +630,7 @@ int main(void)
 			record->objects.first == obj_before + 3 &&
 			!record->instances.count && !record->equations.count &&
 			!record->processes.count);
-		assert(model.object_count == obj_before + 4);
+		assert(model.object_count == obj_before + 5);
 		assert(model.instance_count == inst_before + 1);
 
 		/* Owner identity is validated before publication: invalid owners
@@ -676,8 +676,8 @@ int main(void)
 				missing_mod, expression, PIGEN_SEMANTIC_POSEDGE,
 				ups, 2, second)));
 		}
-		assert(model.module_count == 2 && model.object_count ==
-			obj_before + 4 && model.instance_count == inst_before + 1 &&
+		assert(model.module_count == 3 && model.object_count ==
+			obj_before + 5 && model.instance_count == inst_before + 1 &&
 			model.equation_count == eq_before + 1 &&
 			model.update_count == up_before + 3 &&
 			model.process_count == proc_before + 1 &&
