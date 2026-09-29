@@ -306,6 +306,116 @@ int main(void)
 		free_name_arena(&synth);
 	}
 
+	/* (6) Internal-stem collision suffixing. An internal-role stem that equals
+	 * the checked spelling of a SOURCE span, with the internal request ordered
+	 * after that source, must gain a deterministic numeric suffix: the first
+	 * free number is _1, so the internals become payload_1 and valid_1. The
+	 * SOURCE names keep the bare checked spelling (SOURCE copies provenance and
+	 * never suffixes). Identical internal-role requests dedup by identity and
+	 * are deliberately NOT the collision case here (a second PAYLOAD would
+	 * reuse the first name, not take a suffix). A bare-stem-only allocator
+	 * (no suffixing) cannot pass this section. */
+	{
+		pigen_rtl_model coll = {0};
+		pigen_source_id csource;
+		const pigen_rtl_name *c0;
+		const pigen_rtl_name *c1;
+		const pigen_rtl_name *c2;
+		const pigen_rtl_name *c3;
+		pigen_rtl_name_id head;
+		size_t before;
+		size_t i;
+		size_t j;
+
+		csource = pigen_source_add(&sources, "collide.pigen",
+			"module m; logic payload; logic valid; endmodule\n", 48);
+		assert(pigen_source_span_valid(&sources,
+			(pigen_source_span){csource, 16, 23}));
+		assert(pigen_source_span_valid(&sources,
+			(pigen_source_span){csource, 31, 36}));
+		/* The checked span spellings are exactly the internal role stems. The
+		 * span text is a pointer into the source buffer, so compare by length. */
+		{
+			size_t p_len = 0, v_len = 0;
+			assert(pigen_source_span_text(&sources,
+				(pigen_source_span){csource, 16, 23}, &p_len) &&
+				p_len == 7 &&
+				strncmp(pigen_source_span_text(&sources,
+					(pigen_source_span){csource, 16, 23}, &p_len), "payload",
+					p_len) == 0);
+			assert(pigen_source_span_text(&sources,
+				(pigen_source_span){csource, 31, 36}, &v_len) &&
+				v_len == 5 &&
+				strncmp(pigen_source_span_text(&sources,
+					(pigen_source_span){csource, 31, 36}, &v_len), "valid",
+					v_len) == 0);
+		}
+
+		const pigen_rtl_name_request requests[4] = {
+			{PIGEN_RTL_NAME_SOURCE, {csource, 16, 23}},
+			{PIGEN_RTL_NAME_SOURCE, {csource, 31, 36}},
+			{PIGEN_RTL_NAME_PAYLOAD, {INVALID_SOURCE, 0, 0}},
+			{PIGEN_RTL_NAME_VALID, {INVALID_SOURCE, 0, 0}},
+		};
+
+		head = pigen_rtl_assign_names(&coll, &sources, requests, 4);
+		assert(!IS_INVALID_ID(head));
+		assert(SAME_NAME(head, (pigen_rtl_name_id){0}));
+		assert(coll.name_count == 4);
+
+		c0 = pigen_rtl_name_get(&coll, (pigen_rtl_name_id){0});
+		c1 = pigen_rtl_name_get(&coll, (pigen_rtl_name_id){1});
+		c2 = pigen_rtl_name_get(&coll, (pigen_rtl_name_id){2});
+		c3 = pigen_rtl_name_get(&coll, (pigen_rtl_name_id){3});
+
+		/* SOURCE names keep the bare checked spelling; no suffix. */
+		assert(c0->kind == PIGEN_RTL_NAME_SOURCE &&
+			c1->kind == PIGEN_RTL_NAME_SOURCE);
+		assert(name_copies_span(c0, &sources, requests[0].origin));
+		assert(name_copies_span(c1, &sources, requests[1].origin));
+		assert(strcmp(c0->text, "payload") == 0);
+		assert(strcmp(c1->text, "valid") == 0);
+
+		/* Internals collided with the source spellings and took _1. */
+		assert(c2->kind == PIGEN_RTL_NAME_PAYLOAD &&
+			c3->kind == PIGEN_RTL_NAME_VALID);
+		assert(c2->origin.source.index == PIGEN_INVALID_ID);
+		assert(c3->origin.source.index == PIGEN_INVALID_ID);
+		assert(name_nonempty(c2) && name_nonempty(c3));
+		assert(strcmp(c2->text, "payload_1") == 0);
+		assert(strcmp(c3->text, "valid_1") == 0);
+
+		/* Every terminal name is distinct and model-owned. */
+		for (i = 0; i < 4; i++)
+			for (j = i + 1; j < 4; j++)
+			{
+				const pigen_rtl_name *a = i == 0 ? c0 : i == 1 ? c1 :
+					(i == 2 ? c2 : c3);
+				const pigen_rtl_name *b = j == 1 ? c1 :
+					(j == 2 ? c2 : c3);
+				assert(strcmp(a->text, b->text) != 0);
+				assert(a->text && a->text[0]);
+			}
+
+		/* Repeat stability: the same request set leaves name_count unchanged,
+		 * keeps every suffixed name byte-identical (no growth to _2), and keeps
+		 * the head id stable. */
+		before = coll.name_count;
+		head = pigen_rtl_assign_names(&coll, &sources, requests, 4);
+		assert(!IS_INVALID_ID(head));
+		assert(SAME_NAME(head, (pigen_rtl_name_id){0}));
+		assert(coll.name_count == before);
+		assert(strcmp(pigen_rtl_name_get(&coll, (pigen_rtl_name_id){0})->text,
+			"payload") == 0);
+		assert(strcmp(pigen_rtl_name_get(&coll, (pigen_rtl_name_id){1})->text,
+			"valid") == 0);
+		assert(strcmp(pigen_rtl_name_get(&coll, (pigen_rtl_name_id){2})->text,
+			"payload_1") == 0);
+		assert(strcmp(pigen_rtl_name_get(&coll, (pigen_rtl_name_id){3})->text,
+			"valid_1") == 0);
+		free_name_arena(&coll);
+	}
+
 	/* Cleanup: the model owns its name texts and releases them. */
 	free_name_arena(&model);
 	assert(!model.names && !model.name_count && !model.name_capacity);
@@ -314,5 +424,6 @@ int main(void)
 	puts("PASS: rtl source names copy the checked span spelling");
 	puts("PASS: rtl names publish nothing on an unchecked source span");
 	puts("PASS: rtl names assign derived names to synthetic internal roles");
+	puts("PASS: rtl internal stems suffix on a same-stem source collision");
 	return 0;
 }
