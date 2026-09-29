@@ -41,6 +41,7 @@ PIGEN_ID_TYPE(pigen_rtl_equation_id);
 PIGEN_ID_TYPE(pigen_rtl_update_id);
 PIGEN_ID_TYPE(pigen_rtl_process_id);
 PIGEN_ID_TYPE(pigen_rtl_module_id);
+PIGEN_ID_TYPE(pigen_rtl_name_id);
 
 #undef PIGEN_ID_TYPE
 

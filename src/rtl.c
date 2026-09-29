@@ -903,6 +903,8 @@ void pigen_free_rtl_model(pigen_rtl_model *model)
 		free((void *)model->types[i].dimensions);
 	for (size_t i = 0; i < model->expression_count; ++i)
 		free((void *)model->expressions[i].literal_words);
+	for (size_t i = 0; i < model->name_count; ++i)
+		free(model->names[i].text);
 	free(model->types);
 	free(model->expressions);
 	free(model->expression_children);
@@ -914,5 +916,6 @@ void pigen_free_rtl_model(pigen_rtl_model *model)
 	free(model->modules);
 	free(model->instance_parameters);
 	free(model->instance_connections);
+	free(model->names);
 	*model = (pigen_rtl_model){0};
 }

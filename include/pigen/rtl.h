@@ -147,6 +147,24 @@ typedef struct {
 	pigen_rtl_record_range processes;
 } pigen_rtl_module;
 
+typedef enum {
+	PIGEN_RTL_NAME_KIND_INVALID,
+	PIGEN_RTL_NAME_SOURCE,
+	PIGEN_RTL_NAME_PAYLOAD,
+	PIGEN_RTL_NAME_VALID,
+	PIGEN_RTL_NAME_READY,
+	PIGEN_RTL_NAME_INSTANCE,
+	PIGEN_RTL_NAME_TEMPORARY
+} pigen_rtl_name_kind;
+
+/* Origin is the checked identifier span for source roles and may be
+ * invalid for synthetic internal roles; text is model-owned. */
+typedef struct {
+	pigen_source_span origin;
+	pigen_rtl_name_kind kind;
+	char *text;
+} pigen_rtl_name;
+
 typedef struct {
 	pigen_rtl_type *types;
 	size_t type_count;
@@ -181,6 +199,9 @@ typedef struct {
 	pigen_rtl_object_id *instance_connections;
 	size_t instance_connection_count;
 	size_t instance_connection_capacity;
+	pigen_rtl_name *names;
+	size_t name_count;
+	size_t name_capacity;
 } pigen_rtl_model;
 
 /* Arena indices are stable identities; origin may be invalid for

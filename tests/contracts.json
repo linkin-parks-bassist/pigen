@@ -131,6 +131,10 @@
     "command": ["make", "rtl-test"]
   },
   {
+    "covers": ["src/rtl_name.c", "src/source.c", "src/util.c"],
+    "command": ["make", "rtl-name-test"]
+  },
+  {
     "covers": [
       "src/pigen.c",
       "src/blocks.c",
