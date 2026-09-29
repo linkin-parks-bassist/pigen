@@ -21,6 +21,7 @@ typedef struct {
 
 /* Returns an invalid ID when unimplemented or when any request fails. */
 pigen_rtl_name_id pigen_rtl_assign_names(pigen_rtl_model *model,
+	const pigen_source_manager *sources,
 	const pigen_rtl_name_request *requests, size_t request_count);
 const pigen_rtl_name *pigen_rtl_name_get(const pigen_rtl_model *model,
 	pigen_rtl_name_id name);

@@ -3,9 +3,11 @@
 #include "pigen/rtl_name.h"
 
 pigen_rtl_name_id pigen_rtl_assign_names(pigen_rtl_model *model,
+	const pigen_source_manager *sources,
 	const pigen_rtl_name_request *requests, size_t request_count)
 {
 	(void)model;
+	(void)sources;
 	(void)requests;
 	(void)request_count;
 	return (pigen_rtl_name_id){PIGEN_INVALID_ID};
