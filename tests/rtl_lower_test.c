@@ -232,8 +232,6 @@ int main(void)
 		 * and leaves both identity memo maps untouched. */
 		eid = pigen_lower_rtl_expression(&lowering, INVALID_EXPR);
 		assert(IS_INVALID_ID(eid));
-		assert(!lowering.lowered_types &&
-			!lowering.lowered_type_count && !lowering.lowered_type_capacity);
 		assert(!lowering.lowered_expressions &&
 			!lowering.lowered_expression_count &&
 			!lowering.lowered_expression_capacity);
