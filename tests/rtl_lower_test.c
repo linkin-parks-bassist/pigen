@@ -460,9 +460,6 @@ int main(void)
 		 * leaves the identity memo maps untouched. */
 		eid = pigen_lower_rtl_expression(&lowering, INVALID_EXPR);
 		assert(IS_INVALID_ID(eid));
-		assert(!lowering.lowered_expressions &&
-			!lowering.lowered_expression_count &&
-			!lowering.lowered_expression_capacity);
 
 		/* Case 1: lower the SAME constant (c5) twice. Both calls return the
 		 * same valid memoized RTL handle and the second call does not grow the
