@@ -409,6 +409,83 @@ int main(void)
 		}
 	}
 
+	/* (5) Constants are lowered once by identity: the same source constant
+	 * expression lowered twice returns the same memoized RTL handle and does
+	 * not grow the RTL expression arena, a distinct constant of the same type
+	 * gets a different handle, and the identity memo slot is stable. Third
+	 * expression-family section of the Task 5 test-contract chain (the
+	 * constant-identity family). Staged red: the front-loaded
+	 * invalid-constant sentinel assert below is the section's first assert and
+	 * passes against the stub; the first deliberate red is case 1's
+	 * `!IS_INVALID_ID(eid)`, since the stub still returns the sentinel for a
+	 * valid constant expression. Cases 1-3 build real owner constant
+	 * expressions through the owner APIs and assert only the returned
+	 * pigen_rtl_expr_id and the public RTL expression-arena count - never an
+	 * imagined internal memo representation - so the implementer cannot
+	 * shortcut the once-by-identity contract. Case 4 pins the
+	 * invalid-constant-expression contract. */
+	{
+		pigen_data_type_id unsized;
+		pigen_const_expr_id width16;
+		pigen_data_type_id t16;
+		pigen_const_expr_id c5;
+		pigen_const_expr_id c7;
+		pigen_rtl_expr_id eid;
+		pigen_rtl_expr_id eid_again;
+		pigen_rtl_expr_id eid_distinct;
+		size_t arena_before;
+		size_t arena_after;
+
+		/* Owner data: a 16-bit unsigned type and two distinct constants of it,
+		 * all through the owner APIs. The two values differ so the owner
+		 * interning keeps them at distinct arena indices; identity is by arena
+		 * index, never by value. */
+		unsized = pigen_data_type_unsized_integer(&sem);
+		assert(!IS_INVALID_ID(unsized));
+		width16 = pigen_const_expr_intern_integer(&sem, 16, unsized);
+		t16 = pigen_data_type_unsigned_integer(&sem, width16);
+		assert(!IS_INVALID_ID(width16) && !IS_INVALID_ID(t16));
+		c5 = pigen_const_expr_intern_integer(&sem, 5, t16);
+		c7 = pigen_const_expr_intern_integer(&sem, 7, t16);
+		assert(!IS_INVALID_ID(c5) && !IS_INVALID_ID(c7));
+		assert(c5.index != c7.index); /* distinct arena indices, same type */
+		/* Same value re-interned is deduplicated by the owner to the same arena
+		 * index, so it is not a distinct constant. */
+		assert(c5.index ==
+			pigen_const_expr_intern_integer(&sem, 5, t16).index);
+
+		/* Case 4 (front-loaded, the section's first behavioral assert): an
+		 * invalid constant-expression id returns the RTL-expression sentinel and
+		 * leaves the identity memo maps untouched. */
+		eid = pigen_lower_rtl_expression(&lowering, INVALID_EXPR);
+		assert(IS_INVALID_ID(eid));
+		assert(!lowering.lowered_expressions &&
+			!lowering.lowered_expression_count &&
+			!lowering.lowered_expression_capacity);
+
+		/* Case 1: lower the SAME constant (c5) twice. Both calls return the
+		 * same valid memoized RTL handle and the second call does not grow the
+		 * RTL expression arena. */
+		eid = pigen_lower_rtl_expression(&lowering, c5);
+		assert(!IS_INVALID_ID(eid)); /* Deliberate red: stub returns the sentinel. */
+		arena_before = rtl.expression_count;
+		eid_again = pigen_lower_rtl_expression(&lowering, c5);
+		arena_after = rtl.expression_count;
+		assert(eid_again.index == eid.index); /* memoized: same handle */
+		assert(arena_after == arena_before); /* no arena growth on the second call */
+
+		/* Case 2: a distinct constant of the same type (c7) gets a DIFFERENT
+		 * valid RTL handle - identity is by arena index, not by value or type. */
+		eid_distinct = pigen_lower_rtl_expression(&lowering, c7);
+		assert(!IS_INVALID_ID(eid_distinct));
+		assert(eid_distinct.index != eid.index);
+
+		/* Case 3: the identity memo slot is stable: the slot keyed by the
+		 * constant's arena index equals the returned handle. */
+		assert(lowering.lowered_expression_count > c5.index);
+		assert(lowering.lowered_expressions[c5.index].index == eid.index);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -425,5 +502,6 @@ int main(void)
 	puts("PASS: rtl lowering stubs return the unimplemented sentinel");
 	puts("PASS: rtl type lowering preserves owner state, width, signedness and range");
 	puts("PASS: rtl expression lowering preserves width, signedness, conversions, projections and child order");
+	puts("PASS: rtl constant lowering is once by identity");
 	return 0;
 }
