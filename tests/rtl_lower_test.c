@@ -518,11 +518,14 @@ int main(void)
 	 * report the error with NO partial RTL records published. Fourth
 	 * expression-family section of the Task 5 test-contract chain (the
 	 * error-rollback family). Cases build one real validated model through the
-	 * owner APIs (a source file, a compilation scope, a module, and a declared
-	 * signal), then drive the two failure modes and assert only observable
-	 * state:
-	 *   Case 1: a constant expression referencing the declared signal lowers to
-	 *     the RTL-expression sentinel.
+	 * owner APIs (a source file, a compilation scope, a module, a declared
+	 * signal, and a distinct UNBOUND PARAMETER symbol), then drive the two
+	 * failure modes and assert only observable state:
+	 *   Case 1: a constant expression referencing the unbound PARAMETER symbol
+	 *     lowers to the RTL-expression sentinel. The witness is a distinct
+	 *     PARAMETER symbol (not the real signal): the const-expr owner interns
+	 *     only PIGEN_SYMBOL_PARAMETER symbols, and pigen_signal_add requires
+	 *     PIGEN_SYMBOL_SIGNAL, so the same symbol cannot serve both.
 	 *   Case 2: after Case 1 the RTL type/expression arena counts and every
 	 *     previously populated identity-memo slot are exactly unchanged - the
 	 *     failed call published no partial RTL records.
@@ -549,6 +552,7 @@ int main(void)
 		pigen_scope_id module_scope;
 		pigen_symbol_id module_symbol;
 		pigen_symbol_id signal_symbol;
+		pigen_symbol_id param_symbol;
 		pigen_module_id module;
 		pigen_signal_id signal;
 		pigen_data_type_id t16;
@@ -562,6 +566,8 @@ int main(void)
 		size_t expr_count_before, expr_count_after;
 		size_t type_map_before, type_map_after;
 		size_t expr_map_before, expr_map_after;
+		size_t type_populated_before, type_populated_after;
+		size_t expr_populated_before, expr_populated_after;
 		size_t i;
 		int no_partial_state;
 
@@ -603,6 +609,23 @@ int main(void)
 			PIGEN_SEMANTIC_INTERNAL, name);
 		assert(signal.index != PIGEN_INVALID_ID);
 
+		/* A DISTINCT unbound PARAMETER symbol: declared in the module scope but
+		 * never given a parameter value (no pigen_parameter_add), so it carries
+		 * no value - an unbound witness. The const-expr owner interns only
+		 * PIGEN_SYMBOL_PARAMETER symbols, and pigen_signal_add requires
+		 * PIGEN_SYMBOL_SIGNAL, so the real signal symbol above cannot serve as
+		 * the const-expr witness: the two symbols are distinct and both are
+		 * kept - the real signal build stays intact (it exercises the
+		 * no-partial-record recovery path). */
+		/* The parameter name span is "top" in the same source file: it is
+		 * valid, non-empty, and does not collide with the "value" signal
+		 * symbol in module_scope (the module symbol owns "top" in the parent
+		 * scope, which lookup_local does not see). */
+		assert(pigen_symbol_declare(&sem, module_scope, PIGEN_SYMBOL_PARAMETER,
+			t16, (pigen_source_span){source, 7, 10},
+			(pigen_source_span){source, 7, 10}, &param_symbol, NULL) ==
+			PIGEN_DECLARE_OK);
+
 		/* A valid constant of the same type, lowered before any failure, is the
 		 * recoverability witness for Case 4. */
 		good = pigen_const_expr_intern_integer(&sem, 5, t16);
@@ -611,9 +634,29 @@ int main(void)
 		assert(!IS_INVALID_ID(good_id)); /* Deliberate red (first in this
 		 * section): the stub returns the sentinel for the valid constant. */
 
-		/* Case 1: a constant expression referencing the declared signal lowers
-		 * to the sentinel (a guard: the stub also returns the sentinel). */
-		sym_expr = pigen_const_expr_intern_symbol(&sem, signal_symbol, t16);
+		/* Snapshot the populated type and expression memo slots BEFORE the
+		 * failed Case 1 call: the no-partial-record contract is that the failed
+		 * call leaves every previously populated slot unchanged and adds none.
+		 * Both maps are legitimately populated by the earlier sections (3) and
+		 * (4) and by the successful `good` lowering (which publishes its owner
+		 * type t16), so the check must compare against this snapshot rather
+		 * than asserting every slot is a sentinel. */
+		type_populated_before = 0;
+		for (i = 0; i < lowering.lowered_type_count; i++)
+			if (lowering.lowered_types[i].index != PIGEN_INVALID_ID)
+				type_populated_before++;
+		expr_populated_before = 0;
+		for (i = 0; i < lowering.lowered_expression_count; i++)
+			if (lowering.lowered_expressions[i].index != PIGEN_INVALID_ID)
+				expr_populated_before++;
+
+		/* Case 1: a constant expression referencing the unbound PARAMETER
+		 * symbol lowers to the sentinel (a guard: the stub also returns the
+		 * sentinel). The witness is a PARAMETER symbol because the const-expr
+		 * owner interns only PIGEN_SYMBOL_PARAMETER symbols, and it is unbound
+		 * (no parameter value) so lowering must report the sentinel with no
+		 * partial records. */
+		sym_expr = pigen_const_expr_intern_symbol(&sem, param_symbol, t16);
 		assert(!IS_INVALID_ID(sym_expr));
 		eid = pigen_lower_rtl_expression(&lowering, sym_expr);
 		assert(IS_INVALID_ID(eid));
@@ -628,18 +671,24 @@ int main(void)
 		expr_count_after = rtl.expression_count;
 		type_map_after = lowering.lowered_type_count;
 		expr_map_after = lowering.lowered_expression_count;
+		type_populated_after = 0;
+		for (i = 0; i < type_map_after; i++)
+			if (lowering.lowered_types[i].index != PIGEN_INVALID_ID)
+				type_populated_after++;
+		expr_populated_after = 0;
+		for (i = 0; i < expr_map_after; i++)
+			if (lowering.lowered_expressions[i].index != PIGEN_INVALID_ID)
+				expr_populated_after++;
 		no_partial_state = type_count_after == type_count_before &&
 			expr_count_after == expr_count_before &&
 			type_map_after == type_map_before &&
-			expr_map_after == expr_map_before;
-		for (i = 0; i < type_map_after; i++)
-			no_partial_state = no_partial_state &&
-				lowering.lowered_types[i].index == PIGEN_INVALID_ID;
-		for (i = 0; i < expr_map_after; i++)
-			no_partial_state = no_partial_state &&
-				(i == good.index ?
-					lowering.lowered_expressions[i].index == good_id.index :
-					lowering.lowered_expressions[i].index == PIGEN_INVALID_ID);
+			expr_map_after == expr_map_before &&
+			type_populated_after == type_populated_before &&
+			expr_populated_after == expr_populated_before;
+		/* The `good` slot still resolves to the memoized handle: the failed
+		 * call neither clobbered it nor republished it. */
+		no_partial_state = no_partial_state &&
+			lowering.lowered_expressions[good.index].index == good_id.index;
 		assert(no_partial_state); /* guard: the stub publishes nothing */
 
 		/* Case 3: a constant-expression id absent from the semantic arena
@@ -652,18 +701,22 @@ int main(void)
 		expr_count_after = rtl.expression_count;
 		type_map_after = lowering.lowered_type_count;
 		expr_map_after = lowering.lowered_expression_count;
+		type_populated_after = 0;
+		for (i = 0; i < type_map_after; i++)
+			if (lowering.lowered_types[i].index != PIGEN_INVALID_ID)
+				type_populated_after++;
+		expr_populated_after = 0;
+		for (i = 0; i < expr_map_after; i++)
+			if (lowering.lowered_expressions[i].index != PIGEN_INVALID_ID)
+				expr_populated_after++;
 		no_partial_state = type_count_after == type_count_before &&
 			expr_count_after == expr_count_before &&
 			type_map_after == type_map_before &&
-			expr_map_after == expr_map_before;
-		for (i = 0; i < type_map_after; i++)
-			no_partial_state = no_partial_state &&
-				lowering.lowered_types[i].index == PIGEN_INVALID_ID;
-		for (i = 0; i < expr_map_after; i++)
-			no_partial_state = no_partial_state &&
-				(i == good.index ?
-					lowering.lowered_expressions[i].index == good_id.index :
-					lowering.lowered_expressions[i].index == PIGEN_INVALID_ID);
+			expr_map_after == expr_map_before &&
+			type_populated_after == type_populated_before &&
+			expr_populated_after == expr_populated_before;
+		no_partial_state = no_partial_state &&
+			lowering.lowered_expressions[good.index].index == good_id.index;
 		assert(no_partial_state); /* guard: the stub publishes nothing */
 
 		/* Case 4: after both failures the already-lowered valid constant still
