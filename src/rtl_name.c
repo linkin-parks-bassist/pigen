@@ -92,9 +92,9 @@ static int name_taken(const pigen_rtl_model *model, const char **staged,
 }
 
 /* A terminal name that is not already taken: the bare stem, then the stem with
- * a deterministic _2, _3, ... suffix. The first free number is stable because
- * a repeat of the same request set reuses existing names and never reaches the
- * suffix loop. */
+ * a deterministic _1, _2, ... suffix. The suffix loop is the collision backstop;
+ * under the current identity model each role has one stem and one invalid-span
+ * identity, so the first free suffix is _1 and higher numbers are unreachable. */
 static char *unique_name(const pigen_rtl_model *model, const char **staged,
 	size_t staged_count, const char *stem)
 {
