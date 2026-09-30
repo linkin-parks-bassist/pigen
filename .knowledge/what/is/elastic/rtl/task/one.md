@@ -1,7 +1,7 @@
 ---
 status: green
 revised_at: "2026-09-29T08:19:48+10:00"
-checked_at: "2026-09-28T23:00:19+10:00"
+checked_at: '2026-09-30T10:17:35+10:00'
 ---
 
 Task 1 is implemented and landed. include/pigen/ids.h defines eight distinct RTL IDs: type, expression, object, instance, equation, update, process and module. include/pigen/rtl.h and src/rtl.c own the eight pointer/count/capacity arena triples. Current records retain an origin span, allowing invalid provenance for synthetic hardware, and contain no source-text pointer. Checked accessors reject null models, invalid IDs and out-of-range indices; appends guard identity exhaustion and grow arena storage; destruction releases every arena and zeroes the model.
