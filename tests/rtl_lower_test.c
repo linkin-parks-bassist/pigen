@@ -157,6 +157,258 @@ int main(void)
 		assert(rt->dimension_count == 1 && rt->dimensions);
 	}
 
+	/* (4) Expression lowering preserves the surviving width, signedness, every
+	 * explicit conversion/projection and child order. Second expression-family
+	 * section of the Task 5 test-contract chain. Staged red: the front-loaded
+	 * invalid-expression-id sentinel assert below is the section's first assert
+	 * and passes against the stub; the first deliberate red is case 1's
+	 * `!IS_INVALID_ID(eid)`, since the stub still returns the sentinel for a
+	 * valid constant expression. Cases 1-4 build real owner constant
+	 * expressions through the owner APIs and assert only the returned
+	 * pigen_rtl_expr record: its kind, the result type's signedness and width
+	 * exactly as the owner's resolved result data type reports them, every
+	 * explicit conversion and select kept on the record, and the lowered child
+	 * count and order. Child order is asserted by identity: the owner's
+	 * source children (as.binary.left/right, as.conversion.operand,
+	 * as.select.base/left/right, as.sequence via pigen_const_expr_children)
+	 * lowered by identity must be exactly the lowered children, in order -
+	 * which a reordered or dropped-children implementation cannot shortcut.
+	 * Case 5 pins the invalid-expression-id contract. */
+	{
+		pigen_data_type_id unsized;
+		pigen_data_type_id t4;
+		pigen_data_type_id t8;
+		pigen_data_type_id t12;
+		pigen_data_type_id t16;
+		pigen_const_expr_id width8;
+		pigen_const_expr_id a;
+		pigen_const_expr_id b;
+		pigen_const_expr_id base16;
+		pigen_const_expr_id idx5;
+		pigen_const_expr_id c4;
+		pigen_const_expr_id c16;
+		pigen_conversion conversion;
+		pigen_data_type_id select_type;
+		pigen_data_type_id concat_type;
+		pigen_binary_resolution binary_resolution;
+		pigen_const_expr_id add_expr;
+		pigen_const_expr_id conv_expr;
+		pigen_const_expr_id select_expr;
+		pigen_const_expr_id concat_expr;
+		const pigen_const_expr *owner_expr;
+		const pigen_rtl_expr *re;
+		const pigen_rtl_type *result_type;
+		const pigen_rtl_expr_id *rtl_children;
+		pigen_rtl_expr_id eid;
+		size_t rtl_child_count;
+		uint64_t w;
+		size_t i;
+
+		/* Owner data: signed int[8], uint[12], bit[16] and bit[4] plus the
+		 * constant operands the cases build from, all through the owner APIs. */
+		unsized = pigen_data_type_unsized_integer(&sem);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem, 8, unsized);
+		t8 = pigen_data_type_signed_integer(&sem, width8);
+		t12 = pigen_data_type_unsigned_integer(&sem,
+			pigen_const_expr_intern_integer(&sem, 12, unsized));
+		t16 = pigen_data_type_sized_logic(&sem, 16, PIGEN_SIGN_UNSIGNED);
+		t4 = pigen_data_type_sized_logic(&sem, 4, PIGEN_SIGN_UNSIGNED);
+		assert(!IS_INVALID_ID(t8) && !IS_INVALID_ID(t12) &&
+			!IS_INVALID_ID(t16) && !IS_INVALID_ID(t4));
+		a = pigen_const_expr_intern_integer(&sem, 1, t8);
+		b = pigen_const_expr_intern_integer(&sem, 2, t8);
+		base16 = pigen_const_expr_intern_integer(&sem, 0x1234, t16);
+		idx5 = pigen_const_expr_intern_integer(&sem, 5, unsized);
+		c4 = pigen_const_expr_intern_integer(&sem, 0xAB, t4);
+		c16 = pigen_const_expr_intern_integer(&sem, 0x5678, t16);
+		assert(!IS_INVALID_ID(a) && !IS_INVALID_ID(b) &&
+			!IS_INVALID_ID(base16) && !IS_INVALID_ID(idx5) &&
+			!IS_INVALID_ID(c4) && !IS_INVALID_ID(c16));
+
+		/* Case 5 (front-loaded, the section's first behavioral assert): an
+		 * invalid constant-expression id returns the RTL-expression sentinel
+		 * and leaves both identity memo maps untouched. */
+		eid = pigen_lower_rtl_expression(&lowering, INVALID_EXPR);
+		assert(IS_INVALID_ID(eid));
+		assert(!lowering.lowered_types &&
+			!lowering.lowered_type_count && !lowering.lowered_type_capacity);
+		assert(!lowering.lowered_expressions &&
+			!lowering.lowered_expression_count &&
+			!lowering.lowered_expression_capacity);
+
+		/* Case 1: widening binary arithmetic. signed int[8] + signed int[8]
+		 * resolves through the owner to a signed result type strictly wider
+		 * than the operands; the lowered record keeps the binary kind, the
+		 * owner's result type's signedness and width, and both children in
+		 * source child order (left then right). */
+		assert(pigen_data_type_resolve_binary_operation(&sem, PIGEN_BINARY_ADD,
+			t8, t8, &binary_resolution));
+		add_expr = pigen_const_expr_intern_binary(&sem,
+			binary_resolution.operation, a, b);
+		owner_expr = pigen_const_expr_get(&sem, add_expr);
+		assert(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_BINARY);
+		assert(!IS_INVALID_ID(owner_expr->data_type));
+		assert(pigen_data_type_signedness(&sem, owner_expr->data_type) ==
+			PIGEN_SIGN_SIGNED);
+		assert(pigen_const_expr_evaluate_u64(&sem,
+			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
+		assert(w > 8); /* widening: the result is wider than the int[8] operands */
+		eid = pigen_lower_rtl_expression(&lowering, add_expr);
+		assert(!IS_INVALID_ID(eid)); /* Deliberate red: stub returns the sentinel. */
+		re = pigen_rtl_expr_get(&rtl, eid);
+		assert(re && re->kind == PIGEN_RTL_EXPR_BINARY);
+		result_type = pigen_rtl_type_get(&rtl, re->type);
+		assert(result_type);
+		assert(result_type->signedness ==
+			pigen_data_type_signedness(&sem, owner_expr->data_type));
+		assert(pigen_const_expr_evaluate_u64(&sem,
+			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
+		assert(result_type->width == w);
+		/* Both children lowered, in source child order, by identity. */
+		rtl_children = pigen_rtl_expr_children(&rtl, eid, &rtl_child_count);
+		assert(rtl_children && rtl_child_count == 2);
+		assert(rtl_children[0].index ==
+			pigen_lower_rtl_expression(&lowering,
+				owner_expr->as.binary.left).index);
+		assert(rtl_children[1].index ==
+			pigen_lower_rtl_expression(&lowering,
+				owner_expr->as.binary.right).index);
+
+		/* Case 2: explicit cast. An owner-resolved explicit conversion from
+		 * bit[16] to signed int[12] is interned as a conversion constant;
+		 * the lowered record keeps the conversion verbatim and the target
+		 * type's signedness and width. */
+		assert(pigen_data_type_resolve_explicit_conversion(&sem, t16, t8,
+			&conversion));
+		assert(pigen_data_type_conversion_is_valid(&sem, conversion));
+		conv_expr = pigen_const_expr_intern_conversion(&sem, conversion, base16);
+		owner_expr = pigen_const_expr_get(&sem, conv_expr);
+		assert(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_CONVERSION);
+		assert(!IS_INVALID_ID(owner_expr->data_type));
+		assert(owner_expr->as.conversion.conversion.kind == conversion.kind);
+		assert(owner_expr->as.conversion.conversion.source_data_type.index ==
+			conversion.source_data_type.index);
+		assert(owner_expr->as.conversion.conversion.target_data_type.index ==
+			conversion.target_data_type.index);
+		assert(pigen_data_type_signedness(&sem, owner_expr->data_type) ==
+			PIGEN_SIGN_SIGNED);
+		eid = pigen_lower_rtl_expression(&lowering, conv_expr);
+		assert(!IS_INVALID_ID(eid));
+		re = pigen_rtl_expr_get(&rtl, eid);
+		assert(re && re->kind == PIGEN_RTL_EXPR_CONVERSION);
+		assert(re->as.conversion.conversion.kind == conversion.kind);
+		assert(re->as.conversion.conversion.source_data_type.index ==
+			conversion.source_data_type.index);
+		assert(re->as.conversion.conversion.target_data_type.index ==
+			conversion.target_data_type.index);
+		result_type = pigen_rtl_type_get(&rtl, re->type);
+		assert(result_type);
+		assert(result_type->signedness ==
+			pigen_data_type_signedness(&sem, owner_expr->data_type));
+		assert(pigen_const_expr_evaluate_u64(&sem,
+			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
+		assert(result_type->width == w);
+		/* The single operand is lowered and kept, by identity. */
+		rtl_children = pigen_rtl_expr_children(&rtl, eid, &rtl_child_count);
+		assert(rtl_children && rtl_child_count == 1);
+		assert(rtl_children[0].index ==
+			pigen_lower_rtl_expression(&lowering,
+				owner_expr->as.conversion.operand).index);
+
+		/* Case 3: projection (select). A constant bit[15:0] range-selected to
+		 * bits [5:0] through the owner keeps the select kind and the
+		 * owner's projected width on the lowered record. */
+		select_type = pigen_data_type_packed_select(&sem, t16, idx5,
+			pigen_const_expr_intern_integer(&sem, 0, unsized),
+			PIGEN_SEMANTIC_SELECT_RANGE);
+		assert(!IS_INVALID_ID(select_type));
+		assert(pigen_const_expr_evaluate_u64(&sem,
+			pigen_data_type_packed_width(&sem, select_type), &w) && w == 6);
+		select_expr = pigen_const_expr_intern_select(&sem, base16, idx5,
+			pigen_const_expr_intern_integer(&sem, 0, unsized),
+			PIGEN_SEMANTIC_SELECT_RANGE, select_type);
+		owner_expr = pigen_const_expr_get(&sem, select_expr);
+		assert(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_SELECT);
+		assert(!IS_INVALID_ID(owner_expr->data_type));
+		assert(owner_expr->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE);
+		eid = pigen_lower_rtl_expression(&lowering, select_expr);
+		assert(!IS_INVALID_ID(eid));
+		re = pigen_rtl_expr_get(&rtl, eid);
+		assert(re && re->kind == PIGEN_RTL_EXPR_SELECT);
+		assert(re->as.select.kind == owner_expr->as.select.kind);
+		result_type = pigen_rtl_type_get(&rtl, re->type);
+		assert(result_type);
+		assert(pigen_const_expr_evaluate_u64(&sem,
+			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
+		assert(result_type->width == w);
+		/* Base and range bounds lowered, in owner child order (base, left,
+		 * right), by identity. */
+		rtl_children = pigen_rtl_expr_children(&rtl, eid, &rtl_child_count);
+		assert(rtl_children && rtl_child_count == 3);
+		assert(rtl_children[0].index ==
+			pigen_lower_rtl_expression(&lowering,
+				owner_expr->as.select.base).index);
+		assert(rtl_children[1].index ==
+			pigen_lower_rtl_expression(&lowering,
+				owner_expr->as.select.left).index);
+		assert(rtl_children[2].index ==
+			pigen_lower_rtl_expression(&lowering,
+				owner_expr->as.select.right).index);
+
+		/* Case 4: concatenation. A constant bit[4] concatenated with a
+		 * constant bit[16] keeps the owner's combined width and both
+		 * children in source order. */
+		{
+			pigen_data_type_id concat_types[2];
+			const pigen_const_expr_id *seq_owner_children;
+
+			concat_types[0] = t4;
+			concat_types[1] = t16;
+			concat_type = pigen_data_type_concatenation(&sem, concat_types, 2);
+			assert(!IS_INVALID_ID(concat_type));
+			assert(pigen_const_expr_evaluate_u64(&sem,
+				pigen_data_type_packed_width(&sem, concat_type), &w) &&
+				w == 20);
+			{
+				pigen_const_expr_id concat_children[2];
+
+				concat_children[0] = c4;
+				concat_children[1] = c16;
+				concat_expr = pigen_const_expr_intern_concatenation(&sem,
+					concat_children, 2, concat_type);
+			}
+			owner_expr = pigen_const_expr_get(&sem, concat_expr);
+			assert(owner_expr &&
+				owner_expr->kind == PIGEN_CONST_EXPR_CONCATENATION);
+			assert(!IS_INVALID_ID(owner_expr->data_type));
+			eid = pigen_lower_rtl_expression(&lowering, concat_expr);
+			assert(!IS_INVALID_ID(eid));
+			re = pigen_rtl_expr_get(&rtl, eid);
+			assert(re && re->kind == PIGEN_RTL_EXPR_CONCATENATION);
+			result_type = pigen_rtl_type_get(&rtl, re->type);
+			assert(result_type);
+			assert(pigen_const_expr_evaluate_u64(&sem,
+				pigen_data_type_packed_width(&sem, owner_expr->data_type),
+				&w));
+			assert(result_type->width == w);
+			/* Owner's children via the children arena, in source order. */
+			seq_owner_children = pigen_const_expr_children(&sem,
+				owner_expr->as.sequence.first_child,
+				owner_expr->as.sequence.child_count);
+			assert(seq_owner_children &&
+				owner_expr->as.sequence.child_count == 2);
+			assert(seq_owner_children[0].index == c4.index);
+			assert(seq_owner_children[1].index == c16.index);
+			rtl_children = pigen_rtl_expr_children(&rtl, eid, &rtl_child_count);
+			assert(rtl_children && rtl_child_count == 2);
+			for (i = 0; i < rtl_child_count; i++)
+				assert(rtl_children[i].index ==
+					pigen_lower_rtl_expression(&lowering,
+						seq_owner_children[i]).index);
+		}
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -172,5 +424,6 @@ int main(void)
 	puts("PASS: rtl lowering skeleton inits empty identity maps");
 	puts("PASS: rtl lowering stubs return the unimplemented sentinel");
 	puts("PASS: rtl type lowering preserves owner state, width, signedness and range");
+	puts("PASS: rtl expression lowering preserves width, signedness, conversions, projections and child order");
 	return 0;
 }
