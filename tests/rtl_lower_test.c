@@ -486,6 +486,167 @@ int main(void)
 		assert(lowering.lowered_expressions[c5.index].index == eid.index);
 	}
 
+	/* (6) Error rollback: an invalid expression and an unbound signal each
+	 * report the error and publish NO partial RTL records. Fourth
+	 * expression-family section of the Task 5 test-contract chain (the
+	 * error-rollback family). Staged red: case 1's sentinel guard and every
+	 * no-partial-state comparison in cases 1-3 PASS against the stub, which
+	 * returns the sentinel and publishes nothing, so they pin the contract
+	 * the implementer must not violate but cannot distinguish a stub. The
+	 * FIRST deliberate RED assert against the stub is the recoverability
+	 * check (case 4): the stub still returns the sentinel for the already
+	 * lowered valid constant, so `!IS_INVALID_ID(valid_id)` fires the moment
+	 * that constant is lowered, before any later behavior is probed. Case 1
+	 * builds a real owner signal
+	 * (scope, symbol, signal through the owner APIs) and a constant
+	 * expression referencing it via pigen_const_expr_intern_symbol; lowering
+	 * it must return the sentinel. Case 2 snapshots the RTL arena counts and
+	 * every populated slot of both identity memo maps before the failing call
+	 * and asserts the snapshot is byte-for-byte unchanged after it. Case 3
+	 * repeats the no-partial-state contract for a constant-expression id that
+	 * does not exist in the semantic arena. Case 4 asserts recoverability:
+	 * after both failures, lowering the section's earlier valid constant
+	 * still returns its memoized valid id. Only public behavior is asserted -
+	 * the returned handles, the public arena counts and the memo slots keyed
+	 * by source arena index - never an imagined internal rollback mechanism,
+	 * so the implementer cannot shortcut the rollback contract. */
+	{
+		const char *text = "module m; logic [7:0] in; endmodule";
+		pigen_source_id src = pigen_source_add(&sources, "rollback.pigen",
+			text, sizeof(text) - 1);
+		pigen_source_span whole = {src, 0, sizeof(text) - 1};
+		pigen_source_span name_in;
+		pigen_scope_id mod_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id in_symbol;
+		pigen_symbol_id shadowed;
+		pigen_module_id mod;
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8;
+		pigen_shape_id shape;
+		pigen_signal_id sig;
+		pigen_const_expr_id width8;
+		pigen_const_expr_id valid_const;
+		pigen_const_expr_id sym_expr;
+		pigen_rtl_expr_id valid_id;
+		pigen_rtl_expr_id valid_again;
+		pigen_rtl_expr_id fail1;
+		pigen_rtl_expr_id fail2;
+		size_t snap_type_count;
+		size_t snap_expr_count;
+		size_t snap_type_memo;
+		size_t snap_expr_memo;
+		pigen_rtl_type_id snap_types[PIGEN_INVALID_ID];
+		pigen_rtl_expr_id snap_exprs[PIGEN_INVALID_ID];
+		size_t i;
+
+		/* Owner data: a real signal symbol and its signal record, a valid
+		 * constant and the constant expression referencing the signal, all
+		 * through the owner APIs (pattern: tests/semantic_test.c). */
+		assert(!IS_INVALID_ID(src));
+		sem.compilation_scope = pigen_scope_add(&sem,
+			(pigen_scope_id){PIGEN_INVALID_ID}, whole);
+		assert(!IS_INVALID_ID(sem.compilation_scope));
+		name_in = (pigen_source_span){src, 22, 24}; /* "in" in "logic [7:0] in" */
+		assert(pigen_symbol_declare(&sem, sem.compilation_scope,
+			PIGEN_SYMBOL_MODULE, (pigen_data_type_id){PIGEN_INVALID_ID},
+			name_in, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		mod_scope = pigen_scope_add(&sem, sem.compilation_scope, whole);
+		assert(!IS_INVALID_ID(mod_scope));
+		mod = pigen_module_add(&sem, (pigen_syntax_id){0}, module_symbol,
+			mod_scope, whole);
+		assert(!IS_INVALID_ID(mod));
+		unsized = pigen_data_type_unsized_integer(&sem);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem, 8, unsized);
+		t8 = pigen_data_type_signed_integer(&sem, width8);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		shape = pigen_semantic_scalar_shape(&sem);
+		assert(!IS_INVALID_ID(shape));
+		assert(pigen_symbol_declare(&sem, mod_scope, PIGEN_SYMBOL_SIGNAL, t8,
+			name_in, whole, &in_symbol, &shadowed) == PIGEN_DECLARE_OK);
+		assert(IS_INVALID_ID(shadowed));
+		sig = pigen_signal_add(&sem, (pigen_syntax_id){0}, mod, in_symbol,
+			t8, shape, (pigen_expr_id){PIGEN_INVALID_ID},
+			PIGEN_TRANSFER_TYPE_LOGIC, PIGEN_SEMANTIC_INTERNAL, whole);
+		assert(!IS_INVALID_ID(sig));
+		valid_const = pigen_const_expr_intern_integer(&sem, 5, t8);
+		assert(!IS_INVALID_ID(valid_const));
+		sym_expr = pigen_const_expr_intern_symbol(&sem, in_symbol, t8);
+		assert(!IS_INVALID_ID(sym_expr));
+		/* Snapshot taken BEFORE the first failing call: the RTL arena counts
+		 * and every populated slot of both identity memo maps. */
+		snap_type_count = rtl.type_count;
+		snap_expr_count = rtl.expression_count;
+		snap_type_memo = lowering.lowered_type_count;
+		snap_expr_memo = lowering.lowered_expression_count;
+		for (i = 0; i < snap_type_memo; i++)
+			snap_types[i] = lowering.lowered_types[i];
+		for (i = 0; i < snap_expr_memo; i++)
+			snap_exprs[i] = lowering.lowered_expressions[i];
+
+		/* The section's valid constant is lowered before any failure so case 4
+		 * can prove the errors left the lowering usable. Its validity is
+		 * asserted only in case 4, after both failures: against the stub this
+		 * is the section's first deliberate red, so the stub cannot be
+		 * mistaken for a working implementation by the guards above. */
+		valid_id = pigen_lower_rtl_expression(&lowering, valid_const);
+
+		/* Case 1 (guard): the constant expression referencing the owner signal
+		 * is not a validated constant identity, so lowering it returns the
+		 * RTL-expression sentinel. Passes against the stub, which returns the
+		 * sentinel for everything. */
+		fail1 = pigen_lower_rtl_expression(&lowering, sym_expr);
+		assert(IS_INVALID_ID(fail1));
+
+		/* Case 2: the case-1 failure published NO partial RTL records: the RTL
+		 * arena counts and both memo maps (counts and every populated slot)
+		 * are byte-for-byte the snapshot taken BEFORE the failing call. */
+		assert(rtl.type_count == snap_type_count &&
+			rtl.expression_count == snap_expr_count);
+		assert(lowering.lowered_type_count == snap_type_memo &&
+			lowering.lowered_expression_count == snap_expr_memo);
+		for (i = 0; i < snap_type_memo; i++)
+			assert(lowering.lowered_types[i].index == snap_types[i].index);
+		for (i = 0; i < snap_expr_memo; i++)
+			assert(lowering.lowered_expressions[i].index ==
+				snap_exprs[i].index);
+
+		/* Case 3: a constant-expression id that does not exist in the
+		 * semantic arena ({999}) returns the sentinel and again leaves every
+		 * arena count and populated memo slot exactly as before. */
+		snap_type_count = rtl.type_count;
+		snap_expr_count = rtl.expression_count;
+		snap_type_memo = lowering.lowered_type_count;
+		snap_expr_memo = lowering.lowered_expression_count;
+		for (i = 0; i < snap_type_memo; i++)
+			snap_types[i] = lowering.lowered_types[i];
+		for (i = 0; i < snap_expr_memo; i++)
+			snap_exprs[i] = lowering.lowered_expressions[i];
+		fail2 = pigen_lower_rtl_expression(&lowering,
+			(pigen_const_expr_id){999});
+		assert(IS_INVALID_ID(fail2));
+		assert(rtl.type_count == snap_type_count &&
+			rtl.expression_count == snap_expr_count);
+		assert(lowering.lowered_type_count == snap_type_memo &&
+			lowering.lowered_expression_count == snap_expr_memo);
+		for (i = 0; i < snap_type_memo; i++)
+			assert(lowering.lowered_types[i].index == snap_types[i].index);
+		for (i = 0; i < snap_expr_memo; i++)
+			assert(lowering.lowered_expressions[i].index ==
+				snap_exprs[i].index);
+
+		/* Case 4: recoverability. After both failures, lowering the section's
+		 * already-lowered valid constant still returns its memoized valid id
+		 * - the errors left the lowering usable. FIRST deliberate red against
+		 * the stub: the stub returns the sentinel here, so
+		 * `!IS_INVALID_ID(valid_again)` aborts the section (and the binary)
+		 * before any later case is probed. */
+		valid_again = pigen_lower_rtl_expression(&lowering, valid_const);
+		assert(!IS_INVALID_ID(valid_again)); /* Deliberate red: stub. */
+		assert(valid_again.index == valid_id.index);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -503,5 +664,6 @@ int main(void)
 	puts("PASS: rtl type lowering preserves owner state, width, signedness and range");
 	puts("PASS: rtl expression lowering preserves width, signedness, conversions, projections and child order");
 	puts("PASS: rtl constant lowering is once by identity");
+	puts("PASS: rtl lowering errors roll back without partial RTL records");
 	return 0;
 }
