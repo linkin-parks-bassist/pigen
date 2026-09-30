@@ -680,6 +680,374 @@ int main(void)
 		assert(recoverable.index == good_id.index);
 	}
 
+	/* (7) Repeat lowering is identity-memoized and deterministic. Fifth
+	 * expression-family section of the Task 5 test-contract chain (the
+	 * memo-stability and determinism family). Cases build one real
+	 * pigen_semantic_model through the owner APIs (an 8-bit signed type, a
+	 * 16-bit unsigned type, and three constants including one explicit
+	 * conversion) and drive the lowering contract from outside:
+	 *   Case 1: REPEAT-LOWER STABILITY. Lower every identity in the fixed set
+	 *     and record every returned id; lower the WHOLE set again and assert
+	 *     every returned id is identical to the first pass, the memo map
+	 *     counts (lowered_type_count, lowered_expression_count) and the RTL
+	 *     type/expression arena counts are unchanged - no duplicate growth.
+	 *   Case 2: INDEPENDENT-BUILD DETERMINISM. Build a SECOND
+	 *     pigen_semantic_model + pigen_rtl_model with the IDENTICAL
+	 *     construction sequence (same API calls, same values, fresh managers)
+	 *     and run the identical lowering sequence through a second
+	 *     pigen_rtl_lowering; for every lowered identity the lowered
+	 *     pigen_rtl_type / pigen_rtl_expr record fields (kind, type, width,
+	 *     signedness, state domain, child count and child ids relative to the
+	 *     arena, literal fields) are byte-identical to the first build's
+	 *     records - ids may differ only by arena offset, so record contents,
+	 *     not raw ids, are compared. The second build frees its own models
+	 *     before the shared tail.
+	 *   Case 3: MEMO MAP COHERENCE. After both passes, every populated
+	 *     lowering.lowered_types[i] / lowering.lowered_expressions[i] slot
+	 *     equals the id pigen_rtl_type_get / pigen_rtl_expr_get can resolve
+	 *     in its RTL model (no dangling slots).
+	 * Staged red: every owner-construction assert passes against the landed
+	 * owners; the FIRST deliberate unimplemented-behavior assert in this
+	 * section is Case 1's first `!IS_INVALID_ID(id1)` (second pass, t8s),
+	 * marked below - the stub returns the sentinel for every valid identity,
+	 * so the second pass's valid-id check fails first. Every later assert in
+	 * this section requires implemented behavior and is also deliberate red.
+	 * This is the LAST test-contract section of the chain: the implementation
+	 * item makes the whole target green. */
+	{
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8s;
+		pigen_data_type_id t16u;
+		pigen_const_expr_id width8;
+		pigen_const_expr_id width16;
+		pigen_const_expr_id c5;
+		pigen_const_expr_id c0x1234;
+		pigen_const_expr_id conv;
+		pigen_conversion conversion;
+		pigen_rtl_type_id p1_t8s;
+		pigen_rtl_type_id p1_t16u;
+		pigen_rtl_expr_id p1_c5;
+		pigen_rtl_expr_id p1_c16;
+		pigen_rtl_expr_id p1_conv;
+		pigen_rtl_type_id id1;
+		const pigen_rtl_type *rt;
+		const pigen_rtl_expr *re;
+		size_t type_count_before;
+		size_t expr_count_before;
+		size_t type_map_before;
+		size_t expr_map_before;
+		size_t type_count_after;
+		size_t expr_count_after;
+		size_t type_map_after;
+		size_t expr_map_after;
+		size_t i;
+		int stable;
+
+		/* Owner data for the fixed set: one 8-bit signed type, one 16-bit
+		 * unsigned type and three constants (two integers and one explicit
+		 * conversion), all through the owner APIs. */
+		unsized = pigen_data_type_unsized_integer(&sem);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem, 8, unsized);
+		width16 = pigen_const_expr_intern_integer(&sem, 16, unsized);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(width16));
+		t8s = pigen_data_type_signed_integer(&sem, width8);
+		t16u = pigen_data_type_unsigned_integer(&sem, width16);
+		assert(!IS_INVALID_ID(t8s) && !IS_INVALID_ID(t16u));
+		c5 = pigen_const_expr_intern_integer(&sem, 5, t8s);
+		c0x1234 = pigen_const_expr_intern_integer(&sem, 0x1234, t16u);
+		assert(!IS_INVALID_ID(c5) && !IS_INVALID_ID(c0x1234));
+		assert(pigen_data_type_resolve_explicit_conversion(&sem, t16u, t8s,
+			&conversion));
+		assert(pigen_data_type_conversion_is_valid(&sem, conversion));
+		conv = pigen_const_expr_intern_conversion(&sem, conversion, c0x1234);
+		assert(!IS_INVALID_ID(conv));
+
+		/* Case 1: REPEAT-LOWER STABILITY. Lower the whole fixed set (types,
+		 * then constants) and record every returned id, then lower the whole
+		 * set AGAIN and assert every returned id is identical, the memo map
+		 * counts and the RTL arena counts are unchanged - no duplicate growth.
+		 * The second pass's valid-id checks are this section's first
+		 * deliberate red asserts. */
+		/* First pass: lower the whole fixed set and record every returned id.
+		 * The stub returns the sentinel for each, so no id is asserted valid
+		 * yet - the first deliberate red is the second pass below. */
+		p1_t8s = pigen_lower_rtl_type(&lowering, t8s);
+		p1_t16u = pigen_lower_rtl_type(&lowering, t16u);
+		p1_c5 = pigen_lower_rtl_expression(&lowering, c5);
+		p1_c16 = pigen_lower_rtl_expression(&lowering, c0x1234);
+		p1_conv = pigen_lower_rtl_expression(&lowering, conv);
+		type_count_before = rtl.type_count;
+		expr_count_before = rtl.expression_count;
+		type_map_before = lowering.lowered_type_count;
+		expr_map_before = lowering.lowered_expression_count;
+
+		/* Second pass over the WHOLE set: every returned id is identical to
+		 * the first pass and nothing grows. */
+		id1 = pigen_lower_rtl_type(&lowering, t8s);
+		assert(!IS_INVALID_ID(id1)); /* Deliberate red (first in this
+		 * section): the stub returns the sentinel for a valid type. */
+		assert(id1.index == p1_t8s.index);
+		assert(pigen_lower_rtl_type(&lowering, t16u).index == p1_t16u.index);
+		assert(pigen_lower_rtl_expression(&lowering, c5).index == p1_c5.index);
+		assert(pigen_lower_rtl_expression(&lowering, c0x1234).index ==
+			p1_c16.index);
+		assert(pigen_lower_rtl_expression(&lowering, conv).index ==
+			p1_conv.index);
+		type_count_after = rtl.type_count;
+		expr_count_after = rtl.expression_count;
+		type_map_after = lowering.lowered_type_count;
+		expr_map_after = lowering.lowered_expression_count;
+		stable = type_count_after == type_count_before &&
+			expr_count_after == expr_count_before &&
+			type_map_after == type_map_before &&
+			expr_map_after == expr_map_before;
+		assert(stable); /* memoized: no duplicate growth on the repeat pass */
+
+		/* Case 2: INDEPENDENT-BUILD DETERMINISM. Build a second model pair
+		 * with the IDENTICAL construction sequence (same API calls, same
+		 * values, fresh managers), run the identical lowering sequence through
+		 * a second pigen_rtl_lowering, and compare every lowered record
+		 * field by field against the first build's records. Ids may differ
+		 * only by arena offset, so record contents are compared, not raw ids:
+		 * for types the record fields (signedness, state domain, width,
+		 * dimension count and per-dimension bounds); for expressions kind,
+		 * the low word value, the literal fields, the child count, and - for
+		 * the conversion - the conversion kept verbatim plus its single
+		 * operand's child id RELATIVE TO THE ARENA (offset from the build's
+		 * first lowered child). The second build frees its own models before
+		 * the shared tail. */
+		{
+			pigen_source_manager sources2 = {0};
+			pigen_semantic_model sem2;
+			pigen_rtl_model rtl2 = {0};
+			pigen_rtl_lowering lowering2;
+			pigen_data_type_id unsized2;
+			pigen_data_type_id t8s2;
+			pigen_data_type_id t16u2;
+			pigen_const_expr_id width8_2;
+			pigen_const_expr_id width16_2;
+			pigen_const_expr_id c5_2;
+			pigen_const_expr_id c0x1234_2;
+			pigen_const_expr_id conv_2;
+			pigen_conversion conversion2;
+			const pigen_rtl_type *rt2;
+			const pigen_rtl_expr *re2;
+			const pigen_rtl_expr_id *kids1;
+			const pigen_rtl_expr_id *kids2;
+			size_t kids1_count;
+			size_t kids2_count;
+			uint64_t words;
+			int deterministic;
+
+			pigen_semantic_init(&sem2, &sources2);
+			pigen_rtl_lowering_init(&lowering2, &sem2, &rtl2);
+
+			/* Identical construction sequence, fresh managers. */
+			unsized2 = pigen_data_type_unsized_integer(&sem2);
+			assert(!IS_INVALID_ID(unsized2));
+			width8_2 = pigen_const_expr_intern_integer(&sem2, 8, unsized2);
+			width16_2 = pigen_const_expr_intern_integer(&sem2, 16, unsized2);
+			assert(!IS_INVALID_ID(width8_2) && !IS_INVALID_ID(width16_2));
+			t8s2 = pigen_data_type_signed_integer(&sem2, width8_2);
+			t16u2 = pigen_data_type_unsigned_integer(&sem2, width16_2);
+			assert(!IS_INVALID_ID(t8s2) && !IS_INVALID_ID(t16u2));
+			c5_2 = pigen_const_expr_intern_integer(&sem2, 5, t8s2);
+			c0x1234_2 = pigen_const_expr_intern_integer(&sem2, 0x1234, t16u2);
+			assert(!IS_INVALID_ID(c5_2) && !IS_INVALID_ID(c0x1234_2));
+			assert(pigen_data_type_resolve_explicit_conversion(&sem2, t16u2,
+				t8s2, &conversion2));
+			assert(pigen_data_type_conversion_is_valid(&sem2, conversion2));
+			conv_2 = pigen_const_expr_intern_conversion(&sem2, conversion2,
+				c0x1234_2);
+			assert(!IS_INVALID_ID(conv_2));
+
+			/* Identical lowering sequence through the second lowering. */
+			pigen_lower_rtl_type(&lowering2, t8s2);
+			pigen_lower_rtl_type(&lowering2, t16u2);
+			pigen_lower_rtl_expression(&lowering2, c5_2);
+			pigen_lower_rtl_expression(&lowering2, c0x1234_2);
+			pigen_lower_rtl_expression(&lowering2, conv_2);
+
+			/* Types: record contents are byte-identical between the builds. */
+			rt = pigen_rtl_type_get(&rtl, pigen_lower_rtl_type(&lowering, t8s));
+			rt2 = pigen_rtl_type_get(&rtl2, pigen_lower_rtl_type(&lowering2,
+				t8s2));
+			deterministic = rt && rt2 &&
+				rt->signedness == rt2->signedness &&
+				rt->state_domain == rt2->state_domain &&
+				rt->width == rt2->width &&
+				rt->dimension_count == rt2->dimension_count;
+			for (i = 0; deterministic && i < rt->dimension_count; i++) {
+				const pigen_rtl_packed_dimension *d1;
+				const pigen_rtl_packed_dimension *d2;
+
+				d1 = &rt->dimensions[i];
+				d2 = &rt2->dimensions[i];
+				deterministic =
+					d1->left.value == d2->left.value &&
+					d1->right.value == d2->right.value &&
+					d1->left.expression.index == d2->left.expression.index &&
+					d1->right.expression.index ==
+					d2->right.expression.index;
+			}
+			rt = pigen_rtl_type_get(&rtl, pigen_lower_rtl_type(&lowering, t16u));
+			rt2 = pigen_rtl_type_get(&rtl2, pigen_lower_rtl_type(&lowering2,
+				t16u2));
+			deterministic = deterministic && rt && rt2 &&
+				rt->signedness == rt2->signedness &&
+				rt->state_domain == rt2->state_domain &&
+				rt->width == rt2->width &&
+				rt->dimension_count == rt2->dimension_count;
+			for (i = 0; deterministic && i < rt->dimension_count; i++) {
+				const pigen_rtl_packed_dimension *d1;
+				const pigen_rtl_packed_dimension *d2;
+
+				d1 = &rt->dimensions[i];
+				d2 = &rt2->dimensions[i];
+				deterministic =
+					d1->left.value == d2->left.value &&
+					d1->right.value == d2->right.value &&
+					d1->left.expression.index == d2->left.expression.index &&
+					d1->right.expression.index ==
+					d2->right.expression.index;
+			}
+			assert(deterministic); /* Deliberate red: stubs publish no records. */
+
+			/* The c5 constant: kind, low word, literal fields, child count
+			 * and the lowered record's own type record contents. */
+			re = pigen_rtl_expr_get(&rtl,
+				pigen_lower_rtl_expression(&lowering, c5));
+			re2 = pigen_rtl_expr_get(&rtl2,
+				pigen_lower_rtl_expression(&lowering2, c5_2));
+			deterministic = re && re2 &&
+				re->kind == re2->kind &&
+				re->value == re2->value &&
+				re->literal_bit_count == re2->literal_bit_count &&
+				re->literal_negative == re2->literal_negative &&
+				re->child_count == re2->child_count;
+			if (deterministic && re->literal_bit_count) {
+				words = (re->literal_bit_count + 63) / 64;
+				for (i = 0; i < words; i++) {
+					const pigen_rtl_literal_word *w1;
+					const pigen_rtl_literal_word *w2;
+
+					w1 = &re->literal_words[i];
+					w2 = &re2->literal_words[i];
+					deterministic = w1->value == w2->value &&
+						w1->x_mask == w2->x_mask &&
+						w1->z_mask == w2->z_mask;
+				}
+			}
+			if (deterministic) {
+				rt = pigen_rtl_type_get(&rtl, re->type);
+				rt2 = pigen_rtl_type_get(&rtl2, re2->type);
+				deterministic = rt && rt2 &&
+					rt->signedness == rt2->signedness &&
+					rt->state_domain == rt2->state_domain &&
+					rt->width == rt2->width;
+			}
+			assert(deterministic); /* Deliberate red: stubs publish no records. */
+
+			/* The 0x1234 constant: same record-content comparison. */
+			re = pigen_rtl_expr_get(&rtl,
+				pigen_lower_rtl_expression(&lowering, c0x1234));
+			re2 = pigen_rtl_expr_get(&rtl2,
+				pigen_lower_rtl_expression(&lowering2, c0x1234_2));
+			deterministic = re && re2 &&
+				re->kind == re2->kind &&
+				re->value == re2->value &&
+				re->literal_bit_count == re2->literal_bit_count &&
+				re->literal_negative == re2->literal_negative &&
+				re->child_count == re2->child_count;
+			if (deterministic && re->literal_bit_count) {
+				words = (re->literal_bit_count + 63) / 64;
+				for (i = 0; i < words; i++) {
+					const pigen_rtl_literal_word *w1;
+					const pigen_rtl_literal_word *w2;
+
+					w1 = &re->literal_words[i];
+					w2 = &re2->literal_words[i];
+					deterministic = w1->value == w2->value &&
+						w1->x_mask == w2->x_mask &&
+						w1->z_mask == w2->z_mask;
+				}
+			}
+			if (deterministic) {
+				rt = pigen_rtl_type_get(&rtl, re->type);
+				rt2 = pigen_rtl_type_get(&rtl2, re2->type);
+				deterministic = rt && rt2 &&
+					rt->signedness == rt2->signedness &&
+					rt->state_domain == rt2->state_domain &&
+					rt->width == rt2->width;
+			}
+			assert(deterministic); /* Deliberate red: stubs publish no records. */
+
+			/* The conversion: kind, the conversion kept verbatim, and the
+			 * single operand's child id relative to the arena: the offset
+			 * from the conversion record to its operand child is the same in
+			 * both arenas (absolute child ids may differ by arena offset). */
+			re = pigen_rtl_expr_get(&rtl,
+				pigen_lower_rtl_expression(&lowering, conv));
+			re2 = pigen_rtl_expr_get(&rtl2,
+				pigen_lower_rtl_expression(&lowering2, conv_2));
+			deterministic = re && re2 &&
+				re->kind == re2->kind &&
+				re->as.conversion.conversion.kind ==
+				re2->as.conversion.conversion.kind &&
+				re->child_count == re2->child_count;
+			if (deterministic) {
+				size_t base1;
+				size_t base2;
+
+				kids1 = pigen_rtl_expr_children(&rtl,
+					pigen_lower_rtl_expression(&lowering, conv),
+					&kids1_count);
+				kids2 = pigen_rtl_expr_children(&rtl2,
+					pigen_lower_rtl_expression(&lowering2, conv_2),
+					&kids2_count);
+				deterministic = kids1 && kids2 &&
+					kids1_count == kids2_count &&
+					kids1_count == re->child_count &&
+					kids2_count == re2->child_count;
+				if (deterministic && kids1_count) {
+					base1 = pigen_lower_rtl_expression(&lowering, conv).index;
+					base2 = pigen_lower_rtl_expression(&lowering2,
+						conv_2).index;
+					deterministic =
+						kids1[0].index >= base1 &&
+						kids2[0].index >= base2 &&
+						(kids1[0].index - base1) ==
+						(kids2[0].index - base2);
+				}
+			}
+			assert(deterministic); /* Deliberate red: stubs publish no records. */
+
+			/* The second build owns its models: free them before the shared
+			 * tail so the shared tail frees only the first build. */
+			pigen_rtl_lowering_free(&lowering2);
+			pigen_free_rtl_model(&rtl2);
+			pigen_free_semantic_model(&sem2);
+			pigen_free_sources(&sources2);
+		}
+
+		/* Case 3: MEMO MAP COHERENCE. After both passes, every populated
+		 * lowering.lowered_types[i] / lowering.lowered_expressions[i] slot
+		 * resolves in the RTL model (no dangling slots). */
+		for (i = 0; i < lowering.lowered_type_count; i++) {
+			if (lowering.lowered_types[i].index == PIGEN_INVALID_ID)
+				continue;
+			rt = pigen_rtl_type_get(&rtl, lowering.lowered_types[i]);
+			assert(rt); /* Deliberate red: stubs populate no map slots. */
+		}
+		for (i = 0; i < lowering.lowered_expression_count; i++) {
+			if (lowering.lowered_expressions[i].index == PIGEN_INVALID_ID)
+				continue;
+			re = pigen_rtl_expr_get(&rtl, lowering.lowered_expressions[i]);
+			assert(re); /* Deliberate red: stubs populate no map slots. */
+		}
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -698,5 +1066,6 @@ int main(void)
 	puts("PASS: rtl expression lowering preserves width, signedness, conversions, projections and child order");
 	puts("PASS: rtl constant lowering is once by identity");
 	puts("PASS: rtl lowering errors publish no partial records and stay recoverable");
+	puts("PASS: rtl lowering is identity-memoized, stable and deterministic");
 	return 0;
 }
