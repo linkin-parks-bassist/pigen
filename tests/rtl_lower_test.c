@@ -434,8 +434,10 @@ int main(void)
 		pigen_rtl_expr_id eid;
 		pigen_rtl_expr_id eid_again;
 		pigen_rtl_expr_id eid_distinct;
+		const pigen_rtl_expr *re;
 		size_t arena_before;
 		size_t arena_after;
+		uint64_t w;
 
 		/* Owner data: a 16-bit unsigned type and two distinct constants of it,
 		 * all through the owner APIs. The two values differ so the owner
@@ -485,6 +487,36 @@ int main(void)
 		 * constant's arena index equals the returned handle. */
 		assert(lowering.lowered_expression_count > c5.index);
 		assert(lowering.lowered_expressions[c5.index].index == eid.index);
+
+		/* Content: the ALREADY-LOWERED bare integer constants publish the
+		 * correct record content, not just a handle. This closes the
+		 * constant-identity CONTENT gap: an implementation that memoizes by
+		 * identity but publishes the wrong literal value, the wrong kind (e.g.
+		 * PIGEN_RTL_EXPR_BITS or PIGEN_RTL_EXPR_OBJECT) or a wrong/missing type
+		 * would otherwise pass the whole section. Only the returned
+		 * pigen_rtl_expr record and owner-reported facts are asserted - never
+		 * an imagined internal memo representation. */
+
+		/* c5 (the lowered value 5) is a PIGEN_RTL_EXPR_INTEGER carrying the
+		 * owner-reported value and the lowered id of its owner type t16. */
+		re = pigen_rtl_expr_get(&rtl, eid);
+		assert(re);
+		assert(re->kind == PIGEN_RTL_EXPR_INTEGER);
+		assert(pigen_const_expr_evaluate_u64(&sem, c5, &w));
+		assert(re->value == w); /* owner-reported value (5) on the record */
+		assert(re->type.index ==
+			pigen_lower_rtl_type(&lowering, t16).index);
+
+		/* c7 (the lowered value 7, the distinct constant) carries the same
+		 * integer kind, its own owner-reported value and the same lowered
+		 * t16 type. */
+		re = pigen_rtl_expr_get(&rtl, eid_distinct);
+		assert(re);
+		assert(re->kind == PIGEN_RTL_EXPR_INTEGER);
+		assert(pigen_const_expr_evaluate_u64(&sem, c7, &w));
+		assert(re->value == w); /* owner-reported value (7) on the record */
+		assert(re->type.index ==
+			pigen_lower_rtl_type(&lowering, t16).index);
 	}
 
 	/* (6) Error rollback: an invalid expression and an unbound signal each
