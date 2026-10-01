@@ -1,12 +1,13 @@
 ---
 status: green
-revised_at: "2026-09-20T09:14:55+10:00"
-checked_at: '2026-09-14T20:43:49+10:00'
+revised_at: "2026-10-01T18:18:41+10:00"
+checked_at: "2026-09-14T20:43:49+10:00"
 ---
 
-make verify currently passes all eleven structured C foundation targets and production smoke/fabric/core checks, then Icarus Verilog crashes compiling rtl/pigen_primitives.sv, /tmp/pigen-pipeline.sv and tests/pipeline_tb.sv. make pipeline-test reproduces segmentation fault and Makefile Error 139. Compiler sources and fixture inputs are unchanged from the tested baseline. The failing stage is known; the root cause is unresolved.
+make verify passes all eleven structured C foundation targets and the production smoke/fabric/core checks, then make pipeline-test fails under Icarus Verilog 12.0 (Ubuntu 12.0-2build2). Root cause (isolated 2026-10-01): Icarus 12 does not evaluate `$bits(<signal>)` correctly in a declaration range. The prototype emits pipeline ingress endpoints as `ingress [($bits(source))-1:0] name;`, which declarations.c lowers to `logic [($bits(source))-1:0] name__pigen_packet_in;` driven by a continuous assign. That exact form segfaults ivl in elaboration (NetNet::test_and_set_part_driver, exit 139); every alternative spelling that sizes from a signal (`wire`, a localparam W=$bits(s), always_comb, $size/$left) compiles but silently simulates as z/x or fails to bind. Only `$bits(<typedef>)` sizes correctly. Minimal reproducer:
 
-Blocker: Icarus crashes before pipeline simulation. Next check: record the installed Icarus version and reduce the generated pipeline/compiler input combination to isolate the crash in a separate verification investigation. Task 2 remains limited to its C RTL arena tests; no full make verify pass is claimed.
+```systemverilog
+module m(input logic [7:0] s); logic [$bits(s)-1:0] p; assign p = s; endmodule
+```
 
-Blocker: Icarus pipeline compilation exit139; root cause not isolated
-Next check: In a dedicated simulation-tool investigation, capture Icarus build/version and reduce the unchanged primitive/pipeline compilation input before proposing a compiler or toolchain fix
+The generated SV is legal; pigen is not at fault, and the handshake logic was observed correct (valid/ready, stall and token counts) with only the payload lost. Declaring packet_in as a net removes the crash but exposes the silent mis-sizing (payload x, tests/pipeline_tb.sv fatal "reordered/lost payload 0"), so it was not kept. Fixing it inside Icarus's limits would require the textual prototype to resolve ingress expression types into typedefs, which is structured-frontend work. The chosen direction is to run hardware simulation under Verilator instead (5.020 is the Ubuntu candidate; not yet installed).

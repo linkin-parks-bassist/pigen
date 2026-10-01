@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-01T17:25:35+10:00"
+revised_at: "2026-10-01T18:18:48+10:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -27,7 +27,7 @@ Elastic RTL Task 2 is implemented and landed: interned types retain ordered conc
 
 The local tree is the sole project documentation authority; obsolete history is excluded. The immutable Kestrel reference remains applicable.
 
-Current verification: all eleven structured C foundation targets pass. Full make verify fails when Icarus compiles the pipeline fixture with segmentation fault/exit 139 (re-confirmed 2026-09-29 on Icarus Verilog 12.0 via make pipeline-test); the cause remains unresolved in why/does/pipeline/verification/currently/fail.md. No full-suite success is claimed.
+Current verification: all eleven structured C foundation targets pass. Full make verify fails at make pipeline-test: Icarus Verilog 12.0 cannot size declarations from `$bits(<signal>)` (segfault on the emitted form, silent z/x on every alternative), an Icarus defect isolated in why/does/pipeline/verification/currently/fail.md; the direction is to move hardware simulation to Verilator. No full-suite success is claimed.
 
 The containing personal-project folder was renamed to `Projects`. Git identity and existing local work were preserved. Saved agent directories and snapshot dependencies were migrated; local proofs and Git whitespace checks pass. This rename did not modify compiler implementation or requalify the known pipeline crash.
 
