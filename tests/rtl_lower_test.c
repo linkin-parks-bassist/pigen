@@ -524,16 +524,18 @@ int main(void)
 		 * exact-integer data type. Only the returned pigen_rtl_expr record and
 		 * owner-reported facts are asserted - never an imagined internal
 		 * representation - so the implementer cannot shortcut the
-		 * identical-to-bare-integer contract. The exact-integer TYPE's own
-		 * lowering (width derived from the exact value, not the packed width)
-		 * is the impl item's concern; here we pin only that the constant's
-		 * record type is the lowered id of its owner type. */
+		 * identical-to-bare-integer contract. Case 5 now also pins the
+		 * exact-integer TYPE's own lowered width: it is derived from the owner
+		 * exact value (width 3 for 5), NOT the packed width - and the
+		 * packed-width query is INVALID_ID for this constructor, so the
+		 * value-derived width is provably not the packed width. */
 		{
 			pigen_integer_id v;
 			pigen_data_type_id t_ex;
 			pigen_const_expr_id cx;
 			pigen_rtl_expr_id exid;
 			const pigen_rtl_expr *rex;
+			const pigen_rtl_type *rt;
 
 			/* Owner witness: intern the exact value 5, build the exact-integer
 			 * data type carrying it, and intern the exact-integer constant of
@@ -566,6 +568,17 @@ int main(void)
 			assert(rex->value == w); /* owner-reported value (5) on the record */
 			assert(rex->type.index ==
 				pigen_lower_rtl_type(&lowering, t_ex).index);
+
+			/* TEST-AUDIT-9: pin the exact-integer TYPE's own lowered width. It
+			 * must be DERIVED FROM THE OWNER EXACT VALUE (width 3 for 5), not the
+			 * packed width. rt is the lowered id of t_ex; its width equals the
+			 * owner unsigned width of the exact value. */
+			rt = pigen_rtl_type_get(&rtl, pigen_lower_rtl_type(&lowering, t_ex));
+			assert(rt);
+			assert(rt->width == pigen_integer_unsigned_width(&sem, v));
+			/* The packed-width query reports INVALID_ID for this constructor,
+			 * so the value-derived width above is provably NOT the packed width. */
+			assert(IS_INVALID_ID(pigen_data_type_packed_width(&sem, t_ex)));
 
 			/* Boundary: a NEGATIVE exact integer is not a u64 constant. Its
 			 * owner value does not evaluate to u64, and its lowering is pinned
