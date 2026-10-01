@@ -1750,6 +1750,222 @@ int main(void)
 		pigen_free_sources(&sources_b);
 	}
 
+	/* (9) Net and variable realizations: the COMBINATIONAL_NET /
+	 * PROCEDURAL_VARIABLE PAYLOAD-SHAPE contract for
+	 * pigen_lower_rtl_module_declarations (Task 6, "combinational net /
+	 * procedural variable -> payload plus constants"). One module holds TWO
+	 * INTERNAL signals of the SAME 8-bit unsigned data type: a
+	 * PIGEN_TRANSFER_TYPE_WIRE (COMBINATIONAL_NET) and a
+	 * PIGEN_TRANSFER_TYPE_REG (PROCEDURAL_VARIABLE), built through the owner
+	 * APIs exactly as section (8)'s landed construction pattern: a source
+	 * file, the compilation scope, a module symbol + pigen_module_add, a
+	 * PIGEN_SYMBOL_SIGNAL declaration per signal (matching data type and
+	 * declaration span) and pigen_signal_add with PIGEN_SEMANTIC_INTERNAL -
+	 * permitted for concrete types (the owner forces INPUT only for
+	 * non-concrete types and rejects NULL transfer-type descriptors). Both
+	 * descriptors are owner facts this contract rides on (green against the
+	 * landed owners): WIRE is concrete with realization COMBINATIONAL_NET,
+	 * and REG is concrete with realization PROCEDURAL_VARIABLE.
+	 *   Case 1: PAYLOAD SHAPE. The call reports success (the FIRST
+	 *     deliberate red of this section: the stub returns the -1
+	 *     unimplemented sentinel, not a compile or harness error) and the
+	 *     endpoints map grows past BOTH signal indices. For EACH signal,
+	 *     the endpoints payload is a valid id resolving to a
+	 *     pigen_rtl_object of kind PIGEN_RTL_OBJECT_VARIABLE whose type is
+	 *     the lowered 8-bit type - the SAME record the landed
+	 *     pigen_lower_rtl_type memo yields for the signal's data type - and
+	 *     whose direction equals the semantic signal's direction. The
+	 *     payload object is DISTINCT from any control (it is an object;
+	 *     valid and ready are expression ids), and the two signals yield
+	 *     two DISTINCT payload objects.
+	 * The descriptor constant values and the constant-expression identity
+	 * of the valid/ready controls (WIRE ready 0, REG ready 1, valid 1)
+	 * belong to the sibling constant-controls section; no constant value,
+	 * valid/ready record content, or arena count delta is pinned here.
+	 * Staged red: every owner-construction and descriptor assert passes
+	 * against the landed owners (including the already-implemented
+	 * pigen_lower_rtl_type memo, which resolves the 8-bit type); the FIRST
+	 * deliberate unimplemented-behavior assert is Case 1's `rc == 0`,
+	 * marked below. Every later assert in this section requires
+	 * implemented behavior and is deliberate red as well. */
+	{
+		const char *text =
+			"module netvar : wire a ; reg b ;\n";
+		pigen_source_manager sources_e = {0};
+		pigen_semantic_model sem_e;
+		pigen_rtl_model rtl_e = {0};
+		pigen_rtl_lowering lowering_e;
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8;
+		pigen_const_expr_id width8;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_a;
+		pigen_source_span name_b;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id wire_symbol;
+		pigen_symbol_id reg_symbol;
+		pigen_module_id module;
+		pigen_signal_id wire;
+		pigen_signal_id reg;
+		const pigen_semantic_signal *wire_owner;
+		const pigen_semantic_signal *reg_owner;
+		const pigen_transfer_type_descriptor *wire_descriptor;
+		const pigen_transfer_type_descriptor *reg_descriptor;
+		pigen_rtl_type_id lowered_t8;
+		const pigen_rtl_type *t8_record;
+		const pigen_rtl_type *wire_payload_type;
+		const pigen_rtl_type *reg_payload_type;
+		const pigen_rtl_signal_endpoints *wire_endpoints;
+		const pigen_rtl_signal_endpoints *reg_endpoints;
+		const pigen_rtl_object *wire_payload_obj;
+		const pigen_rtl_object *reg_payload_obj;
+		int rc;
+		int payload_wire;
+		int payload_reg;
+		int distinct;
+
+		/* Build the net/variable module through the owner APIs (section
+		 * (8)'s landed construction pattern, two INTERNAL signals of the
+		 * same 8-bit type): the type first, then a source file, the
+		 * compilation scope, a module in it, and the two declared signals.
+		 * The module symbol's declaration spans the whole file (as
+		 * module_add requires), the module scope uses the same span, and
+		 * each signal symbol's name span is contained in and its
+		 * declaration span equal to the span signal_add checks. */
+		pigen_semantic_init(&sem_e, &sources_e);
+		pigen_rtl_lowering_init(&lowering_e, &sem_e, &rtl_e);
+		unsized = pigen_data_type_unsized_integer(&sem_e);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem_e, 8, unsized);
+		t8 = pigen_data_type_unsigned_integer(&sem_e, width8);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		source = pigen_source_add(&sources_e, "lower_netvar.pigen", text,
+			strlen(text));
+		assert(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_a = (pigen_source_span){source, 21, 22}; /* "a" */
+		name_b = (pigen_source_span){source, 29, 30}; /* "b" */
+		sem_e.compilation_scope = pigen_scope_add(&sem_e,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		assert(sem_e.compilation_scope.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_e, sem_e.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_e, sem_e.compilation_scope, whole);
+		assert(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_e, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		assert(module.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_e, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_a, name_a, &wire_symbol, NULL) == PIGEN_DECLARE_OK);
+		wire = pigen_signal_add(&sem_e, (pigen_syntax_id){2}, module,
+			wire_symbol, t8, pigen_semantic_scalar_shape(&sem_e),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_WIRE,
+			PIGEN_SEMANTIC_INTERNAL, name_a);
+		assert(wire.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_e, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_b, name_b, &reg_symbol, NULL) == PIGEN_DECLARE_OK);
+		reg = pigen_signal_add(&sem_e, (pigen_syntax_id){3}, module,
+			reg_symbol, t8, pigen_semantic_scalar_shape(&sem_e),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_REG,
+			PIGEN_SEMANTIC_INTERNAL, name_b);
+		assert(reg.index != PIGEN_INVALID_ID);
+
+		/* Owner facts the contract rides on (all green against the landed
+		 * owners): both signal records report their transfer type, the
+		 * INTERNAL direction and the module; WIRE and REG are concrete
+		 * descriptors mapped to the COMBINATIONAL_NET and
+		 * PROCEDURAL_VARIABLE realizations; and the already-implemented
+		 * pigen_lower_rtl_type memo resolves the 8-bit data type to a
+		 * record in the RTL model. */
+		wire_owner = pigen_signal_get(&sem_e, wire);
+		assert(wire_owner &&
+			wire_owner->transfer_type == PIGEN_TRANSFER_TYPE_WIRE &&
+			wire_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			wire_owner->module.index == module.index);
+		reg_owner = pigen_signal_get(&sem_e, reg);
+		assert(reg_owner &&
+			reg_owner->transfer_type == PIGEN_TRANSFER_TYPE_REG &&
+			reg_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			reg_owner->module.index == module.index);
+		wire_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_WIRE);
+		assert(wire_descriptor && wire_descriptor->is_concrete &&
+			wire_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET);
+		reg_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_REG);
+		assert(reg_descriptor && reg_descriptor->is_concrete &&
+			reg_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE);
+		lowered_t8 = pigen_lower_rtl_type(&lowering_e, t8);
+		assert(!IS_INVALID_ID(lowered_t8));
+		t8_record = pigen_rtl_type_get(&rtl_e, lowered_t8);
+		assert(t8_record);
+
+		/* Case 1: PAYLOAD SHAPE. The declaration lowering reports success
+		 * and the endpoints map covers BOTH signals. The first
+		 * `rc == 0` is this section's first deliberate red: the stub
+		 * returns the -1 unimplemented sentinel. */
+		rc = pigen_lower_rtl_module_declarations(&lowering_e, module);
+		assert(rc == 0); /* Deliberate red (first in this section): the
+		 * stub returns -1 without touching the maps or the RTL model. */
+		assert(lowering_e.lowered_endpoint_count >
+			(wire.index > reg.index ? wire.index : reg.index));
+
+		/* For EACH signal the payload is a resolvable VARIABLE object:
+		 * kind PIGEN_RTL_OBJECT_VARIABLE, type the lowered 8-bit type -
+		 * the SAME record the pigen_lower_rtl_type memo yielded - and
+		 * direction the semantic signal's direction. */
+		wire_endpoints = &lowering_e.lowered_endpoints[wire.index];
+		reg_endpoints = &lowering_e.lowered_endpoints[reg.index];
+		assert(!IS_INVALID_ID(wire_endpoints->payload));
+		assert(!IS_INVALID_ID(reg_endpoints->payload));
+		wire_payload_obj = pigen_rtl_object_get(&rtl_e,
+			wire_endpoints->payload);
+		reg_payload_obj = pigen_rtl_object_get(&rtl_e, reg_endpoints->payload);
+		wire_payload_type = pigen_rtl_type_get(&rtl_e,
+			wire_payload_obj ? wire_payload_obj->type :
+			(pigen_rtl_type_id){PIGEN_INVALID_ID});
+		reg_payload_type = pigen_rtl_type_get(&rtl_e,
+			reg_payload_obj ? reg_payload_obj->type :
+			(pigen_rtl_type_id){PIGEN_INVALID_ID});
+		payload_wire = wire_payload_obj &&
+			wire_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
+			wire_payload_type == t8_record &&
+			wire_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
+		assert(payload_wire); /* Deliberate red: the stub populates nothing. */
+		payload_reg = reg_payload_obj &&
+			reg_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
+			reg_payload_type == t8_record &&
+			reg_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
+		assert(payload_reg); /* Deliberate red: the stub populates nothing. */
+
+		/* The payload object is DISTINCT from any control (it is an
+		 * object; valid and ready are expression ids), and the two
+		 * signals yield two DISTINCT payload objects: an implementation
+		 * that shares one object between the net and the variable is
+		 * caught here. */
+		distinct = wire_endpoints->payload.index !=
+				wire_endpoints->valid.index &&
+			wire_endpoints->payload.index !=
+				wire_endpoints->ready.index &&
+			reg_endpoints->payload.index != reg_endpoints->valid.index &&
+			reg_endpoints->payload.index != reg_endpoints->ready.index &&
+			wire_endpoints->payload.index !=
+				reg_endpoints->payload.index;
+		assert(distinct); /* Deliberate red: the stub populates nothing. */
+
+		pigen_rtl_lowering_free(&lowering_e);
+		pigen_free_rtl_model(&rtl_e);
+		pigen_free_semantic_model(&sem_e);
+		pigen_free_sources(&sources_e);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -1770,5 +1986,6 @@ int main(void)
 	puts("PASS: rtl lowering errors publish no partial records and stay recoverable");
 	puts("PASS: rtl lowering is identity-memoized, stable and deterministic");
 	puts("PASS: boundary declaration endpoints are three input ports with context-dependent controls");
+	puts("PASS: net and variable declarations expose distinct variable payloads of the lowered type");
 	return 0;
 }
