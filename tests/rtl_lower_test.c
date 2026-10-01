@@ -512,6 +512,82 @@ int main(void)
 		assert(re->value == w); /* owner-reported value (7) on the record */
 		assert(re->type.index ==
 			pigen_lower_rtl_type(&lowering, t16).index);
+
+		/* Case 5: an exact-integer constant lowers IDENTICALLY to the bare
+		 * PIGEN_CONST_EXPR_INTEGER constant. This closes the TEST-AUDIT gap:
+		 * every owner-constructable constant kind was pinned except
+		 * PIGEN_CONST_EXPR_EXACT_INTEGER, so its lowering was unenforced. The
+		 * confirmed contract (manager decision): an owner-constructable
+		 * exact-integer constant IS lowerable, and the lowered record must
+		 * publish re->kind == PIGEN_RTL_EXPR_INTEGER, re->value == the
+		 * owner-reported value, and re->type.index == the lowered id of the
+		 * exact-integer data type. Only the returned pigen_rtl_expr record and
+		 * owner-reported facts are asserted - never an imagined internal
+		 * representation - so the implementer cannot shortcut the
+		 * identical-to-bare-integer contract. The exact-integer TYPE's own
+		 * lowering (width derived from the exact value, not the packed width)
+		 * is the impl item's concern; here we pin only that the constant's
+		 * record type is the lowered id of its owner type. */
+		{
+			pigen_integer_id v;
+			pigen_data_type_id t_ex;
+			pigen_const_expr_id cx;
+			pigen_rtl_expr_id exid;
+			const pigen_rtl_expr *rex;
+
+			/* Owner witness: intern the exact value 5, build the exact-integer
+			 * data type carrying it, and intern the exact-integer constant of
+			 * that type. Identity is by (kind, value): even though the value
+			 * equals c5's 5, the distinct kind keeps it at a distinct arena
+			 * index. */
+			v = pigen_integer_intern_u64(&sem, 5);
+			assert(!IS_INVALID_ID(v));
+			t_ex = pigen_data_type_exact_integer(&sem, v);
+			assert(!IS_INVALID_ID(t_ex));
+			cx = pigen_const_expr_intern_exact_integer(&sem, v, t_ex);
+			assert(!IS_INVALID_ID(cx));
+			assert(cx.index != c5.index); /* distinct from INTEGER c5, same 5 */
+
+			/* The exact-integer constant lowers to a valid RTL handle distinct
+			 * from the bare integer constant's handle. Deliberate red: the
+			 * current type+expression+constant impl returns the sentinel for
+			 * EXACT_INTEGER (its packed width is INVALID_ID), so this is the
+			 * section's first exact-integer assert to abort. */
+			exid = pigen_lower_rtl_expression(&lowering, cx);
+			assert(!IS_INVALID_ID(exid)); /* Deliberate red: impl sentinel. */
+			assert(exid.index != eid.index);
+
+			/* The lowered record is an INTEGER carrying the owner-reported
+			 * value and the lowered id of its owner type t_ex. */
+			rex = pigen_rtl_expr_get(&rtl, exid);
+			assert(rex);
+			assert(rex->kind == PIGEN_RTL_EXPR_INTEGER);
+			assert(pigen_const_expr_evaluate_u64(&sem, cx, &w));
+			assert(rex->value == w); /* owner-reported value (5) on the record */
+			assert(rex->type.index ==
+				pigen_lower_rtl_type(&lowering, t_ex).index);
+
+			/* Boundary: a NEGATIVE exact integer is not a u64 constant. Its
+			 * owner value does not evaluate to u64, and its lowering is pinned
+			 * consistently to the sentinel - the one behavior the impl contract
+			 * permits for a non-lowerable (negative) exact integer. */
+			{
+				pigen_integer_id v2;
+				pigen_data_type_id t_ex2;
+				pigen_const_expr_id cx2;
+				pigen_rtl_expr_id exid2;
+
+				v2 = pigen_integer_negate(&sem, v);
+				assert(!IS_INVALID_ID(v2));
+				t_ex2 = pigen_data_type_exact_integer(&sem, v2);
+				assert(!IS_INVALID_ID(t_ex2));
+				cx2 = pigen_const_expr_intern_exact_integer(&sem, v2, t_ex2);
+				assert(!IS_INVALID_ID(cx2));
+				assert(!pigen_const_expr_evaluate_u64(&sem, cx2, &w));
+				exid2 = pigen_lower_rtl_expression(&lowering, cx2);
+				assert(IS_INVALID_ID(exid2)); /* negative: not a u64 constant */
+			}
+		}
 	}
 
 	/* (6) Error rollback: an invalid expression and an unbound signal each
