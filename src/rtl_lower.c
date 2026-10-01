@@ -17,11 +17,21 @@
  * select, concatenation) keeping the owner's resolution/conversion/select
  * kind and child order. Each identity is memoized by its arena index so it
  * lowers exactly once, and a failing identity publishes nothing: the RTL
- * model and both identity memo maps stay exactly as they were. */
+ * model and both identity memo maps stay exactly as they were.
+ *
+ * The declaration half (Task 6 skeleton) fixes only the shape: the
+ * signal-indexed endpoints map grows on demand like the two identity memo
+ * maps, pigen_lower_rtl_module_declarations is the (unimplemented) entry
+ * point for lowering every signal declaration in a module, and the private
+ * realization adapter table below is the dispatch point the implementation
+ * stage will fill. It is indexed by pigen_transfer_realization, never by the
+ * source transfer-type enum, so no source transfer-type enum value is
+ * referenced in this file. */
 #include <stdlib.h>
 #include <string.h>
 
 #include "pigen/rtl_lower.h"
+#include "pigen/transfer_type.h"
 #include "pigen/util.h"
 
 void pigen_rtl_lowering_init(pigen_rtl_lowering *lowering,
@@ -38,6 +48,7 @@ void pigen_rtl_lowering_free(pigen_rtl_lowering *lowering)
 		return;
 	free(lowering->lowered_types);
 	free(lowering->lowered_expressions);
+	free(lowering->lowered_endpoints);
 	*lowering = (pigen_rtl_lowering){0};
 }
 
@@ -234,6 +245,41 @@ static int expr_map_ensure(pigen_rtl_lowering *lowering, size_t needed)
 	return 1;
 }
 
+/* Grow the signal-indexed endpoints map so that slot index < needed is
+ * addressable, keeping every unpopulated slot invalid. Returns 1 on success.
+ * This is the shape the declaration-endpoint implementation will use to
+ * memoize each signal's endpoints by pigen_signal_id.index. */
+static int endpoint_map_ensure(pigen_rtl_lowering *lowering, size_t needed)
+{
+	size_t capacity;
+	pigen_rtl_signal_endpoints *map;
+
+	if (lowering->lowered_endpoint_count >= needed)
+		return 1;
+	capacity = lowering->lowered_endpoint_capacity;
+	if (!capacity)
+		capacity = 8;
+	while (capacity < needed)
+		capacity *= 2;
+	map = pigen_resize(lowering->lowered_endpoints,
+		capacity * sizeof(*map));
+	if (!map)
+		return 0;
+	for (size_t i = lowering->lowered_endpoint_count; i < capacity; i++)
+	{
+		map[i].payload = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+		map[i].valid = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		map[i].ready = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		map[i].input_payload = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+		map[i].input_valid = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+		map[i].input_ready = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	}
+	lowering->lowered_endpoints = map;
+	lowering->lowered_endpoint_capacity = capacity;
+	lowering->lowered_endpoint_count = needed;
+	return 1;
+}
+
 pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 	pigen_const_expr_id expression)
 {
@@ -401,4 +447,46 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	lowering->lowered_expressions[expression.index] = result;
 	return result;
+}
+
+/* Private, file-local adapter table, one entry per valid transfer
+ * realization. The implementation stage fills each entry with the concrete
+ * declaration-endpoint strategy for that realization (boundary -> ports,
+ * net/variable -> constants, slot/pulse/queue/skid -> primitives). This
+ * skeleton fixes only the shape: a tagged entry with a void * payload the
+ * implementation will reinterpret, indexed by pigen_transfer_realization and
+ * never by the source transfer-type enum. */
+struct pigen_realization_endpoint_adapter {
+	pigen_transfer_realization realization;
+	void *strategy;
+};
+
+static const struct pigen_realization_endpoint_adapter
+realization_endpoint_adapters[8] = {
+	[PIGEN_TRANSFER_REALIZATION_BOUNDARY] = {
+		PIGEN_TRANSFER_REALIZATION_BOUNDARY, NULL},
+	[PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET] = {
+		PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET, NULL},
+	[PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE] = {
+		PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE, NULL},
+	[PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT] = {
+		PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT, NULL},
+	[PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER] = {
+		PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER, NULL},
+	[PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE] = {
+		PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE, NULL},
+	[PIGEN_TRANSFER_REALIZATION_SKID_QUEUE] = {
+		PIGEN_TRANSFER_REALIZATION_SKID_QUEUE, NULL},
+};
+
+int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
+	pigen_module_id module)
+{
+	(void)lowering;
+	(void)module;
+	(void)realization_endpoint_adapters;
+	(void)endpoint_map_ensure;
+	/* Task 6 skeleton: shape only. The unimplemented sentinel is returned
+	 * without touching the lowering maps or the RTL model. */
+	return -1;
 }

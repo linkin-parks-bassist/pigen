@@ -135,7 +135,7 @@
     "command": ["make", "rtl-name-test"]
   },
   {
-    "covers": ["src/rtl_lower.c"],
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
     "command": ["make", "rtl-lower-test"]
   },
   {
