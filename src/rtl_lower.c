@@ -103,12 +103,31 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 
 	signedness = pigen_data_type_signedness(sem, type);
 	state_domain = pigen_data_type_state_domain(sem, type);
-	width_expr = pigen_data_type_packed_width(sem, type);
-	if (signedness < PIGEN_SIGN_IMPLICIT || signedness > PIGEN_SIGN_SIGNED ||
-		(state_domain != PIGEN_DATA_TYPE_STATE_TWO &&
-		state_domain != PIGEN_DATA_TYPE_STATE_FOUR) ||
-		!pigen_const_expr_evaluate_u64(sem, width_expr, &width))
-		return (pigen_rtl_type_id){PIGEN_INVALID_ID};
+	if (pigen_data_type_numerical_interpretation(sem, type) ==
+		PIGEN_NUMERICAL_EXACT_INTEGER)
+	{
+		/* An exact-integer type carries no packed width: derive its width
+		 * from the owner's exact value instead of the packed-width query
+		 * (which reports INVALID_ID for this constructor). A non-negative
+		 * value lowers to a valid RTL type; a negative value reports the
+		 * sentinel with no partial record. */
+		pigen_integer_id exact_value =
+			pigen_data_type_exact_value(sem, type);
+		width = pigen_integer_unsigned_width(sem, exact_value);
+		if (signedness < PIGEN_SIGN_IMPLICIT || signedness > PIGEN_SIGN_SIGNED ||
+			(state_domain != PIGEN_DATA_TYPE_STATE_TWO &&
+			state_domain != PIGEN_DATA_TYPE_STATE_FOUR) || !width)
+			return (pigen_rtl_type_id){PIGEN_INVALID_ID};
+	}
+	else
+	{
+		width_expr = pigen_data_type_packed_width(sem, type);
+		if (signedness < PIGEN_SIGN_IMPLICIT || signedness > PIGEN_SIGN_SIGNED ||
+			(state_domain != PIGEN_DATA_TYPE_STATE_TWO &&
+			state_domain != PIGEN_DATA_TYPE_STATE_FOUR) ||
+			!pigen_const_expr_evaluate_u64(sem, width_expr, &width))
+			return (pigen_rtl_type_id){PIGEN_INVALID_ID};
+	}
 
 	dimension_count = pigen_data_type_dimension_count(sem, type);
 	owner_dimensions = pigen_data_type_dimensions(sem, type);
@@ -260,12 +279,25 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 		(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
 	switch (owner->kind) {
 	case PIGEN_CONST_EXPR_INTEGER:
-	case PIGEN_CONST_EXPR_EXACT_INTEGER:
 		/* A literal has no structural children; publish it once the result
 		 * type is in place so any structural child can resolve it. */
 		result = pigen_rtl_expr_add_integer(rtl, result_type,
 			owner->as.integer, origin);
 		break;
+	case PIGEN_CONST_EXPR_EXACT_INTEGER:
+	{
+		/* An owner-constructable exact-integer constant lowers IDENTICALLY to
+		 * the bare integer constant: one PIGEN_RTL_EXPR_INTEGER carrying the
+		 * owner-reported non-negative value and the lowered exact-integer type.
+		 * The result type (lowered above) already gates a negative value to the
+		 * sentinel, so here the value always evaluates to a u64. */
+		uint64_t exact_value;
+		if (!pigen_const_expr_evaluate_u64(sem, expression, &exact_value))
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		result = pigen_rtl_expr_add_integer(rtl, result_type, exact_value,
+			origin);
+		break;
+	}
 	case PIGEN_CONST_EXPR_BINARY:
 	{
 		const pigen_binary_operation *op = &owner->as.binary.operation;
