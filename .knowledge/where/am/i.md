@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-01T18:18:48+10:00"
+revised_at: "2026-10-01T18:30:25+10:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -27,7 +27,7 @@ Elastic RTL Task 2 is implemented and landed: interned types retain ordered conc
 
 The local tree is the sole project documentation authority; obsolete history is excluded. The immutable Kestrel reference remains applicable.
 
-Current verification: all eleven structured C foundation targets pass. Full make verify fails at make pipeline-test: Icarus Verilog 12.0 cannot size declarations from `$bits(<signal>)` (segfault on the emitted form, silent z/x on every alternative), an Icarus defect isolated in why/does/pipeline/verification/currently/fail.md; the direction is to move hardware simulation to Verilator. No full-suite success is claimed.
+Current verification: all eleven structured C foundation targets pass. Icarus Verilog 13.0 is installed at ~/.local/bin (the Ubuntu 12.0 package mis-elaborates `$bits(<signal>)` widths; why/does/pipeline/verification/currently/fail.md), and the pipeline simulation targets pass. Full make verify now stops at tests/smoke.sh because verilator is not installed. No full-suite success is claimed.
 
 The containing personal-project folder was renamed to `Projects`. Git identity and existing local work were preserved. Saved agent directories and snapshot dependencies were migrated; local proofs and Git whitespace checks pass. This rename did not modify compiler implementation or requalify the known pipeline crash.
 

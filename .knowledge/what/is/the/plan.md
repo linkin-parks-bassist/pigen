@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-01T18:15:11+10:00"
+revised_at: "2026-10-01T18:30:26+10:00"
 checked_at: "2026-09-30T20:31:54+10:00"
 ---
 
@@ -15,3 +15,5 @@ Remaining approved work, in order: Task 6 realization-owned declarations; Task 7
 Lowering consumes validated identities and backend-neutral realization properties. RTL contains resolved hardware only; opaque SV occupies ordered spans copied at terminal emission. Multi-arena builders restore all counts on failure; semantic owners decide widths, types and conversions.
 
 After the RTL slice, complete retained core, pipeline, FSM, child-instance and fabric migration and compatibility gates at what/are/the/remaining/architecture/migration/gates.md. Production waits until every retained subsystem uses one structured path and corresponding textual machinery is deleted in the same change. No validator bridge, fallback, second dialect or per-file choice. Use ordinary branches and worktrees where they help isolate or parallelize narrow checked work; no linear-history or direct-master workflow is required. Maintain current state and next in the tree.
+
+Verification toolchain: Icarus 13.0 is installed and the pipeline simulation targets pass. Remaining: David installs verilator (`sudo apt install verilator`; required by tests/smoke.sh and twelve Makefile targets); treat its lint findings on generated SV as possible pigen output defects rather than silencing them; then make verify fully green.

@@ -1,13 +1,12 @@
 ---
 status: green
-revised_at: "2026-10-01T16:38:12+10:00"
+revised_at: "2026-10-01T18:30:25+10:00"
 ---
 
 Current, evidence-backed inventory of what is broken, failing, incomplete, or deviating from spec in Pigen. Audited in place 2026-10-01 at master `49ab665`, re-checked after the elastic-rtl-task-5-impl-error-memo landing and the elastic-rtl-task-5-impl-exact-integer landing; every item verified against the live tree (not inferred from future contracts). Green foundation: all eleven structured C targets, fabric smoke, core-language, validate, signed-widen, ready-break, pipeline-syntax PASS. `make rtl-lower-test` is fully green (all 7 PASS lines, clean under -Werror) since the Task 5 type/expression/constant + error-rollback + memo-stability + exact-integer lowering landed on `src/rtl_lower.c`.
 
 ## Failing tests (run on master)
 
-1. **Icarus Verilog 12.0 segfault (exit 139)** compiling pipeline fixtures. `make pipeline-test`, `pipeline-scope-test`, `biquad-bank-test` all crash at the iverilog step. Root cause unresolved; compiler sources and fixture inputs unchanged from the tested baseline. This is the failure that stops `make test` and `make verify`. Evidence: iverilog 12.0 stable; `make pipeline-test` → `Segmentation fault (core dumped)` / `Error 139` at Makefile:78. Owner: why/does/pipeline/verification/currently/fail.md.
 
 2. **Co-slice/slice "Pigen transfer aggregate width mismatch" `$fatal` at Time 0** — a genuine compiler defect, not the iverilog crash. The last destination of a multi-destination co-sliced transfer is assigned the FULL aggregate instead of its slice: `tests/coslice.pigen` `{left,right,state,state_delay} <= {source+1,source+2,peek(source),state}` lowers to `state_delay <= ({source+8'd1,source+8'd2,source,state})` (all 32 bits into an 8-bit dest) at generated SV line 139, and the emitted width guard `pigen_emit_width_checks` (src/assignments.c:757-772) fires `Pigen transfer aggregate width mismatch` at Time 0. Affects `coslice-test`, `slicing-test`, `signal-syntax-test`, `biquad-waveform`. Evidence: generated `/tmp/audit-coslice.sv` line 117 guard + line 139 full-width store; `make coslice-test`/`slicing-test`/`signal-syntax-test` each abort with the FATAL at Time 0. Not recorded in any current leaf (the pipeline-fail leaf names only the segfault). Deviates from spec "co-slices preserve packed bit-stream order" and the co-slice/concat law (how/to/split/or/join/packets.md).
 
