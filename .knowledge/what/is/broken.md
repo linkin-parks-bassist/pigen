@@ -1,29 +1,14 @@
 ---
 status: green
-revised_at: "2026-10-02T02:10:08+10:00"
+revised_at: "2026-10-02T05:15:49+10:00"
 ---
 
-Current, evidence-backed inventory of what is broken, failing, incomplete, or deviating from spec in Pigen. Audited in place 2026-10-01 at master `49ab665`, re-checked after the elastic-rtl-task-5-impl-error-memo landing, the elastic-rtl-task-5-impl-exact-integer landing, and the elastic-rtl-task-6-skeleton landing; every item verified against the live tree (not inferred from future contracts). Green foundation: all eleven structured C targets, fabric smoke, core-language, validate, signed-widen, ready-break, pipeline-syntax PASS. `make rtl-lower-test` is fully green (all 7 PASS lines, clean under -Werror) since the Task 5 type/expression/constant + error-rollback + memo-stability + exact-integer lowering landed on `src/rtl_lower.c`.
+The structured frontend and elastic RTL work remain incomplete. Passing focused tests do not establish full compiler acceptance.
 
-## Failing tests (run on master)
-
-
-2. **Co-slice/slice "Pigen transfer aggregate width mismatch" `$fatal` at Time 0** — a genuine compiler defect, not the iverilog crash. The last destination of a multi-destination co-sliced transfer is assigned the FULL aggregate instead of its slice: `tests/coslice.pigen` `{left,right,state,state_delay} <= {source+1,source+2,peek(source),state}` lowers to `state_delay <= ({source+8'd1,source+8'd2,source,state})` (all 32 bits into an 8-bit dest) at generated SV line 139, and the emitted width guard `pigen_emit_width_checks` (src/assignments.c:757-772) fires `Pigen transfer aggregate width mismatch` at Time 0. Affects `coslice-test`, `slicing-test`, `signal-syntax-test`, `biquad-waveform`. Evidence: generated `/tmp/audit-coslice.sv` line 117 guard + line 139 full-width store; `make coslice-test`/`slicing-test`/`signal-syntax-test` each abort with the FATAL at Time 0. Not recorded in any current leaf (the pipeline-fail leaf names only the segfault). Deviates from spec "co-slices preserve packed bit-stream order" and the co-slice/concat law (how/to/split/or/join/packets.md).
-
-## Environment gap (not a compiler defect)
-
-3. **verilator is not installed** on this host. Every verilator-based target fails `Error 127`: `waveform`, `compiler-waveform`, `mac-waveform`, `join-waveform`, `fifo-waveform`, `skid-waveform`, `port-waveform`, `bram-waveform`, `guarded-waveform`, `output-waveform`, `clear-test`, `fsm-test`. `command -v verilator` → not installed; iverilog/vvp are present. These cannot be evaluated for pass/fail here.
-
-## Unimplemented (approved)
-
-4. **Elastic RTL Task 6 declaration lowering + Tasks 7-12.** Task 6's SKELETON is landed (shape only: pigen_rtl_signal_endpoints, the signal-indexed lowered_endpoints map, the pigen_lower_rtl_module_declarations stub returning -1, and the private realization-indexed adapter table); its test-contract (adapter entry shape + per-realization endpoint population) and implementation are NOT done. Remaining: whole-unit ready graph (7), atomic transfers sharing one fire (8), exact ordered output (9), terminal SV emission (10), quarantined composition/simulation (11), verification and accurate status (12). Evidence: what/is/the/plan.md "Remaining approved work"; task leaves what/is/elastic/rtl/task/six..twelve.md.
-
-5. **Structured frontend unlinked from production `./pigen`.** The Makefile `pigen` target compiles only the textual prototype (src/pigen.c blocks/assignments/declarations/procedural/transfer/pipeline/fsm/lexer/util); it excludes the structured syntax/resolution/semantic modules (src/syntax.c, type_syntax.c, expression*.c, resolve*.c, semantic.c, rtl*.c). Evidence: does/the/structured/frontend/run/in/production.md; Makefile:11-12.
-
-6. **Retained-core, pipeline, FSM, child-instance and fabric migration not done.** The textual prototype machinery (rewritten text, rescans, generated-name lookup, marker comments, feature-local models) must be deleted only after every retained subsystem uses one structured path. Evidence: what/are/the/remaining/architecture/migration/gates.md.
-
-7. **Frontend gaps:** parameter/type/aggregate/array/expression forms required by accepted Pigen constructs, and macro concatenation/stringification/required arguments, are incomplete. Evidence: what/are/the/remaining/architecture/migration/gates.md.
-
-## Unmet acceptance gate
-
-8. **`make verify` is not clean.** Required gate "clean make verify with warnings-as-errors" is unmet: it stops at the Icarus segfault (#1) and would additionally surface #2 (width mismatch) and #3 (missing verilator). Evidence: what/are/the/remaining/architecture/migration/gates.md; this run.
+- **Task 5 rollback coverage and publication ordering.** src/rtl_lower.c lowers a result type before rejecting an unsupported SYMBOL, and can publish recursive children before later failure; memo allocation follows record interning. The seven-section rtl-lower-test suite passes but does not establish universal atomic rollback. Section (6) uses an already-lowered t16 and samples its arena/map “before” counts after the failed call. Verify a fresh-type unbound PARAMETER with genuine pre-call snapshots, then recursive-child and allocation failures. The exact owner and next checks are in what/is/elastic/rtl/task/five.md.
+- **Co-slice aggregate width mismatch.** The retained diagnostic shows the last destination of a multi-destination co-sliced transfer receiving the full aggregate instead of its slice: tests/coslice.pigen's four 8-bit destinations produce a 32-bit assignment to state_delay and a Time 0 width-check fatal. coslice-test, slicing-test, signal-syntax-test and biquad-waveform are affected in that diagnostic. This is a compiler defect against the packed bit-stream order contract; no fresh full-suite rerun is claimed here.
+- **Missing Verilator.** command -v verilator finds no executable on the current host. Verilator-based waveform, clear and FSM targets cannot be qualified here. Icarus 13.0 is available and the current pipeline verification owner reports passing pipeline simulation; the former Icarus 12.0 failure is not a current explanation for the whole-suite gate.
+- **Task 6 declaration lowering and Tasks 7–12.** Task 6 has the endpoint-map and realization-adapter skeleton, but pigen_lower_rtl_module_declarations still returns -1. Declaration implementations, whole-unit ready graph, atomic fire, ordered output, SV emission, quarantined composition and complete verification remain open; see the task owners and plan.
+- **Structured frontend is unlinked from production ./pigen.** The production Makefile target still compiles the textual prototype rather than the structured syntax, resolution, semantic and RTL path. See does/the/structured/frontend/run/in/production.md.
+- **Retained-subsystem migration and frontend gaps.** Core, pipeline, FSM, child-instance and fabric migration remains subject to what/are/the/remaining/architecture/migration/gates.md. Accepted parameter/type/aggregate/array/expression forms and macro concatenation/stringification/required arguments remain incomplete. Delete textual machinery only when the corresponding retained subsystem uses the structured path.
+- **Full make verify acceptance is unmet.** Missing tooling and unresolved compiler behavior prevent a full-success claim. Focused green RTL and foundation tests do not substitute for that gate.
