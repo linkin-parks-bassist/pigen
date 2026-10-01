@@ -1,9 +1,9 @@
 ---
 status: green
-revised_at: "2026-10-01T08:53:50+10:00"
+revised_at: "2026-10-01T15:20:25+10:00"
 ---
 
-Current, evidence-backed inventory of what is broken, failing, incomplete, or deviating from spec in Pigen. Audited in place 2026-10-01 at master `49ab665`; every item verified against the live tree (not inferred from future contracts). Green foundation: all eleven structured C targets, fabric smoke, core-language, validate, signed-widen, ready-break, pipeline-syntax PASS.
+Current, evidence-backed inventory of what is broken, failing, incomplete, or deviating from spec in Pigen. Audited in place 2026-10-01 at master `49ab665`, re-checked after the elastic-rtl-task-5-impl-error-memo landing; every item verified against the live tree (not inferred from future contracts). Green foundation: all eleven structured C targets, fabric smoke, core-language, validate, signed-widen, ready-break, pipeline-syntax PASS. `make rtl-lower-test` is fully green (all 7 PASS lines, clean under -Werror) since the Task 5 type/expression/constant + error-rollback + memo-stability lowering landed on `src/rtl_lower.c`.
 
 ## Failing tests (run on master)
 
@@ -17,7 +17,7 @@ Current, evidence-backed inventory of what is broken, failing, incomplete, or de
 
 ## In-flight (expected red, not defects)
 
-4. **Task 5 implementation staged red.** `make rtl-lower-test` aborts at the first deliberate red (tests/rtl_lower_test.c:112) against master's stub src/rtl_lower.c. It is a registered target (tests/contracts.json) and is red by design until the impl chain lands. Owner: what/is/elastic/rtl/task/five.md.
+4. **Task 5 EXACT_INTEGER constant not yet lowerable.** `pigen_lower_rtl_expression` returns the sentinel for `PIGEN_CONST_EXPR_EXACT_INTEGER` today: the type/expression half resolves the constant's data type via `pigen_data_type_packed_width` (src/data_type.c:2001-2002 special-cases `PIGEN_DATA_TYPE_EXACT_INTEGER` to `PIGEN_INVALID_ID`), so an exact-integer constant lowers to nothing. The frozen test `tests/rtl_lower_test.c` does not yet exercise an exact integer (zero `pigen_const_expr_intern_exact_integer` calls), so this is not a currently-failing test. It is queued: `elastic-rtl-task-5-test-contract-exact-integer` (extends section 5 in place with a labeled exact-integer case, staged red) and `elastic-rtl-task-5-impl-exact-integer` (routes EXACT_INTEGER through the integer path with the exact-integer type lowered via its exact value, making it green). The confirmed contract: an owner-constructable exact integer lowers identically to a bare `PIGEN_CONST_EXPR_INTEGER` (kind `PIGEN_RTL_EXPR_INTEGER`, owner low word, lowered exact-integer type). Owner: what/is/elastic/rtl/task/five.md.
 
 ## Unimplemented (approved, not started)
 
