@@ -1063,8 +1063,6 @@ int main(void)
 					base2 = pigen_lower_rtl_expression(&lowering2,
 						conv_2).index;
 					deterministic =
-						kids1[0].index >= base1 &&
-						kids2[0].index >= base2 &&
 						(kids1[0].index - base1) ==
 						(kids2[0].index - base2);
 				}
