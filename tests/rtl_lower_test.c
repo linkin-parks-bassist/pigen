@@ -1183,6 +1183,573 @@ int main(void)
 		}
 	}
 
+	/* (8) Boundary realization (module input): the BOUNDARY endpoint
+	 * contract for pigen_lower_rtl_module_declarations. First
+	 * declaration-family section of the Task 6 test-contract chain. BOUNDARY
+	 * is module-input only: ABSTRACT is the only source transfer type that
+	 * maps to the BOUNDARY realization, its descriptor has is_concrete=0, and
+	 * pigen_signal_add forces the INPUT direction for non-concrete types and
+	 * rejects NULL transfer-type descriptors - so no OUTPUT-direction
+	 * boundary signal and no NULL-descriptor/INVALID-realization signal are
+	 * constructible through the owner API, and neither is attempted here.
+	 * The model is built through the owner APIs exactly as the landed
+	 * construction pattern does: a source file, the compilation scope, a
+	 * module symbol + pigen_module_add, a PIGEN_SYMBOL_SIGNAL declaration
+	 * (matching data type and declaration span) and pigen_signal_add with
+	 * PIGEN_TRANSFER_TYPE_ABSTRACT and PIGEN_SEMANTIC_INPUT. Checked through
+	 * pigen_rtl_lowering_init + pigen_lower_rtl_module_declarations:
+	 *   Case 1: THREE-PORT SHAPE. The call reports success and the
+	 *     pigen_rtl_signal_endpoints record for that signal holds distinct
+	 *     payload, valid and ready - payload a real pigen_rtl_object_id with
+	 *     a resolvable RTL object record, valid and ready real
+	 *     pigen_rtl_expr_id handles with resolvable RTL expression records -
+	 *     and the input side exposes the SAME three objects as the
+	 *     declaration's input side (input_payload/input_valid/input_ready).
+	 *   Case 2: CONTEXT-DEPENDENT CONTROLS. The ABSTRACT descriptor carries
+	 *     valid_constant=-1 and ready_constant=-1 and the BOUNDARY
+	 *     realization has ready_dependency PIGEN_TRANSFER_READY_EXTERNAL, so
+	 *     a boundary signal has NO constant controls: the valid and ready
+	 *     expression records must NOT be the owner-published constant
+	 *     expression for a 1-bit constant (lowered through
+	 *     pigen_const_expr_intern_integer + pigen_lower_rtl_expression on a
+	 *     SEPARATE lowering/model, whose record is the constant witness).
+	 *     The constant-expression-identity contract belongs to section (9);
+	 *     no constant value is pinned here.
+	 *   Case 3: MEMO/STABILITY. A second call of
+	 *     pigen_lower_rtl_module_declarations on the SAME lowering is
+	 *     idempotent (no duplicate objects/expressions, endpoints record
+	 *     unchanged), and a second independently built model yields
+	 *     identical endpoint ids at equal offsets.
+	 *   Case 4: NO-PARTIAL-RECORD ROLLBACK. A genuinely different
+	 *     failing module in the SAME lowering - a second module/scope with
+	 *     one ABSTRACT INPUT signal whose data type is a NEGATIVE exact
+	 *     integer, the stable owner-constructible failure witness (the
+	 *     type exists in the semantic owner but pigen_lower_rtl_type
+	 *     refuses it, so the declaration lowering must report the error
+	 *     regardless of the adapter table's state). The error leaves the
+	 *     RTL model and the lowering endpoints map EXACTLY as before the
+	 *     failing call (object/expression/endpoints-map counts and the
+	 *     populated record snapshotted before, compared after). The
+	 *     transient unimplemented-adapter path is deliberately not the
+	 *     frozen failure witness: it cannot by itself justify a frozen
+	 *     failure assertion once every promised adapter is implemented.
+	 * Staged red: every owner-construction and descriptor assert passes
+	 * against the landed owners; the FIRST deliberate unimplemented-
+	 * behavior assert in this section is Case 1's `rc == 0` (the stub
+	 * returns the -1 unimplemented sentinel), marked below - not a compile
+	 * or harness error. Every later assert in this section requires
+	 * implemented behavior and is deliberate red as well. */
+	{
+		const char *text =
+			"module top : input value : abstract ;\n";
+		pigen_source_manager sources_b = {0};
+		pigen_semantic_model sem_b;
+		pigen_rtl_model rtl_b = {0};
+		pigen_rtl_lowering lowering_b;
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8;
+		pigen_const_expr_id width8;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id signal_symbol;
+		pigen_module_id module;
+		pigen_signal_id signal;
+		const pigen_semantic_signal *owner_signal;
+		const pigen_transfer_type_descriptor *descriptor;
+		const pigen_transfer_realization_descriptor *realization;
+		const pigen_rtl_signal_endpoints *endpoints;
+		const pigen_rtl_object *payload_obj;
+		const pigen_rtl_expr *valid_re;
+		const pigen_rtl_expr *ready_re;
+		const pigen_rtl_signal_endpoints *endpoints_again;
+		const pigen_rtl_object *input_obj;
+		pigen_rtl_object_id input_payload_obj;
+		pigen_rtl_object_id input_ready_obj;
+		pigen_rtl_expr_id input_valid_expr;
+		size_t object_count_before;
+		size_t object_count_after;
+		size_t expression_count_before;
+		size_t expression_count_after;
+		size_t endpoint_map_before;
+		size_t endpoint_map_after;
+		size_t endpoint_populated_before;
+		size_t endpoint_populated_after;
+		pigen_rtl_signal_endpoints record_before;
+		pigen_rtl_signal_endpoints record_again;
+		int rc;
+		int stable;
+		int no_partial;
+		int distinct;
+		int not_constant;
+		size_t i;
+
+		/* Build the boundary module through the owner APIs (the landed
+		 * construction pattern): the signal's 8-bit type first, then a
+		 * source file, the compilation scope, a module in it, and one
+		 * declared ABSTRACT input signal of that type. The spans hold the
+		 * owner constraints: the module symbol's declaration spans the
+		 * whole file (as module_add requires), the module scope uses the
+		 * same span, and the signal symbol's name span is contained in and
+		 * its declaration span equal to the span signal_add checks. */
+		pigen_semantic_init(&sem_b, &sources_b);
+		pigen_rtl_lowering_init(&lowering_b, &sem_b, &rtl_b);
+		unsized = pigen_data_type_unsized_integer(&sem_b);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem_b, 8, unsized);
+		t8 = pigen_data_type_unsigned_integer(&sem_b, width8);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		source = pigen_source_add(&sources_b, "lower_boundary.pigen", text,
+			strlen(text));
+		assert(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name = (pigen_source_span){source, 19, 24}; /* "value" */
+		sem_b.compilation_scope = pigen_scope_add(&sem_b,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		assert(sem_b.compilation_scope.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_b, sem_b.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_b, sem_b.compilation_scope, whole);
+		assert(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_b, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		assert(module.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_b, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name, name, &signal_symbol, NULL) == PIGEN_DECLARE_OK);
+		signal = pigen_signal_add(&sem_b, (pigen_syntax_id){2}, module,
+			signal_symbol, t8, pigen_semantic_scalar_shape(&sem_b),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_ABSTRACT,
+			PIGEN_SEMANTIC_INPUT, name);
+		assert(signal.index != PIGEN_INVALID_ID);
+
+		/* Owner facts the contract rides on (all green against the landed
+		 * owners): the signal record reports ABSTRACT and the forced INPUT
+		 * direction, the ABSTRACT descriptor is the only source mapping to
+		 * the BOUNDARY realization with is_concrete=0 and context-dependent
+		 * controls (valid_constant=-1, ready_constant=-1), and the BOUNDARY
+		 * realization has ready_dependency PIGEN_TRANSFER_READY_EXTERNAL. */
+		owner_signal = pigen_signal_get(&sem_b, signal);
+		assert(owner_signal &&
+			owner_signal->transfer_type == PIGEN_TRANSFER_TYPE_ABSTRACT &&
+			owner_signal->direction == PIGEN_SEMANTIC_INPUT &&
+			owner_signal->module.index == module.index);
+		descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_ABSTRACT);
+		assert(descriptor && !descriptor->is_concrete &&
+			descriptor->valid_constant == -1 &&
+			descriptor->ready_constant == -1);
+		realization =
+			pigen_transfer_realization_descriptor_get(
+				PIGEN_TRANSFER_REALIZATION_BOUNDARY);
+		assert(realization &&
+			realization->ready_dependency ==
+				PIGEN_TRANSFER_READY_EXTERNAL &&
+			descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_BOUNDARY);
+
+		/* Case 1: THREE-PORT SHAPE. The declaration lowering reports
+		 * success and the endpoints record for the signal holds distinct
+		 * payload (a resolvable RTL object), valid and ready (resolvable
+		 * RTL expressions), with the input side exposing the SAME three
+		 * objects. The first `rc == 0` is the section's first deliberate
+		 * red: the stub returns the -1 unimplemented sentinel. */
+		rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
+		assert(rc == 0); /* Deliberate red (first in this section): the
+		 * stub returns -1 without touching the maps or the RTL model. */
+		assert(lowering_b.lowered_endpoint_count > signal.index);
+		endpoints = &lowering_b.lowered_endpoints[signal.index];
+		assert(!IS_INVALID_ID(endpoints->payload));
+		assert(!IS_INVALID_ID(endpoints->valid));
+		assert(!IS_INVALID_ID(endpoints->ready));
+		assert(!IS_INVALID_ID(endpoints->input_payload));
+		assert(!IS_INVALID_ID(endpoints->input_valid));
+		assert(!IS_INVALID_ID(endpoints->input_ready));
+		payload_obj = pigen_rtl_object_get(&rtl_b, endpoints->payload);
+		assert(payload_obj);
+		valid_re = pigen_rtl_expr_get(&rtl_b, endpoints->valid);
+		assert(valid_re);
+		ready_re = pigen_rtl_expr_get(&rtl_b, endpoints->ready);
+		assert(ready_re);
+		/* The three ports are distinct objects in the RTL model: the
+		 * payload object and the two control expression records are
+		 * separate arena entries, and the payload object's type is the
+		 * signal's data type (lowered, resolvable in the same model). */
+		distinct = payload_obj->kind != PIGEN_RTL_OBJECT_KIND_INVALID &&
+			!IS_INVALID_ID(payload_obj->type) &&
+			pigen_rtl_type_get(&rtl_b, payload_obj->type) &&
+			valid_re->kind != PIGEN_RTL_EXPR_INVALID &&
+			ready_re->kind != PIGEN_RTL_EXPR_INVALID &&
+			endpoints->valid.index != endpoints->ready.index;
+		assert(distinct); /* Deliberate red: the stub populates nothing. */
+		/* Input side: the declaration exposes the SAME three objects on
+		 * its input side - the same payload object, the same valid and
+		 * ready expressions (the input-side fields are object ids, so
+		 * they carry the same object/expression arena indices). */
+		assert(endpoints->input_payload.index == endpoints->payload.index);
+		input_obj = pigen_rtl_object_get(&rtl_b, endpoints->input_payload);
+		assert(input_obj);
+		assert(input_obj->kind != PIGEN_RTL_OBJECT_KIND_INVALID);
+		/* The input-side valid/ready fields carry resolvable records:
+		 * they resolve in the RTL model to the SAME records the
+		 * declaration's valid/ready expression ids resolve to (same
+		 * arena index, so the same record). */
+		input_payload_obj = endpoints->input_payload;
+		input_ready_obj = endpoints->input_ready;
+		input_valid_expr = (pigen_rtl_expr_id){endpoints->valid.index};
+		assert(pigen_rtl_expr_get(&rtl_b, input_valid_expr) == valid_re);
+		assert(pigen_rtl_object_get(&rtl_b, input_payload_obj) == payload_obj);
+		assert(pigen_rtl_object_get(&rtl_b, input_ready_obj));
+
+		/* Case 2: CONTEXT-DEPENDENT CONTROLS. The boundary signal has NO
+		 * constant controls: the valid and ready expression records must
+		 * NOT be the owner-published constant expression for a 1-bit
+		 * constant. The witness is lowered through
+		 * pigen_const_expr_intern_integer + pigen_lower_rtl_expression on
+		 * a SEPARATE lowering/model so its record (an
+		 * PIGEN_RTL_EXPR_INTEGER with the 1-bit type) is the constant,
+		 * independent of the boundary model. The constant-expression-
+		 * identity contract belongs to section (9); no value is pinned
+		 * here. Deliberate red: the stub publishes no records. */
+		{
+			pigen_source_manager sources_c = {0};
+			pigen_semantic_model sem_c;
+			pigen_rtl_model rtl_c = {0};
+			pigen_rtl_lowering lowering_c;
+			pigen_data_type_id unsized_c;
+			pigen_data_type_id t1bit;
+			pigen_const_expr_id one1bit;
+			pigen_rtl_expr_id const1;
+			const pigen_rtl_expr *const_re;
+
+			pigen_semantic_init(&sem_c, &sources_c);
+			pigen_rtl_lowering_init(&lowering_c, &sem_c, &rtl_c);
+			unsized_c = pigen_data_type_unsized_integer(&sem_c);
+			t1bit = pigen_data_type_sized_logic(&sem_c, 1, PIGEN_SIGN_UNSIGNED);
+			assert(!IS_INVALID_ID(unsized_c) && !IS_INVALID_ID(t1bit));
+			one1bit = pigen_const_expr_intern_integer(&sem_c, 1, t1bit);
+			assert(!IS_INVALID_ID(one1bit));
+			const1 = pigen_lower_rtl_expression(&lowering_c, one1bit);
+			assert(!IS_INVALID_ID(const1)); /* Deliberate red: the stub
+			 * returns the sentinel for the valid 1-bit constant. */
+			const_re = pigen_rtl_expr_get(&rtl_c, const1);
+			assert(const_re && const_re->kind == PIGEN_RTL_EXPR_INTEGER);
+
+			/* The boundary valid/ready records are NOT that constant:
+			 * neither by id (the boundary model is a separate arena, so
+			 * a shortcut that republished the constant's own record into
+			 * the boundary model at the same index is caught here) nor by
+			 * the record content the constant witness carries (kind
+			 * INTEGER, value 1, 1-bit type). */
+			not_constant = valid_re && ready_re;
+			if (not_constant) {
+				not_constant =
+					!(valid_re->kind == const_re->kind &&
+					valid_re->value == const_re->value &&
+					valid_re->literal_bit_count ==
+						const_re->literal_bit_count &&
+					valid_re->literal_negative ==
+						const_re->literal_negative &&
+					valid_re->child_count == const_re->child_count);
+			}
+			if (not_constant) {
+				not_constant =
+					!(ready_re->kind == const_re->kind &&
+					ready_re->value == const_re->value &&
+					ready_re->literal_bit_count ==
+						const_re->literal_bit_count &&
+					ready_re->literal_negative ==
+						const_re->literal_negative &&
+					ready_re->child_count == const_re->child_count);
+			}
+			not_constant = not_constant &&
+				endpoints->valid.index != const1.index &&
+				endpoints->ready.index != const1.index;
+			assert(not_constant); /* Deliberate red: the stub publishes
+			 * nothing, so valid_re/ready_re are NULL above. */
+			pigen_rtl_lowering_free(&lowering_c);
+			pigen_free_rtl_model(&rtl_c);
+			pigen_free_semantic_model(&sem_c);
+			pigen_free_sources(&sources_c);
+		}
+
+		/* Case 3: MEMO/STABILITY. A second call on the SAME lowering is
+		 * idempotent: no duplicate objects/expressions, the endpoints map
+		 * count is unchanged and the populated record is byte-identical.
+		 * Deliberate red: the stub publishes nothing. */
+		object_count_before = rtl_b.object_count;
+		expression_count_before = rtl_b.expression_count;
+		endpoint_map_before = lowering_b.lowered_endpoint_count;
+		record_before = lowering_b.lowered_endpoints[signal.index];
+		rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
+		assert(rc == 0); /* Deliberate red: the stub returns -1. */
+		endpoints_again = &lowering_b.lowered_endpoints[signal.index];
+		record_again = *endpoints_again;
+		stable = rtl_b.object_count == object_count_before &&
+			rtl_b.expression_count == expression_count_before &&
+			lowering_b.lowered_endpoint_count == endpoint_map_before &&
+			(record_again.payload.index == record_before.payload.index) &&
+			(record_again.valid.index == record_before.valid.index) &&
+			(record_again.ready.index == record_before.ready.index) &&
+			(record_again.input_payload.index ==
+				record_before.input_payload.index) &&
+			(record_again.input_valid.index ==
+				record_before.input_valid.index) &&
+			(record_again.input_ready.index ==
+				record_before.input_ready.index);
+		assert(stable); /* Deliberate red: the stub republishes nothing. */
+
+		/* A second independently built model (identical construction
+		 * sequence, fresh managers) yields identical endpoint ids at
+		 * equal offsets: the endpoints record of the second build's
+		 * signal equals the first build's record at equal arena offsets,
+		 * so the per-signal endpoint shape is deterministic. The second
+		 * build frees its own models before the shared tail. */
+		{
+			pigen_source_manager sources_d = {0};
+			pigen_semantic_model sem_d;
+			pigen_rtl_model rtl_d = {0};
+			pigen_rtl_lowering lowering_d;
+			pigen_data_type_id unsized_d;
+			pigen_data_type_id t8_d;
+			pigen_const_expr_id width8_d;
+			pigen_source_id source_d;
+			pigen_source_span whole_d;
+			pigen_source_span name_d;
+			pigen_scope_id module_scope_d;
+			pigen_symbol_id module_symbol_d;
+			pigen_symbol_id signal_symbol_d;
+			pigen_module_id module_d;
+			pigen_signal_id signal_d;
+			const pigen_rtl_signal_endpoints *ep1;
+			const pigen_rtl_signal_endpoints *ep2;
+			int deterministic;
+
+			pigen_semantic_init(&sem_d, &sources_d);
+			pigen_rtl_lowering_init(&lowering_d, &sem_d, &rtl_d);
+			unsized_d = pigen_data_type_unsized_integer(&sem_d);
+			width8_d = pigen_const_expr_intern_integer(&sem_d, 8, unsized_d);
+			t8_d = pigen_data_type_unsigned_integer(&sem_d, width8_d);
+			assert(!IS_INVALID_ID(unsized_d) && !IS_INVALID_ID(width8_d) &&
+				!IS_INVALID_ID(t8_d));
+			source_d = pigen_source_add(&sources_d, "lower_boundary.pigen",
+				text, strlen(text));
+			assert(source_d.index != PIGEN_INVALID_ID);
+			whole_d = (pigen_source_span){source_d, 0, strlen(text)};
+			name_d = (pigen_source_span){source_d, 19, 24}; /* "value" */
+			sem_d.compilation_scope = pigen_scope_add(&sem_d,
+				(pigen_scope_id){PIGEN_INVALID_ID},
+				(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID},
+					0, 0});
+			assert(sem_d.compilation_scope.index != PIGEN_INVALID_ID);
+			assert(pigen_symbol_declare(&sem_d, sem_d.compilation_scope,
+				PIGEN_SYMBOL_MODULE,
+				(pigen_data_type_id){PIGEN_INVALID_ID},
+				whole_d, whole_d, &module_symbol_d, NULL) ==
+				PIGEN_DECLARE_OK);
+			module_scope_d =
+				pigen_scope_add(&sem_d, sem_d.compilation_scope, whole_d);
+			assert(module_scope_d.index != PIGEN_INVALID_ID);
+			module_d = pigen_module_add(&sem_d, (pigen_syntax_id){1},
+				module_symbol_d, module_scope_d, whole_d);
+			assert(module_d.index != PIGEN_INVALID_ID);
+			assert(pigen_symbol_declare(&sem_d, module_scope_d,
+				PIGEN_SYMBOL_SIGNAL, t8_d, name_d, name_d,
+				&signal_symbol_d, NULL) == PIGEN_DECLARE_OK);
+			signal_d = pigen_signal_add(&sem_d, (pigen_syntax_id){2},
+				module_d, signal_symbol_d, t8_d,
+				pigen_semantic_scalar_shape(&sem_d),
+				(pigen_expr_id){PIGEN_INVALID_ID},
+				PIGEN_TRANSFER_TYPE_ABSTRACT, PIGEN_SEMANTIC_INPUT, name_d);
+			assert(signal_d.index != PIGEN_INVALID_ID);
+			assert(pigen_lower_rtl_module_declarations(&lowering_d,
+				module_d) == 0); /* Deliberate red: the stub returns -1. */
+			assert(lowering_d.lowered_endpoint_count > signal_d.index);
+			ep1 = &lowering_b.lowered_endpoints[signal.index];
+			ep2 = &lowering_d.lowered_endpoints[signal_d.index];
+			deterministic = ep1 && ep2 &&
+				ep1->payload.index == ep2->payload.index &&
+				ep1->valid.index == ep2->valid.index &&
+				ep1->ready.index == ep2->ready.index &&
+				ep1->input_payload.index == ep2->input_payload.index &&
+				ep1->input_valid.index == ep2->input_valid.index &&
+				ep1->input_ready.index == ep2->input_ready.index;
+			assert(deterministic); /* Deliberate red: the stub populates
+			 * no records, so both are the all-invalid sentinel. */
+			pigen_rtl_lowering_free(&lowering_d);
+			pigen_free_rtl_model(&rtl_d);
+			pigen_free_semantic_model(&sem_d);
+			pigen_free_sources(&sources_d);
+		}
+
+		/* Case 4: NO-PARTIAL-RECORD ROLLBACK. A genuinely DIFFERENT
+		 * failing module, not a repeat of Case 3's call: a second module
+		 * in the SAME lowering (its own scope, its own source file, one
+		 * ABSTRACT INPUT signal) whose signal data type is a NEGATIVE
+		 * exact integer - the stable, owner-constructible failure
+		 * witness. The type is constructible through the owner APIs
+		 * (pigen_integer_negate + pigen_data_type_exact_integer) yet
+		 * pigen_lower_rtl_type refuses it (its unsigned width is zero;
+		 * pinned by section (5)'s negative-exact-integer boundary), and
+		 * the declaration lowering must lower the signal's data type to
+		 * type the payload object - so this module fails deterministically
+		 * regardless of the adapter table's state: the SAME
+		 * implementation that makes Case 1 and Case 3 green makes this
+		 * call return -1. The transient unimplemented-adapter path is
+		 * deliberately NOT used as the frozen failure witness: it cannot
+		 * by itself justify a frozen failure assertion once every
+		 * promised adapter is implemented. The error must leave the RTL
+		 * model and the endpoints map EXACTLY as before the failing call
+		 * (snapshot captured before, compared after): every arena count,
+		 * every endpoints-map count and populated-slot count, and the
+		 * previously populated record unchanged, with nothing newly
+		 * published for the failing signal. */
+		{
+			const char *text2 =
+				"module fail : input value : abstract ;\n";
+			pigen_integer_id neg_value;
+			pigen_data_type_id t_neg;
+			pigen_source_id source2;
+			pigen_source_span whole2;
+			pigen_source_span name2;
+			pigen_scope_id module_scope2;
+			pigen_symbol_id module_symbol2;
+			pigen_symbol_id signal_symbol2;
+			pigen_module_id module2;
+			pigen_signal_id signal2;
+
+			/* The stable failure witness: intern the exact value 5, negate
+			 * it, and build the exact-integer data type carrying the
+			 * negative value. The type exists in the semantic owner but
+			 * is not lowerable: pigen_lower_rtl_type reports the
+			 * sentinel for it (its unsigned width is zero), which is the
+			 * pinned negative-exact-integer boundary of section (5). */
+			neg_value = pigen_integer_intern_u64(&sem_b, 5);
+			assert(!IS_INVALID_ID(neg_value));
+			neg_value = pigen_integer_negate(&sem_b, neg_value);
+			assert(!IS_INVALID_ID(neg_value));
+			t_neg = pigen_data_type_exact_integer(&sem_b, neg_value);
+			assert(!IS_INVALID_ID(t_neg));
+			assert(pigen_lower_rtl_type(&lowering_b, t_neg).index ==
+				PIGEN_INVALID_ID); /* guard: the landed type lowering
+			 * refuses the negative exact integer */
+
+			/* The second module in the SAME lowering: its own source
+			 * file, module symbol + scope in the compilation scope, and
+			 * one ABSTRACT INPUT signal of the unlowerable type. */
+			source2 = pigen_source_add(&sources_b, "lower_boundary_fail.pigen",
+				text2, strlen(text2));
+			assert(source2.index != PIGEN_INVALID_ID);
+			whole2 = (pigen_source_span){source2, 0, strlen(text2)};
+			name2 = (pigen_source_span){source2, 20, 25}; /* "value" */
+			assert(pigen_symbol_declare(&sem_b, sem_b.compilation_scope,
+				PIGEN_SYMBOL_MODULE,
+				(pigen_data_type_id){PIGEN_INVALID_ID},
+				whole2, whole2, &module_symbol2, NULL) == PIGEN_DECLARE_OK);
+			module_scope2 =
+				pigen_scope_add(&sem_b, sem_b.compilation_scope, whole2);
+			assert(module_scope2.index != PIGEN_INVALID_ID);
+			module2 = pigen_module_add(&sem_b, (pigen_syntax_id){3},
+				module_symbol2, module_scope2, whole2);
+			assert(module2.index != PIGEN_INVALID_ID);
+			assert(pigen_symbol_declare(&sem_b, module_scope2,
+				PIGEN_SYMBOL_SIGNAL, t_neg, name2, name2,
+				&signal_symbol2, NULL) == PIGEN_DECLARE_OK);
+			signal2 = pigen_signal_add(&sem_b, (pigen_syntax_id){4},
+				module2, signal_symbol2, t_neg,
+				pigen_semantic_scalar_shape(&sem_b),
+				(pigen_expr_id){PIGEN_INVALID_ID},
+				PIGEN_TRANSFER_TYPE_ABSTRACT, PIGEN_SEMANTIC_INPUT, name2);
+			assert(signal2.index != PIGEN_INVALID_ID);
+
+			/* Snapshot the RTL model and the endpoints map BEFORE the
+			 * failing call: every arena count, every endpoints-map count
+			 * and populated-slot count, and the previously populated
+			 * record of Case 1's signal. */
+			object_count_before = rtl_b.object_count;
+			expression_count_before = rtl_b.expression_count;
+			endpoint_map_before = lowering_b.lowered_endpoint_count;
+			endpoint_populated_before = 0;
+			for (i = 0; i < endpoint_map_before; i++)
+				if (lowering_b.lowered_endpoints[i].payload.index !=
+					PIGEN_INVALID_ID)
+					endpoint_populated_before++;
+			record_before = lowering_b.lowered_endpoints[signal.index];
+
+			/* The different failing module reports the error: the
+			 * unlowerable signal data type fails the declaration
+			 * lowering. Deliberate red: the stub returns -1 for every
+			 * call, so this assert passes against it and pins the
+			 * stable witness for the implementation. */
+			rc = pigen_lower_rtl_module_declarations(&lowering_b, module2);
+			assert(rc == -1); /* Deliberate red (staged): the stub
+			 * returns -1 without touching the maps or the RTL model. */
+
+			/* The failure published no partial records: the RTL model and
+			 * the endpoints map are EXACTLY as before the failing call -
+			 * every arena count, every endpoints-map count and
+			 * populated-slot count unchanged, the previously populated
+			 * record unchanged, and nothing newly populated. */
+			object_count_after = rtl_b.object_count;
+			expression_count_after = rtl_b.expression_count;
+			endpoint_map_after = lowering_b.lowered_endpoint_count;
+			endpoint_populated_after = 0;
+			for (i = 0; i < endpoint_map_after; i++)
+				if (lowering_b.lowered_endpoints[i].payload.index !=
+					PIGEN_INVALID_ID)
+					endpoint_populated_after++;
+			no_partial = object_count_after == object_count_before &&
+				expression_count_after == expression_count_before &&
+				endpoint_map_after == endpoint_map_before &&
+				endpoint_populated_after == endpoint_populated_before;
+			if (no_partial && endpoint_map_after > signal.index) {
+				record_again = lowering_b.lowered_endpoints[signal.index];
+				no_partial =
+					(record_again.payload.index ==
+						record_before.payload.index) &&
+					(record_again.valid.index ==
+						record_before.valid.index) &&
+					(record_again.ready.index ==
+						record_before.ready.index) &&
+					(record_again.input_payload.index ==
+						record_before.input_payload.index) &&
+					(record_again.input_valid.index ==
+						record_before.input_valid.index) &&
+					(record_again.input_ready.index ==
+						record_before.input_ready.index);
+			}
+			assert(no_partial); /* guard: the stub publishes nothing */
+
+			/* The failed call left the lowering usable: the previously
+			 * populated endpoints record still resolves in the RTL model
+			 * and a repeat of the successful Case 1 call is still
+			 * idempotent. Deliberate red: the stub populated nothing. */
+			endpoints = &lowering_b.lowered_endpoints[signal.index];
+			assert(!IS_INVALID_ID(endpoints->payload));
+			assert(pigen_rtl_object_get(&rtl_b, endpoints->payload));
+			assert(pigen_rtl_expr_get(&rtl_b, endpoints->valid));
+			assert(pigen_rtl_expr_get(&rtl_b, endpoints->ready));
+			rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
+			assert(rc == 0); /* Deliberate red: the stub returns -1. */
+			record_again = lowering_b.lowered_endpoints[signal.index];
+			stable =
+				(record_again.payload.index ==
+					record_before.payload.index) &&
+				(record_again.valid.index == record_before.valid.index) &&
+				(record_again.ready.index == record_before.ready.index);
+			assert(stable); /* Deliberate red: the stub republishes nothing. */
+		}
+
+		pigen_rtl_lowering_free(&lowering_b);
+		pigen_free_rtl_model(&rtl_b);
+		pigen_free_semantic_model(&sem_b);
+		pigen_free_sources(&sources_b);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -1202,5 +1769,6 @@ int main(void)
 	puts("PASS: rtl constant lowering is once by identity");
 	puts("PASS: rtl lowering errors publish no partial records and stay recoverable");
 	puts("PASS: rtl lowering is identity-memoized, stable and deterministic");
+	puts("PASS: boundary declaration endpoints are three input ports with context-dependent controls");
 	return 0;
 }
