@@ -2771,6 +2771,285 @@ int main(void)
 		pigen_free_sources(&sources_h);
 	}
 
+	/* (13) Storage realization instances: the DISTINCT-INSTANCE publication
+	 * and cross-contamination contract for
+	 * pigen_lower_rtl_module_declarations (Task 6, "elastic slot / pulse /
+	 * queue / skid -> corresponding primitive structure"). The SAME
+	 * four-signal storage module sibling section (12) builds: one 8-bit
+	 * unsigned data type, FOUR PIGEN_SEMANTIC_INTERNAL signals in one
+	 * module - a PIGEN_TRANSFER_TYPE_BUF (ELASTIC_SLOT), a
+	 * PIGEN_TRANSFER_TYPE_PORT (PULSE_REGISTER), a PIGEN_TRANSFER_TYPE_FIFO
+	 * (PARAMETERIZED_QUEUE) whose transfer_argument is the constant 4
+	 * expression of the same 8-bit type (the owner's
+	 * PIGEN_TRANSFER_PARAMETER_DEPTH requirement: a valid
+	 * constant-expression identity), and a PIGEN_TRANSFER_TYPE_SKID
+	 * (SKID_QUEUE) - the three non-FIFO signals passing the exact invalid
+	 * (pigen_expr_id){PIGEN_INVALID_ID} transfer-argument form the owner
+	 * requires for PIGEN_TRANSFER_PARAMETER_NONE descriptors. Built
+	 * through the owner APIs exactly as section (12) does. Checked
+	 * through pigen_rtl_lowering_init +
+	 * pigen_lower_rtl_module_declarations + the RTL model's instance arena
+	 * (pigen_rtl_model.instances / .instance_count; the record is
+	 * pigen_rtl_instance in include/pigen/rtl.h:111-117):
+	 *   Case 1: DISTINCT INSTANCES. The call reports success (the
+	 *     FIRST deliberate red of this section: the stub returns the -1
+	 *     unimplemented sentinel, not a compile or harness error, staged
+	 *     behind section (8)'s still-active red); the instance arena
+	 *     grows by EXACTLY four (snapshotted before the call); and the
+	 *     four newly published records are MUTUALLY DISTINCT - no two of
+	 *     the four records are field-identical (origin, semantic_module,
+	 *     parameters, connections and module compared), so the set of
+	 *     newly published instance ids has cardinality exactly four and
+	 *     no instance is published twice. An implementation that
+	 *     publishes one shared instance for all four signals, publishes
+	 *     the same instance for two signals, or publishes any other
+	 *     number of instances is caught here.
+	 * Exclusions (sibling sections, NOT pinned here): the payload object
+	 * kind/type/direction and endpoints past all four indices (sibling
+	 * section (12) storage-matrix-success); the FIFO depth value, the
+	 * parameters-record round-trip and the descriptor facts (sibling
+	 * section storage-fifo-depth); every arena count delta and the
+	 * second-pass idempotence (sibling section storage-count-deltas);
+	 * and which primitive each instance instantiates
+	 * (pigen_buf/pigen_port/pigen_fifo/pigen_skid) - there is no owner
+	 * API resolving a pigen_rtl_module_id to a primitive definition name
+	 * and the instance's module field is invalid until a later
+	 * owner-resolution stage, so that mapping is an implementation design
+	 * decision, not an owner-checkable fact here.
+	 * Staged red: every owner-construction and descriptor assert passes
+	 * against the landed owners; the FIRST deliberate
+	 * unimplemented-behavior assert is Case 1's `rc == 0`, marked below.
+	 * Every later assert in this section requires implemented behavior
+	 * and is deliberate red as well. */
+	{
+		const char *text =
+			"module store : buf a ; port b ; fifo c ; skid d ;\n";
+		pigen_source_manager sources_i = {0};
+		pigen_semantic_model sem_i;
+		pigen_rtl_model rtl_i = {0};
+		pigen_rtl_lowering lowering_i;
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8;
+		pigen_const_expr_id width8;
+		pigen_expr_id depth4;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_a;
+		pigen_source_span name_b;
+		pigen_source_span name_c;
+		pigen_source_span name_d;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id buf_symbol;
+		pigen_symbol_id port_symbol;
+		pigen_symbol_id fifo_symbol;
+		pigen_symbol_id skid_symbol;
+		pigen_module_id module;
+		pigen_signal_id buf;
+		pigen_signal_id port;
+		pigen_signal_id fifo;
+		pigen_signal_id skid;
+		const pigen_semantic_signal *buf_owner;
+		const pigen_semantic_signal *port_owner;
+		const pigen_semantic_signal *fifo_owner;
+		const pigen_semantic_signal *skid_owner;
+		const pigen_transfer_type_descriptor *buf_descriptor;
+		const pigen_transfer_type_descriptor *port_descriptor;
+		const pigen_transfer_type_descriptor *fifo_descriptor;
+		const pigen_transfer_type_descriptor *skid_descriptor;
+		size_t instance_before;
+		int rc;
+		int exact_delta;
+		int distinct;
+
+		/* Build the storage module through the owner APIs (section (12)'s
+		 * landed construction pattern, four INTERNAL signals of the same
+		 * 8-bit type): the type first, then the depth argument over that
+		 * type, a source file, the compilation scope, a module in it, and
+		 * the four declared signals. The module symbol's declaration
+		 * spans the whole file (as module_add requires), the module scope
+		 * uses the same span, and each signal symbol's name span is
+		 * contained in and its declaration span equal to the span
+		 * signal_add checks. */
+		pigen_semantic_init(&sem_i, &sources_i);
+		pigen_rtl_lowering_init(&lowering_i, &sem_i, &rtl_i);
+		unsized = pigen_data_type_unsized_integer(&sem_i);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem_i, 8, unsized);
+		t8 = pigen_data_type_unsigned_integer(&sem_i, width8);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		source = pigen_source_add(&sources_i,
+			"lower_storage_instances.pigen", text, strlen(text));
+		assert(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_a = (pigen_source_span){source, 19, 20}; /* "a" */
+		name_b = (pigen_source_span){source, 28, 29}; /* "b" */
+		name_c = (pigen_source_span){source, 37, 38}; /* "c" */
+		name_d = (pigen_source_span){source, 46, 47}; /* "d" */
+		/* The FIFO depth: a real expression over the interned constant 4
+		 * of the 8-bit type - the valid constant-expression identity the
+		 * owner requires for PIGEN_TRANSFER_PARAMETER_DEPTH descriptors. */
+		depth4 = pigen_expr_add_integer(&sem_i, 4, t8, name_c);
+		assert(!IS_INVALID_ID(depth4));
+		sem_i.compilation_scope = pigen_scope_add(&sem_i,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		assert(sem_i.compilation_scope.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_i, sem_i.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_i, sem_i.compilation_scope, whole);
+		assert(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_i, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		assert(module.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_a, name_a, &buf_symbol, NULL) == PIGEN_DECLARE_OK);
+		buf = pigen_signal_add(&sem_i, (pigen_syntax_id){2}, module,
+			buf_symbol, t8, pigen_semantic_scalar_shape(&sem_i),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
+			PIGEN_SEMANTIC_INTERNAL, name_a);
+		assert(buf.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_b, name_b, &port_symbol, NULL) == PIGEN_DECLARE_OK);
+		port = pigen_signal_add(&sem_i, (pigen_syntax_id){3}, module,
+			port_symbol, t8, pigen_semantic_scalar_shape(&sem_i),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_PORT,
+			PIGEN_SEMANTIC_INTERNAL, name_b);
+		assert(port.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_c, name_c, &fifo_symbol, NULL) == PIGEN_DECLARE_OK);
+		fifo = pigen_signal_add(&sem_i, (pigen_syntax_id){4}, module,
+			fifo_symbol, t8, pigen_semantic_scalar_shape(&sem_i),
+			depth4, PIGEN_TRANSFER_TYPE_FIFO,
+			PIGEN_SEMANTIC_INTERNAL, name_c);
+		assert(fifo.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_d, name_d, &skid_symbol, NULL) == PIGEN_DECLARE_OK);
+		skid = pigen_signal_add(&sem_i, (pigen_syntax_id){5}, module,
+			skid_symbol, t8, pigen_semantic_scalar_shape(&sem_i),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_SKID,
+			PIGEN_SEMANTIC_INTERNAL, name_d);
+		assert(skid.index != PIGEN_INVALID_ID);
+
+		/* Owner facts the contract rides on (all green against the landed
+		 * owners): all four signal records report their transfer type,
+		 * the INTERNAL direction and the module; BUF, PORT, FIFO and
+		 * SKID are concrete descriptors mapped to the ELASTIC_SLOT,
+		 * PULSE_REGISTER, PARAMETERIZED_QUEUE and SKID_QUEUE
+		 * realizations, respectively; only FIFO carries a transfer
+		 * parameter (PIGEN_TRANSFER_PARAMETER_DEPTH) and its
+		 * transfer_argument is the constant 4 expression over the 8-bit
+		 * type - a valid constant-expression identity the owner
+		 * requires; the other three carry the invalid argument. */
+		buf_owner = pigen_signal_get(&sem_i, buf);
+		assert(buf_owner &&
+			buf_owner->transfer_type == PIGEN_TRANSFER_TYPE_BUF &&
+			buf_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			buf_owner->module.index == module.index &&
+			IS_INVALID_ID(buf_owner->transfer_argument));
+		port_owner = pigen_signal_get(&sem_i, port);
+		assert(port_owner &&
+			port_owner->transfer_type == PIGEN_TRANSFER_TYPE_PORT &&
+			port_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			port_owner->module.index == module.index &&
+			IS_INVALID_ID(port_owner->transfer_argument));
+		fifo_owner = pigen_signal_get(&sem_i, fifo);
+		assert(fifo_owner &&
+			fifo_owner->transfer_type == PIGEN_TRANSFER_TYPE_FIFO &&
+			fifo_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			fifo_owner->module.index == module.index &&
+			fifo_owner->transfer_argument.index == depth4.index);
+		skid_owner = pigen_signal_get(&sem_i, skid);
+		assert(skid_owner &&
+			skid_owner->transfer_type == PIGEN_TRANSFER_TYPE_SKID &&
+			skid_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			skid_owner->module.index == module.index &&
+			IS_INVALID_ID(skid_owner->transfer_argument));
+		buf_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_BUF);
+		assert(buf_descriptor && buf_descriptor->is_concrete &&
+			buf_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
+			buf_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT);
+		port_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_PORT);
+		assert(port_descriptor && port_descriptor->is_concrete &&
+			port_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
+			port_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER);
+		fifo_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_FIFO);
+		assert(fifo_descriptor && fifo_descriptor->is_concrete &&
+			fifo_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH &&
+			fifo_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
+		skid_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_SKID);
+		assert(skid_descriptor && skid_descriptor->is_concrete &&
+			skid_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
+			skid_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_SKID_QUEUE);
+		assert(pigen_expr_get(&sem_i, depth4) &&
+			pigen_expr_constant(&sem_i, depth4).index != PIGEN_INVALID_ID);
+
+		/* Case 1: DISTINCT INSTANCES. The declaration lowering reports
+		 * success, the instance arena grows by exactly four, and the
+		 * four newly published records are mutually distinct. The first
+		 * `rc == 0` is this section's first deliberate red: the stub
+		 * returns the -1 unimplemented sentinel, staged behind section
+		 * (8)'s still-active red. */
+		instance_before = rtl_i.instance_count;
+		assert(rtl_i.instances == NULL && instance_before == 0);
+		rc = pigen_lower_rtl_module_declarations(&lowering_i, module);
+		assert(rc == 0); /* Deliberate red (first in this section): the
+		 * stub returns -1 without touching the maps or the RTL model. */
+		exact_delta = rtl_i.instance_count == instance_before + 4;
+		assert(exact_delta); /* Deliberate red: the stub publishes nothing. */
+
+		/* The four newly published records [instance_before ..
+		 * instance_before+4) are MUTUALLY DISTINCT: no two of the four
+		 * records are field-identical (origin, semantic_module,
+		 * parameters, connections and module compared), so the set of
+		 * newly published instance ids has cardinality exactly four and
+		 * no instance id is published more than once. An implementation
+		 * that shares one instance between two signals - or between all
+		 * four - is caught here. */
+		distinct = 1;
+		{
+			size_t k;
+			for (k = 0; k + 1 < 4; k++) {
+				const pigen_rtl_instance *r1 = &rtl_i.instances[k +
+					instance_before];
+				size_t l;
+				for (l = k + 1; l < 4; l++) {
+					const pigen_rtl_instance *r2 = &rtl_i.instances[l +
+						instance_before];
+					int identical =
+						(r1->origin.source.index ==
+							r2->origin.source.index) &&
+						(r1->origin.start == r2->origin.start) &&
+						(r1->origin.end == r2->origin.end) &&
+						(r1->semantic_module.index ==
+							r2->semantic_module.index) &&
+						(r1->parameters.first == r2->parameters.first) &&
+						(r1->parameters.count == r2->parameters.count) &&
+						(r1->connections.first == r2->connections.first) &&
+						(r1->connections.count == r2->connections.count) &&
+						(r1->module.index == r2->module.index);
+					distinct = distinct && !identical;
+				}
+			}
+		}
+		assert(distinct); /* Deliberate red: the stub publishes nothing. */
+
+		pigen_rtl_lowering_free(&lowering_i);
+		pigen_free_rtl_model(&rtl_i);
+		pigen_free_semantic_model(&sem_i);
+		pigen_free_sources(&sources_i);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -2795,5 +3074,6 @@ int main(void)
 	puts("PASS: net and variable declaration controls are the descriptor 1-bit constants with no published object");
 	puts("PASS: net and variable declarations publish no storage and are idempotent");
 	puts("PASS: storage declarations expose variable payloads for the four realizations");
+	puts("PASS: storage declarations publish four distinct instances with no cross-contamination");
 	return 0;
 }
