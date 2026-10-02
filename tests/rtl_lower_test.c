@@ -3078,7 +3078,13 @@ int main(void)
 	 *     ordered parameters record range and resolves through the landed
 	 *     pigen_rtl_expr_get to a PIGEN_RTL_EXPR_INTEGER record whose value is
 	 *     the interned const-expr value of the argument (4), not a spelling
-	 *     match. (c) The depth comes from the transfer argument, so no
+	 *     match - and whose record is jointly width- and type-checked:
+	 *     literal_bit_count 64 (the only literal width the landed lowering
+	 *     owner path, pigen_rtl_expr_add_integer, can publish, so a
+	 *     wrong-width literal carrying 4 cannot round-trip) plus a type
+	 *     field resolving to the 8-bit unsigned witness record (width 8,
+	 *     PIGEN_SIGN_UNSIGNED, the argument type's state domain), compared
+	 *     by fields, not pointer. (c) The depth comes from the transfer argument, so no
 	 *     PIGEN_TRANSFER_TYPE_* source enum spelling is matched - only the
 	 *     realization (PARAMETERIZED_QUEUE) and its descriptor are consulted,
 	 *     and the descriptor is ARGUMENT-sourced with no fixed_capacity.
@@ -3319,16 +3325,43 @@ int main(void)
 		/* (b) The FIFO instance's ordered parameters range holds a parameter
 		 * expression that resolves to the interned const-expr value of the
 		 * transfer argument (expected_depth, 4) - the depth round-trips
-		 * EXACTLY, witnessed on the record value, not a source spelling. */
+		 * EXACTLY, witnessed on the record value, not a source spelling.
+		 * The witness record is jointly width- and type-checked against the
+		 * landed owners: the depth argument was built over the 8-bit type
+		 * (pigen_expr_add_integer(4, t8, ...)), and the ONLY expression
+		 * lowering owner path, pigen_lower_rtl_expression, lowers exact
+		 * integers through pigen_rtl_expr_add_integer - the uint64_t
+		 * convenience constructor that hardcodes literal_bit_count 64. So
+		 * the record a correct implementation publishes is 8-bit TYPED with
+		 * a 64-bit literal: (i) literal_bit_count == 64 - the only literal
+		 * width the owner path can publish (a 1-bit, 8-bit or other-width
+		 * literal carrying value 4 cannot round-trip) - and (ii) its type
+		 * field resolves through pigen_rtl_type_get to a record with
+		 * width == 8, signedness == PIGEN_SIGN_UNSIGNED and
+		 * state_domain == the 8-bit witness type's domain, compared field
+		 * by field, never by pointer (a distinct but equal type record
+		 * still passes). */
 		fifo_parameter_count = fifo_instance->parameters.count;
 		fifo_has_depth = 0;
 		for (size_t p = 0; p < fifo_parameter_count; p++) {
 			const pigen_rtl_expr *pe = pigen_rtl_expr_get(&rtl_j,
 				rtl_j.instance_parameters[fifo_instance->parameters.first +
 					p]);
-			if (pe && pe->kind == PIGEN_RTL_EXPR_INTEGER &&
-				pe->value == expected_depth)
-				fifo_has_depth = 1;
+			const pigen_rtl_type *pe_type;
+			if (!pe || pe->kind != PIGEN_RTL_EXPR_INTEGER ||
+				pe->value != expected_depth)
+				continue;
+			if (pe->literal_bit_count != 64) /* (i) owner-pinned literal width */
+				continue;
+			pe_type = pigen_rtl_type_get(&rtl_j, pe->type);
+			if (!pe_type)
+				continue;
+			if (pe_type->width != 8 ||
+				pe_type->signedness != PIGEN_SIGN_UNSIGNED ||
+				pe_type->state_domain !=
+					pigen_data_type_state_domain(&sem_j, t8)) /* (ii) 8-bit type witness */
+				continue;
+			fifo_has_depth = 1;
 		}
 		assert(fifo_has_depth); /* Deliberate red: the stub publishes no
 		 * instance and no parameter record. */
