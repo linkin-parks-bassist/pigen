@@ -2466,6 +2466,311 @@ int main(void)
 		pigen_free_sources(&sources_g);
 	}
 
+	/* (12) Storage realization matrix: the ELASTIC_SLOT / PULSE_REGISTER /
+	 * PARAMETERIZED_QUEUE / SKID_QUEUE construction + declaration-success +
+	 * per-signal payload contract for pigen_lower_rtl_module_declarations
+	 * (Task 6, "elastic slot / pulse / queue / skid -> corresponding
+	 * primitive structure"). One module holds FOUR INTERNAL signals of the
+	 * SAME 8-bit unsigned data type: a PIGEN_TRANSFER_TYPE_BUF
+	 * (ELASTIC_SLOT), a PIGEN_TRANSFER_TYPE_PORT (PULSE_REGISTER), a
+	 * PIGEN_TRANSFER_TYPE_FIFO (PARAMETERIZED_QUEUE) whose
+	 * transfer_argument is a constant 4 expression of the same type (the
+	 * owner's PIGEN_TRANSFER_PARAMETER_DEPTH requirement: a valid
+	 * constant-expression identity), and a PIGEN_TRANSFER_TYPE_SKID
+	 * (SKID_QUEUE). The three non-FIFO signals pass the exact invalid
+	 * transfer-argument form sections (8)-(11) use, because the owner
+	 * rejects any non-invalid argument for
+	 * PIGEN_TRANSFER_PARAMETER_NONE descriptors. Built through the owner
+	 * APIs exactly as section (8)'s landed construction pattern: a source
+	 * file, the compilation scope, a module symbol + pigen_module_add, a
+	 * PIGEN_SYMBOL_SIGNAL declaration per signal (matching data type and
+	 * declaration span) and pigen_signal_add with
+	 * PIGEN_SEMANTIC_INTERNAL - permitted for these concrete types.
+	 *   Case 1: STORAGE MATRIX. The call reports success (the FIRST
+	 *     deliberate red of this section: the stub returns the -1
+	 *     unimplemented sentinel, not a compile or harness error, staged
+	 *     behind section (8)'s still-active red) and the endpoints map
+	 *     grows past ALL FOUR signal indices. For EACH signal, the
+	 *     endpoints payload is a valid id resolving to a
+	 *     pigen_rtl_object of kind PIGEN_RTL_OBJECT_VARIABLE whose type is
+	 *     the lowered 8-bit type - the SAME record the landed
+	 *     pigen_lower_rtl_type memo yields - and whose direction equals
+	 *     the semantic signal's direction.
+	 * Exclusions (sibling sections, NOT pinned here): the per-signal
+	 * instance publication, the four distinct instance shapes and the
+	 * cross-contamination pin (the storage-instance-shapes section); the
+	 * FIFO depth round-trip into the instance parameters range and the
+	 * descriptor facts (the storage-fifo-depth section); every arena
+	 * count delta and the second-pass idempotence (the
+	 * storage-count-deltas section).
+	 * Staged red: every owner-construction and descriptor assert passes
+	 * against the landed owners (including the already-implemented
+	 * pigen_lower_rtl_type memo, which resolves the 8-bit type); the FIRST
+	 * deliberate unimplemented-behavior assert is Case 1's `rc == 0`,
+	 * marked below. Every later assert in this section requires
+	 * implemented behavior and is deliberate red as well. */
+	{
+		const char *text =
+			"module store : buf a ; port b ; fifo c ; skid d ;\n";
+		pigen_source_manager sources_h = {0};
+		pigen_semantic_model sem_h;
+		pigen_rtl_model rtl_h = {0};
+		pigen_rtl_lowering lowering_h;
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8;
+		pigen_const_expr_id width8;
+		pigen_expr_id depth4;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_a;
+		pigen_source_span name_b;
+		pigen_source_span name_c;
+		pigen_source_span name_d;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id buf_symbol;
+		pigen_symbol_id port_symbol;
+		pigen_symbol_id fifo_symbol;
+		pigen_symbol_id skid_symbol;
+		pigen_module_id module;
+		pigen_signal_id buf;
+		pigen_signal_id port;
+		pigen_signal_id fifo;
+		pigen_signal_id skid;
+		const pigen_semantic_signal *buf_owner;
+		const pigen_semantic_signal *port_owner;
+		const pigen_semantic_signal *fifo_owner;
+		const pigen_semantic_signal *skid_owner;
+		const pigen_transfer_type_descriptor *buf_descriptor;
+		const pigen_transfer_type_descriptor *port_descriptor;
+		const pigen_transfer_type_descriptor *fifo_descriptor;
+		const pigen_transfer_type_descriptor *skid_descriptor;
+		pigen_rtl_type_id lowered_t8;
+		const pigen_rtl_type *t8_record;
+		const pigen_rtl_signal_endpoints *buf_endpoints;
+		const pigen_rtl_signal_endpoints *port_endpoints;
+		const pigen_rtl_signal_endpoints *fifo_endpoints;
+		const pigen_rtl_signal_endpoints *skid_endpoints;
+		const pigen_rtl_object *buf_payload_obj;
+		const pigen_rtl_object *port_payload_obj;
+		const pigen_rtl_object *fifo_payload_obj;
+		const pigen_rtl_object *skid_payload_obj;
+		const pigen_rtl_type *payload_type;
+		int rc;
+		int payload_ok;
+
+		/* Build the storage module through the owner APIs (section (8)'s
+		 * landed construction pattern, four INTERNAL signals of the same
+		 * 8-bit type): the type first, then the depth argument over that
+		 * type, a source file, the compilation scope, a module in it, and
+		 * the four declared signals. The module symbol's declaration
+		 * spans the whole file (as module_add requires), the module scope
+		 * uses the same span, and each signal symbol's name span is
+		 * contained in and its declaration span equal to the span
+		 * signal_add checks. */
+		pigen_semantic_init(&sem_h, &sources_h);
+		pigen_rtl_lowering_init(&lowering_h, &sem_h, &rtl_h);
+		unsized = pigen_data_type_unsized_integer(&sem_h);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem_h, 8, unsized);
+		t8 = pigen_data_type_unsigned_integer(&sem_h, width8);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		source = pigen_source_add(&sources_h, "lower_storage_matrix.pigen",
+			text, strlen(text));
+		assert(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_a = (pigen_source_span){source, 19, 20}; /* "a" */
+		name_b = (pigen_source_span){source, 28, 29}; /* "b" */
+		name_c = (pigen_source_span){source, 37, 38}; /* "c" */
+		name_d = (pigen_source_span){source, 46, 47}; /* "d" */
+		/* The FIFO depth: a real expression over the interned constant 4
+		 * of the 8-bit type - the valid constant-expression identity the
+		 * owner requires for PIGEN_TRANSFER_PARAMETER_DEPTH descriptors. */
+		depth4 = pigen_expr_add_integer(&sem_h, 4, t8, name_c);
+		assert(!IS_INVALID_ID(depth4));
+		sem_h.compilation_scope = pigen_scope_add(&sem_h,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		assert(sem_h.compilation_scope.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_h, sem_h.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_h, sem_h.compilation_scope, whole);
+		assert(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_h, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		assert(module.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_a, name_a, &buf_symbol, NULL) == PIGEN_DECLARE_OK);
+		buf = pigen_signal_add(&sem_h, (pigen_syntax_id){2}, module,
+			buf_symbol, t8, pigen_semantic_scalar_shape(&sem_h),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
+			PIGEN_SEMANTIC_INTERNAL, name_a);
+		assert(buf.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_b, name_b, &port_symbol, NULL) == PIGEN_DECLARE_OK);
+		port = pigen_signal_add(&sem_h, (pigen_syntax_id){3}, module,
+			port_symbol, t8, pigen_semantic_scalar_shape(&sem_h),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_PORT,
+			PIGEN_SEMANTIC_INTERNAL, name_b);
+		assert(port.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_c, name_c, &fifo_symbol, NULL) == PIGEN_DECLARE_OK);
+		fifo = pigen_signal_add(&sem_h, (pigen_syntax_id){4}, module,
+			fifo_symbol, t8, pigen_semantic_scalar_shape(&sem_h),
+			depth4, PIGEN_TRANSFER_TYPE_FIFO,
+			PIGEN_SEMANTIC_INTERNAL, name_c);
+		assert(fifo.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_d, name_d, &skid_symbol, NULL) == PIGEN_DECLARE_OK);
+		skid = pigen_signal_add(&sem_h, (pigen_syntax_id){5}, module,
+			skid_symbol, t8, pigen_semantic_scalar_shape(&sem_h),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_SKID,
+			PIGEN_SEMANTIC_INTERNAL, name_d);
+		assert(skid.index != PIGEN_INVALID_ID);
+
+		/* Owner facts the contract rides on (all green against the landed
+		 * owners): all four signal records report their transfer type,
+		 * the INTERNAL direction and the module; BUF, PORT, FIFO and
+		 * SKID are concrete descriptors mapped to the ELASTIC_SLOT,
+		 * PULSE_REGISTER, PARAMETERIZED_QUEUE and SKID_QUEUE
+		 * realizations, respectively; only FIFO carries a transfer
+		 * parameter (PIGEN_TRANSFER_PARAMETER_DEPTH) and its
+		 * transfer_argument is the constant 4 expression over the 8-bit
+		 * type - a valid constant-expression identity the owner
+		 * requires; the other three carry the invalid argument; and the
+		 * already-implemented pigen_lower_rtl_type memo resolves the
+		 * 8-bit data type to a record in the RTL model. */
+		buf_owner = pigen_signal_get(&sem_h, buf);
+		assert(buf_owner &&
+			buf_owner->transfer_type == PIGEN_TRANSFER_TYPE_BUF &&
+			buf_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			buf_owner->module.index == module.index &&
+			IS_INVALID_ID(buf_owner->transfer_argument));
+		port_owner = pigen_signal_get(&sem_h, port);
+		assert(port_owner &&
+			port_owner->transfer_type == PIGEN_TRANSFER_TYPE_PORT &&
+			port_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			port_owner->module.index == module.index &&
+			IS_INVALID_ID(port_owner->transfer_argument));
+		fifo_owner = pigen_signal_get(&sem_h, fifo);
+		assert(fifo_owner &&
+			fifo_owner->transfer_type == PIGEN_TRANSFER_TYPE_FIFO &&
+			fifo_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			fifo_owner->module.index == module.index &&
+			fifo_owner->transfer_argument.index == depth4.index);
+		skid_owner = pigen_signal_get(&sem_h, skid);
+		assert(skid_owner &&
+			skid_owner->transfer_type == PIGEN_TRANSFER_TYPE_SKID &&
+			skid_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			skid_owner->module.index == module.index &&
+			IS_INVALID_ID(skid_owner->transfer_argument));
+		buf_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_BUF);
+		assert(buf_descriptor && buf_descriptor->is_concrete &&
+			buf_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
+			buf_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT);
+		port_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_PORT);
+		assert(port_descriptor && port_descriptor->is_concrete &&
+			port_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
+			port_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER);
+		fifo_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_FIFO);
+		assert(fifo_descriptor && fifo_descriptor->is_concrete &&
+			fifo_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH &&
+			fifo_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
+		skid_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_SKID);
+		assert(skid_descriptor && skid_descriptor->is_concrete &&
+			skid_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
+			skid_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_SKID_QUEUE);
+		assert(pigen_expr_get(&sem_h, depth4) &&
+			pigen_expr_constant(&sem_h, depth4).index != PIGEN_INVALID_ID);
+		lowered_t8 = pigen_lower_rtl_type(&lowering_h, t8);
+		assert(!IS_INVALID_ID(lowered_t8));
+		t8_record = pigen_rtl_type_get(&rtl_h, lowered_t8);
+		assert(t8_record);
+
+		/* Case 1: STORAGE MATRIX. The declaration lowering reports
+		 * success and the endpoints map covers ALL FOUR signals. The
+		 * first `rc == 0` is this section's first deliberate red: the
+		 * stub returns the -1 unimplemented sentinel, staged behind
+		 * section (8)'s still-active red. */
+		rc = pigen_lower_rtl_module_declarations(&lowering_h, module);
+		assert(rc == 0); /* Deliberate red (first in this section): the
+		 * stub returns -1 without touching the maps or the RTL model. */
+		{
+			uint32_t max_index = buf.index > port.index ?
+				buf.index : port.index;
+			max_index = max_index > fifo.index ?
+				max_index : fifo.index;
+			max_index = max_index > skid.index ?
+				max_index : skid.index;
+			assert(lowering_h.lowered_endpoint_count > max_index);
+		}
+
+		/* For EACH signal the payload is a resolvable VARIABLE object:
+		 * kind PIGEN_RTL_OBJECT_VARIABLE, type the lowered 8-bit type -
+		 * the SAME record the pigen_lower_rtl_type memo yielded - and
+		 * direction the semantic signal's direction. An implementation
+		 * that lowers a storage signal to a non-VARIABLE object,
+		 * gives it a wrong or missing type, or skips a signal is caught
+		 * here. */
+		buf_endpoints = &lowering_h.lowered_endpoints[buf.index];
+		port_endpoints = &lowering_h.lowered_endpoints[port.index];
+		fifo_endpoints = &lowering_h.lowered_endpoints[fifo.index];
+		skid_endpoints = &lowering_h.lowered_endpoints[skid.index];
+		payload_ok =
+			(!IS_INVALID_ID(buf_endpoints->payload)) &&
+			(!IS_INVALID_ID(port_endpoints->payload)) &&
+			(!IS_INVALID_ID(fifo_endpoints->payload)) &&
+			(!IS_INVALID_ID(skid_endpoints->payload));
+		buf_payload_obj = payload_ok ? pigen_rtl_object_get(&rtl_h,
+			buf_endpoints->payload) : NULL;
+		port_payload_obj = payload_ok ? pigen_rtl_object_get(&rtl_h,
+			port_endpoints->payload) : NULL;
+		fifo_payload_obj = payload_ok ? pigen_rtl_object_get(&rtl_h,
+			fifo_endpoints->payload) : NULL;
+		skid_payload_obj = payload_ok ? pigen_rtl_object_get(&rtl_h,
+			skid_endpoints->payload) : NULL;
+		payload_type = pigen_rtl_type_get(&rtl_h, buf_payload_obj ?
+			buf_payload_obj->type : (pigen_rtl_type_id){PIGEN_INVALID_ID});
+		payload_ok = payload_ok && buf_payload_obj &&
+			buf_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
+			payload_type == t8_record &&
+			buf_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
+		payload_type = pigen_rtl_type_get(&rtl_h, port_payload_obj ?
+			port_payload_obj->type : (pigen_rtl_type_id){PIGEN_INVALID_ID});
+		payload_ok = payload_ok && port_payload_obj &&
+			port_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
+			payload_type == t8_record &&
+			port_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
+		payload_type = pigen_rtl_type_get(&rtl_h, fifo_payload_obj ?
+			fifo_payload_obj->type : (pigen_rtl_type_id){PIGEN_INVALID_ID});
+		payload_ok = payload_ok && fifo_payload_obj &&
+			fifo_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
+			payload_type == t8_record &&
+			fifo_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
+		payload_type = pigen_rtl_type_get(&rtl_h, skid_payload_obj ?
+			skid_payload_obj->type : (pigen_rtl_type_id){PIGEN_INVALID_ID});
+		payload_ok = payload_ok && skid_payload_obj &&
+			skid_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
+			payload_type == t8_record &&
+			skid_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
+		assert(payload_ok); /* Deliberate red: the stub populates nothing. */
+
+		pigen_rtl_lowering_free(&lowering_h);
+		pigen_free_rtl_model(&rtl_h);
+		pigen_free_semantic_model(&sem_h);
+		pigen_free_sources(&sources_h);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -2489,5 +2794,6 @@ int main(void)
 	puts("PASS: net and variable declarations expose distinct variable payloads of the lowered type");
 	puts("PASS: net and variable declaration controls are the descriptor 1-bit constants with no published object");
 	puts("PASS: net and variable declarations publish no storage and are idempotent");
+	puts("PASS: storage declarations expose variable payloads for the four realizations");
 	return 0;
 }
