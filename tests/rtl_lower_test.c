@@ -2230,6 +2230,242 @@ int main(void)
 		pigen_free_sources(&sources_f);
 	}
 
+	/* (11) Net and variable counts and idempotence: the
+	 * COMBINATIONAL_NET / PROCEDURAL_VARIABLE NO-STORAGE COUNT-DELTA and
+	 * IDEMPOTENCE contract for pigen_lower_rtl_module_declarations (Task 6,
+	 * "combinational net / procedural variable -> payload plus constants").
+	 * Sibling of sections (9) (payload shape) and (10) (constant controls):
+	 * one module holds TWO INTERNAL signals of the SAME 8-bit unsigned data
+	 * type, a PIGEN_TRANSFER_TYPE_WIRE (COMBINATIONAL_NET) and a
+	 * PIGEN_TRANSFER_TYPE_REG (PROCEDURAL_VARIABLE), built through the owner
+	 * APIs exactly as section (8)'s landed construction pattern: a source
+	 * file, the compilation scope, a module symbol + pigen_module_add, a
+	 * PIGEN_SYMBOL_SIGNAL declaration per signal (matching data type and
+	 * declaration span) and pigen_signal_add with PIGEN_SEMANTIC_INTERNAL.
+	 *   Case 1: COUNT DELTAS. The call reports success (the FIRST deliberate
+	 *     red of this section: the stub returns the -1 unimplemented
+	 *     sentinel, not a compile or harness error). The object-arena delta
+	 *     for the whole module is EXACTLY two - one payload object per
+	 *     signal - because a constant control carries no published object;
+	 *     the expression-arena delta is AT MOST two per signal (four for the
+	 *     module) and at least the payload objects: the two valid constants
+	 *     (both 1) may share a single interned 1-bit record when the
+	 *     lowering interns by value, and the ready constants (WIRE 0, REG 1)
+	 *     differ, so four is the upper bound and two the lower bound; no
+	 *     pigen_rtl_instance is published (instance-arena delta exactly
+	 *     zero) - the net/variable realizations have no storage. The
+	 *     endpoints map also grows to cover both signal indices.
+	 *   Case 2: IDEMPOTENCE. A SECOND call of
+	 *     pigen_lower_rtl_module_declarations on the SAME lowering and
+	 *     module publishes NOTHING new: object_count, expression_count and
+	 *     instance_count are all unchanged, and each signal's endpoints
+	 *     record is byte-identical to after the first call.
+	 * The payload object kind (section (9)), the constant values and literal
+	 * widths (section (10)) and the per-control record contents are NOT
+	 * re-asserted here; only the arena count deltas, the no-instance pin and
+	 * the second-pass idempotence are pinned in this section.
+	 * Staged red: every owner-construction and descriptor assert passes
+	 * against the landed owners (including the already-implemented
+	 * pigen_lower_rtl_type memo, which resolves the 8-bit type); the FIRST
+	 * deliberate unimplemented-behavior assert is Case 1's `rc == 0`,
+	 * marked below, staged behind section (8)'s still-active red. Every
+	 * later assert in this section requires implemented behavior and is
+	 * deliberate red as well. */
+	{
+		const char *text =
+			"module netvar : wire a ; reg b ;\n";
+		pigen_source_manager sources_g = {0};
+		pigen_semantic_model sem_g;
+		pigen_rtl_model rtl_g = {0};
+		pigen_rtl_lowering lowering_g;
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8;
+		pigen_const_expr_id width8;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_a;
+		pigen_source_span name_b;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id wire_symbol;
+		pigen_symbol_id reg_symbol;
+		pigen_module_id module;
+		pigen_signal_id wire;
+		pigen_signal_id reg;
+		const pigen_semantic_signal *wire_owner;
+		const pigen_semantic_signal *reg_owner;
+		const pigen_transfer_type_descriptor *wire_descriptor;
+		const pigen_transfer_type_descriptor *reg_descriptor;
+		pigen_rtl_type_id lowered_t8;
+		const pigen_rtl_type *t8_record;
+		pigen_rtl_signal_endpoints wire_record;
+		pigen_rtl_signal_endpoints reg_record;
+		pigen_rtl_signal_endpoints wire_again;
+		pigen_rtl_signal_endpoints reg_again;
+		size_t object_before;
+		size_t expression_before;
+		size_t instance_before;
+		size_t object_delta;
+		size_t expression_delta;
+		size_t instance_delta;
+		size_t endpoint_map_before;
+		int rc;
+		int no_storage;
+		int idempotent;
+
+		/* Build the net/variable module through the owner APIs (section
+		 * (8)'s landed construction pattern, two INTERNAL signals of the
+		 * same 8-bit type): the type first, then a source file, the
+		 * compilation scope, a module in it, and the two declared signals.
+		 * The module symbol's declaration spans the whole file (as
+		 * module_add requires), the module scope uses the same span, and
+		 * each signal symbol's name span is contained in and its
+		 * declaration span equal to the span signal_add checks. */
+		pigen_semantic_init(&sem_g, &sources_g);
+		pigen_rtl_lowering_init(&lowering_g, &sem_g, &rtl_g);
+		unsized = pigen_data_type_unsized_integer(&sem_g);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem_g, 8, unsized);
+		t8 = pigen_data_type_unsigned_integer(&sem_g, width8);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		source = pigen_source_add(&sources_g, "lower_netvar_counts.pigen",
+			text, strlen(text));
+		assert(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_a = (pigen_source_span){source, 21, 22}; /* "a" */
+		name_b = (pigen_source_span){source, 29, 30}; /* "b" */
+		sem_g.compilation_scope = pigen_scope_add(&sem_g,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		assert(sem_g.compilation_scope.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_g, sem_g.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_g, sem_g.compilation_scope, whole);
+		assert(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_g, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		assert(module.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_g, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_a, name_a, &wire_symbol, NULL) == PIGEN_DECLARE_OK);
+		wire = pigen_signal_add(&sem_g, (pigen_syntax_id){2}, module,
+			wire_symbol, t8, pigen_semantic_scalar_shape(&sem_g),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_WIRE,
+			PIGEN_SEMANTIC_INTERNAL, name_a);
+		assert(wire.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_g, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_b, name_b, &reg_symbol, NULL) == PIGEN_DECLARE_OK);
+		reg = pigen_signal_add(&sem_g, (pigen_syntax_id){3}, module,
+			reg_symbol, t8, pigen_semantic_scalar_shape(&sem_g),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_REG,
+			PIGEN_SEMANTIC_INTERNAL, name_b);
+		assert(reg.index != PIGEN_INVALID_ID);
+
+		/* Owner facts the contract rides on (all green against the landed
+		 * owners): both signal records report their transfer type, the
+		 * INTERNAL direction and the module; WIRE and REG are concrete
+		 * descriptors mapped to the COMBINATIONAL_NET and
+		 * PROCEDURAL_VARIABLE realizations; and the already-implemented
+		 * pigen_lower_rtl_type memo resolves the 8-bit data type to a
+		 * record in the RTL model. The type memo is the only lowering work
+		 * done before the declaration call, so the count snapshots below
+		 * are taken after it. */
+		wire_owner = pigen_signal_get(&sem_g, wire);
+		assert(wire_owner &&
+			wire_owner->transfer_type == PIGEN_TRANSFER_TYPE_WIRE &&
+			wire_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			wire_owner->module.index == module.index);
+		reg_owner = pigen_signal_get(&sem_g, reg);
+		assert(reg_owner &&
+			reg_owner->transfer_type == PIGEN_TRANSFER_TYPE_REG &&
+			reg_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			reg_owner->module.index == module.index);
+		wire_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_WIRE);
+		assert(wire_descriptor && wire_descriptor->is_concrete &&
+			wire_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET);
+		reg_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_REG);
+		assert(reg_descriptor && reg_descriptor->is_concrete &&
+			reg_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE);
+		lowered_t8 = pigen_lower_rtl_type(&lowering_g, t8);
+		assert(!IS_INVALID_ID(lowered_t8));
+		t8_record = pigen_rtl_type_get(&rtl_g, lowered_t8);
+		assert(t8_record);
+
+		/* Case 1: COUNT DELTAS. Snapshot all three arenas BEFORE the first
+		 * declaration call; the first `rc == 0` is this section's first
+		 * deliberate red (the stub returns the -1 unimplemented sentinel).
+		 * The net/variable realizations have no storage: the object
+		 * delta is exactly one payload per signal, the expression delta
+		 * is bounded by the two constant controls per signal, and no
+		 * pigen_rtl_instance is published at all. */
+		object_before = rtl_g.object_count;
+		expression_before = rtl_g.expression_count;
+		instance_before = rtl_g.instance_count;
+		assert(instance_before == 0); /* no instances before the call */
+		rc = pigen_lower_rtl_module_declarations(&lowering_g, module);
+		assert(rc == 0); /* Deliberate red (first in this section): the
+		 * stub returns -1 without touching the maps or the RTL model. */
+		assert(lowering_g.lowered_endpoint_count >
+			(wire.index > reg.index ? wire.index : reg.index));
+		object_delta = rtl_g.object_count - object_before;
+		expression_delta = rtl_g.expression_count - expression_before;
+		instance_delta = rtl_g.instance_count - instance_before;
+		/* Exactly one payload object per signal: the two constant controls
+		 * (valid/ready) publish no objects, so the object delta is exactly
+		 * two for the whole module. An implementation that also publishes
+		 * an object for a constant control - or shares one payload object
+		 * between the two signals - is caught here. */
+		no_storage = object_delta == 2 && instance_delta == 0 &&
+			expression_delta >= 2 && expression_delta <= 4;
+		assert(no_storage); /* Deliberate red: the stub publishes nothing. */
+
+		/* Case 2: IDEMPOTENCE. A second call on the SAME lowering and
+		 * module publishes NOTHING new: all three arena counts are
+		 * unchanged and each signal's endpoints record is byte-identical
+		 * to after the first call. Deliberate red: the stub returns -1
+		 * and republishes nothing. */
+		wire_record = lowering_g.lowered_endpoints[wire.index];
+		reg_record = lowering_g.lowered_endpoints[reg.index];
+		object_before = rtl_g.object_count;
+		expression_before = rtl_g.expression_count;
+		instance_before = rtl_g.instance_count;
+		endpoint_map_before = lowering_g.lowered_endpoint_count;
+		rc = pigen_lower_rtl_module_declarations(&lowering_g, module);
+		assert(rc == 0); /* Deliberate red: the stub returns -1. */
+		wire_again = lowering_g.lowered_endpoints[wire.index];
+		reg_again = lowering_g.lowered_endpoints[reg.index];
+		idempotent = rtl_g.object_count == object_before &&
+			rtl_g.expression_count == expression_before &&
+			rtl_g.instance_count == instance_before &&
+			lowering_g.lowered_endpoint_count == endpoint_map_before &&
+			(wire_again.payload.index == wire_record.payload.index) &&
+			(wire_again.valid.index == wire_record.valid.index) &&
+			(wire_again.ready.index == wire_record.ready.index) &&
+			(wire_again.input_payload.index ==
+				wire_record.input_payload.index) &&
+			(wire_again.input_valid.index == wire_record.input_valid.index) &&
+			(wire_again.input_ready.index ==
+				wire_record.input_ready.index) &&
+			(reg_again.payload.index == reg_record.payload.index) &&
+			(reg_again.valid.index == reg_record.valid.index) &&
+			(reg_again.ready.index == reg_record.ready.index) &&
+			(reg_again.input_payload.index ==
+				reg_record.input_payload.index) &&
+			(reg_again.input_valid.index == reg_record.input_valid.index) &&
+			(reg_again.input_ready.index == reg_record.input_ready.index);
+		assert(idempotent); /* Deliberate red: the stub republishes nothing. */
+
+		pigen_rtl_lowering_free(&lowering_g);
+		pigen_free_rtl_model(&rtl_g);
+		pigen_free_semantic_model(&sem_g);
+		pigen_free_sources(&sources_g);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -2252,5 +2488,6 @@ int main(void)
 	puts("PASS: boundary declaration endpoints are three input ports with context-dependent controls");
 	puts("PASS: net and variable declarations expose distinct variable payloads of the lowered type");
 	puts("PASS: net and variable declaration controls are the descriptor 1-bit constants with no published object");
+	puts("PASS: net and variable declarations publish no storage and are idempotent");
 	return 0;
 }
