@@ -1,6 +1,7 @@
 ---
 status: green
 revised_at: "2026-09-29T08:19:47+10:00"
+checked_at: '2026-10-02T12:03:24+10:00'
 ---
 
 For approved implementation, use ordinary Git branches and worktrees as useful for isolation and concurrency. Make coherent commits after appropriate checks, integrate reviewed work without losing concurrent changes, and push only when authorized. No linear-history, direct-to-master, or worktreeless workflow is required. There is no mandatory hosted PR gate unless David requests one for particular work. Disclose no unrelated material. This personal project excludes employer, partner and customer material. Current user instructions and permissions govern.
