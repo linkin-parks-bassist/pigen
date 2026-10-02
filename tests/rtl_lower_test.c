@@ -3050,6 +3050,340 @@ int main(void)
 		pigen_free_sources(&sources_i);
 	}
 
+	/* (14) Storage FIFO depth: the PARAMETERIZED_QUEUE depth round-trip
+	 * contract for pigen_lower_rtl_module_declarations (Task 6, "elastic
+	 * slot / pulse / queue / skid -> corresponding primitive structure").
+	 * The SAME four-signal storage module sections (12)/(13) build: one 8-bit
+	 * unsigned data type, FOUR PIGEN_SEMANTIC_INTERNAL signals in one module -
+	 * a PIGEN_TRANSFER_TYPE_BUF (ELASTIC_SLOT), a PIGEN_TRANSFER_TYPE_PORT
+	 * (PULSE_REGISTER), a PIGEN_TRANSFER_TYPE_FIFO (PARAMETERIZED_QUEUE)
+	 * whose transfer_argument is the constant 4 expression over that same
+	 * 8-bit type (the owner's PIGEN_TRANSFER_PARAMETER_DEPTH requirement), and
+	 * a PIGEN_TRANSFER_TYPE_SKID (SKID_QUEUE) - the three non-FIFO signals
+	 * passing the exact invalid (pigen_expr_id){PIGEN_INVALID_ID}
+	 * transfer-argument form the owner requires for
+	 * PIGEN_TRANSFER_PARAMETER_NONE descriptors. Built through the owner APIs
+	 * exactly as sections (12)/(13) do. Checked through
+	 * pigen_rtl_lowering_init + pigen_lower_rtl_module_declarations + the RTL
+	 * model's instance and expression arenas (the instance record is
+	 * pigen_rtl_instance in include/pigen/rtl.h:111-117, whose ordered
+	 * parameters range indexes rtl_i.instance_parameters):
+	 *   Case 1: DEPTH ROUND-TRIP. (a) The call reports success - the
+	 *     section's FIRST deliberate red: the stub returns the -1 unimplemented
+	 *     sentinel, not a compile or harness error, staged behind section
+	 *     (8)'s still-active red. (b) The FIFO signal's published
+	 *     pigen_rtl_instance carries its semantic depth: the depth value 4
+	 *     round-trips EXACTLY from the const-expr argument the test built,
+	 *     witnessed on the parameter expression that sits in the instance's
+	 *     ordered parameters record range and resolves through the landed
+	 *     pigen_rtl_expr_get to a PIGEN_RTL_EXPR_INTEGER record whose value is
+	 *     the interned const-expr value of the argument (4), not a spelling
+	 *     match. (c) The depth comes from the transfer argument, so no
+	 *     PIGEN_TRANSFER_TYPE_* source enum spelling is matched - only the
+	 *     realization (PARAMETERIZED_QUEUE) and its descriptor are consulted,
+	 *     and the descriptor is ARGUMENT-sourced with no fixed_capacity.
+	 *     (d) The three non-argument storage signals publish NO depth
+	 *     parameter: their capacity is the descriptor's fixed_capacity
+	 *     constant (ELASTIC_SLOT 1, PULSE_REGISTER 1, SKID_QUEUE 2), so each
+	 *     of their instance records carries no parameter record that
+	 *     resolves to that depth value.
+	 * Exclusions (sibling sections, NOT pinned here): the instance-shape
+	 * matrix (sibling section (12)), the distinct-instance publication and
+	 * cross-contamination (sibling section (13)), and every arena count delta
+	 * (sibling section storage-count-deltas); the primitive name each
+	 * instance instantiates - there is no owner API resolving a
+	 * pigen_rtl_module_id to a primitive definition name, so that mapping is
+	 * an implementation design decision, not an owner-checkable fact here.
+	 * Staged red: every owner-construction and descriptor assert passes
+	 * against the landed owners; the FIRST deliberate unimplemented-behavior
+	 * assert is Case 1's `rc == 0`, marked below. Every later assert in this
+	 * section requires implemented behavior and is deliberate red as well. */
+	{
+		const char *text =
+			"module store : buf a ; port b ; fifo c ; skid d ;\n";
+		pigen_source_manager sources_j = {0};
+		pigen_semantic_model sem_j;
+		pigen_rtl_model rtl_j = {0};
+		pigen_rtl_lowering lowering_j;
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8;
+		pigen_const_expr_id width8;
+		pigen_expr_id depth4;
+		pigen_const_expr_id depth4_const;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_a;
+		pigen_source_span name_b;
+		pigen_source_span name_c;
+		pigen_source_span name_d;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id buf_symbol;
+		pigen_symbol_id port_symbol;
+		pigen_symbol_id fifo_symbol;
+		pigen_symbol_id skid_symbol;
+		pigen_module_id module;
+		pigen_signal_id buf;
+		pigen_signal_id port;
+		pigen_signal_id fifo;
+		pigen_signal_id skid;
+		const pigen_semantic_signal *buf_owner;
+		const pigen_semantic_signal *fifo_owner;
+		const pigen_transfer_type_descriptor *fifo_descriptor;
+		const pigen_transfer_realization_descriptor *queue_descriptor;
+		const pigen_transfer_realization_descriptor *slot_descriptor;
+		const pigen_transfer_realization_descriptor *pulse_descriptor;
+		const pigen_transfer_realization_descriptor *skid_descriptor;
+		uint64_t expected_depth;
+		size_t instance_before;
+		const pigen_rtl_instance *fifo_instance;
+		const pigen_rtl_instance *buf_instance;
+		const pigen_rtl_instance *port_instance;
+		const pigen_rtl_instance *skid_instance;
+		size_t fifo_parameter_count;
+		int fifo_has_depth;
+		int buf_has_depth;
+		int port_has_depth;
+		int skid_has_depth;
+		int rc;
+
+		/* Build the storage module through the owner APIs (section (12)'s
+		 * landed construction pattern, four INTERNAL signals of the same
+		 * 8-bit type): the type first, then the depth argument over that
+		 * type, a source file, the compilation scope, a module in it, and
+		 * the four declared signals. The module symbol's declaration
+		 * spans the whole file (as module_add requires), the module scope
+		 * uses the same span, and each signal symbol's name span is
+		 * contained in and its declaration span equal to the span
+		 * signal_add checks. */
+		pigen_semantic_init(&sem_j, &sources_j);
+		pigen_rtl_lowering_init(&lowering_j, &sem_j, &rtl_j);
+		unsized = pigen_data_type_unsized_integer(&sem_j);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem_j, 8, unsized);
+		t8 = pigen_data_type_unsigned_integer(&sem_j, width8);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		source = pigen_source_add(&sources_j,
+			"lower_storage_fifo_depth.pigen", text, strlen(text));
+		assert(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_a = (pigen_source_span){source, 19, 20}; /* "a" */
+		name_b = (pigen_source_span){source, 28, 29}; /* "b" */
+		name_c = (pigen_source_span){source, 37, 38}; /* "c" */
+		name_d = (pigen_source_span){source, 46, 47}; /* "d" */
+		/* The FIFO depth: a real expression over the interned constant 4
+		 * of the 8-bit type - the valid constant-expression identity the
+		 * owner requires for PIGEN_TRANSFER_PARAMETER_DEPTH descriptors. */
+		depth4 = pigen_expr_add_integer(&sem_j, 4, t8, name_c);
+		assert(!IS_INVALID_ID(depth4));
+		sem_j.compilation_scope = pigen_scope_add(&sem_j,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		assert(sem_j.compilation_scope.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_j, sem_j.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_j, sem_j.compilation_scope, whole);
+		assert(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_j, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		assert(module.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_a, name_a, &buf_symbol, NULL) == PIGEN_DECLARE_OK);
+		buf = pigen_signal_add(&sem_j, (pigen_syntax_id){2}, module,
+			buf_symbol, t8, pigen_semantic_scalar_shape(&sem_j),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
+			PIGEN_SEMANTIC_INTERNAL, name_a);
+		assert(buf.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_b, name_b, &port_symbol, NULL) == PIGEN_DECLARE_OK);
+		port = pigen_signal_add(&sem_j, (pigen_syntax_id){3}, module,
+			port_symbol, t8, pigen_semantic_scalar_shape(&sem_j),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_PORT,
+			PIGEN_SEMANTIC_INTERNAL, name_b);
+		assert(port.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_c, name_c, &fifo_symbol, NULL) == PIGEN_DECLARE_OK);
+		fifo = pigen_signal_add(&sem_j, (pigen_syntax_id){4}, module,
+			fifo_symbol, t8, pigen_semantic_scalar_shape(&sem_j),
+			depth4, PIGEN_TRANSFER_TYPE_FIFO,
+			PIGEN_SEMANTIC_INTERNAL, name_c);
+		assert(fifo.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_d, name_d, &skid_symbol, NULL) == PIGEN_DECLARE_OK);
+		skid = pigen_signal_add(&sem_j, (pigen_syntax_id){5}, module,
+			skid_symbol, t8, pigen_semantic_scalar_shape(&sem_j),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_SKID,
+			PIGEN_SEMANTIC_INTERNAL, name_d);
+		assert(skid.index != PIGEN_INVALID_ID);
+
+		/* Owner facts the contract rides on (all green against the landed
+		 * owners): the four signal records report their transfer type and
+		 * the INTERNAL direction; only FIFO carries a transfer argument -
+		 * the constant 4 expression over the 8-bit type (a valid
+		 * constant-expression identity the owner requires for
+		 * PIGEN_TRANSFER_PARAMETER_DEPTH) - and its descriptor is the
+		 * concrete FIFO mapped to PARAMETERIZED_QUEUE with the DEPTH
+		 * parameter; the other three carry the invalid argument and map to
+		 * fixed-capacity realizations. The interned value of the built
+		 * argument is 4, so the depth witness below compares the RTL
+		 * record against the interned const-expr value, not a spelling. */
+		buf_owner = pigen_signal_get(&sem_j, buf);
+		assert(buf_owner &&
+			buf_owner->transfer_type == PIGEN_TRANSFER_TYPE_BUF &&
+			buf_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			IS_INVALID_ID(buf_owner->transfer_argument));
+		fifo_owner = pigen_signal_get(&sem_j, fifo);
+		assert(fifo_owner &&
+			fifo_owner->transfer_type == PIGEN_TRANSFER_TYPE_FIFO &&
+			fifo_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			fifo_owner->transfer_argument.index == depth4.index);
+		fifo_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_FIFO);
+		assert(fifo_descriptor && fifo_descriptor->is_concrete &&
+			fifo_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH &&
+			fifo_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
+		queue_descriptor =
+			pigen_transfer_realization_descriptor_get(
+				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
+		assert(queue_descriptor &&
+			queue_descriptor->capacity_source ==
+				PIGEN_TRANSFER_CAPACITY_ARGUMENT &&
+			queue_descriptor->ready_dependency ==
+				PIGEN_TRANSFER_READY_OCCUPANCY &&
+			queue_descriptor->has_occupancy == 1 &&
+			queue_descriptor->reset == PIGEN_TRANSFER_RESET_EMPTY);
+		slot_descriptor =
+			pigen_transfer_realization_descriptor_get(
+				PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT);
+		assert(slot_descriptor &&
+			slot_descriptor->capacity_source ==
+				PIGEN_TRANSFER_CAPACITY_FIXED &&
+			slot_descriptor->fixed_capacity == 1 &&
+			slot_descriptor->ready_dependency ==
+				PIGEN_TRANSFER_READY_DOWNSTREAM &&
+			slot_descriptor->has_occupancy == 1 &&
+			slot_descriptor->reset == PIGEN_TRANSFER_RESET_EMPTY);
+		pulse_descriptor =
+			pigen_transfer_realization_descriptor_get(
+				PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER);
+		assert(pulse_descriptor &&
+			pulse_descriptor->capacity_source ==
+				PIGEN_TRANSFER_CAPACITY_FIXED &&
+			pulse_descriptor->fixed_capacity == 1 &&
+			pulse_descriptor->ready_dependency ==
+				PIGEN_TRANSFER_READY_CONSTANT &&
+			pulse_descriptor->has_occupancy == 0 &&
+			pulse_descriptor->reset == PIGEN_TRANSFER_RESET_EMPTY);
+		skid_descriptor =
+			pigen_transfer_realization_descriptor_get(
+				PIGEN_TRANSFER_REALIZATION_SKID_QUEUE);
+		assert(skid_descriptor &&
+			skid_descriptor->capacity_source ==
+				PIGEN_TRANSFER_CAPACITY_FIXED &&
+			skid_descriptor->fixed_capacity == 2 &&
+			skid_descriptor->ready_dependency ==
+				PIGEN_TRANSFER_READY_OCCUPANCY &&
+			skid_descriptor->has_occupancy == 1 &&
+			skid_descriptor->reset == PIGEN_TRANSFER_RESET_EMPTY);
+		depth4_const = pigen_expr_constant(&sem_j, depth4);
+		assert(!IS_INVALID_ID(depth4_const));
+		expected_depth = 0;
+		assert(pigen_const_expr_evaluate_u64(&sem_j, depth4_const,
+			&expected_depth) && expected_depth == 4);
+
+		/* Case 1: DEPTH ROUND-TRIP. The declaration lowering reports
+		 * success, the FIFO instance carries the depth argument's interned
+		 * value as a parameter record, and the three fixed-capacity
+		 * instances carry no depth parameter. The first `rc == 0` is this
+		 * section's first deliberate red: the stub returns the -1
+		 * unimplemented sentinel, staged behind section (8)'s still-active
+		 * red. */
+		instance_before = rtl_j.instance_count;
+		assert(rtl_j.instances == NULL && instance_before == 0);
+		rc = pigen_lower_rtl_module_declarations(&lowering_j, module);
+		assert(rc == 0); /* Deliberate red (first in this section): the
+		 * stub returns -1 without touching the maps or the RTL model. */
+
+		/* The four storage instances are published at the four new arena
+		 * slots in declaration order: BUF, PORT, FIFO, SKID. (Section (13)
+		 * pins that they are mutually distinct; here we only need the four
+		 * records to inspect their parameters ranges.) */
+		fifo_instance = &rtl_j.instances[instance_before + 2];
+		buf_instance = &rtl_j.instances[instance_before + 0];
+		port_instance = &rtl_j.instances[instance_before + 1];
+		skid_instance = &rtl_j.instances[instance_before + 3];
+
+		/* (b) The FIFO instance's ordered parameters range holds a parameter
+		 * expression that resolves to the interned const-expr value of the
+		 * transfer argument (expected_depth, 4) - the depth round-trips
+		 * EXACTLY, witnessed on the record value, not a source spelling. */
+		fifo_parameter_count = fifo_instance->parameters.count;
+		fifo_has_depth = 0;
+		for (size_t p = 0; p < fifo_parameter_count; p++) {
+			const pigen_rtl_expr *pe = pigen_rtl_expr_get(&rtl_j,
+				rtl_j.instance_parameters[fifo_instance->parameters.first +
+					p]);
+			if (pe && pe->kind == PIGEN_RTL_EXPR_INTEGER &&
+				pe->value == expected_depth)
+				fifo_has_depth = 1;
+		}
+		assert(fifo_has_depth); /* Deliberate red: the stub publishes no
+		 * instance and no parameter record. */
+
+		/* (c) The depth is sourced from the transfer argument, not a
+		 * spelling match: the only realization consulted is
+		 * PARAMETERIZED_QUEUE (the descriptor asserted above), which is
+		 * ARGUMENT-sourced and carries no fixed capacity to substitute. */
+		assert(fifo_descriptor->realization ==
+			PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
+		assert(queue_descriptor->capacity_source ==
+			PIGEN_TRANSFER_CAPACITY_ARGUMENT);
+
+		/* (d) The three non-argument storage signals publish NO depth
+		 * parameter: their capacity is the descriptor's fixed_capacity
+		 * constant (ELASTIC_SLOT 1, PULSE_REGISTER 1, SKID_QUEUE 2), so
+		 * none of their parameter records resolves to the depth value. */
+		buf_has_depth = 0;
+		for (size_t p = 0; p < buf_instance->parameters.count; p++) {
+			const pigen_rtl_expr *pe = pigen_rtl_expr_get(&rtl_j,
+				rtl_j.instance_parameters[buf_instance->parameters.first +
+					p]);
+			if (pe && pe->kind == PIGEN_RTL_EXPR_INTEGER &&
+				pe->value == expected_depth)
+				buf_has_depth = 1;
+		}
+		assert(!buf_has_depth); /* Deliberate red: the stub publishes
+		 * nothing; a fixed-capacity implementation publishes no depth. */
+		port_has_depth = 0;
+		for (size_t p = 0; p < port_instance->parameters.count; p++) {
+			const pigen_rtl_expr *pe = pigen_rtl_expr_get(&rtl_j,
+				rtl_j.instance_parameters[port_instance->parameters.first +
+					p]);
+			if (pe && pe->kind == PIGEN_RTL_EXPR_INTEGER &&
+				pe->value == expected_depth)
+				port_has_depth = 1;
+		}
+		assert(!port_has_depth); /* Deliberate red: no depth parameter. */
+		skid_has_depth = 0;
+		for (size_t p = 0; p < skid_instance->parameters.count; p++) {
+			const pigen_rtl_expr *pe = pigen_rtl_expr_get(&rtl_j,
+				rtl_j.instance_parameters[skid_instance->parameters.first +
+					p]);
+			if (pe && pe->kind == PIGEN_RTL_EXPR_INTEGER &&
+				pe->value == expected_depth)
+				skid_has_depth = 1;
+		}
+		assert(!skid_has_depth); /* Deliberate red: no depth parameter. */
+
+		pigen_rtl_lowering_free(&lowering_j);
+		pigen_free_rtl_model(&rtl_j);
+		pigen_free_semantic_model(&sem_j);
+		pigen_free_sources(&sources_j);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -3075,5 +3409,6 @@ int main(void)
 	puts("PASS: net and variable declarations publish no storage and are idempotent");
 	puts("PASS: storage declarations expose variable payloads for the four realizations");
 	puts("PASS: storage declarations publish four distinct instances with no cross-contamination");
+	puts("PASS: storage FIFO depth round-trips the transfer argument and no other storage signal carries a depth parameter");
 	return 0;
 }
