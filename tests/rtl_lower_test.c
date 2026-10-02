@@ -3384,6 +3384,326 @@ int main(void)
 		pigen_free_sources(&sources_j);
 	}
 
+	/* (15) Storage count deltas: the STORAGE COUNT-DELTA and IDEMPOTENCE
+	 * contract for pigen_lower_rtl_module_declarations (Task 6, "elastic slot /
+	 * pulse / queue / skid -> corresponding primitive structure"). Sibling of
+	 * sections (12) (matrix), (13) (instances) and (14) (FIFO depth): one
+	 * module holds FOUR INTERNAL signals of the SAME 8-bit unsigned data type,
+	 * a PIGEN_TRANSFER_TYPE_BUF (ELASTIC_SLOT), a PIGEN_TRANSFER_TYPE_PORT
+	 * (PULSE_REGISTER), a PIGEN_TRANSFER_TYPE_FIFO (PARAMETERIZED_QUEUE) whose
+	 * transfer_argument is a constant 4 expression of the same type, and a
+	 * PIGEN_TRANSFER_TYPE_SKID (SKID_QUEUE). The three non-FIFO signals pass
+	 * the exact invalid transfer-argument form sections (8)-(14) use. Built
+	 * through the owner APIs exactly as section (8)'s landed construction
+	 * pattern: a source file, the compilation scope, a module symbol +
+	 * pigen_module_add, a PIGEN_SYMBOL_SIGNAL declaration per signal (matching
+	 * data type and declaration span) and pigen_signal_add with
+	 * PIGEN_SEMANTIC_INTERNAL - permitted for these concrete types.
+	 *   Case 1: COUNT DELTAS. Snapshot all THREE arenas (object_count,
+	 *     expression_count, instance_count) BEFORE the first
+	 *     pigen_lower_rtl_module_declarations call; the call reports success
+	 *     rc == 0 - the section's FIRST deliberate red (the stub -1 sentinel,
+	 *     staged behind section (8)'s still-active red, NOT a compile/harness
+	 *     error). Then:
+	 *     (a) the OBJECT-arena delta is EXACTLY four - one VARIABLE payload
+	 *         object per storage signal (section (12)'s payload shape), and no
+	 *         other objects are published by the declaration lowering for
+	 *         these four signals (the storage realizations publish no control
+	 *         objects, so a spurious control-object publish or a shared payload
+	 *         is caught here);
+	 *     (b) the INSTANCE-arena delta is EXACTLY four - one pigen_rtl_instance
+	 *         per storage signal (BUF, PORT, FIFO, SKID each own their
+	 *         primitive instance, section (13));
+	 *     (c) the EXPRESSION-arena delta is bounded and pinned from evidence,
+	 *         NOT guessed, to the inclusive range [0, 1]. The derivation, by
+	 *         emulating the landed memo/interning behavior (as section (11)
+	 *         did with its [2,4] bound):
+	 *         - The payload type publishes NO expression record: the landed
+	 *           pigen_lower_rtl_type (src/rtl_lower.c:81) stores a scalar
+	 *           type's width as an evaluated uint64_t and keeps its
+	 *           width_expression invalid (src/rtl_lower.c:148-152), so
+	 *           lowering the 8-bit type interns nothing into the expression
+	 *           arena (and the snapshot below is taken after that memo, the
+	 *           section (11) convention).
+	 *         - The storage realizations publish NO constant CONTROL
+	 *           expression: unlike the net/variable family (section (11)),
+	 *           whose valid/ready are owner-published 1-bit descriptor
+	 *           constants, the storage valid/ready are driven by the
+	 *           primitive (downstream / occupancy / always-ready), so no
+	 *           1-bit control constant is interned per storage signal.
+	 *         - The ONLY expression the lowering may intern for these four
+	 *           signals is the FIFO's depth argument: a correct implementation
+	 *           publishes the transfer argument's interned const-expr value as
+	 *           the FIFO instance's depth parameter record (the record value
+	 *           section (14) pins as PIGEN_RTL_EXPR_INTEGER == 4). The landed
+	 *           pigen_lower_rtl_expression memo interns ONCE per const-expr
+	 *           IDENTITY (src/rtl_lower.c:283), so that one argument identity
+	 *           yields at most one expression record.
+	 *         Hence the emulated-correct delta is EXACTLY 1 (the shared
+	 *         depth-4 record), the range [0, 1] spans every plausible
+	 *         interning variant (0 if a depth-carrying implementation stores
+	 *         the value in the record without a dedicated expression slot, 1
+	 *         with one shared record), and an implementation that interns a
+	 *         per-signal or duplicated depth record (delta > 1) is caught here.
+	 *     (d) the endpoints map grows past all four signal indices.
+	 *   Case 2: IDEMPOTENCE. A SECOND call of
+	 *     pigen_lower_rtl_module_declarations on the SAME lowering and module
+	 *     publishes NOTHING new: object_count, expression_count and
+	 *     instance_count are all unchanged, the endpoints-map count is
+	 *     unchanged, and each of the four signals' endpoints record is
+	 *     field-identical to after the first call (all six fields per signal
+	 *     compared, as section (11) does).
+	 * Exclusions (sibling sections, NOT re-asserted here): the instance-shape
+	 * matrix (section (12)), the distinct-instance publication and
+	 * cross-contamination (section (13)), and the FIFO depth parameter
+	 * round-trip and descriptor facts (section (14)).
+	 * Staged red: every owner-construction and descriptor assert passes
+	 * against the landed owners (including the already-implemented
+	 * pigen_lower_rtl_type memo, which resolves the 8-bit type with no
+	 * expression publish); the FIRST deliberate unimplemented-behavior assert
+	 * is Case 1's `rc == 0`, marked below, staged behind section (8)'s
+	 * still-active red. Every later assert in this section requires
+	 * implemented behavior and is deliberate red as well. */
+	{
+		const char *text =
+			"module store : buf a ; port b ; fifo c ; skid d ;\n";
+		pigen_source_manager sources_k = {0};
+		pigen_semantic_model sem_k;
+		pigen_rtl_model rtl_k = {0};
+		pigen_rtl_lowering lowering_k;
+		pigen_data_type_id unsized;
+		pigen_data_type_id t8;
+		pigen_const_expr_id width8;
+		pigen_expr_id depth4;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_a;
+		pigen_source_span name_b;
+		pigen_source_span name_c;
+		pigen_source_span name_d;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id buf_symbol;
+		pigen_symbol_id port_symbol;
+		pigen_symbol_id fifo_symbol;
+		pigen_symbol_id skid_symbol;
+		pigen_module_id module;
+		pigen_signal_id buf;
+		pigen_signal_id port;
+		pigen_signal_id fifo;
+		pigen_signal_id skid;
+		const pigen_semantic_signal *buf_owner;
+		const pigen_semantic_signal *fifo_owner;
+		const pigen_transfer_type_descriptor *fifo_descriptor;
+		pigen_rtl_type_id lowered_t8;
+		const pigen_rtl_type *t8_record;
+		pigen_rtl_signal_endpoints buf_record;
+		pigen_rtl_signal_endpoints port_record;
+		pigen_rtl_signal_endpoints fifo_record;
+		pigen_rtl_signal_endpoints skid_record;
+		pigen_rtl_signal_endpoints buf_again;
+		pigen_rtl_signal_endpoints port_again;
+		pigen_rtl_signal_endpoints fifo_again;
+		pigen_rtl_signal_endpoints skid_again;
+		size_t object_before;
+		size_t expression_before;
+		size_t instance_before;
+		size_t object_delta;
+		size_t expression_delta;
+		size_t instance_delta;
+		size_t endpoint_map_before;
+		int count_deltas;
+		int idempotent;
+		int rc;
+
+		/* Build the storage module through the owner APIs (section (8)'s
+		 * landed construction pattern, four INTERNAL signals of the same
+		 * 8-bit type): the type first, then the depth argument over that
+		 * type, a source file, the compilation scope, a module in it, and the
+		 * four declared signals. The module symbol's declaration spans the
+		 * whole file (as module_add requires), the module scope uses the same
+		 * span, and each signal symbol's name span is contained in and its
+		 * declaration span equal to the span signal_add checks. */
+		pigen_semantic_init(&sem_k, &sources_k);
+		pigen_rtl_lowering_init(&lowering_k, &sem_k, &rtl_k);
+		unsized = pigen_data_type_unsized_integer(&sem_k);
+		assert(!IS_INVALID_ID(unsized));
+		width8 = pigen_const_expr_intern_integer(&sem_k, 8, unsized);
+		t8 = pigen_data_type_unsigned_integer(&sem_k, width8);
+		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		source = pigen_source_add(&sources_k,
+			"lower_storage_count_deltas.pigen", text, strlen(text));
+		assert(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_a = (pigen_source_span){source, 19, 20}; /* "a" */
+		name_b = (pigen_source_span){source, 28, 29}; /* "b" */
+		name_c = (pigen_source_span){source, 37, 38}; /* "c" */
+		name_d = (pigen_source_span){source, 46, 47}; /* "d" */
+		/* The FIFO depth: a real expression over the interned constant 4 of
+		 * the 8-bit type - the valid constant-expression identity the owner
+		 * requires for PIGEN_TRANSFER_PARAMETER_DEPTH descriptors. */
+		depth4 = pigen_expr_add_integer(&sem_k, 4, t8, name_c);
+		assert(!IS_INVALID_ID(depth4));
+		sem_k.compilation_scope = pigen_scope_add(&sem_k,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		assert(sem_k.compilation_scope.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_k, sem_k.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_k, sem_k.compilation_scope, whole);
+		assert(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_k, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		assert(module.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_a, name_a, &buf_symbol, NULL) == PIGEN_DECLARE_OK);
+		buf = pigen_signal_add(&sem_k, (pigen_syntax_id){2}, module,
+			buf_symbol, t8, pigen_semantic_scalar_shape(&sem_k),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
+			PIGEN_SEMANTIC_INTERNAL, name_a);
+		assert(buf.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_b, name_b, &port_symbol, NULL) == PIGEN_DECLARE_OK);
+		port = pigen_signal_add(&sem_k, (pigen_syntax_id){3}, module,
+			port_symbol, t8, pigen_semantic_scalar_shape(&sem_k),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_PORT,
+			PIGEN_SEMANTIC_INTERNAL, name_b);
+		assert(port.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_c, name_c, &fifo_symbol, NULL) == PIGEN_DECLARE_OK);
+		fifo = pigen_signal_add(&sem_k, (pigen_syntax_id){4}, module,
+			fifo_symbol, t8, pigen_semantic_scalar_shape(&sem_k),
+			depth4, PIGEN_TRANSFER_TYPE_FIFO,
+			PIGEN_SEMANTIC_INTERNAL, name_c);
+		assert(fifo.index != PIGEN_INVALID_ID);
+		assert(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t8, name_d, name_d, &skid_symbol, NULL) == PIGEN_DECLARE_OK);
+		skid = pigen_signal_add(&sem_k, (pigen_syntax_id){5}, module,
+			skid_symbol, t8, pigen_semantic_scalar_shape(&sem_k),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_SKID,
+			PIGEN_SEMANTIC_INTERNAL, name_d);
+		assert(skid.index != PIGEN_INVALID_ID);
+
+		/* Owner facts the contract rides on (all green against the landed
+		 * owners): the four signal records report their transfer type and the
+		 * INTERNAL direction; only FIFO carries a transfer argument - the
+		 * constant 4 expression over the 8-bit type - and its descriptor is
+		 * the concrete FIFO mapped to PARAMETERIZED_QUEUE; the other three
+		 * carry the invalid argument. The already-implemented
+		 * pigen_lower_rtl_type memo resolves the 8-bit data type to a record
+		 * in the RTL model and publishes NO expression (a scalar type stores
+		 * its width as a uint64_t), so the arena snapshots below - taken
+		 * after that memo, the section (11) convention - are unaffected by it. */
+		buf_owner = pigen_signal_get(&sem_k, buf);
+		assert(buf_owner &&
+			buf_owner->transfer_type == PIGEN_TRANSFER_TYPE_BUF &&
+			buf_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			IS_INVALID_ID(buf_owner->transfer_argument));
+		fifo_owner = pigen_signal_get(&sem_k, fifo);
+		assert(fifo_owner &&
+			fifo_owner->transfer_type == PIGEN_TRANSFER_TYPE_FIFO &&
+			fifo_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
+			fifo_owner->transfer_argument.index == depth4.index);
+		fifo_descriptor =
+			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_FIFO);
+		assert(fifo_descriptor && fifo_descriptor->is_concrete &&
+			fifo_descriptor->realization ==
+				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
+		lowered_t8 = pigen_lower_rtl_type(&lowering_k, t8);
+		assert(!IS_INVALID_ID(lowered_t8));
+		t8_record = pigen_rtl_type_get(&rtl_k, lowered_t8);
+		assert(t8_record);
+
+		/* Case 1: COUNT DELTAS. Snapshot all three arenas BEFORE the first
+		 * declaration call; the first `rc == 0` is this section's first
+		 * deliberate red (the stub returns the -1 unimplemented sentinel).
+		 * The storage realizations own their primitive: exactly one payload
+		 * object and exactly one instance per signal, and at most the shared
+		 * FIFO depth argument as the sole interned expression. */
+		object_before = rtl_k.object_count;
+		expression_before = rtl_k.expression_count;
+		instance_before = rtl_k.instance_count;
+		assert(instance_before == 0); /* no instances before the call */
+		rc = pigen_lower_rtl_module_declarations(&lowering_k, module);
+		assert(rc == 0); /* Deliberate red (first in this section): the
+		 * stub returns -1 without touching the maps or the RTL model. */
+		assert(lowering_k.lowered_endpoint_count > buf.index);
+		assert(lowering_k.lowered_endpoint_count > port.index);
+		assert(lowering_k.lowered_endpoint_count > fifo.index);
+		assert(lowering_k.lowered_endpoint_count > skid.index);
+		object_delta = rtl_k.object_count - object_before;
+		expression_delta = rtl_k.expression_count - expression_before;
+		instance_delta = rtl_k.instance_count - instance_before;
+		/* (a)+(b)+(c): exactly one VARIABLE payload object per signal (four),
+		 * exactly one pigen_rtl_instance per signal (four), and the
+		 * expression delta bounded by the shared depth argument (at most one,
+		 * per the [0,1] derivation above). A control-object publish, a shared
+		 * or missing payload, a missing or duplicated instance, or a
+		 * per-signal/duplicated depth record is each caught here. */
+		/* The [0,1] range: the lower bound 0 is implicit for the unsigned
+		 * delta; the upper bound 1 pins the single shared depth record. */
+		count_deltas = object_delta == 4 && instance_delta == 4 &&
+			expression_delta <= 1;
+		assert(count_deltas); /* Deliberate red: the stub publishes nothing. */
+
+		/* Case 2: IDEMPOTENCE. A second call on the SAME lowering and module
+		 * publishes NOTHING new: all three arena counts and the endpoints-map
+		 * count are unchanged and each of the four signals' endpoints record
+		 * is field-identical to after the first call (all six fields per
+		 * signal). Deliberate red: the stub returns -1 and republishes
+		 * nothing. */
+		buf_record = lowering_k.lowered_endpoints[buf.index];
+		port_record = lowering_k.lowered_endpoints[port.index];
+		fifo_record = lowering_k.lowered_endpoints[fifo.index];
+		skid_record = lowering_k.lowered_endpoints[skid.index];
+		object_before = rtl_k.object_count;
+		expression_before = rtl_k.expression_count;
+		instance_before = rtl_k.instance_count;
+		endpoint_map_before = lowering_k.lowered_endpoint_count;
+		rc = pigen_lower_rtl_module_declarations(&lowering_k, module);
+		assert(rc == 0); /* Deliberate red: the stub returns -1. */
+		buf_again = lowering_k.lowered_endpoints[buf.index];
+		port_again = lowering_k.lowered_endpoints[port.index];
+		fifo_again = lowering_k.lowered_endpoints[fifo.index];
+		skid_again = lowering_k.lowered_endpoints[skid.index];
+		idempotent = rtl_k.object_count == object_before &&
+			rtl_k.expression_count == expression_before &&
+			rtl_k.instance_count == instance_before &&
+			lowering_k.lowered_endpoint_count == endpoint_map_before &&
+			(buf_again.payload.index == buf_record.payload.index) &&
+			(buf_again.valid.index == buf_record.valid.index) &&
+			(buf_again.ready.index == buf_record.ready.index) &&
+			(buf_again.input_payload.index == buf_record.input_payload.index) &&
+			(buf_again.input_valid.index == buf_record.input_valid.index) &&
+			(buf_again.input_ready.index == buf_record.input_ready.index) &&
+			(port_again.payload.index == port_record.payload.index) &&
+			(port_again.valid.index == port_record.valid.index) &&
+			(port_again.ready.index == port_record.ready.index) &&
+			(port_again.input_payload.index == port_record.input_payload.index) &&
+			(port_again.input_valid.index == port_record.input_valid.index) &&
+			(port_again.input_ready.index == port_record.input_ready.index) &&
+			(fifo_again.payload.index == fifo_record.payload.index) &&
+			(fifo_again.valid.index == fifo_record.valid.index) &&
+			(fifo_again.ready.index == fifo_record.ready.index) &&
+			(fifo_again.input_payload.index == fifo_record.input_payload.index) &&
+			(fifo_again.input_valid.index == fifo_record.input_valid.index) &&
+			(fifo_again.input_ready.index == fifo_record.input_ready.index) &&
+			(skid_again.payload.index == skid_record.payload.index) &&
+			(skid_again.valid.index == skid_record.valid.index) &&
+			(skid_again.ready.index == skid_record.ready.index) &&
+			(skid_again.input_payload.index == skid_record.input_payload.index) &&
+			(skid_again.input_valid.index == skid_record.input_valid.index) &&
+			(skid_again.input_ready.index == skid_record.input_ready.index);
+		assert(idempotent); /* Deliberate red: the stub republishes nothing. */
+
+		pigen_rtl_lowering_free(&lowering_k);
+		pigen_free_rtl_model(&rtl_k);
+		pigen_free_semantic_model(&sem_k);
+		pigen_free_sources(&sources_k);
+	}
+
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
 	assert(!lowering.semantics && !lowering.rtl);
@@ -3410,5 +3730,6 @@ int main(void)
 	puts("PASS: storage declarations expose variable payloads for the four realizations");
 	puts("PASS: storage declarations publish four distinct instances with no cross-contamination");
 	puts("PASS: storage FIFO depth round-trips the transfer argument and no other storage signal carries a depth parameter");
+	puts("PASS: storage declarations publish one payload object and one instance per signal with a bounded expression delta and are idempotent");
 	return 0;
 }
