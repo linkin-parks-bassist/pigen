@@ -14,7 +14,7 @@
  * child-order propagation, and its conversion and projection handling arrive
  * with the test-contract and implementation stages; this driver asserts only
  * the shape and the sentinel behavior that must never regress. */
-#include <assert.h>
+#include "check.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -26,36 +26,39 @@
 #define INVALID_EXPR ((pigen_const_expr_id){PIGEN_INVALID_ID})
 #define IS_INVALID_ID(id) ((id).index == PIGEN_INVALID_ID)
 
-int main(void)
+int main(int argc, char **argv)
 {
 	pigen_source_manager sources = {0};
 	pigen_semantic_model sem;
 	pigen_rtl_model rtl = {0};
 	pigen_rtl_lowering lowering;
 
+	check_init(argc, argv);
 	pigen_semantic_init(&sem, &sources);
 	pigen_rtl_lowering_init(&lowering, &sem, &rtl);
 
+	SECTION("t5-skeleton") {
 	/* init stores the models and leaves both identity memo maps empty. */
-	assert(lowering.semantics == &sem);
-	assert(lowering.rtl == &rtl);
-	assert(!lowering.lowered_types &&
+	REQUIRE(lowering.semantics == &sem);
+	REQUIRE(lowering.rtl == &rtl);
+	REQUIRE(!lowering.lowered_types &&
 		!lowering.lowered_type_count && !lowering.lowered_type_capacity);
-	assert(!lowering.lowered_expressions &&
+	REQUIRE(!lowering.lowered_expressions &&
 		!lowering.lowered_expression_count &&
 		!lowering.lowered_expression_capacity);
 
 	/* Both stubs return the unimplemented/invalid sentinel and leave the maps
 	 * untouched, for a valid lowering and for a NULL lowering. */
-	assert(IS_INVALID_ID(pigen_lower_rtl_type(&lowering, INVALID_TYPE)));
-	assert(IS_INVALID_ID(pigen_lower_rtl_expression(&lowering, INVALID_EXPR)));
-	assert(IS_INVALID_ID(pigen_lower_rtl_type(NULL, INVALID_TYPE)));
-	assert(IS_INVALID_ID(pigen_lower_rtl_expression(NULL, INVALID_EXPR)));
-	assert(!lowering.lowered_types &&
+	REQUIRE(IS_INVALID_ID(pigen_lower_rtl_type(&lowering, INVALID_TYPE)));
+	REQUIRE(IS_INVALID_ID(pigen_lower_rtl_expression(&lowering, INVALID_EXPR)));
+	REQUIRE(IS_INVALID_ID(pigen_lower_rtl_type(NULL, INVALID_TYPE)));
+	REQUIRE(IS_INVALID_ID(pigen_lower_rtl_expression(NULL, INVALID_EXPR)));
+	REQUIRE(!lowering.lowered_types &&
 		!lowering.lowered_type_count && !lowering.lowered_type_capacity);
-	assert(!lowering.lowered_expressions &&
+	REQUIRE(!lowering.lowered_expressions &&
 		!lowering.lowered_expression_count &&
 		!lowering.lowered_expression_capacity);
+	}
 
 	/* (3) Type lowering preserves the owner-reported state, width, signedness
 	 * and range shape. This is the first type-family section of the Task 5
@@ -69,7 +72,7 @@ int main(void)
 	 * invalid-id contract. Only the returned record is asserted - never an
 	 * imagined internal representation - so the implementer cannot shortcut the
 	 * preservation contract. */
-	{
+	SECTION("t5-type-lowering") {
 		pigen_data_type_id unsized;
 		pigen_const_expr_id width8;
 		pigen_const_expr_id width12;
@@ -84,24 +87,24 @@ int main(void)
 		 * expressions are concrete non-zero integers typed with the owner's
 		 * unsized integer type, so each data type is valid. */
 		unsized = pigen_data_type_unsized_integer(&sem);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem, 8, unsized);
 		width12 = pigen_const_expr_intern_integer(&sem, 12, unsized);
 		t_signed = pigen_data_type_signed_integer(&sem, width8);
 		t_unsigned = pigen_data_type_unsigned_integer(&sem, width12);
 		t_bit = pigen_data_type_sized_logic(&sem, 16, PIGEN_SIGN_UNSIGNED);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(width12));
-		assert(!IS_INVALID_ID(t_signed) && !IS_INVALID_ID(t_unsigned) &&
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(width12));
+		REQUIRE(!IS_INVALID_ID(t_signed) && !IS_INVALID_ID(t_unsigned) &&
 			!IS_INVALID_ID(t_bit));
 
 		/* Case 4 (front-loaded, the section's first behavioral assert): an
 		 * invalid data-type id returns the RTL-type sentinel and leaves both
 		 * identity memo maps untouched. */
 		id = pigen_lower_rtl_type(&lowering, INVALID_TYPE);
-		assert(IS_INVALID_ID(id));
-		assert(!lowering.lowered_types &&
+		REQUIRE(IS_INVALID_ID(id));
+		REQUIRE(!lowering.lowered_types &&
 			!lowering.lowered_type_count && !lowering.lowered_type_capacity);
-		assert(!lowering.lowered_expressions &&
+		REQUIRE(!lowering.lowered_expressions &&
 			!lowering.lowered_expression_count &&
 			!lowering.lowered_expression_capacity);
 
@@ -109,53 +112,53 @@ int main(void)
 		 * the owner-reported range shape (dimension count, packed width and a
 		 * valid packed element). */
 		id = pigen_lower_rtl_type(&lowering, t_signed);
-		assert(!IS_INVALID_ID(id)); /* Deliberate red: stub returns the sentinel. */
+		REQUIRE(!IS_INVALID_ID(id)); /* Deliberate red: stub returns the sentinel. */
 		rt = pigen_rtl_type_get(&rtl, id);
-		assert(rt);
-		assert(rt->signedness == PIGEN_SIGN_SIGNED);
-		assert(rt->signedness == pigen_data_type_signedness(&sem, t_signed));
-		assert(rt->state_domain == pigen_data_type_state_domain(&sem, t_signed));
-		assert(rt->width == 8);
-		assert(pigen_const_expr_evaluate_u64(&sem,
+		REQUIRE(rt);
+		REQUIRE(rt->signedness == PIGEN_SIGN_SIGNED);
+		REQUIRE(rt->signedness == pigen_data_type_signedness(&sem, t_signed));
+		REQUIRE(rt->state_domain == pigen_data_type_state_domain(&sem, t_signed));
+		REQUIRE(rt->width == 8);
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 			pigen_data_type_packed_width(&sem, t_signed), &w) && w == 8);
 		/* Range shape: the owner's dimension count and packed element are
 		 * preserved exactly on the lowered record. */
-		assert(rt->dimension_count ==
+		REQUIRE(rt->dimension_count ==
 			pigen_data_type_dimension_count(&sem, t_signed));
-		assert(!IS_INVALID_ID(pigen_data_type_packed_element(&sem, t_signed)));
+		REQUIRE(!IS_INVALID_ID(pigen_data_type_packed_element(&sem, t_signed)));
 
 		/* Case 2: unsigned uint[12] preserves unsigned signedness, state domain,
 		 * width 12 and the owner-reported range shape. */
 		id = pigen_lower_rtl_type(&lowering, t_unsigned);
-		assert(!IS_INVALID_ID(id));
+		REQUIRE(!IS_INVALID_ID(id));
 		rt = pigen_rtl_type_get(&rtl, id);
-		assert(rt);
-		assert(rt->signedness == PIGEN_SIGN_UNSIGNED);
-		assert(rt->signedness == pigen_data_type_signedness(&sem, t_unsigned));
-		assert(rt->state_domain == pigen_data_type_state_domain(&sem, t_unsigned));
-		assert(rt->width == 12);
-		assert(pigen_const_expr_evaluate_u64(&sem,
+		REQUIRE(rt);
+		REQUIRE(rt->signedness == PIGEN_SIGN_UNSIGNED);
+		REQUIRE(rt->signedness == pigen_data_type_signedness(&sem, t_unsigned));
+		REQUIRE(rt->state_domain == pigen_data_type_state_domain(&sem, t_unsigned));
+		REQUIRE(rt->width == 12);
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 			pigen_data_type_packed_width(&sem, t_unsigned), &w) && w == 12);
-		assert(rt->dimension_count ==
+		REQUIRE(rt->dimension_count ==
 			pigen_data_type_dimension_count(&sem, t_unsigned));
-		assert(!IS_INVALID_ID(pigen_data_type_packed_element(&sem, t_unsigned)));
+		REQUIRE(!IS_INVALID_ID(pigen_data_type_packed_element(&sem, t_unsigned)));
 
 		/* Case 3: bit[16] preserves width 16, the state domain exactly as the
 		 * owner reports it, and the owner's single packed range. */
 		id = pigen_lower_rtl_type(&lowering, t_bit);
-		assert(!IS_INVALID_ID(id));
+		REQUIRE(!IS_INVALID_ID(id));
 		rt = pigen_rtl_type_get(&rtl, id);
-		assert(rt);
-		assert(rt->signedness == PIGEN_SIGN_UNSIGNED);
-		assert(rt->signedness == pigen_data_type_signedness(&sem, t_bit));
-		assert(rt->state_domain == pigen_data_type_state_domain(&sem, t_bit));
-		assert(rt->width == 16);
-		assert(pigen_const_expr_evaluate_u64(&sem,
+		REQUIRE(rt);
+		REQUIRE(rt->signedness == PIGEN_SIGN_UNSIGNED);
+		REQUIRE(rt->signedness == pigen_data_type_signedness(&sem, t_bit));
+		REQUIRE(rt->state_domain == pigen_data_type_state_domain(&sem, t_bit));
+		REQUIRE(rt->width == 16);
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 			pigen_data_type_packed_width(&sem, t_bit), &w) && w == 16);
 		/* bit[16] carries the owner's single packed range: the lowered record
 		 * keeps that one dimension (the owner reports [15:0]). */
-		assert(pigen_data_type_dimension_count(&sem, t_bit) == 1);
-		assert(rt->dimension_count == 1 && rt->dimensions);
+		REQUIRE(pigen_data_type_dimension_count(&sem, t_bit) == 1);
+		REQUIRE(rt->dimension_count == 1 && rt->dimensions);
 	}
 
 	/* (4) Expression lowering preserves the surviving width, signedness, every
@@ -175,7 +178,7 @@ int main(void)
 	 * lowered by identity must be exactly the lowered children, in order -
 	 * which a reordered or dropped-children implementation cannot shortcut.
 	 * Case 5 pins the invalid-expression-id contract. */
-	{
+	SECTION("t5-expression-lowering") {
 		pigen_data_type_id unsized;
 		pigen_data_type_id t4;
 		pigen_data_type_id t8;
@@ -208,14 +211,14 @@ int main(void)
 		/* Owner data: signed int[8], uint[12], bit[16] and bit[4] plus the
 		 * constant operands the cases build from, all through the owner APIs. */
 		unsized = pigen_data_type_unsized_integer(&sem);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem, 8, unsized);
 		t8 = pigen_data_type_signed_integer(&sem, width8);
 		t12 = pigen_data_type_unsigned_integer(&sem,
 			pigen_const_expr_intern_integer(&sem, 12, unsized));
 		t16 = pigen_data_type_sized_logic(&sem, 16, PIGEN_SIGN_UNSIGNED);
 		t4 = pigen_data_type_sized_logic(&sem, 4, PIGEN_SIGN_UNSIGNED);
-		assert(!IS_INVALID_ID(t8) && !IS_INVALID_ID(t12) &&
+		REQUIRE(!IS_INVALID_ID(t8) && !IS_INVALID_ID(t12) &&
 			!IS_INVALID_ID(t16) && !IS_INVALID_ID(t4));
 		a = pigen_const_expr_intern_integer(&sem, 1, t8);
 		b = pigen_const_expr_intern_integer(&sem, 2, t8);
@@ -223,7 +226,7 @@ int main(void)
 		idx5 = pigen_const_expr_intern_integer(&sem, 5, unsized);
 		c4 = pigen_const_expr_intern_integer(&sem, 0xAB, t4);
 		c16 = pigen_const_expr_intern_integer(&sem, 0x5678, t16);
-		assert(!IS_INVALID_ID(a) && !IS_INVALID_ID(b) &&
+		REQUIRE(!IS_INVALID_ID(a) && !IS_INVALID_ID(b) &&
 			!IS_INVALID_ID(base16) && !IS_INVALID_ID(idx5) &&
 			!IS_INVALID_ID(c4) && !IS_INVALID_ID(c16));
 
@@ -231,8 +234,8 @@ int main(void)
 		 * invalid constant-expression id returns the RTL-expression sentinel
 		 * and leaves both identity memo maps untouched. */
 		eid = pigen_lower_rtl_expression(&lowering, INVALID_EXPR);
-		assert(IS_INVALID_ID(eid));
-		assert(!lowering.lowered_expressions &&
+		REQUIRE(IS_INVALID_ID(eid));
+		REQUIRE(!lowering.lowered_expressions &&
 			!lowering.lowered_expression_count &&
 			!lowering.lowered_expression_capacity);
 
@@ -241,36 +244,36 @@ int main(void)
 		 * than the operands; the lowered record keeps the binary kind, the
 		 * owner's result type's signedness and width, and both children in
 		 * source child order (left then right). */
-		assert(pigen_data_type_resolve_binary_operation(&sem, PIGEN_BINARY_ADD,
+		REQUIRE(pigen_data_type_resolve_binary_operation(&sem, PIGEN_BINARY_ADD,
 			t8, t8, &binary_resolution));
 		add_expr = pigen_const_expr_intern_binary(&sem,
 			binary_resolution.operation, a, b);
 		owner_expr = pigen_const_expr_get(&sem, add_expr);
-		assert(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_BINARY);
-		assert(!IS_INVALID_ID(owner_expr->data_type));
-		assert(pigen_data_type_signedness(&sem, owner_expr->data_type) ==
+		REQUIRE(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_BINARY);
+		REQUIRE(!IS_INVALID_ID(owner_expr->data_type));
+		REQUIRE(pigen_data_type_signedness(&sem, owner_expr->data_type) ==
 			PIGEN_SIGN_SIGNED);
-		assert(pigen_const_expr_evaluate_u64(&sem,
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
-		assert(w > 8); /* widening: the result is wider than the int[8] operands */
+		REQUIRE(w > 8); /* widening: the result is wider than the int[8] operands */
 		eid = pigen_lower_rtl_expression(&lowering, add_expr);
-		assert(!IS_INVALID_ID(eid)); /* Deliberate red: stub returns the sentinel. */
+		REQUIRE(!IS_INVALID_ID(eid)); /* Deliberate red: stub returns the sentinel. */
 		re = pigen_rtl_expr_get(&rtl, eid);
-		assert(re && re->kind == PIGEN_RTL_EXPR_BINARY);
+		REQUIRE(re && re->kind == PIGEN_RTL_EXPR_BINARY);
 		result_type = pigen_rtl_type_get(&rtl, re->type);
-		assert(result_type);
-		assert(result_type->signedness ==
+		REQUIRE(result_type);
+		REQUIRE(result_type->signedness ==
 			pigen_data_type_signedness(&sem, owner_expr->data_type));
-		assert(pigen_const_expr_evaluate_u64(&sem,
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
-		assert(result_type->width == w);
+		REQUIRE(result_type->width == w);
 		/* Both children lowered, in source child order, by identity. */
 		rtl_children = pigen_rtl_expr_children(&rtl, eid, &rtl_child_count);
-		assert(rtl_children && rtl_child_count == 2);
-		assert(rtl_children[0].index ==
+		REQUIRE(rtl_children && rtl_child_count == 2);
+		REQUIRE(rtl_children[0].index ==
 			pigen_lower_rtl_expression(&lowering,
 				owner_expr->as.binary.left).index);
-		assert(rtl_children[1].index ==
+		REQUIRE(rtl_children[1].index ==
 			pigen_lower_rtl_expression(&lowering,
 				owner_expr->as.binary.right).index);
 
@@ -278,40 +281,40 @@ int main(void)
 		 * bit[16] to signed int[12] is interned as a conversion constant;
 		 * the lowered record keeps the conversion verbatim and the target
 		 * type's signedness and width. */
-		assert(pigen_data_type_resolve_explicit_conversion(&sem, t16, t8,
+		REQUIRE(pigen_data_type_resolve_explicit_conversion(&sem, t16, t8,
 			&conversion));
-		assert(pigen_data_type_conversion_is_valid(&sem, conversion));
+		REQUIRE(pigen_data_type_conversion_is_valid(&sem, conversion));
 		conv_expr = pigen_const_expr_intern_conversion(&sem, conversion, base16);
 		owner_expr = pigen_const_expr_get(&sem, conv_expr);
-		assert(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_CONVERSION);
-		assert(!IS_INVALID_ID(owner_expr->data_type));
-		assert(owner_expr->as.conversion.conversion.kind == conversion.kind);
-		assert(owner_expr->as.conversion.conversion.source_data_type.index ==
+		REQUIRE(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_CONVERSION);
+		REQUIRE(!IS_INVALID_ID(owner_expr->data_type));
+		REQUIRE(owner_expr->as.conversion.conversion.kind == conversion.kind);
+		REQUIRE(owner_expr->as.conversion.conversion.source_data_type.index ==
 			conversion.source_data_type.index);
-		assert(owner_expr->as.conversion.conversion.target_data_type.index ==
+		REQUIRE(owner_expr->as.conversion.conversion.target_data_type.index ==
 			conversion.target_data_type.index);
-		assert(pigen_data_type_signedness(&sem, owner_expr->data_type) ==
+		REQUIRE(pigen_data_type_signedness(&sem, owner_expr->data_type) ==
 			PIGEN_SIGN_SIGNED);
 		eid = pigen_lower_rtl_expression(&lowering, conv_expr);
-		assert(!IS_INVALID_ID(eid));
+		REQUIRE(!IS_INVALID_ID(eid));
 		re = pigen_rtl_expr_get(&rtl, eid);
-		assert(re && re->kind == PIGEN_RTL_EXPR_CONVERSION);
-		assert(re->as.conversion.conversion.kind == conversion.kind);
-		assert(re->as.conversion.conversion.source_data_type.index ==
+		REQUIRE(re && re->kind == PIGEN_RTL_EXPR_CONVERSION);
+		REQUIRE(re->as.conversion.conversion.kind == conversion.kind);
+		REQUIRE(re->as.conversion.conversion.source_data_type.index ==
 			conversion.source_data_type.index);
-		assert(re->as.conversion.conversion.target_data_type.index ==
+		REQUIRE(re->as.conversion.conversion.target_data_type.index ==
 			conversion.target_data_type.index);
 		result_type = pigen_rtl_type_get(&rtl, re->type);
-		assert(result_type);
-		assert(result_type->signedness ==
+		REQUIRE(result_type);
+		REQUIRE(result_type->signedness ==
 			pigen_data_type_signedness(&sem, owner_expr->data_type));
-		assert(pigen_const_expr_evaluate_u64(&sem,
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
-		assert(result_type->width == w);
+		REQUIRE(result_type->width == w);
 		/* The single operand is lowered and kept, by identity. */
 		rtl_children = pigen_rtl_expr_children(&rtl, eid, &rtl_child_count);
-		assert(rtl_children && rtl_child_count == 1);
-		assert(rtl_children[0].index ==
+		REQUIRE(rtl_children && rtl_child_count == 1);
+		REQUIRE(rtl_children[0].index ==
 			pigen_lower_rtl_expression(&lowering,
 				owner_expr->as.conversion.operand).index);
 
@@ -321,37 +324,37 @@ int main(void)
 		select_type = pigen_data_type_packed_select(&sem, t16, idx5,
 			pigen_const_expr_intern_integer(&sem, 0, unsized),
 			PIGEN_SEMANTIC_SELECT_RANGE);
-		assert(!IS_INVALID_ID(select_type));
-		assert(pigen_const_expr_evaluate_u64(&sem,
+		REQUIRE(!IS_INVALID_ID(select_type));
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 			pigen_data_type_packed_width(&sem, select_type), &w) && w == 6);
 		select_expr = pigen_const_expr_intern_select(&sem, base16, idx5,
 			pigen_const_expr_intern_integer(&sem, 0, unsized),
 			PIGEN_SEMANTIC_SELECT_RANGE, select_type);
 		owner_expr = pigen_const_expr_get(&sem, select_expr);
-		assert(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_SELECT);
-		assert(!IS_INVALID_ID(owner_expr->data_type));
-		assert(owner_expr->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE);
+		REQUIRE(owner_expr && owner_expr->kind == PIGEN_CONST_EXPR_SELECT);
+		REQUIRE(!IS_INVALID_ID(owner_expr->data_type));
+		REQUIRE(owner_expr->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE);
 		eid = pigen_lower_rtl_expression(&lowering, select_expr);
-		assert(!IS_INVALID_ID(eid));
+		REQUIRE(!IS_INVALID_ID(eid));
 		re = pigen_rtl_expr_get(&rtl, eid);
-		assert(re && re->kind == PIGEN_RTL_EXPR_SELECT);
-		assert(re->as.select.kind == owner_expr->as.select.kind);
+		REQUIRE(re && re->kind == PIGEN_RTL_EXPR_SELECT);
+		REQUIRE(re->as.select.kind == owner_expr->as.select.kind);
 		result_type = pigen_rtl_type_get(&rtl, re->type);
-		assert(result_type);
-		assert(pigen_const_expr_evaluate_u64(&sem,
+		REQUIRE(result_type);
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
-		assert(result_type->width == w);
+		REQUIRE(result_type->width == w);
 		/* Base and range bounds lowered, in owner child order (base, left,
 		 * right), by identity. */
 		rtl_children = pigen_rtl_expr_children(&rtl, eid, &rtl_child_count);
-		assert(rtl_children && rtl_child_count == 3);
-		assert(rtl_children[0].index ==
+		REQUIRE(rtl_children && rtl_child_count == 3);
+		REQUIRE(rtl_children[0].index ==
 			pigen_lower_rtl_expression(&lowering,
 				owner_expr->as.select.base).index);
-		assert(rtl_children[1].index ==
+		REQUIRE(rtl_children[1].index ==
 			pigen_lower_rtl_expression(&lowering,
 				owner_expr->as.select.left).index);
-		assert(rtl_children[2].index ==
+		REQUIRE(rtl_children[2].index ==
 			pigen_lower_rtl_expression(&lowering,
 				owner_expr->as.select.right).index);
 
@@ -365,8 +368,8 @@ int main(void)
 			concat_types[0] = t4;
 			concat_types[1] = t16;
 			concat_type = pigen_data_type_concatenation(&sem, concat_types, 2);
-			assert(!IS_INVALID_ID(concat_type));
-			assert(pigen_const_expr_evaluate_u64(&sem,
+			REQUIRE(!IS_INVALID_ID(concat_type));
+			REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 				pigen_data_type_packed_width(&sem, concat_type), &w) &&
 				w == 20);
 			{
@@ -378,31 +381,31 @@ int main(void)
 					concat_children, 2, concat_type);
 			}
 			owner_expr = pigen_const_expr_get(&sem, concat_expr);
-			assert(owner_expr &&
+			REQUIRE(owner_expr &&
 				owner_expr->kind == PIGEN_CONST_EXPR_CONCATENATION);
-			assert(!IS_INVALID_ID(owner_expr->data_type));
+			REQUIRE(!IS_INVALID_ID(owner_expr->data_type));
 			eid = pigen_lower_rtl_expression(&lowering, concat_expr);
-			assert(!IS_INVALID_ID(eid));
+			REQUIRE(!IS_INVALID_ID(eid));
 			re = pigen_rtl_expr_get(&rtl, eid);
-			assert(re && re->kind == PIGEN_RTL_EXPR_CONCATENATION);
+			REQUIRE(re && re->kind == PIGEN_RTL_EXPR_CONCATENATION);
 			result_type = pigen_rtl_type_get(&rtl, re->type);
-			assert(result_type);
-			assert(pigen_const_expr_evaluate_u64(&sem,
+			REQUIRE(result_type);
+			REQUIRE(pigen_const_expr_evaluate_u64(&sem,
 				pigen_data_type_packed_width(&sem, owner_expr->data_type),
 				&w));
-			assert(result_type->width == w);
+			REQUIRE(result_type->width == w);
 			/* Owner's children via the children arena, in source order. */
 			seq_owner_children = pigen_const_expr_children(&sem,
 				owner_expr->as.sequence.first_child,
 				owner_expr->as.sequence.child_count);
-			assert(seq_owner_children &&
+			REQUIRE(seq_owner_children &&
 				owner_expr->as.sequence.child_count == 2);
-			assert(seq_owner_children[0].index == c4.index);
-			assert(seq_owner_children[1].index == c16.index);
+			REQUIRE(seq_owner_children[0].index == c4.index);
+			REQUIRE(seq_owner_children[1].index == c16.index);
 			rtl_children = pigen_rtl_expr_children(&rtl, eid, &rtl_child_count);
-			assert(rtl_children && rtl_child_count == 2);
+			REQUIRE(rtl_children && rtl_child_count == 2);
 			for (i = 0; i < rtl_child_count; i++)
-				assert(rtl_children[i].index ==
+				REQUIRE(rtl_children[i].index ==
 					pigen_lower_rtl_expression(&lowering,
 						seq_owner_children[i]).index);
 		}
@@ -423,7 +426,7 @@ int main(void)
 	 * imagined internal memo representation - so the implementer cannot
 	 * shortcut the once-by-identity contract. Case 4 pins the
 	 * invalid-constant-expression contract. */
-	{
+	SECTION("t5-constant-identity") {
 		pigen_data_type_id unsized;
 		pigen_const_expr_id width16;
 		pigen_data_type_id t16;
@@ -442,46 +445,46 @@ int main(void)
 		 * interning keeps them at distinct arena indices; identity is by arena
 		 * index, never by value. */
 		unsized = pigen_data_type_unsized_integer(&sem);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width16 = pigen_const_expr_intern_integer(&sem, 16, unsized);
 		t16 = pigen_data_type_unsigned_integer(&sem, width16);
-		assert(!IS_INVALID_ID(width16) && !IS_INVALID_ID(t16));
+		REQUIRE(!IS_INVALID_ID(width16) && !IS_INVALID_ID(t16));
 		c5 = pigen_const_expr_intern_integer(&sem, 5, t16);
 		c7 = pigen_const_expr_intern_integer(&sem, 7, t16);
-		assert(!IS_INVALID_ID(c5) && !IS_INVALID_ID(c7));
-		assert(c5.index != c7.index); /* distinct arena indices, same type */
+		REQUIRE(!IS_INVALID_ID(c5) && !IS_INVALID_ID(c7));
+		REQUIRE(c5.index != c7.index); /* distinct arena indices, same type */
 		/* Same value re-interned is deduplicated by the owner to the same arena
 		 * index, so it is not a distinct constant. */
-		assert(c5.index ==
+		REQUIRE(c5.index ==
 			pigen_const_expr_intern_integer(&sem, 5, t16).index);
 
 		/* Case 4 (front-loaded, the section's first behavioral assert): an
 		 * invalid constant-expression id returns the RTL-expression sentinel and
 		 * leaves the identity memo maps untouched. */
 		eid = pigen_lower_rtl_expression(&lowering, INVALID_EXPR);
-		assert(IS_INVALID_ID(eid));
+		REQUIRE(IS_INVALID_ID(eid));
 
 		/* Case 1: lower the SAME constant (c5) twice. Both calls return the
 		 * same valid memoized RTL handle and the second call does not grow the
 		 * RTL expression arena. */
 		eid = pigen_lower_rtl_expression(&lowering, c5);
-		assert(!IS_INVALID_ID(eid)); /* Deliberate red: stub returns the sentinel. */
+		REQUIRE(!IS_INVALID_ID(eid)); /* Deliberate red: stub returns the sentinel. */
 		arena_before = rtl.expression_count;
 		eid_again = pigen_lower_rtl_expression(&lowering, c5);
 		arena_after = rtl.expression_count;
-		assert(eid_again.index == eid.index); /* memoized: same handle */
-		assert(arena_after == arena_before); /* no arena growth on the second call */
+		REQUIRE(eid_again.index == eid.index); /* memoized: same handle */
+		REQUIRE(arena_after == arena_before); /* no arena growth on the second call */
 
 		/* Case 2: a distinct constant of the same type (c7) gets a DIFFERENT
 		 * valid RTL handle - identity is by arena index, not by value or type. */
 		eid_distinct = pigen_lower_rtl_expression(&lowering, c7);
-		assert(!IS_INVALID_ID(eid_distinct));
-		assert(eid_distinct.index != eid.index);
+		REQUIRE(!IS_INVALID_ID(eid_distinct));
+		REQUIRE(eid_distinct.index != eid.index);
 
 		/* Case 3: the identity memo slot is stable: the slot keyed by the
 		 * constant's arena index equals the returned handle. */
-		assert(lowering.lowered_expression_count > c5.index);
-		assert(lowering.lowered_expressions[c5.index].index == eid.index);
+		REQUIRE(lowering.lowered_expression_count > c5.index);
+		REQUIRE(lowering.lowered_expressions[c5.index].index == eid.index);
 
 		/* Content: the ALREADY-LOWERED bare integer constants publish the
 		 * correct record content, not just a handle. This closes the
@@ -495,22 +498,22 @@ int main(void)
 		/* c5 (the lowered value 5) is a PIGEN_RTL_EXPR_INTEGER carrying the
 		 * owner-reported value and the lowered id of its owner type t16. */
 		re = pigen_rtl_expr_get(&rtl, eid);
-		assert(re);
-		assert(re->kind == PIGEN_RTL_EXPR_INTEGER);
-		assert(pigen_const_expr_evaluate_u64(&sem, c5, &w));
-		assert(re->value == w); /* owner-reported value (5) on the record */
-		assert(re->type.index ==
+		REQUIRE(re);
+		REQUIRE(re->kind == PIGEN_RTL_EXPR_INTEGER);
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem, c5, &w));
+		REQUIRE(re->value == w); /* owner-reported value (5) on the record */
+		REQUIRE(re->type.index ==
 			pigen_lower_rtl_type(&lowering, t16).index);
 
 		/* c7 (the lowered value 7, the distinct constant) carries the same
 		 * integer kind, its own owner-reported value and the same lowered
 		 * t16 type. */
 		re = pigen_rtl_expr_get(&rtl, eid_distinct);
-		assert(re);
-		assert(re->kind == PIGEN_RTL_EXPR_INTEGER);
-		assert(pigen_const_expr_evaluate_u64(&sem, c7, &w));
-		assert(re->value == w); /* owner-reported value (7) on the record */
-		assert(re->type.index ==
+		REQUIRE(re);
+		REQUIRE(re->kind == PIGEN_RTL_EXPR_INTEGER);
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem, c7, &w));
+		REQUIRE(re->value == w); /* owner-reported value (7) on the record */
+		REQUIRE(re->type.index ==
 			pigen_lower_rtl_type(&lowering, t16).index);
 
 		/* Case 5: an exact-integer constant lowers IDENTICALLY to the bare
@@ -543,12 +546,12 @@ int main(void)
 			 * equals c5's 5, the distinct kind keeps it at a distinct arena
 			 * index. */
 			v = pigen_integer_intern_u64(&sem, 5);
-			assert(!IS_INVALID_ID(v));
+			REQUIRE(!IS_INVALID_ID(v));
 			t_ex = pigen_data_type_exact_integer(&sem, v);
-			assert(!IS_INVALID_ID(t_ex));
+			REQUIRE(!IS_INVALID_ID(t_ex));
 			cx = pigen_const_expr_intern_exact_integer(&sem, v, t_ex);
-			assert(!IS_INVALID_ID(cx));
-			assert(cx.index != c5.index); /* distinct from INTEGER c5, same 5 */
+			REQUIRE(!IS_INVALID_ID(cx));
+			REQUIRE(cx.index != c5.index); /* distinct from INTEGER c5, same 5 */
 
 			/* The exact-integer constant lowers to a valid RTL handle distinct
 			 * from the bare integer constant's handle. Deliberate red: the
@@ -556,17 +559,17 @@ int main(void)
 			 * EXACT_INTEGER (its packed width is INVALID_ID), so this is the
 			 * section's first exact-integer assert to abort. */
 			exid = pigen_lower_rtl_expression(&lowering, cx);
-			assert(!IS_INVALID_ID(exid)); /* Deliberate red: impl sentinel. */
-			assert(exid.index != eid.index);
+			REQUIRE(!IS_INVALID_ID(exid)); /* Deliberate red: impl sentinel. */
+			REQUIRE(exid.index != eid.index);
 
 			/* The lowered record is an INTEGER carrying the owner-reported
 			 * value and the lowered id of its owner type t_ex. */
 			rex = pigen_rtl_expr_get(&rtl, exid);
-			assert(rex);
-			assert(rex->kind == PIGEN_RTL_EXPR_INTEGER);
-			assert(pigen_const_expr_evaluate_u64(&sem, cx, &w));
-			assert(rex->value == w); /* owner-reported value (5) on the record */
-			assert(rex->type.index ==
+			REQUIRE(rex);
+			REQUIRE(rex->kind == PIGEN_RTL_EXPR_INTEGER);
+			REQUIRE(pigen_const_expr_evaluate_u64(&sem, cx, &w));
+			REQUIRE(rex->value == w); /* owner-reported value (5) on the record */
+			REQUIRE(rex->type.index ==
 				pigen_lower_rtl_type(&lowering, t_ex).index);
 
 			/* TEST-AUDIT-9: pin the exact-integer TYPE's own lowered width. It
@@ -574,11 +577,11 @@ int main(void)
 			 * packed width. rt is the lowered id of t_ex; its width equals the
 			 * owner unsigned width of the exact value. */
 			rt = pigen_rtl_type_get(&rtl, pigen_lower_rtl_type(&lowering, t_ex));
-			assert(rt);
-			assert(rt->width == pigen_integer_unsigned_width(&sem, v));
+			REQUIRE(rt);
+			REQUIRE(rt->width == pigen_integer_unsigned_width(&sem, v));
 			/* The packed-width query reports INVALID_ID for this constructor,
 			 * so the value-derived width above is provably NOT the packed width. */
-			assert(IS_INVALID_ID(pigen_data_type_packed_width(&sem, t_ex)));
+			REQUIRE(IS_INVALID_ID(pigen_data_type_packed_width(&sem, t_ex)));
 
 			/* Boundary: a NEGATIVE exact integer is not a u64 constant. Its
 			 * owner value does not evaluate to u64, and its lowering is pinned
@@ -591,14 +594,14 @@ int main(void)
 				pigen_rtl_expr_id exid2;
 
 				v2 = pigen_integer_negate(&sem, v);
-				assert(!IS_INVALID_ID(v2));
+				REQUIRE(!IS_INVALID_ID(v2));
 				t_ex2 = pigen_data_type_exact_integer(&sem, v2);
-				assert(!IS_INVALID_ID(t_ex2));
+				REQUIRE(!IS_INVALID_ID(t_ex2));
 				cx2 = pigen_const_expr_intern_exact_integer(&sem, v2, t_ex2);
-				assert(!IS_INVALID_ID(cx2));
-				assert(!pigen_const_expr_evaluate_u64(&sem, cx2, &w));
+				REQUIRE(!IS_INVALID_ID(cx2));
+				REQUIRE(!pigen_const_expr_evaluate_u64(&sem, cx2, &w));
 				exid2 = pigen_lower_rtl_expression(&lowering, cx2);
-				assert(IS_INVALID_ID(exid2)); /* negative: not a u64 constant */
+				REQUIRE(IS_INVALID_ID(exid2)); /* negative: not a u64 constant */
 			}
 		}
 	}
@@ -632,7 +635,7 @@ int main(void)
 	 * because only a real lowering memoizes a valid constant so that the
 	 * recoverable call returns a non-sentinel handle while the stub returns the
 	 * sentinel. Cases 1-3 are guards that pin the error-reporting contract. */
-	{
+	SECTION("t5-error-rollback") {
 		const char *text =
 			"module top : input value : logic ;\n";
 		pigen_source_id source;
@@ -669,34 +672,34 @@ int main(void)
 		 * declaration span equal to the span signal_add checks. */
 		width16 = pigen_const_expr_intern_integer(&sem, 16,
 			pigen_data_type_unsized_integer(&sem));
-		assert(!IS_INVALID_ID(width16));
+		REQUIRE(!IS_INVALID_ID(width16));
 		t16 = pigen_data_type_unsigned_integer(&sem, width16);
-		assert(!IS_INVALID_ID(t16));
+		REQUIRE(!IS_INVALID_ID(t16));
 		source = pigen_source_add(&sources, "lower_rollback.pigen", text,
 			strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name = (pigen_source_span){source, 19, 24}; /* "value" */
 		sem.compilation_scope = pigen_scope_add(&sem,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem, sem.compilation_scope,
+		REQUIRE(sem.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem, sem.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem, sem.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t16, name, name, &signal_symbol, NULL) == PIGEN_DECLARE_OK);
 		signal = pigen_signal_add(&sem, (pigen_syntax_id){2}, module,
 			signal_symbol, t16, pigen_semantic_scalar_shape(&sem),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
 			PIGEN_SEMANTIC_INTERNAL, name);
-		assert(signal.index != PIGEN_INVALID_ID);
+		REQUIRE(signal.index != PIGEN_INVALID_ID);
 
 		/* A DISTINCT unbound PARAMETER symbol: declared in the module scope but
 		 * never given a parameter value (no pigen_parameter_add), so it carries
@@ -710,7 +713,7 @@ int main(void)
 		 * valid, non-empty, and does not collide with the "value" signal
 		 * symbol in module_scope (the module symbol owns "top" in the parent
 		 * scope, which lookup_local does not see). */
-		assert(pigen_symbol_declare(&sem, module_scope, PIGEN_SYMBOL_PARAMETER,
+		REQUIRE(pigen_symbol_declare(&sem, module_scope, PIGEN_SYMBOL_PARAMETER,
 			t16, (pigen_source_span){source, 7, 10},
 			(pigen_source_span){source, 7, 10}, &param_symbol, NULL) ==
 			PIGEN_DECLARE_OK);
@@ -718,9 +721,9 @@ int main(void)
 		/* A valid constant of the same type, lowered before any failure, is the
 		 * recoverability witness for Case 4. */
 		good = pigen_const_expr_intern_integer(&sem, 5, t16);
-		assert(!IS_INVALID_ID(good));
+		REQUIRE(!IS_INVALID_ID(good));
 		good_id = pigen_lower_rtl_expression(&lowering, good);
-		assert(!IS_INVALID_ID(good_id)); /* Deliberate red (first in this
+		REQUIRE(!IS_INVALID_ID(good_id)); /* Deliberate red (first in this
 		 * section): the stub returns the sentinel for the valid constant. */
 
 		/* Snapshot the populated type and expression memo slots BEFORE the
@@ -746,9 +749,9 @@ int main(void)
 		 * (no parameter value) so lowering must report the sentinel with no
 		 * partial records. */
 		sym_expr = pigen_const_expr_intern_symbol(&sem, param_symbol, t16);
-		assert(!IS_INVALID_ID(sym_expr));
+		REQUIRE(!IS_INVALID_ID(sym_expr));
 		eid = pigen_lower_rtl_expression(&lowering, sym_expr);
-		assert(IS_INVALID_ID(eid));
+		REQUIRE(IS_INVALID_ID(eid));
 
 		/* Case 2: the failure published no partial RTL records - the arena
 		 * counts and every previously populated memo slot are unchanged. */
@@ -778,14 +781,14 @@ int main(void)
 		 * call neither clobbered it nor republished it. */
 		no_partial_state = no_partial_state &&
 			lowering.lowered_expressions[good.index].index == good_id.index;
-		assert(no_partial_state); /* guard: the stub publishes nothing */
+		REQUIRE(no_partial_state); /* guard: the stub publishes nothing */
 
 		/* Case 3: a constant-expression id absent from the semantic arena
 		 * lowers to the sentinel and again leaves every count and slot
 		 * unchanged. */
 		eid = pigen_lower_rtl_expression(&lowering,
 			(pigen_const_expr_id){999});
-		assert(IS_INVALID_ID(eid));
+		REQUIRE(IS_INVALID_ID(eid));
 		type_count_after = rtl.type_count;
 		expr_count_after = rtl.expression_count;
 		type_map_after = lowering.lowered_type_count;
@@ -806,15 +809,15 @@ int main(void)
 			expr_populated_after == expr_populated_before;
 		no_partial_state = no_partial_state &&
 			lowering.lowered_expressions[good.index].index == good_id.index;
-		assert(no_partial_state); /* guard: the stub publishes nothing */
+		REQUIRE(no_partial_state); /* guard: the stub publishes nothing */
 
 		/* Case 4: after both failures the already-lowered valid constant still
 		 * returns its memoized valid handle - the error left the lowering
 		 * usable. */
 		recoverable = pigen_lower_rtl_expression(&lowering, good);
-		assert(!IS_INVALID_ID(recoverable)); /* Deliberate red (first in this
+		REQUIRE(!IS_INVALID_ID(recoverable)); /* Deliberate red (first in this
 		 * section): the stub returns the sentinel for the valid constant. */
-		assert(recoverable.index == good_id.index);
+		REQUIRE(recoverable.index == good_id.index);
 	}
 
 	/* (7) Repeat lowering is identity-memoized and deterministic. Fifth
@@ -851,7 +854,7 @@ int main(void)
 	 * this section requires implemented behavior and is also deliberate red.
 	 * This is the LAST test-contract section of the chain: the implementation
 	 * item makes the whole target green. */
-	{
+	SECTION("t5-memoization") {
 		pigen_data_type_id unsized;
 		pigen_data_type_id t8s;
 		pigen_data_type_id t16u;
@@ -884,21 +887,21 @@ int main(void)
 		 * unsigned type and three constants (two integers and one explicit
 		 * conversion), all through the owner APIs. */
 		unsized = pigen_data_type_unsized_integer(&sem);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem, 8, unsized);
 		width16 = pigen_const_expr_intern_integer(&sem, 16, unsized);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(width16));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(width16));
 		t8s = pigen_data_type_signed_integer(&sem, width8);
 		t16u = pigen_data_type_unsigned_integer(&sem, width16);
-		assert(!IS_INVALID_ID(t8s) && !IS_INVALID_ID(t16u));
+		REQUIRE(!IS_INVALID_ID(t8s) && !IS_INVALID_ID(t16u));
 		c5 = pigen_const_expr_intern_integer(&sem, 5, t8s);
 		c0x1234 = pigen_const_expr_intern_integer(&sem, 0x1234, t16u);
-		assert(!IS_INVALID_ID(c5) && !IS_INVALID_ID(c0x1234));
-		assert(pigen_data_type_resolve_explicit_conversion(&sem, t16u, t8s,
+		REQUIRE(!IS_INVALID_ID(c5) && !IS_INVALID_ID(c0x1234));
+		REQUIRE(pigen_data_type_resolve_explicit_conversion(&sem, t16u, t8s,
 			&conversion));
-		assert(pigen_data_type_conversion_is_valid(&sem, conversion));
+		REQUIRE(pigen_data_type_conversion_is_valid(&sem, conversion));
 		conv = pigen_const_expr_intern_conversion(&sem, conversion, c0x1234);
-		assert(!IS_INVALID_ID(conv));
+		REQUIRE(!IS_INVALID_ID(conv));
 
 		/* Case 1: REPEAT-LOWER STABILITY. Lower the whole fixed set (types,
 		 * then constants) and record every returned id, then lower the whole
@@ -922,14 +925,14 @@ int main(void)
 		/* Second pass over the WHOLE set: every returned id is identical to
 		 * the first pass and nothing grows. */
 		id1 = pigen_lower_rtl_type(&lowering, t8s);
-		assert(!IS_INVALID_ID(id1)); /* Deliberate red (first in this
+		REQUIRE(!IS_INVALID_ID(id1)); /* Deliberate red (first in this
 		 * section): the stub returns the sentinel for a valid type. */
-		assert(id1.index == p1_t8s.index);
-		assert(pigen_lower_rtl_type(&lowering, t16u).index == p1_t16u.index);
-		assert(pigen_lower_rtl_expression(&lowering, c5).index == p1_c5.index);
-		assert(pigen_lower_rtl_expression(&lowering, c0x1234).index ==
+		REQUIRE(id1.index == p1_t8s.index);
+		REQUIRE(pigen_lower_rtl_type(&lowering, t16u).index == p1_t16u.index);
+		REQUIRE(pigen_lower_rtl_expression(&lowering, c5).index == p1_c5.index);
+		REQUIRE(pigen_lower_rtl_expression(&lowering, c0x1234).index ==
 			p1_c16.index);
-		assert(pigen_lower_rtl_expression(&lowering, conv).index ==
+		REQUIRE(pigen_lower_rtl_expression(&lowering, conv).index ==
 			p1_conv.index);
 		type_count_after = rtl.type_count;
 		expr_count_after = rtl.expression_count;
@@ -939,7 +942,7 @@ int main(void)
 			expr_count_after == expr_count_before &&
 			type_map_after == type_map_before &&
 			expr_map_after == expr_map_before;
-		assert(stable); /* memoized: no duplicate growth on the repeat pass */
+		REQUIRE(stable); /* memoized: no duplicate growth on the repeat pass */
 
 		/* Case 2: INDEPENDENT-BUILD DETERMINISM. Build a second model pair
 		 * with the IDENTICAL construction sequence (same API calls, same
@@ -982,22 +985,22 @@ int main(void)
 
 			/* Identical construction sequence, fresh managers. */
 			unsized2 = pigen_data_type_unsized_integer(&sem2);
-			assert(!IS_INVALID_ID(unsized2));
+			REQUIRE(!IS_INVALID_ID(unsized2));
 			width8_2 = pigen_const_expr_intern_integer(&sem2, 8, unsized2);
 			width16_2 = pigen_const_expr_intern_integer(&sem2, 16, unsized2);
-			assert(!IS_INVALID_ID(width8_2) && !IS_INVALID_ID(width16_2));
+			REQUIRE(!IS_INVALID_ID(width8_2) && !IS_INVALID_ID(width16_2));
 			t8s2 = pigen_data_type_signed_integer(&sem2, width8_2);
 			t16u2 = pigen_data_type_unsigned_integer(&sem2, width16_2);
-			assert(!IS_INVALID_ID(t8s2) && !IS_INVALID_ID(t16u2));
+			REQUIRE(!IS_INVALID_ID(t8s2) && !IS_INVALID_ID(t16u2));
 			c5_2 = pigen_const_expr_intern_integer(&sem2, 5, t8s2);
 			c0x1234_2 = pigen_const_expr_intern_integer(&sem2, 0x1234, t16u2);
-			assert(!IS_INVALID_ID(c5_2) && !IS_INVALID_ID(c0x1234_2));
-			assert(pigen_data_type_resolve_explicit_conversion(&sem2, t16u2,
+			REQUIRE(!IS_INVALID_ID(c5_2) && !IS_INVALID_ID(c0x1234_2));
+			REQUIRE(pigen_data_type_resolve_explicit_conversion(&sem2, t16u2,
 				t8s2, &conversion2));
-			assert(pigen_data_type_conversion_is_valid(&sem2, conversion2));
+			REQUIRE(pigen_data_type_conversion_is_valid(&sem2, conversion2));
 			conv_2 = pigen_const_expr_intern_conversion(&sem2, conversion2,
 				c0x1234_2);
-			assert(!IS_INVALID_ID(conv_2));
+			REQUIRE(!IS_INVALID_ID(conv_2));
 
 			/* Identical lowering sequence through the second lowering. */
 			pigen_lower_rtl_type(&lowering2, t8s2);
@@ -1049,7 +1052,7 @@ int main(void)
 					d1->right.expression.index ==
 					d2->right.expression.index;
 			}
-			assert(deterministic); /* Deliberate red: stubs publish no records. */
+			REQUIRE(deterministic); /* Deliberate red: stubs publish no records. */
 
 			/* The c5 constant: kind, low word, literal fields, child count
 			 * and the lowered record's own type record contents. */
@@ -1084,7 +1087,7 @@ int main(void)
 					rt->state_domain == rt2->state_domain &&
 					rt->width == rt2->width;
 			}
-			assert(deterministic); /* Deliberate red: stubs publish no records. */
+			REQUIRE(deterministic); /* Deliberate red: stubs publish no records. */
 
 			/* The 0x1234 constant: same record-content comparison. */
 			re = pigen_rtl_expr_get(&rtl,
@@ -1118,7 +1121,7 @@ int main(void)
 					rt->state_domain == rt2->state_domain &&
 					rt->width == rt2->width;
 			}
-			assert(deterministic); /* Deliberate red: stubs publish no records. */
+			REQUIRE(deterministic); /* Deliberate red: stubs publish no records. */
 
 			/* The conversion: kind, the conversion kept verbatim, and the
 			 * single operand's child id relative to the arena: the offset
@@ -1156,7 +1159,7 @@ int main(void)
 						(kids2[0].index - base2);
 				}
 			}
-			assert(deterministic); /* Deliberate red: stubs publish no records. */
+			REQUIRE(deterministic); /* Deliberate red: stubs publish no records. */
 
 			/* The second build owns its models: free them before the shared
 			 * tail so the shared tail frees only the first build. */
@@ -1173,13 +1176,13 @@ int main(void)
 			if (lowering.lowered_types[i].index == PIGEN_INVALID_ID)
 				continue;
 			rt = pigen_rtl_type_get(&rtl, lowering.lowered_types[i]);
-			assert(rt); /* Deliberate red: stubs populate no map slots. */
+			REQUIRE(rt); /* Deliberate red: stubs populate no map slots. */
 		}
 		for (i = 0; i < lowering.lowered_expression_count; i++) {
 			if (lowering.lowered_expressions[i].index == PIGEN_INVALID_ID)
 				continue;
 			re = pigen_rtl_expr_get(&rtl, lowering.lowered_expressions[i]);
-			assert(re); /* Deliberate red: stubs populate no map slots. */
+			REQUIRE(re); /* Deliberate red: stubs populate no map slots. */
 		}
 	}
 
@@ -1239,7 +1242,7 @@ int main(void)
 	 * returns the -1 unimplemented sentinel), marked below - not a compile
 	 * or harness error. Every later assert in this section requires
 	 * implemented behavior and is deliberate red as well. */
-	{
+	SECTION("t6-boundary") {
 		const char *text =
 			"module top : input value : abstract ;\n";
 		pigen_source_manager sources_b = {0};
@@ -1300,35 +1303,35 @@ int main(void)
 		pigen_semantic_init(&sem_b, &sources_b);
 		pigen_rtl_lowering_init(&lowering_b, &sem_b, &rtl_b);
 		unsized = pigen_data_type_unsized_integer(&sem_b);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem_b, 8, unsized);
 		t8 = pigen_data_type_unsigned_integer(&sem_b, width8);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
 		source = pigen_source_add(&sources_b, "lower_boundary.pigen", text,
 			strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name = (pigen_source_span){source, 19, 24}; /* "value" */
 		sem_b.compilation_scope = pigen_scope_add(&sem_b,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem_b.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_b, sem_b.compilation_scope,
+		REQUIRE(sem_b.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_b, sem_b.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem_b, sem_b.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem_b, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_b, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_b, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name, name, &signal_symbol, NULL) == PIGEN_DECLARE_OK);
 		signal = pigen_signal_add(&sem_b, (pigen_syntax_id){2}, module,
 			signal_symbol, t8, pigen_semantic_scalar_shape(&sem_b),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_ABSTRACT,
 			PIGEN_SEMANTIC_INPUT, name);
-		assert(signal.index != PIGEN_INVALID_ID);
+		REQUIRE(signal.index != PIGEN_INVALID_ID);
 
 		/* Owner facts the contract rides on (all green against the landed
 		 * owners): the signal record reports ABSTRACT and the forced INPUT
@@ -1337,19 +1340,19 @@ int main(void)
 		 * controls (valid_constant=-1, ready_constant=-1), and the BOUNDARY
 		 * realization has ready_dependency PIGEN_TRANSFER_READY_EXTERNAL. */
 		owner_signal = pigen_signal_get(&sem_b, signal);
-		assert(owner_signal &&
+		REQUIRE(owner_signal &&
 			owner_signal->transfer_type == PIGEN_TRANSFER_TYPE_ABSTRACT &&
 			owner_signal->direction == PIGEN_SEMANTIC_INPUT &&
 			owner_signal->module.index == module.index);
 		descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_ABSTRACT);
-		assert(descriptor && !descriptor->is_concrete &&
+		REQUIRE(descriptor && !descriptor->is_concrete &&
 			descriptor->valid_constant == -1 &&
 			descriptor->ready_constant == -1);
 		realization =
 			pigen_transfer_realization_descriptor_get(
 				PIGEN_TRANSFER_REALIZATION_BOUNDARY);
-		assert(realization &&
+		REQUIRE(realization &&
 			realization->ready_dependency ==
 				PIGEN_TRANSFER_READY_EXTERNAL &&
 			descriptor->realization ==
@@ -1359,9 +1362,9 @@ int main(void)
 		 * the SAME record the declaration lowering must attach to the
 		 * payload object (pointer equality in the shared RTL model). */
 		lowered_t8 = pigen_lower_rtl_type(&lowering_b, t8);
-		assert(!IS_INVALID_ID(lowered_t8));
+		REQUIRE(!IS_INVALID_ID(lowered_t8));
 		t8_record = pigen_rtl_type_get(&rtl_b, lowered_t8);
-		assert(t8_record);
+		REQUIRE(t8_record);
 
 		/* Case 1: THREE-PORT SHAPE. The declaration lowering reports
 		 * success and the endpoints record for the signal holds distinct
@@ -1370,22 +1373,22 @@ int main(void)
 		 * objects. The first `rc == 0` is the section's first deliberate
 		 * red: the stub returns the -1 unimplemented sentinel. */
 		rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
-		assert(rc == 0); /* Deliberate red (first in this section): the
+		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
 		 * stub returns -1 without touching the maps or the RTL model. */
-		assert(lowering_b.lowered_endpoint_count > signal.index);
+		REQUIRE(lowering_b.lowered_endpoint_count > signal.index);
 		endpoints = &lowering_b.lowered_endpoints[signal.index];
-		assert(!IS_INVALID_ID(endpoints->payload));
-		assert(!IS_INVALID_ID(endpoints->valid));
-		assert(!IS_INVALID_ID(endpoints->ready));
-		assert(!IS_INVALID_ID(endpoints->input_payload));
-		assert(!IS_INVALID_ID(endpoints->input_valid));
-		assert(!IS_INVALID_ID(endpoints->input_ready));
+		REQUIRE(!IS_INVALID_ID(endpoints->payload));
+		REQUIRE(!IS_INVALID_ID(endpoints->valid));
+		REQUIRE(!IS_INVALID_ID(endpoints->ready));
+		REQUIRE(!IS_INVALID_ID(endpoints->input_payload));
+		REQUIRE(!IS_INVALID_ID(endpoints->input_valid));
+		REQUIRE(!IS_INVALID_ID(endpoints->input_ready));
 		payload_obj = pigen_rtl_object_get(&rtl_b, endpoints->payload);
-		assert(payload_obj);
+		REQUIRE(payload_obj);
 		valid_re = pigen_rtl_expr_get(&rtl_b, endpoints->valid);
-		assert(valid_re);
+		REQUIRE(valid_re);
 		ready_re = pigen_rtl_expr_get(&rtl_b, endpoints->ready);
-		assert(ready_re);
+		REQUIRE(ready_re);
 		/* The three ports are distinct objects in the RTL model: the
 		 * payload object and the two control expression records are
 		 * separate arena entries. The payload is a VARIABLE object of the
@@ -1399,22 +1402,22 @@ int main(void)
 			valid_re->kind != PIGEN_RTL_EXPR_INVALID &&
 			ready_re->kind != PIGEN_RTL_EXPR_INVALID &&
 			endpoints->valid.index != endpoints->ready.index;
-		assert(distinct); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(distinct); /* Deliberate red: the stub populates nothing. */
 		/* The payload type is EXACTLY the signal's lowered 8-bit data
 		 * type - the SAME record the pigen_lower_rtl_type memo yields in
 		 * the shared model (pointer equality): a wrong-but-resolvable
 		 * payload type is caught here. */
 		payload_shape = payload_obj &&
 			pigen_rtl_type_get(&rtl_b, payload_obj->type) == t8_record;
-		assert(payload_shape);
+		REQUIRE(payload_shape);
 		/* Input side: the declaration exposes the SAME three objects on
 		 * its input side - the same payload object, the same valid and
 		 * ready expressions (the input-side fields are object ids, so
 		 * they carry the same object/expression arena indices). */
-		assert(endpoints->input_payload.index == endpoints->payload.index);
+		REQUIRE(endpoints->input_payload.index == endpoints->payload.index);
 		input_obj = pigen_rtl_object_get(&rtl_b, endpoints->input_payload);
-		assert(input_obj);
-		assert(input_obj->kind != PIGEN_RTL_OBJECT_KIND_INVALID);
+		REQUIRE(input_obj);
+		REQUIRE(input_obj->kind != PIGEN_RTL_OBJECT_KIND_INVALID);
 		/* The input-side valid/ready fields carry resolvable records:
 		 * they resolve in the RTL model to the SAME records the
 		 * declaration's valid/ready expression ids resolve to (same
@@ -1422,9 +1425,9 @@ int main(void)
 		input_payload_obj = endpoints->input_payload;
 		input_ready_obj = endpoints->input_ready;
 		input_valid_expr = (pigen_rtl_expr_id){endpoints->valid.index};
-		assert(pigen_rtl_expr_get(&rtl_b, input_valid_expr) == valid_re);
-		assert(pigen_rtl_object_get(&rtl_b, input_payload_obj) == payload_obj);
-		assert(pigen_rtl_object_get(&rtl_b, input_ready_obj));
+		REQUIRE(pigen_rtl_expr_get(&rtl_b, input_valid_expr) == valid_re);
+		REQUIRE(pigen_rtl_object_get(&rtl_b, input_payload_obj) == payload_obj);
+		REQUIRE(pigen_rtl_object_get(&rtl_b, input_ready_obj));
 
 		/* Case 2: CONTEXT-DEPENDENT CONTROLS. The boundary signal has NO
 		 * constant controls: the valid and ready expression records must
@@ -1451,14 +1454,14 @@ int main(void)
 			pigen_rtl_lowering_init(&lowering_c, &sem_c, &rtl_c);
 			unsized_c = pigen_data_type_unsized_integer(&sem_c);
 			t1bit = pigen_data_type_sized_logic(&sem_c, 1, PIGEN_SIGN_UNSIGNED);
-			assert(!IS_INVALID_ID(unsized_c) && !IS_INVALID_ID(t1bit));
+			REQUIRE(!IS_INVALID_ID(unsized_c) && !IS_INVALID_ID(t1bit));
 			one1bit = pigen_const_expr_intern_integer(&sem_c, 1, t1bit);
-			assert(!IS_INVALID_ID(one1bit));
+			REQUIRE(!IS_INVALID_ID(one1bit));
 			const1 = pigen_lower_rtl_expression(&lowering_c, one1bit);
-			assert(!IS_INVALID_ID(const1)); /* Deliberate red: the stub
+			REQUIRE(!IS_INVALID_ID(const1)); /* Deliberate red: the stub
 			 * returns the sentinel for the valid 1-bit constant. */
 			const_re = pigen_rtl_expr_get(&rtl_c, const1);
-			assert(const_re && const_re->kind == PIGEN_RTL_EXPR_INTEGER);
+			REQUIRE(const_re && const_re->kind == PIGEN_RTL_EXPR_INTEGER);
 
 			/* The boundary valid/ready records are NOT that constant:
 			 * neither by id (the boundary model is a separate arena, so
@@ -1490,7 +1493,7 @@ int main(void)
 			not_constant = not_constant &&
 				endpoints->valid.index != const1.index &&
 				endpoints->ready.index != const1.index;
-			assert(not_constant); /* Deliberate red: the stub publishes
+			REQUIRE(not_constant); /* Deliberate red: the stub publishes
 			 * nothing, so valid_re/ready_re are NULL above. */
 			pigen_rtl_lowering_free(&lowering_c);
 			pigen_free_rtl_model(&rtl_c);
@@ -1507,7 +1510,7 @@ int main(void)
 		endpoint_map_before = lowering_b.lowered_endpoint_count;
 		record_before = lowering_b.lowered_endpoints[signal.index];
 		rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
-		assert(rc == 0); /* Deliberate red: the stub returns -1. */
+		REQUIRE(rc == 0); /* Deliberate red: the stub returns -1. */
 		endpoints_again = &lowering_b.lowered_endpoints[signal.index];
 		record_again = *endpoints_again;
 		stable = rtl_b.object_count == object_count_before &&
@@ -1522,7 +1525,7 @@ int main(void)
 				record_before.input_valid.index) &&
 			(record_again.input_ready.index ==
 				record_before.input_ready.index);
-		assert(stable); /* Deliberate red: the stub republishes nothing. */
+		REQUIRE(stable); /* Deliberate red: the stub republishes nothing. */
 
 		/* A second independently built model (identical construction
 		 * sequence, fresh managers) yields identical endpoint ids at
@@ -1555,30 +1558,30 @@ int main(void)
 			unsized_d = pigen_data_type_unsized_integer(&sem_d);
 			width8_d = pigen_const_expr_intern_integer(&sem_d, 8, unsized_d);
 			t8_d = pigen_data_type_unsigned_integer(&sem_d, width8_d);
-			assert(!IS_INVALID_ID(unsized_d) && !IS_INVALID_ID(width8_d) &&
+			REQUIRE(!IS_INVALID_ID(unsized_d) && !IS_INVALID_ID(width8_d) &&
 				!IS_INVALID_ID(t8_d));
 			source_d = pigen_source_add(&sources_d, "lower_boundary.pigen",
 				text, strlen(text));
-			assert(source_d.index != PIGEN_INVALID_ID);
+			REQUIRE(source_d.index != PIGEN_INVALID_ID);
 			whole_d = (pigen_source_span){source_d, 0, strlen(text)};
 			name_d = (pigen_source_span){source_d, 19, 24}; /* "value" */
 			sem_d.compilation_scope = pigen_scope_add(&sem_d,
 				(pigen_scope_id){PIGEN_INVALID_ID},
 				(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID},
 					0, 0});
-			assert(sem_d.compilation_scope.index != PIGEN_INVALID_ID);
-			assert(pigen_symbol_declare(&sem_d, sem_d.compilation_scope,
+			REQUIRE(sem_d.compilation_scope.index != PIGEN_INVALID_ID);
+			REQUIRE(pigen_symbol_declare(&sem_d, sem_d.compilation_scope,
 				PIGEN_SYMBOL_MODULE,
 				(pigen_data_type_id){PIGEN_INVALID_ID},
 				whole_d, whole_d, &module_symbol_d, NULL) ==
 				PIGEN_DECLARE_OK);
 			module_scope_d =
 				pigen_scope_add(&sem_d, sem_d.compilation_scope, whole_d);
-			assert(module_scope_d.index != PIGEN_INVALID_ID);
+			REQUIRE(module_scope_d.index != PIGEN_INVALID_ID);
 			module_d = pigen_module_add(&sem_d, (pigen_syntax_id){1},
 				module_symbol_d, module_scope_d, whole_d);
-			assert(module_d.index != PIGEN_INVALID_ID);
-			assert(pigen_symbol_declare(&sem_d, module_scope_d,
+			REQUIRE(module_d.index != PIGEN_INVALID_ID);
+			REQUIRE(pigen_symbol_declare(&sem_d, module_scope_d,
 				PIGEN_SYMBOL_SIGNAL, t8_d, name_d, name_d,
 				&signal_symbol_d, NULL) == PIGEN_DECLARE_OK);
 			signal_d = pigen_signal_add(&sem_d, (pigen_syntax_id){2},
@@ -1586,10 +1589,10 @@ int main(void)
 				pigen_semantic_scalar_shape(&sem_d),
 				(pigen_expr_id){PIGEN_INVALID_ID},
 				PIGEN_TRANSFER_TYPE_ABSTRACT, PIGEN_SEMANTIC_INPUT, name_d);
-			assert(signal_d.index != PIGEN_INVALID_ID);
-			assert(pigen_lower_rtl_module_declarations(&lowering_d,
+			REQUIRE(signal_d.index != PIGEN_INVALID_ID);
+			REQUIRE(pigen_lower_rtl_module_declarations(&lowering_d,
 				module_d) == 0); /* Deliberate red: the stub returns -1. */
-			assert(lowering_d.lowered_endpoint_count > signal_d.index);
+			REQUIRE(lowering_d.lowered_endpoint_count > signal_d.index);
 			ep1 = &lowering_b.lowered_endpoints[signal.index];
 			ep2 = &lowering_d.lowered_endpoints[signal_d.index];
 			deterministic = ep1 && ep2 &&
@@ -1599,7 +1602,7 @@ int main(void)
 				ep1->input_payload.index == ep2->input_payload.index &&
 				ep1->input_valid.index == ep2->input_valid.index &&
 				ep1->input_ready.index == ep2->input_ready.index;
-			assert(deterministic); /* Deliberate red: the stub populates
+			REQUIRE(deterministic); /* Deliberate red: the stub populates
 			 * no records, so both are the all-invalid sentinel. */
 			pigen_rtl_lowering_free(&lowering_d);
 			pigen_free_rtl_model(&rtl_d);
@@ -1650,12 +1653,12 @@ int main(void)
 			 * sentinel for it (its unsigned width is zero), which is the
 			 * pinned negative-exact-integer boundary of section (5). */
 			neg_value = pigen_integer_intern_u64(&sem_b, 5);
-			assert(!IS_INVALID_ID(neg_value));
+			REQUIRE(!IS_INVALID_ID(neg_value));
 			neg_value = pigen_integer_negate(&sem_b, neg_value);
-			assert(!IS_INVALID_ID(neg_value));
+			REQUIRE(!IS_INVALID_ID(neg_value));
 			t_neg = pigen_data_type_exact_integer(&sem_b, neg_value);
-			assert(!IS_INVALID_ID(t_neg));
-			assert(pigen_lower_rtl_type(&lowering_b, t_neg).index ==
+			REQUIRE(!IS_INVALID_ID(t_neg));
+			REQUIRE(pigen_lower_rtl_type(&lowering_b, t_neg).index ==
 				PIGEN_INVALID_ID); /* guard: the landed type lowering
 			 * refuses the negative exact integer */
 
@@ -1664,20 +1667,20 @@ int main(void)
 			 * one ABSTRACT INPUT signal of the unlowerable type. */
 			source2 = pigen_source_add(&sources_b, "lower_boundary_fail.pigen",
 				text2, strlen(text2));
-			assert(source2.index != PIGEN_INVALID_ID);
+			REQUIRE(source2.index != PIGEN_INVALID_ID);
 			whole2 = (pigen_source_span){source2, 0, strlen(text2)};
 			name2 = (pigen_source_span){source2, 20, 25}; /* "value" */
-			assert(pigen_symbol_declare(&sem_b, sem_b.compilation_scope,
+			REQUIRE(pigen_symbol_declare(&sem_b, sem_b.compilation_scope,
 				PIGEN_SYMBOL_MODULE,
 				(pigen_data_type_id){PIGEN_INVALID_ID},
 				whole2, whole2, &module_symbol2, NULL) == PIGEN_DECLARE_OK);
 			module_scope2 =
 				pigen_scope_add(&sem_b, sem_b.compilation_scope, whole2);
-			assert(module_scope2.index != PIGEN_INVALID_ID);
+			REQUIRE(module_scope2.index != PIGEN_INVALID_ID);
 			module2 = pigen_module_add(&sem_b, (pigen_syntax_id){3},
 				module_symbol2, module_scope2, whole2);
-			assert(module2.index != PIGEN_INVALID_ID);
-			assert(pigen_symbol_declare(&sem_b, module_scope2,
+			REQUIRE(module2.index != PIGEN_INVALID_ID);
+			REQUIRE(pigen_symbol_declare(&sem_b, module_scope2,
 				PIGEN_SYMBOL_SIGNAL, t_neg, name2, name2,
 				&signal_symbol2, NULL) == PIGEN_DECLARE_OK);
 			signal2 = pigen_signal_add(&sem_b, (pigen_syntax_id){4},
@@ -1685,7 +1688,7 @@ int main(void)
 				pigen_semantic_scalar_shape(&sem_b),
 				(pigen_expr_id){PIGEN_INVALID_ID},
 				PIGEN_TRANSFER_TYPE_ABSTRACT, PIGEN_SEMANTIC_INPUT, name2);
-			assert(signal2.index != PIGEN_INVALID_ID);
+			REQUIRE(signal2.index != PIGEN_INVALID_ID);
 
 			/* Snapshot the RTL model and the endpoints map BEFORE the
 			 * failing call: every arena count, every endpoints-map count
@@ -1707,7 +1710,7 @@ int main(void)
 			 * call, so this assert passes against it and pins the
 			 * stable witness for the implementation. */
 			rc = pigen_lower_rtl_module_declarations(&lowering_b, module2);
-			assert(rc == -1); /* Deliberate red (staged): the stub
+			REQUIRE(rc == -1); /* Deliberate red (staged): the stub
 			 * returns -1 without touching the maps or the RTL model. */
 
 			/* The failure published no partial records: the RTL model and
@@ -1743,26 +1746,26 @@ int main(void)
 					(record_again.input_ready.index ==
 						record_before.input_ready.index);
 			}
-			assert(no_partial); /* guard: the stub publishes nothing */
+			REQUIRE(no_partial); /* guard: the stub publishes nothing */
 
 			/* The failed call left the lowering usable: the previously
 			 * populated endpoints record still resolves in the RTL model
 			 * and a repeat of the successful Case 1 call is still
 			 * idempotent. Deliberate red: the stub populated nothing. */
 			endpoints = &lowering_b.lowered_endpoints[signal.index];
-			assert(!IS_INVALID_ID(endpoints->payload));
-			assert(pigen_rtl_object_get(&rtl_b, endpoints->payload));
-			assert(pigen_rtl_expr_get(&rtl_b, endpoints->valid));
-			assert(pigen_rtl_expr_get(&rtl_b, endpoints->ready));
+			REQUIRE(!IS_INVALID_ID(endpoints->payload));
+			REQUIRE(pigen_rtl_object_get(&rtl_b, endpoints->payload));
+			REQUIRE(pigen_rtl_expr_get(&rtl_b, endpoints->valid));
+			REQUIRE(pigen_rtl_expr_get(&rtl_b, endpoints->ready));
 			rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
-			assert(rc == 0); /* Deliberate red: the stub returns -1. */
+			REQUIRE(rc == 0); /* Deliberate red: the stub returns -1. */
 			record_again = lowering_b.lowered_endpoints[signal.index];
 			stable =
 				(record_again.payload.index ==
 					record_before.payload.index) &&
 				(record_again.valid.index == record_before.valid.index) &&
 				(record_again.ready.index == record_before.ready.index);
-			assert(stable); /* Deliberate red: the stub republishes nothing. */
+			REQUIRE(stable); /* Deliberate red: the stub republishes nothing. */
 		}
 
 		pigen_rtl_lowering_free(&lowering_b);
@@ -1809,7 +1812,7 @@ int main(void)
 	 * deliberate unimplemented-behavior assert is Case 1's `rc == 0`,
 	 * marked below. Every later assert in this section requires
 	 * implemented behavior and is deliberate red as well. */
-	{
+	SECTION("t6-net-variable-payload") {
 		const char *text =
 			"module netvar : wire a ; reg b ;\n";
 		pigen_source_manager sources_e = {0};
@@ -1858,43 +1861,43 @@ int main(void)
 		pigen_semantic_init(&sem_e, &sources_e);
 		pigen_rtl_lowering_init(&lowering_e, &sem_e, &rtl_e);
 		unsized = pigen_data_type_unsized_integer(&sem_e);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem_e, 8, unsized);
 		t8 = pigen_data_type_unsigned_integer(&sem_e, width8);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
 		source = pigen_source_add(&sources_e, "lower_netvar.pigen", text,
 			strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name_a = (pigen_source_span){source, 21, 22}; /* "a" */
 		name_b = (pigen_source_span){source, 29, 30}; /* "b" */
 		sem_e.compilation_scope = pigen_scope_add(&sem_e,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem_e.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_e, sem_e.compilation_scope,
+		REQUIRE(sem_e.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_e, sem_e.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem_e, sem_e.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem_e, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_e, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_e, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_a, name_a, &wire_symbol, NULL) == PIGEN_DECLARE_OK);
 		wire = pigen_signal_add(&sem_e, (pigen_syntax_id){2}, module,
 			wire_symbol, t8, pigen_semantic_scalar_shape(&sem_e),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_WIRE,
 			PIGEN_SEMANTIC_INTERNAL, name_a);
-		assert(wire.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_e, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(wire.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_e, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_b, name_b, &reg_symbol, NULL) == PIGEN_DECLARE_OK);
 		reg = pigen_signal_add(&sem_e, (pigen_syntax_id){3}, module,
 			reg_symbol, t8, pigen_semantic_scalar_shape(&sem_e),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_REG,
 			PIGEN_SEMANTIC_INTERNAL, name_b);
-		assert(reg.index != PIGEN_INVALID_ID);
+		REQUIRE(reg.index != PIGEN_INVALID_ID);
 
 		/* Owner facts the contract rides on (all green against the landed
 		 * owners): both signal records report their transfer type, the
@@ -1904,38 +1907,38 @@ int main(void)
 		 * pigen_lower_rtl_type memo resolves the 8-bit data type to a
 		 * record in the RTL model. */
 		wire_owner = pigen_signal_get(&sem_e, wire);
-		assert(wire_owner &&
+		REQUIRE(wire_owner &&
 			wire_owner->transfer_type == PIGEN_TRANSFER_TYPE_WIRE &&
 			wire_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			wire_owner->module.index == module.index);
 		reg_owner = pigen_signal_get(&sem_e, reg);
-		assert(reg_owner &&
+		REQUIRE(reg_owner &&
 			reg_owner->transfer_type == PIGEN_TRANSFER_TYPE_REG &&
 			reg_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			reg_owner->module.index == module.index);
 		wire_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_WIRE);
-		assert(wire_descriptor && wire_descriptor->is_concrete &&
+		REQUIRE(wire_descriptor && wire_descriptor->is_concrete &&
 			wire_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET);
 		reg_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_REG);
-		assert(reg_descriptor && reg_descriptor->is_concrete &&
+		REQUIRE(reg_descriptor && reg_descriptor->is_concrete &&
 			reg_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE);
 		lowered_t8 = pigen_lower_rtl_type(&lowering_e, t8);
-		assert(!IS_INVALID_ID(lowered_t8));
+		REQUIRE(!IS_INVALID_ID(lowered_t8));
 		t8_record = pigen_rtl_type_get(&rtl_e, lowered_t8);
-		assert(t8_record);
+		REQUIRE(t8_record);
 
 		/* Case 1: PAYLOAD SHAPE. The declaration lowering reports success
 		 * and the endpoints map covers BOTH signals. The first
 		 * `rc == 0` is this section's first deliberate red: the stub
 		 * returns the -1 unimplemented sentinel. */
 		rc = pigen_lower_rtl_module_declarations(&lowering_e, module);
-		assert(rc == 0); /* Deliberate red (first in this section): the
+		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
 		 * stub returns -1 without touching the maps or the RTL model. */
-		assert(lowering_e.lowered_endpoint_count >
+		REQUIRE(lowering_e.lowered_endpoint_count >
 			(wire.index > reg.index ? wire.index : reg.index));
 
 		/* For EACH signal the payload is a resolvable VARIABLE object:
@@ -1944,8 +1947,8 @@ int main(void)
 		 * direction the semantic signal's direction. */
 		wire_endpoints = &lowering_e.lowered_endpoints[wire.index];
 		reg_endpoints = &lowering_e.lowered_endpoints[reg.index];
-		assert(!IS_INVALID_ID(wire_endpoints->payload));
-		assert(!IS_INVALID_ID(reg_endpoints->payload));
+		REQUIRE(!IS_INVALID_ID(wire_endpoints->payload));
+		REQUIRE(!IS_INVALID_ID(reg_endpoints->payload));
 		wire_payload_obj = pigen_rtl_object_get(&rtl_e,
 			wire_endpoints->payload);
 		reg_payload_obj = pigen_rtl_object_get(&rtl_e, reg_endpoints->payload);
@@ -1959,12 +1962,12 @@ int main(void)
 			wire_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
 			wire_payload_type == t8_record &&
 			wire_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
-		assert(payload_wire); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(payload_wire); /* Deliberate red: the stub populates nothing. */
 		payload_reg = reg_payload_obj &&
 			reg_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
 			reg_payload_type == t8_record &&
 			reg_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
-		assert(payload_reg); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(payload_reg); /* Deliberate red: the stub populates nothing. */
 
 		/* The payload object is DISTINCT from any control (it is an
 		 * object; valid and ready are expression ids), and the two
@@ -1979,7 +1982,7 @@ int main(void)
 			reg_endpoints->payload.index != reg_endpoints->ready.index &&
 			wire_endpoints->payload.index !=
 				reg_endpoints->payload.index;
-		assert(distinct); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(distinct); /* Deliberate red: the stub populates nothing. */
 
 		pigen_rtl_lowering_free(&lowering_e);
 		pigen_free_rtl_model(&rtl_e);
@@ -2027,7 +2030,7 @@ int main(void)
 	 * FIRST deliberate unimplemented-behavior assert is Case 1's
 	 * `rc == 0`, marked below. Every later assert in this section
 	 * requires implemented behavior and is deliberate red as well. */
-	{
+	SECTION("t6-net-variable-controls") {
 		const char *text =
 			"module netvar : wire a ; reg b ;\n";
 		pigen_source_manager sources_f = {0};
@@ -2080,43 +2083,43 @@ int main(void)
 		pigen_semantic_init(&sem_f, &sources_f);
 		pigen_rtl_lowering_init(&lowering_f, &sem_f, &rtl_f);
 		unsized = pigen_data_type_unsized_integer(&sem_f);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem_f, 8, unsized);
 		t8 = pigen_data_type_unsigned_integer(&sem_f, width8);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
 		source = pigen_source_add(&sources_f, "lower_netvar_const.pigen",
 			text, strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name_a = (pigen_source_span){source, 21, 22}; /* "a" */
 		name_b = (pigen_source_span){source, 29, 30}; /* "b" */
 		sem_f.compilation_scope = pigen_scope_add(&sem_f,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem_f.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_f, sem_f.compilation_scope,
+		REQUIRE(sem_f.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_f, sem_f.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem_f, sem_f.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem_f, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_f, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_f, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_a, name_a, &wire_symbol, NULL) == PIGEN_DECLARE_OK);
 		wire = pigen_signal_add(&sem_f, (pigen_syntax_id){2}, module,
 			wire_symbol, t8, pigen_semantic_scalar_shape(&sem_f),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_WIRE,
 			PIGEN_SEMANTIC_INTERNAL, name_a);
-		assert(wire.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_f, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(wire.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_f, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_b, name_b, &reg_symbol, NULL) == PIGEN_DECLARE_OK);
 		reg = pigen_signal_add(&sem_f, (pigen_syntax_id){3}, module,
 			reg_symbol, t8, pigen_semantic_scalar_shape(&sem_f),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_REG,
 			PIGEN_SEMANTIC_INTERNAL, name_b);
-		assert(reg.index != PIGEN_INVALID_ID);
+		REQUIRE(reg.index != PIGEN_INVALID_ID);
 
 		/* Owner facts the contract rides on (all green against the landed
 		 * owners): both signal records report their transfer type, the
@@ -2127,49 +2130,49 @@ int main(void)
 		 * 1); and the already-implemented pigen_lower_rtl_type memo
 		 * resolves the 8-bit data type to a record in the RTL model. */
 		wire_owner = pigen_signal_get(&sem_f, wire);
-		assert(wire_owner &&
+		REQUIRE(wire_owner &&
 			wire_owner->transfer_type == PIGEN_TRANSFER_TYPE_WIRE &&
 			wire_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			wire_owner->module.index == module.index);
 		reg_owner = pigen_signal_get(&sem_f, reg);
-		assert(reg_owner &&
+		REQUIRE(reg_owner &&
 			reg_owner->transfer_type == PIGEN_TRANSFER_TYPE_REG &&
 			reg_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			reg_owner->module.index == module.index);
 		wire_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_WIRE);
-		assert(wire_descriptor && wire_descriptor->is_concrete &&
+		REQUIRE(wire_descriptor && wire_descriptor->is_concrete &&
 			wire_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET &&
 			wire_descriptor->valid_constant == 1 &&
 			wire_descriptor->ready_constant == 0);
 		reg_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_REG);
-		assert(reg_descriptor && reg_descriptor->is_concrete &&
+		REQUIRE(reg_descriptor && reg_descriptor->is_concrete &&
 			reg_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE &&
 			reg_descriptor->valid_constant == 1 &&
 			reg_descriptor->ready_constant == 1);
 		lowered_t8 = pigen_lower_rtl_type(&lowering_f, t8);
-		assert(!IS_INVALID_ID(lowered_t8));
+		REQUIRE(!IS_INVALID_ID(lowered_t8));
 		t8_record = pigen_rtl_type_get(&rtl_f, lowered_t8);
-		assert(t8_record);
+		REQUIRE(t8_record);
 
 		/* The object arena is empty before the declaration call: the
 		 * already-run type memo publishes type records, not objects, so
 		 * every object the first successful call adds is attributable to
 		 * the two declarations. */
 		object_count_before = rtl_f.object_count;
-		assert(object_count_before == 0);
+		REQUIRE(object_count_before == 0);
 
 		/* Case 1: CONSTANT CONTROLS. The declaration lowering reports
 		 * success and the endpoints map covers BOTH signals. The first
 		 * `rc == 0` is this section's first deliberate red: the stub
 		 * returns the -1 unimplemented sentinel. */
 		rc = pigen_lower_rtl_module_declarations(&lowering_f, module);
-		assert(rc == 0); /* Deliberate red (first in this section): the
+		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
 		 * stub returns -1 without touching the maps or the RTL model. */
-		assert(lowering_f.lowered_endpoint_count >
+		REQUIRE(lowering_f.lowered_endpoint_count >
 			(wire.index > reg.index ? wire.index : reg.index));
 
 		/* For EACH signal, valid and ready are valid constant-expression
@@ -2182,13 +2185,13 @@ int main(void)
 			pigen_lower_rtl_type(&lowering_f,
 				pigen_data_type_sized_logic(&sem_f, 1,
 					PIGEN_SIGN_UNSIGNED)));
-		assert(one_bit && one_bit->width == 1);
+		REQUIRE(one_bit && one_bit->width == 1);
 		wire_endpoints = &lowering_f.lowered_endpoints[wire.index];
 		reg_endpoints = &lowering_f.lowered_endpoints[reg.index];
-		assert(!IS_INVALID_ID(wire_endpoints->valid));
-		assert(!IS_INVALID_ID(wire_endpoints->ready));
-		assert(!IS_INVALID_ID(reg_endpoints->valid));
-		assert(!IS_INVALID_ID(reg_endpoints->ready));
+		REQUIRE(!IS_INVALID_ID(wire_endpoints->valid));
+		REQUIRE(!IS_INVALID_ID(wire_endpoints->ready));
+		REQUIRE(!IS_INVALID_ID(reg_endpoints->valid));
+		REQUIRE(!IS_INVALID_ID(reg_endpoints->ready));
 		wire_valid_re = pigen_rtl_expr_get(&rtl_f, wire_endpoints->valid);
 		wire_ready_re = pigen_rtl_expr_get(&rtl_f, wire_endpoints->ready);
 		reg_valid_re = pigen_rtl_expr_get(&rtl_f, reg_endpoints->valid);
@@ -2202,7 +2205,7 @@ int main(void)
 			wire_ready_re->literal_bit_count == 1 &&
 			wire_valid_re->literal_negative == 0 &&
 			wire_ready_re->literal_negative == 0;
-		assert(controls_wire); /* Deliberate red: the stub populates
+		REQUIRE(controls_wire); /* Deliberate red: the stub populates
 		 * nothing, so both records are NULL above. */
 		controls_reg = reg_valid_re && reg_ready_re &&
 			reg_valid_re->kind == PIGEN_RTL_EXPR_INTEGER &&
@@ -2213,7 +2216,7 @@ int main(void)
 			reg_ready_re->literal_bit_count == 1 &&
 			reg_valid_re->literal_negative == 0 &&
 			reg_ready_re->literal_negative == 0;
-		assert(controls_reg); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(controls_reg); /* Deliberate red: the stub populates nothing. */
 
 		/* The control carries NO published object: the endpoints record
 		 * has no object-id field for a control, so the witness is the
@@ -2224,7 +2227,7 @@ int main(void)
 		 * is caught here. */
 		object_count_after = rtl_f.object_count;
 		no_object = (object_count_after - object_count_before) == 2;
-		assert(no_object); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(no_object); /* Deliberate red: the stub publishes nothing. */
 
 		/* WIRE and REG differ EXACTLY in the ready constant (0 vs 1)
 		 * while both carry the valid constant 1: the ready value is the
@@ -2243,7 +2246,7 @@ int main(void)
 				reg_ready_re->literal_bit_count &&
 			wire_ready_re->literal_negative ==
 				reg_ready_re->literal_negative;
-		assert(only_ready); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(only_ready); /* Deliberate red: the stub populates nothing. */
 
 		pigen_rtl_lowering_free(&lowering_f);
 		pigen_free_rtl_model(&rtl_f);
@@ -2292,7 +2295,7 @@ int main(void)
 	 * marked below, staged behind section (8)'s still-active red. Every
 	 * later assert in this section requires implemented behavior and is
 	 * deliberate red as well. */
-	{
+	SECTION("t6-net-variable-counts") {
 		const char *text =
 			"module netvar : wire a ; reg b ;\n";
 		pigen_source_manager sources_g = {0};
@@ -2345,43 +2348,43 @@ int main(void)
 		pigen_semantic_init(&sem_g, &sources_g);
 		pigen_rtl_lowering_init(&lowering_g, &sem_g, &rtl_g);
 		unsized = pigen_data_type_unsized_integer(&sem_g);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem_g, 8, unsized);
 		t8 = pigen_data_type_unsigned_integer(&sem_g, width8);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
 		source = pigen_source_add(&sources_g, "lower_netvar_counts.pigen",
 			text, strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name_a = (pigen_source_span){source, 21, 22}; /* "a" */
 		name_b = (pigen_source_span){source, 29, 30}; /* "b" */
 		sem_g.compilation_scope = pigen_scope_add(&sem_g,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem_g.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_g, sem_g.compilation_scope,
+		REQUIRE(sem_g.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_g, sem_g.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem_g, sem_g.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem_g, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_g, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_g, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_a, name_a, &wire_symbol, NULL) == PIGEN_DECLARE_OK);
 		wire = pigen_signal_add(&sem_g, (pigen_syntax_id){2}, module,
 			wire_symbol, t8, pigen_semantic_scalar_shape(&sem_g),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_WIRE,
 			PIGEN_SEMANTIC_INTERNAL, name_a);
-		assert(wire.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_g, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(wire.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_g, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_b, name_b, &reg_symbol, NULL) == PIGEN_DECLARE_OK);
 		reg = pigen_signal_add(&sem_g, (pigen_syntax_id){3}, module,
 			reg_symbol, t8, pigen_semantic_scalar_shape(&sem_g),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_REG,
 			PIGEN_SEMANTIC_INTERNAL, name_b);
-		assert(reg.index != PIGEN_INVALID_ID);
+		REQUIRE(reg.index != PIGEN_INVALID_ID);
 
 		/* Owner facts the contract rides on (all green against the landed
 		 * owners): both signal records report their transfer type, the
@@ -2393,29 +2396,29 @@ int main(void)
 		 * done before the declaration call, so the count snapshots below
 		 * are taken after it. */
 		wire_owner = pigen_signal_get(&sem_g, wire);
-		assert(wire_owner &&
+		REQUIRE(wire_owner &&
 			wire_owner->transfer_type == PIGEN_TRANSFER_TYPE_WIRE &&
 			wire_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			wire_owner->module.index == module.index);
 		reg_owner = pigen_signal_get(&sem_g, reg);
-		assert(reg_owner &&
+		REQUIRE(reg_owner &&
 			reg_owner->transfer_type == PIGEN_TRANSFER_TYPE_REG &&
 			reg_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			reg_owner->module.index == module.index);
 		wire_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_WIRE);
-		assert(wire_descriptor && wire_descriptor->is_concrete &&
+		REQUIRE(wire_descriptor && wire_descriptor->is_concrete &&
 			wire_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET);
 		reg_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_REG);
-		assert(reg_descriptor && reg_descriptor->is_concrete &&
+		REQUIRE(reg_descriptor && reg_descriptor->is_concrete &&
 			reg_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE);
 		lowered_t8 = pigen_lower_rtl_type(&lowering_g, t8);
-		assert(!IS_INVALID_ID(lowered_t8));
+		REQUIRE(!IS_INVALID_ID(lowered_t8));
 		t8_record = pigen_rtl_type_get(&rtl_g, lowered_t8);
-		assert(t8_record);
+		REQUIRE(t8_record);
 
 		/* Case 1: COUNT DELTAS. Snapshot all three arenas BEFORE the first
 		 * declaration call; the first `rc == 0` is this section's first
@@ -2427,11 +2430,11 @@ int main(void)
 		object_before = rtl_g.object_count;
 		expression_before = rtl_g.expression_count;
 		instance_before = rtl_g.instance_count;
-		assert(instance_before == 0); /* no instances before the call */
+		REQUIRE(instance_before == 0); /* no instances before the call */
 		rc = pigen_lower_rtl_module_declarations(&lowering_g, module);
-		assert(rc == 0); /* Deliberate red (first in this section): the
+		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
 		 * stub returns -1 without touching the maps or the RTL model. */
-		assert(lowering_g.lowered_endpoint_count >
+		REQUIRE(lowering_g.lowered_endpoint_count >
 			(wire.index > reg.index ? wire.index : reg.index));
 		object_delta = rtl_g.object_count - object_before;
 		expression_delta = rtl_g.expression_count - expression_before;
@@ -2443,7 +2446,7 @@ int main(void)
 		 * between the two signals - is caught here. */
 		no_storage = object_delta == 2 && instance_delta == 0 &&
 			expression_delta >= 2 && expression_delta <= 4;
-		assert(no_storage); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(no_storage); /* Deliberate red: the stub publishes nothing. */
 
 		/* Case 2: IDEMPOTENCE. A second call on the SAME lowering and
 		 * module publishes NOTHING new: all three arena counts are
@@ -2457,7 +2460,7 @@ int main(void)
 		instance_before = rtl_g.instance_count;
 		endpoint_map_before = lowering_g.lowered_endpoint_count;
 		rc = pigen_lower_rtl_module_declarations(&lowering_g, module);
-		assert(rc == 0); /* Deliberate red: the stub returns -1. */
+		REQUIRE(rc == 0); /* Deliberate red: the stub returns -1. */
 		wire_again = lowering_g.lowered_endpoints[wire.index];
 		reg_again = lowering_g.lowered_endpoints[reg.index];
 		idempotent = rtl_g.object_count == object_before &&
@@ -2479,7 +2482,7 @@ int main(void)
 				reg_record.input_payload.index) &&
 			(reg_again.input_valid.index == reg_record.input_valid.index) &&
 			(reg_again.input_ready.index == reg_record.input_ready.index);
-		assert(idempotent); /* Deliberate red: the stub republishes nothing. */
+		REQUIRE(idempotent); /* Deliberate red: the stub republishes nothing. */
 
 		pigen_rtl_lowering_free(&lowering_g);
 		pigen_free_rtl_model(&rtl_g);
@@ -2530,7 +2533,7 @@ int main(void)
 	 * deliberate unimplemented-behavior assert is Case 1's `rc == 0`,
 	 * marked below. Every later assert in this section requires
 	 * implemented behavior and is deliberate red as well. */
-	{
+	SECTION("t6-storage-matrix") {
 		const char *text =
 			"module store : buf a ; port b ; fifo c ; skid d ;\n";
 		pigen_source_manager sources_h = {0};
@@ -2592,13 +2595,13 @@ int main(void)
 		pigen_semantic_init(&sem_h, &sources_h);
 		pigen_rtl_lowering_init(&lowering_h, &sem_h, &rtl_h);
 		unsized = pigen_data_type_unsized_integer(&sem_h);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem_h, 8, unsized);
 		t8 = pigen_data_type_unsigned_integer(&sem_h, width8);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
 		source = pigen_source_add(&sources_h, "lower_storage_matrix.pigen",
 			text, strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name_a = (pigen_source_span){source, 19, 20}; /* "a" */
 		name_b = (pigen_source_span){source, 28, 29}; /* "b" */
@@ -2608,48 +2611,48 @@ int main(void)
 		 * of the 8-bit type - the valid constant-expression identity the
 		 * owner requires for PIGEN_TRANSFER_PARAMETER_DEPTH descriptors. */
 		depth4 = pigen_expr_add_integer(&sem_h, 4, t8, name_c);
-		assert(!IS_INVALID_ID(depth4));
+		REQUIRE(!IS_INVALID_ID(depth4));
 		sem_h.compilation_scope = pigen_scope_add(&sem_h,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem_h.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_h, sem_h.compilation_scope,
+		REQUIRE(sem_h.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_h, sem_h.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem_h, sem_h.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem_h, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_a, name_a, &buf_symbol, NULL) == PIGEN_DECLARE_OK);
 		buf = pigen_signal_add(&sem_h, (pigen_syntax_id){2}, module,
 			buf_symbol, t8, pigen_semantic_scalar_shape(&sem_h),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
 			PIGEN_SEMANTIC_INTERNAL, name_a);
-		assert(buf.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(buf.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_b, name_b, &port_symbol, NULL) == PIGEN_DECLARE_OK);
 		port = pigen_signal_add(&sem_h, (pigen_syntax_id){3}, module,
 			port_symbol, t8, pigen_semantic_scalar_shape(&sem_h),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_PORT,
 			PIGEN_SEMANTIC_INTERNAL, name_b);
-		assert(port.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(port.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_c, name_c, &fifo_symbol, NULL) == PIGEN_DECLARE_OK);
 		fifo = pigen_signal_add(&sem_h, (pigen_syntax_id){4}, module,
 			fifo_symbol, t8, pigen_semantic_scalar_shape(&sem_h),
 			depth4, PIGEN_TRANSFER_TYPE_FIFO,
 			PIGEN_SEMANTIC_INTERNAL, name_c);
-		assert(fifo.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(fifo.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_h, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_d, name_d, &skid_symbol, NULL) == PIGEN_DECLARE_OK);
 		skid = pigen_signal_add(&sem_h, (pigen_syntax_id){5}, module,
 			skid_symbol, t8, pigen_semantic_scalar_shape(&sem_h),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_SKID,
 			PIGEN_SEMANTIC_INTERNAL, name_d);
-		assert(skid.index != PIGEN_INVALID_ID);
+		REQUIRE(skid.index != PIGEN_INVALID_ID);
 
 		/* Owner facts the contract rides on (all green against the landed
 		 * owners): all four signal records report their transfer type,
@@ -2664,59 +2667,59 @@ int main(void)
 		 * already-implemented pigen_lower_rtl_type memo resolves the
 		 * 8-bit data type to a record in the RTL model. */
 		buf_owner = pigen_signal_get(&sem_h, buf);
-		assert(buf_owner &&
+		REQUIRE(buf_owner &&
 			buf_owner->transfer_type == PIGEN_TRANSFER_TYPE_BUF &&
 			buf_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			buf_owner->module.index == module.index &&
 			IS_INVALID_ID(buf_owner->transfer_argument));
 		port_owner = pigen_signal_get(&sem_h, port);
-		assert(port_owner &&
+		REQUIRE(port_owner &&
 			port_owner->transfer_type == PIGEN_TRANSFER_TYPE_PORT &&
 			port_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			port_owner->module.index == module.index &&
 			IS_INVALID_ID(port_owner->transfer_argument));
 		fifo_owner = pigen_signal_get(&sem_h, fifo);
-		assert(fifo_owner &&
+		REQUIRE(fifo_owner &&
 			fifo_owner->transfer_type == PIGEN_TRANSFER_TYPE_FIFO &&
 			fifo_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			fifo_owner->module.index == module.index &&
 			fifo_owner->transfer_argument.index == depth4.index);
 		skid_owner = pigen_signal_get(&sem_h, skid);
-		assert(skid_owner &&
+		REQUIRE(skid_owner &&
 			skid_owner->transfer_type == PIGEN_TRANSFER_TYPE_SKID &&
 			skid_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			skid_owner->module.index == module.index &&
 			IS_INVALID_ID(skid_owner->transfer_argument));
 		buf_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_BUF);
-		assert(buf_descriptor && buf_descriptor->is_concrete &&
+		REQUIRE(buf_descriptor && buf_descriptor->is_concrete &&
 			buf_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
 			buf_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT);
 		port_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_PORT);
-		assert(port_descriptor && port_descriptor->is_concrete &&
+		REQUIRE(port_descriptor && port_descriptor->is_concrete &&
 			port_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
 			port_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER);
 		fifo_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_FIFO);
-		assert(fifo_descriptor && fifo_descriptor->is_concrete &&
+		REQUIRE(fifo_descriptor && fifo_descriptor->is_concrete &&
 			fifo_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH &&
 			fifo_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
 		skid_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_SKID);
-		assert(skid_descriptor && skid_descriptor->is_concrete &&
+		REQUIRE(skid_descriptor && skid_descriptor->is_concrete &&
 			skid_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
 			skid_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_SKID_QUEUE);
-		assert(pigen_expr_get(&sem_h, depth4) &&
+		REQUIRE(pigen_expr_get(&sem_h, depth4) &&
 			pigen_expr_constant(&sem_h, depth4).index != PIGEN_INVALID_ID);
 		lowered_t8 = pigen_lower_rtl_type(&lowering_h, t8);
-		assert(!IS_INVALID_ID(lowered_t8));
+		REQUIRE(!IS_INVALID_ID(lowered_t8));
 		t8_record = pigen_rtl_type_get(&rtl_h, lowered_t8);
-		assert(t8_record);
+		REQUIRE(t8_record);
 
 		/* Case 1: STORAGE MATRIX. The declaration lowering reports
 		 * success and the endpoints map covers ALL FOUR signals. The
@@ -2724,7 +2727,7 @@ int main(void)
 		 * stub returns the -1 unimplemented sentinel, staged behind
 		 * section (8)'s still-active red. */
 		rc = pigen_lower_rtl_module_declarations(&lowering_h, module);
-		assert(rc == 0); /* Deliberate red (first in this section): the
+		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
 		 * stub returns -1 without touching the maps or the RTL model. */
 		{
 			uint32_t max_index = buf.index > port.index ?
@@ -2733,7 +2736,7 @@ int main(void)
 				max_index : fifo.index;
 			max_index = max_index > skid.index ?
 				max_index : skid.index;
-			assert(lowering_h.lowered_endpoint_count > max_index);
+			REQUIRE(lowering_h.lowered_endpoint_count > max_index);
 		}
 
 		/* For EACH signal the payload is a resolvable VARIABLE object:
@@ -2784,7 +2787,7 @@ int main(void)
 			skid_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
 			payload_type == t8_record &&
 			skid_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
-		assert(payload_ok); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(payload_ok); /* Deliberate red: the stub populates nothing. */
 
 		pigen_rtl_lowering_free(&lowering_h);
 		pigen_free_rtl_model(&rtl_h);
@@ -2842,7 +2845,7 @@ int main(void)
 	 * unimplemented-behavior assert is Case 1's `rc == 0`, marked below.
 	 * Every later assert in this section requires implemented behavior
 	 * and is deliberate red as well. */
-	{
+	SECTION("t6-storage-instances") {
 		const char *text =
 			"module store : buf a ; port b ; fifo c ; skid d ;\n";
 		pigen_source_manager sources_i = {0};
@@ -2895,13 +2898,13 @@ int main(void)
 		pigen_semantic_init(&sem_i, &sources_i);
 		pigen_rtl_lowering_init(&lowering_i, &sem_i, &rtl_i);
 		unsized = pigen_data_type_unsized_integer(&sem_i);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem_i, 8, unsized);
 		t8 = pigen_data_type_unsigned_integer(&sem_i, width8);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
 		source = pigen_source_add(&sources_i,
 			"lower_storage_instances.pigen", text, strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name_a = (pigen_source_span){source, 19, 20}; /* "a" */
 		name_b = (pigen_source_span){source, 28, 29}; /* "b" */
@@ -2911,48 +2914,48 @@ int main(void)
 		 * of the 8-bit type - the valid constant-expression identity the
 		 * owner requires for PIGEN_TRANSFER_PARAMETER_DEPTH descriptors. */
 		depth4 = pigen_expr_add_integer(&sem_i, 4, t8, name_c);
-		assert(!IS_INVALID_ID(depth4));
+		REQUIRE(!IS_INVALID_ID(depth4));
 		sem_i.compilation_scope = pigen_scope_add(&sem_i,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem_i.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_i, sem_i.compilation_scope,
+		REQUIRE(sem_i.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_i, sem_i.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem_i, sem_i.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem_i, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_a, name_a, &buf_symbol, NULL) == PIGEN_DECLARE_OK);
 		buf = pigen_signal_add(&sem_i, (pigen_syntax_id){2}, module,
 			buf_symbol, t8, pigen_semantic_scalar_shape(&sem_i),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
 			PIGEN_SEMANTIC_INTERNAL, name_a);
-		assert(buf.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(buf.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_b, name_b, &port_symbol, NULL) == PIGEN_DECLARE_OK);
 		port = pigen_signal_add(&sem_i, (pigen_syntax_id){3}, module,
 			port_symbol, t8, pigen_semantic_scalar_shape(&sem_i),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_PORT,
 			PIGEN_SEMANTIC_INTERNAL, name_b);
-		assert(port.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(port.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_c, name_c, &fifo_symbol, NULL) == PIGEN_DECLARE_OK);
 		fifo = pigen_signal_add(&sem_i, (pigen_syntax_id){4}, module,
 			fifo_symbol, t8, pigen_semantic_scalar_shape(&sem_i),
 			depth4, PIGEN_TRANSFER_TYPE_FIFO,
 			PIGEN_SEMANTIC_INTERNAL, name_c);
-		assert(fifo.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(fifo.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_i, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_d, name_d, &skid_symbol, NULL) == PIGEN_DECLARE_OK);
 		skid = pigen_signal_add(&sem_i, (pigen_syntax_id){5}, module,
 			skid_symbol, t8, pigen_semantic_scalar_shape(&sem_i),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_SKID,
 			PIGEN_SEMANTIC_INTERNAL, name_d);
-		assert(skid.index != PIGEN_INVALID_ID);
+		REQUIRE(skid.index != PIGEN_INVALID_ID);
 
 		/* Owner facts the contract rides on (all green against the landed
 		 * owners): all four signal records report their transfer type,
@@ -2965,54 +2968,54 @@ int main(void)
 		 * type - a valid constant-expression identity the owner
 		 * requires; the other three carry the invalid argument. */
 		buf_owner = pigen_signal_get(&sem_i, buf);
-		assert(buf_owner &&
+		REQUIRE(buf_owner &&
 			buf_owner->transfer_type == PIGEN_TRANSFER_TYPE_BUF &&
 			buf_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			buf_owner->module.index == module.index &&
 			IS_INVALID_ID(buf_owner->transfer_argument));
 		port_owner = pigen_signal_get(&sem_i, port);
-		assert(port_owner &&
+		REQUIRE(port_owner &&
 			port_owner->transfer_type == PIGEN_TRANSFER_TYPE_PORT &&
 			port_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			port_owner->module.index == module.index &&
 			IS_INVALID_ID(port_owner->transfer_argument));
 		fifo_owner = pigen_signal_get(&sem_i, fifo);
-		assert(fifo_owner &&
+		REQUIRE(fifo_owner &&
 			fifo_owner->transfer_type == PIGEN_TRANSFER_TYPE_FIFO &&
 			fifo_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			fifo_owner->module.index == module.index &&
 			fifo_owner->transfer_argument.index == depth4.index);
 		skid_owner = pigen_signal_get(&sem_i, skid);
-		assert(skid_owner &&
+		REQUIRE(skid_owner &&
 			skid_owner->transfer_type == PIGEN_TRANSFER_TYPE_SKID &&
 			skid_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			skid_owner->module.index == module.index &&
 			IS_INVALID_ID(skid_owner->transfer_argument));
 		buf_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_BUF);
-		assert(buf_descriptor && buf_descriptor->is_concrete &&
+		REQUIRE(buf_descriptor && buf_descriptor->is_concrete &&
 			buf_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
 			buf_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT);
 		port_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_PORT);
-		assert(port_descriptor && port_descriptor->is_concrete &&
+		REQUIRE(port_descriptor && port_descriptor->is_concrete &&
 			port_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
 			port_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER);
 		fifo_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_FIFO);
-		assert(fifo_descriptor && fifo_descriptor->is_concrete &&
+		REQUIRE(fifo_descriptor && fifo_descriptor->is_concrete &&
 			fifo_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH &&
 			fifo_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
 		skid_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_SKID);
-		assert(skid_descriptor && skid_descriptor->is_concrete &&
+		REQUIRE(skid_descriptor && skid_descriptor->is_concrete &&
 			skid_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_NONE &&
 			skid_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_SKID_QUEUE);
-		assert(pigen_expr_get(&sem_i, depth4) &&
+		REQUIRE(pigen_expr_get(&sem_i, depth4) &&
 			pigen_expr_constant(&sem_i, depth4).index != PIGEN_INVALID_ID);
 
 		/* Case 1: DISTINCT INSTANCES. The declaration lowering reports
@@ -3022,12 +3025,12 @@ int main(void)
 		 * returns the -1 unimplemented sentinel, staged behind section
 		 * (8)'s still-active red. */
 		instance_before = rtl_i.instance_count;
-		assert(rtl_i.instances == NULL && instance_before == 0);
+		REQUIRE(rtl_i.instances == NULL && instance_before == 0);
 		rc = pigen_lower_rtl_module_declarations(&lowering_i, module);
-		assert(rc == 0); /* Deliberate red (first in this section): the
+		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
 		 * stub returns -1 without touching the maps or the RTL model. */
 		exact_delta = rtl_i.instance_count == instance_before + 4;
-		assert(exact_delta); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(exact_delta); /* Deliberate red: the stub publishes nothing. */
 
 		/* The four newly published records [instance_before ..
 		 * instance_before+4) are MUTUALLY DISTINCT: no two of the four
@@ -3063,7 +3066,7 @@ int main(void)
 				}
 			}
 		}
-		assert(distinct); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(distinct); /* Deliberate red: the stub publishes nothing. */
 
 		pigen_rtl_lowering_free(&lowering_i);
 		pigen_free_rtl_model(&rtl_i);
@@ -3125,7 +3128,7 @@ int main(void)
 	 * against the landed owners; the FIRST deliberate unimplemented-behavior
 	 * assert is Case 1's `rc == 0`, marked below. Every later assert in this
 	 * section requires implemented behavior and is deliberate red as well. */
-	{
+	SECTION("t6-storage-fifo-depth") {
 		const char *text =
 			"module store : buf a ; port b ; fifo c ; skid d ;\n";
 		pigen_source_manager sources_j = {0};
@@ -3186,13 +3189,13 @@ int main(void)
 		pigen_semantic_init(&sem_j, &sources_j);
 		pigen_rtl_lowering_init(&lowering_j, &sem_j, &rtl_j);
 		unsized = pigen_data_type_unsized_integer(&sem_j);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem_j, 8, unsized);
 		t8 = pigen_data_type_unsigned_integer(&sem_j, width8);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
 		source = pigen_source_add(&sources_j,
 			"lower_storage_fifo_depth.pigen", text, strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name_a = (pigen_source_span){source, 19, 20}; /* "a" */
 		name_b = (pigen_source_span){source, 28, 29}; /* "b" */
@@ -3202,48 +3205,48 @@ int main(void)
 		 * of the 8-bit type - the valid constant-expression identity the
 		 * owner requires for PIGEN_TRANSFER_PARAMETER_DEPTH descriptors. */
 		depth4 = pigen_expr_add_integer(&sem_j, 4, t8, name_c);
-		assert(!IS_INVALID_ID(depth4));
+		REQUIRE(!IS_INVALID_ID(depth4));
 		sem_j.compilation_scope = pigen_scope_add(&sem_j,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem_j.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_j, sem_j.compilation_scope,
+		REQUIRE(sem_j.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_j, sem_j.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem_j, sem_j.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem_j, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_a, name_a, &buf_symbol, NULL) == PIGEN_DECLARE_OK);
 		buf = pigen_signal_add(&sem_j, (pigen_syntax_id){2}, module,
 			buf_symbol, t8, pigen_semantic_scalar_shape(&sem_j),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
 			PIGEN_SEMANTIC_INTERNAL, name_a);
-		assert(buf.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(buf.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_b, name_b, &port_symbol, NULL) == PIGEN_DECLARE_OK);
 		port = pigen_signal_add(&sem_j, (pigen_syntax_id){3}, module,
 			port_symbol, t8, pigen_semantic_scalar_shape(&sem_j),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_PORT,
 			PIGEN_SEMANTIC_INTERNAL, name_b);
-		assert(port.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(port.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_c, name_c, &fifo_symbol, NULL) == PIGEN_DECLARE_OK);
 		fifo = pigen_signal_add(&sem_j, (pigen_syntax_id){4}, module,
 			fifo_symbol, t8, pigen_semantic_scalar_shape(&sem_j),
 			depth4, PIGEN_TRANSFER_TYPE_FIFO,
 			PIGEN_SEMANTIC_INTERNAL, name_c);
-		assert(fifo.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(fifo.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_j, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_d, name_d, &skid_symbol, NULL) == PIGEN_DECLARE_OK);
 		skid = pigen_signal_add(&sem_j, (pigen_syntax_id){5}, module,
 			skid_symbol, t8, pigen_semantic_scalar_shape(&sem_j),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_SKID,
 			PIGEN_SEMANTIC_INTERNAL, name_d);
-		assert(skid.index != PIGEN_INVALID_ID);
+		REQUIRE(skid.index != PIGEN_INVALID_ID);
 
 		/* Owner facts the contract rides on (all green against the landed
 		 * owners): the four signal records report their transfer type and
@@ -3257,25 +3260,25 @@ int main(void)
 		 * argument is 4, so the depth witness below compares the RTL
 		 * record against the interned const-expr value, not a spelling. */
 		buf_owner = pigen_signal_get(&sem_j, buf);
-		assert(buf_owner &&
+		REQUIRE(buf_owner &&
 			buf_owner->transfer_type == PIGEN_TRANSFER_TYPE_BUF &&
 			buf_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			IS_INVALID_ID(buf_owner->transfer_argument));
 		fifo_owner = pigen_signal_get(&sem_j, fifo);
-		assert(fifo_owner &&
+		REQUIRE(fifo_owner &&
 			fifo_owner->transfer_type == PIGEN_TRANSFER_TYPE_FIFO &&
 			fifo_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			fifo_owner->transfer_argument.index == depth4.index);
 		fifo_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_FIFO);
-		assert(fifo_descriptor && fifo_descriptor->is_concrete &&
+		REQUIRE(fifo_descriptor && fifo_descriptor->is_concrete &&
 			fifo_descriptor->parameter == PIGEN_TRANSFER_PARAMETER_DEPTH &&
 			fifo_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
 		queue_descriptor =
 			pigen_transfer_realization_descriptor_get(
 				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
-		assert(queue_descriptor &&
+		REQUIRE(queue_descriptor &&
 			queue_descriptor->capacity_source ==
 				PIGEN_TRANSFER_CAPACITY_ARGUMENT &&
 			queue_descriptor->ready_dependency ==
@@ -3285,7 +3288,7 @@ int main(void)
 		slot_descriptor =
 			pigen_transfer_realization_descriptor_get(
 				PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT);
-		assert(slot_descriptor &&
+		REQUIRE(slot_descriptor &&
 			slot_descriptor->capacity_source ==
 				PIGEN_TRANSFER_CAPACITY_FIXED &&
 			slot_descriptor->fixed_capacity == 1 &&
@@ -3296,7 +3299,7 @@ int main(void)
 		pulse_descriptor =
 			pigen_transfer_realization_descriptor_get(
 				PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER);
-		assert(pulse_descriptor &&
+		REQUIRE(pulse_descriptor &&
 			pulse_descriptor->capacity_source ==
 				PIGEN_TRANSFER_CAPACITY_FIXED &&
 			pulse_descriptor->fixed_capacity == 1 &&
@@ -3307,7 +3310,7 @@ int main(void)
 		skid_descriptor =
 			pigen_transfer_realization_descriptor_get(
 				PIGEN_TRANSFER_REALIZATION_SKID_QUEUE);
-		assert(skid_descriptor &&
+		REQUIRE(skid_descriptor &&
 			skid_descriptor->capacity_source ==
 				PIGEN_TRANSFER_CAPACITY_FIXED &&
 			skid_descriptor->fixed_capacity == 2 &&
@@ -3316,9 +3319,9 @@ int main(void)
 			skid_descriptor->has_occupancy == 1 &&
 			skid_descriptor->reset == PIGEN_TRANSFER_RESET_EMPTY);
 		depth4_const = pigen_expr_constant(&sem_j, depth4);
-		assert(!IS_INVALID_ID(depth4_const));
+		REQUIRE(!IS_INVALID_ID(depth4_const));
 		expected_depth = 0;
-		assert(pigen_const_expr_evaluate_u64(&sem_j, depth4_const,
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem_j, depth4_const,
 			&expected_depth) && expected_depth == 4);
 
 		/* Case 1: DEPTH ROUND-TRIP. The declaration lowering reports
@@ -3329,9 +3332,9 @@ int main(void)
 		 * unimplemented sentinel, staged behind section (8)'s still-active
 		 * red. */
 		instance_before = rtl_j.instance_count;
-		assert(rtl_j.instances == NULL && instance_before == 0);
+		REQUIRE(rtl_j.instances == NULL && instance_before == 0);
 		rc = pigen_lower_rtl_module_declarations(&lowering_j, module);
-		assert(rc == 0); /* Deliberate red (first in this section): the
+		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
 		 * stub returns -1 without touching the maps or the RTL model. */
 
 		/* The four storage instances are published at the four new arena
@@ -3384,16 +3387,16 @@ int main(void)
 				continue;
 			fifo_has_depth = 1;
 		}
-		assert(fifo_has_depth); /* Deliberate red: the stub publishes no
+		REQUIRE(fifo_has_depth); /* Deliberate red: the stub publishes no
 		 * instance and no parameter record. */
 
 		/* (c) The depth is sourced from the transfer argument, not a
 		 * spelling match: the only realization consulted is
 		 * PARAMETERIZED_QUEUE (the descriptor asserted above), which is
 		 * ARGUMENT-sourced and carries no fixed capacity to substitute. */
-		assert(fifo_descriptor->realization ==
+		REQUIRE(fifo_descriptor->realization ==
 			PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
-		assert(queue_descriptor->capacity_source ==
+		REQUIRE(queue_descriptor->capacity_source ==
 			PIGEN_TRANSFER_CAPACITY_ARGUMENT);
 
 		/* (d) The three non-argument storage signals publish NO depth
@@ -3409,7 +3412,7 @@ int main(void)
 				pe->value == expected_depth)
 				buf_has_depth = 1;
 		}
-		assert(!buf_has_depth); /* Deliberate red: the stub publishes
+		REQUIRE(!buf_has_depth); /* Deliberate red: the stub publishes
 		 * nothing; a fixed-capacity implementation publishes no depth. */
 		port_has_depth = 0;
 		for (size_t p = 0; p < port_instance->parameters.count; p++) {
@@ -3420,7 +3423,7 @@ int main(void)
 				pe->value == expected_depth)
 				port_has_depth = 1;
 		}
-		assert(!port_has_depth); /* Deliberate red: no depth parameter. */
+		REQUIRE(!port_has_depth); /* Deliberate red: no depth parameter. */
 		skid_has_depth = 0;
 		for (size_t p = 0; p < skid_instance->parameters.count; p++) {
 			const pigen_rtl_expr *pe = pigen_rtl_expr_get(&rtl_j,
@@ -3430,7 +3433,7 @@ int main(void)
 				pe->value == expected_depth)
 				skid_has_depth = 1;
 		}
-		assert(!skid_has_depth); /* Deliberate red: no depth parameter. */
+		REQUIRE(!skid_has_depth); /* Deliberate red: no depth parameter. */
 
 		pigen_rtl_lowering_free(&lowering_j);
 		pigen_free_rtl_model(&rtl_j);
@@ -3518,7 +3521,7 @@ int main(void)
 	 * is Case 1's `rc == 0`, marked below, staged behind section (8)'s
 	 * still-active red. Every later assert in this section requires
 	 * implemented behavior and is deliberate red as well. */
-	{
+	SECTION("t6-storage-counts") {
 		const char *text =
 			"module store : buf a ; port b ; fifo c ; skid d ;\n";
 		pigen_source_manager sources_k = {0};
@@ -3581,13 +3584,13 @@ int main(void)
 		pigen_semantic_init(&sem_k, &sources_k);
 		pigen_rtl_lowering_init(&lowering_k, &sem_k, &rtl_k);
 		unsized = pigen_data_type_unsized_integer(&sem_k);
-		assert(!IS_INVALID_ID(unsized));
+		REQUIRE(!IS_INVALID_ID(unsized));
 		width8 = pigen_const_expr_intern_integer(&sem_k, 8, unsized);
 		t8 = pigen_data_type_unsigned_integer(&sem_k, width8);
-		assert(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
+		REQUIRE(!IS_INVALID_ID(width8) && !IS_INVALID_ID(t8));
 		source = pigen_source_add(&sources_k,
 			"lower_storage_count_deltas.pigen", text, strlen(text));
-		assert(source.index != PIGEN_INVALID_ID);
+		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
 		name_a = (pigen_source_span){source, 19, 20}; /* "a" */
 		name_b = (pigen_source_span){source, 28, 29}; /* "b" */
@@ -3597,48 +3600,48 @@ int main(void)
 		 * the 8-bit type - the valid constant-expression identity the owner
 		 * requires for PIGEN_TRANSFER_PARAMETER_DEPTH descriptors. */
 		depth4 = pigen_expr_add_integer(&sem_k, 4, t8, name_c);
-		assert(!IS_INVALID_ID(depth4));
+		REQUIRE(!IS_INVALID_ID(depth4));
 		sem_k.compilation_scope = pigen_scope_add(&sem_k,
 			(pigen_scope_id){PIGEN_INVALID_ID},
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
-		assert(sem_k.compilation_scope.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_k, sem_k.compilation_scope,
+		REQUIRE(sem_k.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_k, sem_k.compilation_scope,
 			PIGEN_SYMBOL_MODULE,
 			(pigen_data_type_id){PIGEN_INVALID_ID},
 			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
 		module_scope = pigen_scope_add(&sem_k, sem_k.compilation_scope, whole);
-		assert(module_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
 		module = pigen_module_add(&sem_k, (pigen_syntax_id){1}, module_symbol,
 			module_scope, whole);
-		assert(module.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_a, name_a, &buf_symbol, NULL) == PIGEN_DECLARE_OK);
 		buf = pigen_signal_add(&sem_k, (pigen_syntax_id){2}, module,
 			buf_symbol, t8, pigen_semantic_scalar_shape(&sem_k),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
 			PIGEN_SEMANTIC_INTERNAL, name_a);
-		assert(buf.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(buf.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_b, name_b, &port_symbol, NULL) == PIGEN_DECLARE_OK);
 		port = pigen_signal_add(&sem_k, (pigen_syntax_id){3}, module,
 			port_symbol, t8, pigen_semantic_scalar_shape(&sem_k),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_PORT,
 			PIGEN_SEMANTIC_INTERNAL, name_b);
-		assert(port.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(port.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_c, name_c, &fifo_symbol, NULL) == PIGEN_DECLARE_OK);
 		fifo = pigen_signal_add(&sem_k, (pigen_syntax_id){4}, module,
 			fifo_symbol, t8, pigen_semantic_scalar_shape(&sem_k),
 			depth4, PIGEN_TRANSFER_TYPE_FIFO,
 			PIGEN_SEMANTIC_INTERNAL, name_c);
-		assert(fifo.index != PIGEN_INVALID_ID);
-		assert(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
+		REQUIRE(fifo.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_k, module_scope, PIGEN_SYMBOL_SIGNAL,
 			t8, name_d, name_d, &skid_symbol, NULL) == PIGEN_DECLARE_OK);
 		skid = pigen_signal_add(&sem_k, (pigen_syntax_id){5}, module,
 			skid_symbol, t8, pigen_semantic_scalar_shape(&sem_k),
 			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_SKID,
 			PIGEN_SEMANTIC_INTERNAL, name_d);
-		assert(skid.index != PIGEN_INVALID_ID);
+		REQUIRE(skid.index != PIGEN_INVALID_ID);
 
 		/* Owner facts the contract rides on (all green against the landed
 		 * owners): the four signal records report their transfer type and the
@@ -3651,24 +3654,24 @@ int main(void)
 		 * its width as a uint64_t), so the arena snapshots below - taken
 		 * after that memo, the section (11) convention - are unaffected by it. */
 		buf_owner = pigen_signal_get(&sem_k, buf);
-		assert(buf_owner &&
+		REQUIRE(buf_owner &&
 			buf_owner->transfer_type == PIGEN_TRANSFER_TYPE_BUF &&
 			buf_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			IS_INVALID_ID(buf_owner->transfer_argument));
 		fifo_owner = pigen_signal_get(&sem_k, fifo);
-		assert(fifo_owner &&
+		REQUIRE(fifo_owner &&
 			fifo_owner->transfer_type == PIGEN_TRANSFER_TYPE_FIFO &&
 			fifo_owner->direction == PIGEN_SEMANTIC_INTERNAL &&
 			fifo_owner->transfer_argument.index == depth4.index);
 		fifo_descriptor =
 			pigen_transfer_type_descriptor_get(PIGEN_TRANSFER_TYPE_FIFO);
-		assert(fifo_descriptor && fifo_descriptor->is_concrete &&
+		REQUIRE(fifo_descriptor && fifo_descriptor->is_concrete &&
 			fifo_descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE);
 		lowered_t8 = pigen_lower_rtl_type(&lowering_k, t8);
-		assert(!IS_INVALID_ID(lowered_t8));
+		REQUIRE(!IS_INVALID_ID(lowered_t8));
 		t8_record = pigen_rtl_type_get(&rtl_k, lowered_t8);
-		assert(t8_record);
+		REQUIRE(t8_record);
 
 		/* Case 1: COUNT DELTAS. Snapshot all three arenas BEFORE the first
 		 * declaration call; the first `rc == 0` is this section's first
@@ -3679,14 +3682,14 @@ int main(void)
 		object_before = rtl_k.object_count;
 		expression_before = rtl_k.expression_count;
 		instance_before = rtl_k.instance_count;
-		assert(instance_before == 0); /* no instances before the call */
+		REQUIRE(instance_before == 0); /* no instances before the call */
 		rc = pigen_lower_rtl_module_declarations(&lowering_k, module);
-		assert(rc == 0); /* Deliberate red (first in this section): the
+		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
 		 * stub returns -1 without touching the maps or the RTL model. */
-		assert(lowering_k.lowered_endpoint_count > buf.index);
-		assert(lowering_k.lowered_endpoint_count > port.index);
-		assert(lowering_k.lowered_endpoint_count > fifo.index);
-		assert(lowering_k.lowered_endpoint_count > skid.index);
+		REQUIRE(lowering_k.lowered_endpoint_count > buf.index);
+		REQUIRE(lowering_k.lowered_endpoint_count > port.index);
+		REQUIRE(lowering_k.lowered_endpoint_count > fifo.index);
+		REQUIRE(lowering_k.lowered_endpoint_count > skid.index);
 		object_delta = rtl_k.object_count - object_before;
 		expression_delta = rtl_k.expression_count - expression_before;
 		instance_delta = rtl_k.instance_count - instance_before;
@@ -3700,7 +3703,7 @@ int main(void)
 		 * delta; the upper bound 1 pins the single shared depth record. */
 		count_deltas = object_delta == 4 && instance_delta == 4 &&
 			expression_delta <= 1;
-		assert(count_deltas); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(count_deltas); /* Deliberate red: the stub publishes nothing. */
 
 		/* Case 2: IDEMPOTENCE. A second call on the SAME lowering and module
 		 * publishes NOTHING new: all three arena counts and the endpoints-map
@@ -3717,7 +3720,7 @@ int main(void)
 		instance_before = rtl_k.instance_count;
 		endpoint_map_before = lowering_k.lowered_endpoint_count;
 		rc = pigen_lower_rtl_module_declarations(&lowering_k, module);
-		assert(rc == 0); /* Deliberate red: the stub returns -1. */
+		REQUIRE(rc == 0); /* Deliberate red: the stub returns -1. */
 		buf_again = lowering_k.lowered_endpoints[buf.index];
 		port_again = lowering_k.lowered_endpoints[port.index];
 		fifo_again = lowering_k.lowered_endpoints[fifo.index];
@@ -3750,7 +3753,7 @@ int main(void)
 			(skid_again.input_payload.index == skid_record.input_payload.index) &&
 			(skid_again.input_valid.index == skid_record.input_valid.index) &&
 			(skid_again.input_ready.index == skid_record.input_ready.index);
-		assert(idempotent); /* Deliberate red: the stub republishes nothing. */
+		REQUIRE(idempotent); /* Deliberate red: the stub republishes nothing. */
 
 		pigen_rtl_lowering_free(&lowering_k);
 		pigen_free_rtl_model(&rtl_k);
@@ -3758,32 +3761,19 @@ int main(void)
 		pigen_free_sources(&sources_k);
 	}
 
+	SECTION("t5-teardown") {
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
-	assert(!lowering.semantics && !lowering.rtl);
-	assert(!lowering.lowered_types &&
+	REQUIRE(!lowering.semantics && !lowering.rtl);
+	REQUIRE(!lowering.lowered_types &&
 		!lowering.lowered_type_count && !lowering.lowered_type_capacity);
-	assert(!lowering.lowered_expressions &&
+	REQUIRE(!lowering.lowered_expressions &&
 		!lowering.lowered_expression_count &&
 		!lowering.lowered_expression_capacity);
+	}
 
 	pigen_free_rtl_model(&rtl);
 	pigen_free_semantic_model(&sem);
 	pigen_free_sources(&sources);
-	puts("PASS: rtl lowering skeleton inits empty identity maps");
-	puts("PASS: rtl lowering stubs return the unimplemented sentinel");
-	puts("PASS: rtl type lowering preserves owner state, width, signedness and range");
-	puts("PASS: rtl expression lowering preserves width, signedness, conversions, projections and child order");
-	puts("PASS: rtl constant lowering is once by identity");
-	puts("PASS: rtl lowering errors publish no partial records and stay recoverable");
-	puts("PASS: rtl lowering is identity-memoized, stable and deterministic");
-	puts("PASS: boundary declaration endpoints are three input ports with context-dependent controls");
-	puts("PASS: net and variable declarations expose distinct variable payloads of the lowered type");
-	puts("PASS: net and variable declaration controls are the descriptor 1-bit constants with no published object");
-	puts("PASS: net and variable declarations publish no storage and are idempotent");
-	puts("PASS: storage declarations expose variable payloads for the four realizations");
-	puts("PASS: storage declarations publish four distinct instances with no cross-contamination");
-	puts("PASS: storage FIFO depth round-trips the transfer argument and no other storage signal carries a depth parameter");
-	puts("PASS: storage declarations publish one payload object and one instance per signal with a bounded expression delta and are idempotent");
-	return 0;
+	return check_finish();
 }
