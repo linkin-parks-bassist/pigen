@@ -1,10 +1,10 @@
 ---
 status: green
-revised_at: "2026-10-02T05:15:48+10:00"
+revised_at: "2026-10-03T17:28:33+10:00"
 checked_at: "2026-09-30T20:31:53+10:00"
 ---
 
-Task 5 owns the semantic-owner type and constant-expression adapters in include/pigen/rtl_lower.h and src/rtl_lower.c. The implementation and frozen tests are landed on master. The seven-section rtl-lower-test suite is green, but this does not establish the required no-partial-publication contract for every failure. The rollback coverage gap below remains open.
+Task 5 owns the semantic-owner type and constant-expression adapters in include/pigen/rtl_lower.h and src/rtl_lower.c. The implementation and its tests are on master. The seven-section rtl-lower-test suite is green, but this does not establish the required no-partial-publication contract for every failure. The rollback coverage gap below remains open.
 
 pigen_rtl_lowering borrows the semantic and RTL models and owns identity maps keyed by source arena index. lowered_types maps data-type identities to opaque RTL type handles; lowered_expressions maps constant-expression identities to opaque RTL expression handles. Task 6 adds a third, signal-indexed lowered_endpoints map. Initialization zeroes the record and stores the borrowed model pointers; free releases all three maps and zeroes the record without freeing either model. Unpopulated slots use PIGEN_INVALID_ID.
 
@@ -18,6 +18,6 @@ Useful witness constraints remain: pigen_const_expr_intern_symbol accepts a matc
 
 Rollback is required but not fully established. Current source lowers and publishes the result type before rejecting an unsupported SYMBOL; recursive child lowering can likewise publish work before a later failure. Type/expression records are also interned before the corresponding memo allocation succeeds. These paths contradict the former claim that all validation occurs before one arena write. No runtime reproduction of each path or allocation-failure injection is claimed.
 
-Section (6) is inadequate as an atomicity proof: its unbound parameter uses t16, already lowered by the valid recoverability witness, and its arena/map count variables named “before” are assigned after the failed SYMBOL call. Populated-slot counts are sampled earlier, but this does not establish unchanged arena contents, all memo slots or a fresh result-type failure. The next check is a valid unbound PARAMETER with a fresh result type, with complete counts and memo contents captured before the call, followed by recursive-child and allocation-failure checks. The native project workflow owns any test-contract correction and implementation; green existing tests do not close this gap.
+Section (6) is inadequate as an atomicity proof: its unbound parameter uses t16, already lowered by the valid recoverability witness, and its arena/map count variables named “before” are assigned after the failed SYMBOL call. Populated-slot counts are sampled earlier, but this does not establish unchanged arena contents, all memo slots or a fresh result-type failure. The next check is a valid unbound PARAMETER with a fresh result type, with complete counts and memo contents captured before the call, followed by recursive-child and allocation-failure checks. The existing green tests do not close this gap.
 
-Task 6 owns realization-based declaration and endpoint population. Its currently landed module-declaration entry point is still a stub returning -1; it does not establish declaration lowering or signal endpoint behavior.
+Task 6 owns realization-based declaration and endpoint population. Its BOUNDARY realization is implemented; the remaining realizations still return the unimplemented sentinel. See what/is/elastic/rtl/task/six.md.

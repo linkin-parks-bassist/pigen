@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-09-29T08:19:48+10:00"
+revised_at: "2026-10-03T18:24:32+10:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -12,4 +12,4 @@ Approved Task 2 touches only include/pigen/rtl.h, src/rtl.c and tests/rtl_test.c
 
 Task 2 review corrections are implemented in commit 7593604. expr_append validates all identities and copies child slices before resizing either arena, including slices returned by pigen_rtl_expr_children. Child capacity growth checks allocation-size limits. pigen_rtl_type owns a copied ordered array of packed dimensions, each with signed concrete or resolved-expression bounds; interning compares bound identity/order and ignores concrete value fields when a symbolic identity is present. Width expressions likewise supersede the concrete width field. Bound and width identities reject invalid expression records. Literal nodes own least-significant-word-first value/X/Z records and a bit count; integer values use signed magnitude, bits disallow negative sign, and integer/two-state literals reject X/Z. Overlapping masks, nonzero value under masks and nonzero padding bits are rejected before append. The uint64_t constructors remain convenience wrappers. Model teardown frees dimensions and literals. Constructors copy borrowed inputs; arena accessor pointers expire on growth while IDs remain stable.
 
-Evidence: tests/rtl_test.c failed first on the missing new representation/API, then passed. Regressions cover reused child slices forcing growth, ascending versus descending dimensions, copied dimensions, symbolic identity, invalid bound rollback, 130-bit signed integers and four-state bits, copied literal ownership/provenance and invalid masks/padding/state. All eleven foundation targets pass; final RTL test passes with AddressSanitizer and UndefinedBehaviorSanitizer; git diff --check passes. The implementation is landed.
+Evidence: tests/rtl_test.c failed first on the missing new representation/API, then passed. Regressions cover reused child slices forcing growth, ascending versus descending dimensions, copied dimensions, symbolic identity, invalid bound rollback, 130-bit signed integers and four-state bits, copied literal ownership/provenance and invalid masks/padding/state. All eleven foundation targets pass; final RTL test passes with AddressSanitizer and UndefinedBehaviorSanitizer; git diff --check passes. The implementation is complete.

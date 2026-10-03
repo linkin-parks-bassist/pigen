@@ -1,12 +1,12 @@
 ---
 status: green
-revised_at: "2026-10-02T05:16:08+10:00"
+revised_at: "2026-10-03T17:47:06+10:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
 Pigen is an active personal C17 source-to-source compiler project extending SystemVerilog with ready/valid transfers, elastic pipelines, FSMs and routed fabrics. It emits readable synthesizable SV and storage primitives. Employer/partner/customer material is excluded.
 
-The structured frontend resolves data-first declarations and intrinsic semantic types/expressions, but remains unlinked from ./pigen. Production is the quarantined textual prototype. Elastic RTL Tasks 1–4 are implemented and landed: IDs/arena, canonical types/expressions, owner-validated hardware constructors and collision-safe names. Task 5 type/expression adapters and its seven-section frozen suite are landed; exact integers lower with owner-value-derived type width. Universal rollback remains unresolved: source can publish a result type or child before failure, while section (6) does not take all of its snapshots before the failed call. See what/is/elastic/rtl/task/five.md for the contract and missing checks. Task 6 has the realization/endpoint skeleton; declaration lowering remains unimplemented. The native project workflow owns continuation and any test-contract correction. No partial frontend production attachment, fallback, second dialect or per-file choice is approved.
+The structured frontend resolves data-first declarations and intrinsic semantic types/expressions, but remains unlinked from ./pigen. Production is the quarantined textual prototype. Elastic RTL Tasks 1–4 are implemented: IDs/arena, canonical types/expressions, owner-validated hardware constructors and collision-safe names. Task 5 type/expression adapters and its seven-section test suite are implemented; exact integers lower with owner-value-derived type width. Universal rollback remains unresolved: source can publish a result type or child before failure, while section (6) does not take all of its snapshots before the failed call. See what/is/elastic/rtl/task/five.md for the contract and missing checks. Task 6 has the realization/endpoint shapes and the BOUNDARY declaration lowering implemented; the remaining declaration realizations are unimplemented. No partial frontend production attachment, fallback, second dialect or per-file choice is approved.
 
 Repository topology: src/ owner subsystems and production prototype; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ executable prototype designs/testbenches; .knowledge/ the sole local documentation and architectural answer authority. Local docs, notes, root Markdown and AGENTS.md are absent. Keep only current contracts, implementation evidence and actionable unresolved questions; delete obsolete material. Detailed semantic coverage is in what/is/the/knowledge/ingestion/coverage.md.
 
@@ -19,11 +19,11 @@ Repository topology: src/ owner subsystems and production prototype; include/pig
 - when/ gives decision gates: when/can/production/switch/to/the/structured/compiler.md, when/to/ask/david/about/architecture.md.
 - who/ gives catalogue ownership: who/owns/omitted/transfer/policy.md, who/owns/compiler/catalogues.md.
 
-This local answer tree is maintained by the project's agents; use this orientation and what/is/the/plan.md for implementation progress, never infer it from future contracts.
+This local answer tree is the project's maintained knowledge source; use this orientation and what/is/the/plan.md for implementation progress, never infer it from future contracts.
 
 The structured frontend implements source/token provenance and preprocessing, shared type/declaration syntax, scopes and stable symbols, canonical data types/shapes/exact integers, intrinsic two-stage expressions and explicit conversions, lvalues/predicates/clock domains, one signal arena, direct transfers, deduplicated incidence and ownership. Data-first declarations, abstract inputs, omission policy and descriptor-owned FIFO depths resolve through owner APIs.
 
-Elastic RTL Task 2 is implemented and landed: interned types retain ordered concrete/symbolic packed bounds; typed expressions own ordered children and arbitrary-width signed integer/four-state literal records. The child arena alias use-after-free is corrected by copying inputs before growth. All eleven foundation targets pass, final RTL regression tests pass under AddressSanitizer/UndefinedBehaviorSanitizer, and git diff --check passes. Ordinary branches, worktrees and merges may be used for isolation and concurrent work; pigen does not require direct-to-master or linear history. Subsequent ready/output/emitter/composer work remains unimplemented.
+Elastic RTL Task 2 is implemented: interned types retain ordered concrete/symbolic packed bounds; typed expressions own ordered children and arbitrary-width signed integer/four-state literal records. The child arena alias use-after-free is corrected by copying inputs before growth. All eleven foundation targets pass, final RTL regression tests pass under AddressSanitizer/UndefinedBehaviorSanitizer, and git diff --check passes. Ordinary branches, worktrees and merges may be used for isolation and concurrent work; pigen does not require direct-to-master or linear history. Subsequent ready/output/emitter/composer work remains unimplemented.
 
 The local tree is the sole project documentation authority; obsolete history is excluded. The immutable Kestrel reference remains applicable.
 
