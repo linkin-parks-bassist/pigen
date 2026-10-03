@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-03T17:24:33+10:00"
+revised_at: "2026-10-04T00:24:56+10:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -16,4 +16,4 @@ Identity contract (verified against src/rtl_name.c): name identity is the role p
 
 Tests: tests/rtl_name_test.c builds a real pigen_source_manager (pigen_source_add, 82-byte module text, checked spans [20,25)=value, [33,44)=value_valid, [52,70)=value__pigen_valid) and checks (1) three distinct source spellings resolving to three distinct non-empty model-owned names byte-equal to their checked span text, (2) repeat-assignment stability with no duplicate growth, (3) byte-identical terminal text across independently built models, (4) a request with an unchecked span (invalid source id, or in-bounds but end beyond the source length) failing the whole assignment with no partial names while the single valid request alone still succeeds, (5) the five synthetic internal roles accepted with an invalid origin, each getting a distinct non-empty derived name, and (6) a same-stem collision taking the first free _1 suffix so the suffix loop is exercised. Checked-accessor and empty-assign asserts are preserved. make rtl-name-test is green (all PASS lines) and make rtl-test is green; every other green target is unaffected (the only failing target remains the pre-existing Icarus pipeline-test segfault at why/does/pipeline/verification/currently/fail.md).
 
-Remaining approved work, in order: Task 5 owner-based type/expression adapters; Task 6 realization-owned declarations; Task 7 whole-unit ready graph; Task 8 atomic transfers sharing one fire; Task 9 exact ordered output; Task 10 terminal SV emission; Task 11 quarantined composer/simulation; Task 12 verification and accurate status. Exact contracts live in what/is/elastic/rtl/task/{one..twelve.md}.
+Remaining approved work, in order: Task 5 owner-based type/expression adapters; Task 6 realization-owned declarations; Task 8 atomic transfers sharing one fire; Task 9 exact ordered output; Task 10 terminal SV emission; Task 11 quarantined composer/simulation; Task 12 verification and accurate status. Exact contracts live in what/is/elastic/rtl/task/{one..twelve.md}.

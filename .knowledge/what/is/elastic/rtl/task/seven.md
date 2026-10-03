@@ -1,8 +1,10 @@
 ---
 status: green
-revised_at: "2026-09-14T20:36:21+10:00"
-checked_at: '2026-09-13T15:07:12+10:00'
+revised_at: "2026-10-04T00:24:33+10:00"
+checked_at: "2026-09-13T15:07:12+10:00"
 ---
+
+Deferred to Pigen 1.0: not part of the current work (what/is/the/elastic/rtl/task/order.md). When taken up, plain cycle detection that names one transfer in the loop suffices; the Tarjan and deterministic-diagnostic requirements below are not required.
 
 Ready-dependency validation. Create ready_graph.h/ready_graph.c/ready_graph_test.c. Build identity graph from deduplicated incidence and downstream-ready realization laws; constants/external/occupancy terminate propagation. Deterministic Tarjan rejects SCC cycles/self-edge, diagnoses source-ordered closing transfer. Gate: chain/cycle/self-loop/FIFO-broken cycle, declaration permutations and duplicate projection incidence; make ready-graph-test resolve-test. This is approved future work, not implemented status.
 
