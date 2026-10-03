@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-03T21:50:02+10:00"
+revised_at: "2026-10-04T00:52:38+10:00"
 checked_at: "2026-09-30T20:31:53+10:00"
 ---
 
@@ -12,7 +12,7 @@ Type lowering queries the semantic owner for state domain, signedness, packed wi
 
 Expression lowering obtains the owner result type and lowers children bottom-up in owner order. INTEGER, EXACT_INTEGER, BINARY, CONVERSION, SELECT and CONCATENATION retain their owner-resolved values, explicit conversions, select kind and ordered children. Constants publish PIGEN_RTL_EXPR_INTEGER with the owner value and lowered result type. EXACT_INTEGER evaluates through pigen_const_expr_evaluate_u64; it does not read the bare-integer union member. Identity memoization avoids duplicate growth for repeated source expressions. Distinct source constant identities remain distinct even when their values match. An absent expression identity or unsupported SYMBOL reports the sentinel.
 
-tests/rtl_lower_test.c has seven families: initialization; sentinel guards; type state/width/sign/ranges; expressions and child order; constant identity/content/exact integers; failure reporting (an unbound PARAMETER symbol and an absent expression identity each lower to the sentinel; the section's post-failure state comparisons are rollback coverage that the approved fail-loudly decision removes, leaving the sentinel reports as the pinned behavior); memo coherence and independent-build determinism. tests/contracts.json covers src/rtl_lower.c through make rtl-lower-test. Companion gates are make rtl-test and make rtl-name-test. The exact-integer section pins both the value-derived width and the INVALID_ID packed-width query; self-consistency between an expression's type and the lowering's own type handle alone would not catch an incorrect width.
+tests/rtl_lower_test.c has seven families: initialization; sentinel guards; type state/width/sign/ranges; expressions and child order; constant identity/content/exact integers; failure reporting (an unbound PARAMETER symbol and an absent expression identity each lower to the sentinel, the section pins only the reported sentinels and memo stability, never the state a failed call leaves); memo coherence and independent-build determinism. tests/contracts.json covers src/rtl_lower.c through make rtl-lower-test. Companion gates are make rtl-test and make rtl-name-test. The exact-integer section pins both the value-derived width and the INVALID_ID packed-width query; self-consistency between an expression's type and the lowering's own type handle alone would not catch an incorrect width.
 
 Useful witness constraints: pigen_const_expr_intern_symbol accepts a matching PARAMETER symbol, whereas pigen_signal_add requires a SIGNAL symbol, so an unbound-parameter failure witness and a real signal must be distinct symbols. Bottom-up publication places a child before its parent, so deterministic relative offsets need not be non-negative.
 

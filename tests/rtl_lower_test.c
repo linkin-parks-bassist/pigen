@@ -9,7 +9,7 @@
  *
  * The skeleton stubs publish nothing: init zeroes the record and leaves both
  * identity memo maps empty, and both lowering entry points return the
- * unimplemented/invalid sentinel without touching a map. The real lowering of
+ * unimplemented/invalid sentinel. The real lowering of
  * a validated source identity into an RTL record, its width/signedness/
  * child-order propagation, and its conversion and projection handling arrive
  * with the test-contract and implementation stages; this driver asserts only
@@ -47,17 +47,12 @@ int main(int argc, char **argv)
 		!lowering.lowered_expression_count &&
 		!lowering.lowered_expression_capacity);
 
-	/* Both stubs return the unimplemented/invalid sentinel and leave the maps
-	 * untouched, for a valid lowering and for a NULL lowering. */
+	/* Both entry points report the unimplemented/invalid sentinel, for a
+	 * valid lowering and for a NULL lowering. */
 	REQUIRE(IS_INVALID_ID(pigen_lower_rtl_type(&lowering, INVALID_TYPE)));
 	REQUIRE(IS_INVALID_ID(pigen_lower_rtl_expression(&lowering, INVALID_EXPR)));
 	REQUIRE(IS_INVALID_ID(pigen_lower_rtl_type(NULL, INVALID_TYPE)));
 	REQUIRE(IS_INVALID_ID(pigen_lower_rtl_expression(NULL, INVALID_EXPR)));
-	REQUIRE(!lowering.lowered_types &&
-		!lowering.lowered_type_count && !lowering.lowered_type_capacity);
-	REQUIRE(!lowering.lowered_expressions &&
-		!lowering.lowered_expression_count &&
-		!lowering.lowered_expression_capacity);
 	}
 
 	/* (3) Type lowering preserves the owner-reported state, width, signedness
@@ -459,8 +454,7 @@ int main(int argc, char **argv)
 			pigen_const_expr_intern_integer(&sem, 5, t16).index);
 
 		/* Case 4 (front-loaded, the section's first behavioral assert): an
-		 * invalid constant-expression id returns the RTL-expression sentinel and
-		 * leaves the identity memo maps untouched. */
+		 * invalid constant-expression id returns the RTL-expression sentinel. */
 		eid = pigen_lower_rtl_expression(&lowering, INVALID_EXPR);
 		REQUIRE(IS_INVALID_ID(eid));
 
@@ -606,36 +600,33 @@ int main(int argc, char **argv)
 		}
 	}
 
-	/* (6) Error rollback: an invalid expression and an unbound signal each
-	 * report the error with NO partial RTL records published. Fourth
+	/* (6) Error reporting: an unbound signal and an absent expression each
+	 * report the failure as the RTL-expression sentinel. Fourth
 	 * expression-family section of the Task 5 test-contract chain (the
-	 * error-rollback family). Cases build one real validated model through the
-	 * owner APIs (a source file, a compilation scope, a module, a declared
-	 * signal, and a distinct UNBOUND PARAMETER symbol), then drive the two
-	 * failure modes and assert only observable state:
+	 * error-reporting family). A failed call may leave partial state behind:
+	 * the contract pins the reported sentinel, not the state a failure
+	 * leaves. Cases build one real validated model through the owner APIs (a
+	 * source file, a compilation scope, a module, a declared signal, and a
+	 * distinct UNBOUND PARAMETER symbol), then drive the two failure modes
+	 * and assert only the reported sentinels:
 	 *   Case 1: a constant expression referencing the unbound PARAMETER symbol
 	 *     lowers to the RTL-expression sentinel. The witness is a distinct
 	 *     PARAMETER symbol (not the real signal): the const-expr owner interns
 	 *     only PIGEN_SYMBOL_PARAMETER symbols, and pigen_signal_add requires
 	 *     PIGEN_SYMBOL_SIGNAL, so the same symbol cannot serve both.
-	 *   Case 2: after Case 1 the RTL type/expression arena counts and every
-	 *     previously populated identity-memo slot are exactly unchanged - the
-	 *     failed call published no partial RTL records.
-	 *   Case 3: a constant-expression id that does not exist in the semantic
-	 *     arena lowers to the sentinel and again leaves every count and slot
-	 *     unchanged.
-	 *   Case 4: after both failures an already-lowered valid constant still
-	 *     returns its memoized valid RTL handle - the error left the lowering
-	 *     usable (recoverable).
-	 * Staged red: Cases 1-3 pass against the stub, which returns the sentinel
-	 * for every input and publishes nothing - the sentinel guard and the
-	 * no-partial-state comparison both hold under the stub. The FIRST deliberate
-	 * red assert in this section is Case 4's `!IS_INVALID_ID(recoverable)`,
-	 * marked below: it is the only assert that requires implemented behavior,
-	 * because only a real lowering memoizes a valid constant so that the
-	 * recoverable call returns a non-sentinel handle while the stub returns the
-	 * sentinel. Cases 1-3 are guards that pin the error-reporting contract. */
-	SECTION("t5-error-rollback") {
+	 *   Case 2: a constant-expression id that does not exist in the semantic
+	 *     arena lowers to the sentinel.
+	 *   Case 3: after both failures an already-lowered valid constant still
+	 *     returns its memoized valid RTL handle - memo stability across the
+	 *     failures.
+	 * Staged red: the sentinel guards pass against the stub, which returns
+	 * the sentinel for every input. The FIRST deliberate red assert in this
+	 * section is the valid-constant lowering `!IS_INVALID_ID(good_id)`,
+	 * marked below: it is the first assert that requires implemented
+	 * behavior, because only a real lowering memoizes a valid constant while
+	 * the stub returns the sentinel. Every later assert in this section
+	 * requires implemented behavior and is deliberate red as well. */
+	SECTION("t5-error-reporting") {
 		const char *text =
 			"module top : input value : logic ;\n";
 		pigen_source_id source;
@@ -654,14 +645,6 @@ int main(int argc, char **argv)
 		pigen_rtl_expr_id good_id;
 		pigen_rtl_expr_id eid;
 		pigen_rtl_expr_id recoverable;
-		size_t type_count_before, type_count_after;
-		size_t expr_count_before, expr_count_after;
-		size_t type_map_before, type_map_after;
-		size_t expr_map_before, expr_map_after;
-		size_t type_populated_before, type_populated_after;
-		size_t expr_populated_before, expr_populated_after;
-		size_t i;
-		int no_partial_state;
 
 		/* Build the signal's 16-bit type first, then the real validated owner
 		 * model: a source file, the compilation scope, a module in it, and one
@@ -675,7 +658,7 @@ int main(int argc, char **argv)
 		REQUIRE(!IS_INVALID_ID(width16));
 		t16 = pigen_data_type_unsigned_integer(&sem, width16);
 		REQUIRE(!IS_INVALID_ID(t16));
-		source = pigen_source_add(&sources, "lower_rollback.pigen", text,
+		source = pigen_source_add(&sources, "lower_error.pigen", text,
 			strlen(text));
 		REQUIRE(source.index != PIGEN_INVALID_ID);
 		whole = (pigen_source_span){source, 0, strlen(text)};
@@ -708,7 +691,7 @@ int main(int argc, char **argv)
 		 * PIGEN_SYMBOL_SIGNAL, so the real signal symbol above cannot serve as
 		 * the const-expr witness: the two symbols are distinct and both are
 		 * kept - the real signal build stays intact (it exercises the
-		 * no-partial-record recovery path). */
+		 * memo-stability path). */
 		/* The parameter name span is "top" in the same source file: it is
 		 * valid, non-empty, and does not collide with the "value" signal
 		 * symbol in module_scope (the module symbol owns "top" in the parent
@@ -718,105 +701,35 @@ int main(int argc, char **argv)
 			(pigen_source_span){source, 7, 10}, &param_symbol, NULL) ==
 			PIGEN_DECLARE_OK);
 
-		/* A valid constant of the same type, lowered before any failure, is the
-		 * recoverability witness for Case 4. */
+		/* A valid constant of the same type, lowered before any failure, is
+		 * the memo-stability witness for Case 3. */
 		good = pigen_const_expr_intern_integer(&sem, 5, t16);
 		REQUIRE(!IS_INVALID_ID(good));
 		good_id = pigen_lower_rtl_expression(&lowering, good);
 		REQUIRE(!IS_INVALID_ID(good_id)); /* Deliberate red (first in this
 		 * section): the stub returns the sentinel for the valid constant. */
 
-		/* Snapshot the populated type and expression memo slots BEFORE the
-		 * failed Case 1 call: the no-partial-record contract is that the failed
-		 * call leaves every previously populated slot unchanged and adds none.
-		 * Both maps are legitimately populated by the earlier sections (3) and
-		 * (4) and by the successful `good` lowering (which publishes its owner
-		 * type t16), so the check must compare against this snapshot rather
-		 * than asserting every slot is a sentinel. */
-		type_populated_before = 0;
-		for (i = 0; i < lowering.lowered_type_count; i++)
-			if (lowering.lowered_types[i].index != PIGEN_INVALID_ID)
-				type_populated_before++;
-		expr_populated_before = 0;
-		for (i = 0; i < lowering.lowered_expression_count; i++)
-			if (lowering.lowered_expressions[i].index != PIGEN_INVALID_ID)
-				expr_populated_before++;
-
 		/* Case 1: a constant expression referencing the unbound PARAMETER
-		 * symbol lowers to the sentinel (a guard: the stub also returns the
+		 * symbol reports the sentinel (a guard: the stub also returns the
 		 * sentinel). The witness is a PARAMETER symbol because the const-expr
 		 * owner interns only PIGEN_SYMBOL_PARAMETER symbols, and it is unbound
-		 * (no parameter value) so lowering must report the sentinel with no
-		 * partial records. */
+		 * (no parameter value) so lowering must report the sentinel. */
 		sym_expr = pigen_const_expr_intern_symbol(&sem, param_symbol, t16);
 		REQUIRE(!IS_INVALID_ID(sym_expr));
 		eid = pigen_lower_rtl_expression(&lowering, sym_expr);
 		REQUIRE(IS_INVALID_ID(eid));
 
-		/* Case 2: the failure published no partial RTL records - the arena
-		 * counts and every previously populated memo slot are unchanged. */
-		type_count_before = rtl.type_count;
-		expr_count_before = rtl.expression_count;
-		type_map_before = lowering.lowered_type_count;
-		expr_map_before = lowering.lowered_expression_count;
-		type_count_after = rtl.type_count;
-		expr_count_after = rtl.expression_count;
-		type_map_after = lowering.lowered_type_count;
-		expr_map_after = lowering.lowered_expression_count;
-		type_populated_after = 0;
-		for (i = 0; i < type_map_after; i++)
-			if (lowering.lowered_types[i].index != PIGEN_INVALID_ID)
-				type_populated_after++;
-		expr_populated_after = 0;
-		for (i = 0; i < expr_map_after; i++)
-			if (lowering.lowered_expressions[i].index != PIGEN_INVALID_ID)
-				expr_populated_after++;
-		no_partial_state = type_count_after == type_count_before &&
-			expr_count_after == expr_count_before &&
-			type_map_after == type_map_before &&
-			expr_map_after == expr_map_before &&
-			type_populated_after == type_populated_before &&
-			expr_populated_after == expr_populated_before;
-		/* The `good` slot still resolves to the memoized handle: the failed
-		 * call neither clobbered it nor republished it. */
-		no_partial_state = no_partial_state &&
-			lowering.lowered_expressions[good.index].index == good_id.index;
-		REQUIRE(no_partial_state); /* guard: the stub publishes nothing */
-
-		/* Case 3: a constant-expression id absent from the semantic arena
-		 * lowers to the sentinel and again leaves every count and slot
-		 * unchanged. */
+		/* Case 2: a constant-expression id absent from the semantic arena
+		 * reports the sentinel. */
 		eid = pigen_lower_rtl_expression(&lowering,
 			(pigen_const_expr_id){999});
 		REQUIRE(IS_INVALID_ID(eid));
-		type_count_after = rtl.type_count;
-		expr_count_after = rtl.expression_count;
-		type_map_after = lowering.lowered_type_count;
-		expr_map_after = lowering.lowered_expression_count;
-		type_populated_after = 0;
-		for (i = 0; i < type_map_after; i++)
-			if (lowering.lowered_types[i].index != PIGEN_INVALID_ID)
-				type_populated_after++;
-		expr_populated_after = 0;
-		for (i = 0; i < expr_map_after; i++)
-			if (lowering.lowered_expressions[i].index != PIGEN_INVALID_ID)
-				expr_populated_after++;
-		no_partial_state = type_count_after == type_count_before &&
-			expr_count_after == expr_count_before &&
-			type_map_after == type_map_before &&
-			expr_map_after == expr_map_before &&
-			type_populated_after == type_populated_before &&
-			expr_populated_after == expr_populated_before;
-		no_partial_state = no_partial_state &&
-			lowering.lowered_expressions[good.index].index == good_id.index;
-		REQUIRE(no_partial_state); /* guard: the stub publishes nothing */
 
-		/* Case 4: after both failures the already-lowered valid constant still
-		 * returns its memoized valid handle - the error left the lowering
-		 * usable. */
+		/* Case 3: after both failures the already-lowered valid constant
+		 * still returns its memoized valid handle - memo stability across
+		 * the failures. */
 		recoverable = pigen_lower_rtl_expression(&lowering, good);
-		REQUIRE(!IS_INVALID_ID(recoverable)); /* Deliberate red (first in this
-		 * section): the stub returns the sentinel for the valid constant. */
+		REQUIRE(!IS_INVALID_ID(recoverable));
 		REQUIRE(recoverable.index == good_id.index);
 	}
 
@@ -1223,19 +1136,17 @@ int main(int argc, char **argv)
 	 *     idempotent (no duplicate objects/expressions, endpoints record
 	 *     unchanged), and a second independently built model yields
 	 *     identical endpoint ids at equal offsets.
-	 *   Case 4: NO-PARTIAL-RECORD ROLLBACK. A genuinely different
-	 *     failing module in the SAME lowering - a second module/scope with
-	 *     one ABSTRACT INPUT signal whose data type is a NEGATIVE exact
-	 *     integer, the stable owner-constructible failure witness (the
-	 *     type exists in the semantic owner but pigen_lower_rtl_type
-	 *     refuses it, so the declaration lowering must report the error
-	 *     regardless of the adapter table's state). The error leaves the
-	 *     RTL model and the lowering endpoints map EXACTLY as before the
-	 *     failing call (object/expression/endpoints-map counts and the
-	 *     populated record snapshotted before, compared after). The
-	 *     transient unimplemented-adapter path is deliberately not the
-	 *     frozen failure witness: it cannot by itself justify a frozen
-	 *     failure assertion once every promised adapter is implemented.
+	 *   Case 4: FAILURE REPORT. A genuinely different failing module in
+	 *     the SAME lowering - a second module/scope with one ABSTRACT
+	 *     INPUT signal whose data type is a NEGATIVE exact integer, the
+	 *     stable owner-constructible failure witness (the type exists in
+	 *     the semantic owner but pigen_lower_rtl_type refuses it, so the
+	 *     declaration lowering must report -1 regardless of the adapter
+	 *     table's state). The contract pins the reported -1, not the state
+	 *     a failed call leaves. The transient unimplemented-adapter path is
+	 *     deliberately not the frozen failure witness: it cannot by itself
+	 *     justify a frozen failure assertion once every promised adapter is
+	 *     implemented.
 	 * Staged red: every owner-construction and descriptor assert passes
 	 * against the landed owners; the FIRST deliberate unimplemented-
 	 * behavior assert in this section is Case 1's `rc == 0` (the stub
@@ -1273,24 +1184,17 @@ int main(int argc, char **argv)
 		pigen_rtl_object_id input_ready_obj;
 		pigen_rtl_expr_id input_valid_expr;
 		size_t object_count_before;
-		size_t object_count_after;
 		size_t expression_count_before;
-		size_t expression_count_after;
 		size_t endpoint_map_before;
-		size_t endpoint_map_after;
-		size_t endpoint_populated_before;
-		size_t endpoint_populated_after;
 		pigen_rtl_signal_endpoints record_before;
 		pigen_rtl_signal_endpoints record_again;
 		pigen_rtl_type_id lowered_t8;
 		const pigen_rtl_type *t8_record;
 		int rc;
 		int stable;
-		int no_partial;
 		int distinct;
 		int payload_shape;
 		int not_constant;
-		size_t i;
 
 		/* Build the boundary module through the owner APIs (the landed
 		 * construction pattern): the signal's 8-bit type first, then a
@@ -1610,12 +1514,12 @@ int main(int argc, char **argv)
 			pigen_free_sources(&sources_d);
 		}
 
-		/* Case 4: NO-PARTIAL-RECORD ROLLBACK. A genuinely DIFFERENT
-		 * failing module, not a repeat of Case 3's call: a second module
-		 * in the SAME lowering (its own scope, its own source file, one
-		 * ABSTRACT INPUT signal) whose signal data type is a NEGATIVE
-		 * exact integer - the stable, owner-constructible failure
-		 * witness. The type is constructible through the owner APIs
+		/* Case 4: FAILURE REPORT. A genuinely DIFFERENT failing module,
+		 * not a repeat of Case 3's call: a second module in the SAME
+		 * lowering (its own scope, its own source file, one ABSTRACT
+		 * INPUT signal) whose signal data type is a NEGATIVE exact
+		 * integer - the stable, owner-constructible failure witness. The
+		 * type is constructible through the owner APIs
 		 * (pigen_integer_negate + pigen_data_type_exact_integer) yet
 		 * pigen_lower_rtl_type refuses it (its unsigned width is zero;
 		 * pinned by section (5)'s negative-exact-integer boundary), and
@@ -1626,12 +1530,8 @@ int main(int argc, char **argv)
 		 * call return -1. The transient unimplemented-adapter path is
 		 * deliberately NOT used as the frozen failure witness: it cannot
 		 * by itself justify a frozen failure assertion once every
-		 * promised adapter is implemented. The error must leave the RTL
-		 * model and the endpoints map EXACTLY as before the failing call
-		 * (snapshot captured before, compared after): every arena count,
-		 * every endpoints-map count and populated-slot count, and the
-		 * previously populated record unchanged, with nothing newly
-		 * published for the failing signal. */
+		 * promised adapter is implemented. The contract pins only the
+		 * reported -1. */
 		{
 			const char *text2 =
 				"module fail : input value : abstract ;\n";
@@ -1690,82 +1590,13 @@ int main(int argc, char **argv)
 				PIGEN_TRANSFER_TYPE_ABSTRACT, PIGEN_SEMANTIC_INPUT, name2);
 			REQUIRE(signal2.index != PIGEN_INVALID_ID);
 
-			/* Snapshot the RTL model and the endpoints map BEFORE the
-			 * failing call: every arena count, every endpoints-map count
-			 * and populated-slot count, and the previously populated
-			 * record of Case 1's signal. */
-			object_count_before = rtl_b.object_count;
-			expression_count_before = rtl_b.expression_count;
-			endpoint_map_before = lowering_b.lowered_endpoint_count;
-			endpoint_populated_before = 0;
-			for (i = 0; i < endpoint_map_before; i++)
-				if (lowering_b.lowered_endpoints[i].payload.index !=
-					PIGEN_INVALID_ID)
-					endpoint_populated_before++;
-			record_before = lowering_b.lowered_endpoints[signal.index];
-
 			/* The different failing module reports the error: the
 			 * unlowerable signal data type fails the declaration
-			 * lowering. Deliberate red: the stub returns -1 for every
-			 * call, so this assert passes against it and pins the
-			 * stable witness for the implementation. */
+			 * lowering, which must return -1. Deliberate red: the stub
+			 * returns -1 for every call, so this assert passes against
+			 * it and pins the stable witness for the implementation. */
 			rc = pigen_lower_rtl_module_declarations(&lowering_b, module2);
-			REQUIRE(rc == -1); /* Deliberate red (staged): the stub
-			 * returns -1 without touching the maps or the RTL model. */
-
-			/* The failure published no partial records: the RTL model and
-			 * the endpoints map are EXACTLY as before the failing call -
-			 * every arena count, every endpoints-map count and
-			 * populated-slot count unchanged, the previously populated
-			 * record unchanged, and nothing newly populated. */
-			object_count_after = rtl_b.object_count;
-			expression_count_after = rtl_b.expression_count;
-			endpoint_map_after = lowering_b.lowered_endpoint_count;
-			endpoint_populated_after = 0;
-			for (i = 0; i < endpoint_map_after; i++)
-				if (lowering_b.lowered_endpoints[i].payload.index !=
-					PIGEN_INVALID_ID)
-					endpoint_populated_after++;
-			no_partial = object_count_after == object_count_before &&
-				expression_count_after == expression_count_before &&
-				endpoint_map_after == endpoint_map_before &&
-				endpoint_populated_after == endpoint_populated_before;
-			if (no_partial && endpoint_map_after > signal.index) {
-				record_again = lowering_b.lowered_endpoints[signal.index];
-				no_partial =
-					(record_again.payload.index ==
-						record_before.payload.index) &&
-					(record_again.valid.index ==
-						record_before.valid.index) &&
-					(record_again.ready.index ==
-						record_before.ready.index) &&
-					(record_again.input_payload.index ==
-						record_before.input_payload.index) &&
-					(record_again.input_valid.index ==
-						record_before.input_valid.index) &&
-					(record_again.input_ready.index ==
-						record_before.input_ready.index);
-			}
-			REQUIRE(no_partial); /* guard: the stub publishes nothing */
-
-			/* The failed call left the lowering usable: the previously
-			 * populated endpoints record still resolves in the RTL model
-			 * and a repeat of the successful Case 1 call is still
-			 * idempotent. Deliberate red: the stub populated nothing. */
-			endpoints = &lowering_b.lowered_endpoints[signal.index];
-			REQUIRE(!IS_INVALID_ID(endpoints->payload));
-			REQUIRE(pigen_rtl_object_get(&rtl_b, endpoints->payload));
-			REQUIRE(pigen_rtl_expr_get(&rtl_b, endpoints->valid));
-			REQUIRE(pigen_rtl_expr_get(&rtl_b, endpoints->ready));
-			rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
-			REQUIRE(rc == 0); /* Deliberate red: the stub returns -1. */
-			record_again = lowering_b.lowered_endpoints[signal.index];
-			stable =
-				(record_again.payload.index ==
-					record_before.payload.index) &&
-				(record_again.valid.index == record_before.valid.index) &&
-				(record_again.ready.index == record_before.ready.index);
-			REQUIRE(stable); /* Deliberate red: the stub republishes nothing. */
+			REQUIRE(rc == -1);
 		}
 
 		pigen_rtl_lowering_free(&lowering_b);
