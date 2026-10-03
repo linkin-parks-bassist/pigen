@@ -1,12 +1,12 @@
 ---
 status: green
-revised_at: "2026-10-03T21:25:17+10:00"
+revised_at: "2026-10-03T21:50:02+10:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
 Pigen is an active personal C17 source-to-source compiler project extending SystemVerilog with ready/valid transfers, elastic pipelines, FSMs and routed fabrics. It emits readable synthesizable SV and storage primitives. Employer/partner/customer material is excluded.
 
-The structured frontend resolves data-first declarations and intrinsic semantic types/expressions, but remains unlinked from ./pigen. Production is the quarantined textual prototype. Elastic RTL Tasks 1–4 are implemented: IDs/arena, canonical types/expressions, owner-validated hardware constructors and collision-safe names. Task 5 type/expression adapters and its test families are implemented; exact integers lower with owner-value-derived type width. Failure rollback is not a requirement: compiler stages report their diagnostic and stop (how/should/compiler/builders/fail.md). Task 6 has the BOUNDARY and net/variable payload declaration lowering implemented; the net/variable constant controls and the storage realizations remain. See what/is/elastic/rtl/task/six.md for the realization contract. No partial frontend production attachment, fallback, second dialect or per-file choice is approved.
+The structured frontend resolves data-first declarations and intrinsic semantic types/expressions, but remains unlinked from ./pigen. Production is the quarantined textual prototype. Elastic RTL Tasks 1–4 are implemented: IDs/arena, canonical types/expressions, owner-validated hardware constructors and collision-safe names. Task 5 type/expression adapters and its seven-section test suite are implemented; exact integers lower with owner-value-derived type width. Failure rollback is not a requirement: compiler stages report their diagnostic and stop (how/should/compiler/builders/fail.md). Task 6 has the realization/endpoint shapes, the BOUNDARY declaration lowering, the net/variable payload realizations, and the four storage realizations implemented; the net/variable valid/ready constant controls remain the last unimplemented declaration family. See what/is/elastic/rtl/task/six.md for the contract and the remaining sections. No partial frontend production attachment, fallback, second dialect or per-file choice is approved.
 
 Repository topology: src/ owner subsystems and production prototype; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ executable prototype designs/testbenches; .knowledge/ the sole local documentation and architectural answer authority. Local docs, notes, root Markdown and AGENTS.md are absent. Keep only current contracts, implementation evidence and actionable unresolved questions; delete obsolete material. Detailed semantic coverage is in what/is/the/knowledge/ingestion/coverage.md.
 

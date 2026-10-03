@@ -453,12 +453,14 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 	return result;
 }
 
-/* Private, file-local adapter table, one entry per valid transfer
- * realization. Each entry tags its realization; the dispatch in
- * pigen_lower_rtl_module_declarations indexes it by the source descriptor's
- * realization (never by the source transfer-type enum). The BOUNDARY entry is
- * implemented (three-port input shape); the remaining realizations are staged
- * unimplemented until their own implementation stages. */
+ /* Private, file-local adapter table, one entry per valid transfer
+  * realization. Each entry tags its realization; the dispatch in
+  * pigen_lower_rtl_module_declarations indexes it by the source descriptor's
+  * realization (never by the source transfer-type enum). Every realized
+  * transfer is now implemented: BOUNDARY (three-port input shape),
+  * COMBINATIONAL_NET / PROCEDURAL_VARIABLE (payload plus descriptor constant
+  * controls) and the four storage realizations (payload plus one instance of
+  * the realization's primitive, the parameterized queue carrying its depth). */
 struct pigen_realization_endpoint_adapter {
 	pigen_transfer_realization realization;
 	int implemented;
@@ -473,13 +475,13 @@ realization_endpoint_adapters[8] = {
 	[PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE] = {
 		PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE, 1},
 	[PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT] = {
-		PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT, 0},
+		PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT, 1},
 	[PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER] = {
-		PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER, 0},
+		PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER, 1},
 	[PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE] = {
-		PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE, 0},
+		PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE, 1},
 	[PIGEN_TRANSFER_REALIZATION_SKID_QUEUE] = {
-		PIGEN_TRANSFER_REALIZATION_SKID_QUEUE, 0},
+		PIGEN_TRANSFER_REALIZATION_SKID_QUEUE, 1},
 };
 
 /* File-local memo of the RTL module record per (RTL model, semantic module)
@@ -700,6 +702,92 @@ static int net_variable_endpoints(pigen_rtl_lowering *lowering,
 	return 1;
 }
 
+/* Lower one storage realization signal declaration (ELASTIC_SLOT,
+ * PULSE_REGISTER, PARAMETERIZED_QUEUE or SKID_QUEUE) into its payload object
+ * plus exactly one instance of the realization's primitive. The payload object
+ * carries the signal's lowered data type and semantic direction (the existing
+ * pigen_lower_rtl_type memo yields the type record). The instance is owned by
+ * the semantic module and carries no connection object in this stage; the
+ * PARAMETERIZED_QUEUE (FIFO) is the only storage realization that carries a
+ * parameter - its semantic depth, lowered from the signal's transfer argument
+ * const-expr through the existing pigen_lower_rtl_expression memo and
+ * published into the instance's ordered parameter record so it round-trips
+ * exactly - while the three fixed-capacity realizations carry no parameter
+ * (their capacity is the descriptor's fixed_capacity constant, not a
+ * published record). valid and ready are driven by the primitive (downstream /
+ * occupancy / always-ready), so no constant control expression is published
+ * and the endpoints record's valid/ready expression identities stay invalid.
+ * Returns the filled endpoints record, or a zeroed record on error. */
+static int storage_endpoints(pigen_rtl_lowering *lowering,
+	const pigen_semantic_signal *owner_signal, size_t signal_index,
+	pigen_rtl_module_id rtl_module, pigen_module_id semantic_module,
+	pigen_transfer_realization realization,
+	pigen_rtl_signal_endpoints *out)
+{
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_rtl_type_id data_type;
+	pigen_rtl_object_id payload;
+	pigen_rtl_expr_id depth = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	pigen_rtl_expr_id *parameter = NULL;
+	size_t parameter_count = 0;
+	pigen_rtl_instance_id instance;
+
+	/* The payload's type must lower first: a signal whose data type does not
+	 * lower fails the whole call with no partial record. */
+	data_type = pigen_lower_rtl_type(lowering, owner_signal->data_type);
+	if (data_type.index == PIGEN_INVALID_ID)
+		return 0;
+
+	payload = pigen_rtl_object_add_with_owner(rtl, rtl_module,
+		PIGEN_RTL_OBJECT_VARIABLE, data_type, owner_signal->direction,
+		(pigen_signal_id){(uint32_t)signal_index}, owner_signal->span);
+	if (payload.index == PIGEN_INVALID_ID)
+		return 0;
+
+	/* The PARAMETERIZED_QUEUE carries its semantic depth: lower the transfer
+	 * argument's const-expr through the existing expression memo (which
+	 * publishes the depth record) and publish it as the instance's single
+	 * ordered parameter so the value round-trips exactly. The three
+	 * fixed-capacity realizations carry no parameter. A missing or non-
+	 * constant argument (the owner rejects both for the parameterized queue)
+	 * fails the whole call with no partial record. */
+	if (realization == PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE)
+	{
+		pigen_const_expr_id argument_const;
+
+		if (owner_signal->transfer_argument.index == PIGEN_INVALID_ID)
+			return 0;
+		argument_const = pigen_expr_constant(lowering->semantics,
+			owner_signal->transfer_argument);
+		if (argument_const.index == PIGEN_INVALID_ID)
+			return 0;
+		depth = pigen_lower_rtl_expression(lowering, argument_const);
+		if (depth.index == PIGEN_INVALID_ID)
+			return 0;
+		parameter = &depth;
+		parameter_count = 1;
+	}
+
+	/* Publish exactly one instance of the realization's primitive, owned by
+	 * the semantic module, carrying the depth parameter (queue only) and no
+	 * connection object. The signal's source span is the instance origin, so
+	 * the four storage instances in one module are mutually distinct. */
+	instance = pigen_rtl_instance_add_with_owner(rtl, rtl_module,
+		semantic_module, parameter, parameter_count, NULL, 0,
+		owner_signal->span);
+	if (instance.index == PIGEN_INVALID_ID)
+		return 0;
+
+	/* valid and ready are driven by the primitive (no constant control
+	 * published); the input side exposes the same payload object. */
+	*out = (pigen_rtl_signal_endpoints){
+		payload,
+		(pigen_rtl_expr_id){PIGEN_INVALID_ID},
+		(pigen_rtl_expr_id){PIGEN_INVALID_ID},
+		payload, payload, payload};
+	return 1;
+}
+
 int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -786,6 +874,15 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 		{
 			if (!net_variable_endpoints(lowering, owner_signal, i,
 				rtl_module, &endpoints))
+				goto fail;
+		}
+		else if (realization == PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT ||
+			realization == PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER ||
+			realization == PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE ||
+			realization == PIGEN_TRANSFER_REALIZATION_SKID_QUEUE)
+		{
+			if (!storage_endpoints(lowering, owner_signal, i,
+				rtl_module, module, realization, &endpoints))
 				goto fail;
 		}
 		else
