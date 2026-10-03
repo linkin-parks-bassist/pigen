@@ -1279,10 +1279,13 @@ int main(void)
 		size_t endpoint_populated_after;
 		pigen_rtl_signal_endpoints record_before;
 		pigen_rtl_signal_endpoints record_again;
+		pigen_rtl_type_id lowered_t8;
+		const pigen_rtl_type *t8_record;
 		int rc;
 		int stable;
 		int no_partial;
 		int distinct;
+		int payload_shape;
 		int not_constant;
 		size_t i;
 
@@ -1351,6 +1354,14 @@ int main(void)
 				PIGEN_TRANSFER_READY_EXTERNAL &&
 			descriptor->realization ==
 				PIGEN_TRANSFER_REALIZATION_BOUNDARY);
+		/* The payload type witness: the already-implemented
+		 * pigen_lower_rtl_type memo lowers the signal's 8-bit data type to
+		 * the SAME record the declaration lowering must attach to the
+		 * payload object (pointer equality in the shared RTL model). */
+		lowered_t8 = pigen_lower_rtl_type(&lowering_b, t8);
+		assert(!IS_INVALID_ID(lowered_t8));
+		t8_record = pigen_rtl_type_get(&rtl_b, lowered_t8);
+		assert(t8_record);
 
 		/* Case 1: THREE-PORT SHAPE. The declaration lowering reports
 		 * success and the endpoints record for the signal holds distinct
@@ -1377,15 +1388,25 @@ int main(void)
 		assert(ready_re);
 		/* The three ports are distinct objects in the RTL model: the
 		 * payload object and the two control expression records are
-		 * separate arena entries, and the payload object's type is the
-		 * signal's data type (lowered, resolvable in the same model). */
-		distinct = payload_obj->kind != PIGEN_RTL_OBJECT_KIND_INVALID &&
+		 * separate arena entries. The payload is a VARIABLE object of the
+		 * signal's semantic direction, not a MEMORY or internal object: a
+		 * BOUNDARY payload published as a MEMORY-kind object, or with an
+		 * INTERNAL direction, is caught here. */
+		distinct = payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
+			payload_obj->direction == PIGEN_SEMANTIC_INPUT &&
 			!IS_INVALID_ID(payload_obj->type) &&
 			pigen_rtl_type_get(&rtl_b, payload_obj->type) &&
 			valid_re->kind != PIGEN_RTL_EXPR_INVALID &&
 			ready_re->kind != PIGEN_RTL_EXPR_INVALID &&
 			endpoints->valid.index != endpoints->ready.index;
 		assert(distinct); /* Deliberate red: the stub populates nothing. */
+		/* The payload type is EXACTLY the signal's lowered 8-bit data
+		 * type - the SAME record the pigen_lower_rtl_type memo yields in
+		 * the shared model (pointer equality): a wrong-but-resolvable
+		 * payload type is caught here. */
+		payload_shape = payload_obj &&
+			pigen_rtl_type_get(&rtl_b, payload_obj->type) == t8_record;
+		assert(payload_shape);
 		/* Input side: the declaration exposes the SAME three objects on
 		 * its input side - the same payload object, the same valid and
 		 * ready expressions (the input-side fields are object ids, so
