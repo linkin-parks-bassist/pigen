@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-03T21:50:02+10:00"
+revised_at: "2026-10-03T23:53:43+10:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -27,4 +27,4 @@ Elastic RTL Task 2 is implemented: interned types retain ordered concrete/symbol
 
 The local tree is the sole project documentation authority; obsolete history is excluded. The immutable Kestrel reference remains applicable.
 
-Current verification: all eleven structured C foundation targets pass. Icarus Verilog 13.0 is installed at ~/.local/bin (the Ubuntu 12.0 package mis-elaborates `$bits(<signal>)` widths; why/does/pipeline/verification/currently/fail.md), and the pipeline simulation targets pass. Full make verify now stops at tests/smoke.sh because verilator is not installed. No full-suite success is claimed.
+Current verification: all eleven structured C foundation targets pass. Icarus Verilog 13.0 is installed at ~/.local/bin (the Ubuntu 12.0 package mis-elaborates `$bits(<signal>)` widths; why/does/pipeline/verification/currently/fail.md), and the pipeline simulation targets pass. Verilator 5.020 is installed and full `make verify` passes (exit 0); its lint does not yet fail on warnings, and it reports the co-slice width defect in what/is/broken.md.
