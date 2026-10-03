@@ -662,21 +662,85 @@ static int boundary_endpoints(pigen_rtl_lowering *lowering,
 	return 1;
 }
 
+/* Intern one 1-bit valid/ready constant control through the existing
+ * expression memo and return its lowered expression identity. The constant is
+ * the descriptor's 0/1 value read into a 1-bit logic type (lowered through the
+ * type memo), interned as a semantic constant-expression identity (which the
+ * owner memoizes by value, so the two valid constants - both 1 - share one
+ * identity while the ready constants differ) and lowered through
+ * pigen_lower_rtl_expression so it is published exactly once per identity. The
+ * control is an expression identity, not a published object. Returns an invalid
+ * identity on any failure. */
+static pigen_rtl_expr_id control_constant(pigen_rtl_lowering *lowering,
+	int constant)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_data_type_id logic_one;
+	pigen_rtl_type_id control_type;
+	pigen_const_expr_id interned;
+	pigen_rtl_expr_id lowered;
+	pigen_rtl_literal_word word;
+	pigen_source_span origin =
+		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+
+	logic_one = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+	if (logic_one.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	control_type = pigen_lower_rtl_type(lowering, logic_one);
+	if (control_type.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+
+	/* The owner interns the (value, 1-bit-type) constant identity once; a
+	 * repeat for an already-lowered identity is a memo hit that publishes
+	 * nothing new (idempotence). */
+	interned = pigen_const_expr_intern_integer(sem, (uint64_t)constant,
+		logic_one);
+	if (interned.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	if (lowering->lowered_expression_count > interned.index &&
+		lowering->lowered_expressions[interned.index].index !=
+		PIGEN_INVALID_ID)
+		return lowering->lowered_expressions[interned.index];
+
+	/* A 1-bit literal: exactly one bit, the descriptor's 0/1 value, unsigned.
+	 * Published directly as a 1-bit integer expression (the uint64_t
+	 * convenience constructor hardcodes a 64-bit literal, so the literal
+	 * constructor is used to carry the 1-bit width the contract pins). */
+	word = (pigen_rtl_literal_word){(uint64_t)constant, 0, 0};
+	lowered = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
+		control_type, &word, 1, 0, origin);
+	if (lowered.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	if (!expr_map_ensure(lowering, interned.index + 1) ||
+		lowering->lowered_expression_count <= interned.index ||
+		lowering->lowered_expressions[interned.index].index !=
+		PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	lowering->lowered_expressions[interned.index] = lowered;
+	return lowered;
+}
+
 /* Lower one COMBINATIONAL_NET or PROCEDURAL_VARIABLE signal declaration into
- * its payload shape. The payload object carries the signal's lowered data type
- * and semantic direction (the existing pigen_lower_rtl_type memo yields the
- * type record). The valid and ready controls are context-dependent for these
- * realizations: no constant control is published in this stage, so the
- * endpoints record holds invalid valid/ready expression identities. The input
- * side exposes the same payload object. No storage instance is published.
- * Returns the filled endpoints record, or a zeroed record on error. */
+ * its payload object plus its two constant controls. The payload object
+ * carries the signal's lowered data type and semantic direction (the existing
+ * pigen_lower_rtl_type memo yields the type record). valid and ready are the
+ * descriptor's 1-bit constant controls, each an expression identity (no
+ * published object) interned through the expression memo; the two valid
+ * constants (both 1) share one interned identity while the ready constants
+ * (WIRE 0, REG 1) differ. The input side exposes the same payload object. No
+ * storage instance is published. Returns the filled endpoints record, or a
+ * zeroed record on error. */
 static int net_variable_endpoints(pigen_rtl_lowering *lowering,
 	const pigen_semantic_signal *owner_signal, size_t signal_index,
-	pigen_rtl_module_id rtl_module, pigen_rtl_signal_endpoints *out)
+	pigen_rtl_module_id rtl_module, int valid_constant, int ready_constant,
+	pigen_rtl_signal_endpoints *out)
 {
 	pigen_rtl_model *rtl = lowering->rtl;
 	pigen_rtl_type_id data_type;
 	pigen_rtl_object_id payload;
+	pigen_rtl_expr_id valid;
+	pigen_rtl_expr_id ready;
 	pigen_source_span origin =
 		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
 
@@ -692,13 +756,17 @@ static int net_variable_endpoints(pigen_rtl_lowering *lowering,
 	if (payload.index == PIGEN_INVALID_ID)
 		return 0;
 
-	/* valid and ready are context-dependent (no constant control published
-	 * in this stage); the input side exposes the same payload object. */
+	/* The two constant controls are expression identities (no objects); a
+	 * failure lowers nothing further and the whole call reports the error. */
+	valid = control_constant(lowering, valid_constant);
+	if (valid.index == PIGEN_INVALID_ID)
+		return 0;
+	ready = control_constant(lowering, ready_constant);
+	if (ready.index == PIGEN_INVALID_ID)
+		return 0;
+
 	*out = (pigen_rtl_signal_endpoints){
-		payload,
-		(pigen_rtl_expr_id){PIGEN_INVALID_ID},
-		(pigen_rtl_expr_id){PIGEN_INVALID_ID},
-		payload, payload, payload};
+		payload, valid, ready, payload, payload, payload};
 	return 1;
 }
 
@@ -873,7 +941,8 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 			realization == PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE)
 		{
 			if (!net_variable_endpoints(lowering, owner_signal, i,
-				rtl_module, &endpoints))
+				rtl_module, descriptor->valid_constant,
+				descriptor->ready_constant, &endpoints))
 				goto fail;
 		}
 		else if (realization == PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT ||
