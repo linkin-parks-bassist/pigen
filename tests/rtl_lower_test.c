@@ -1629,20 +1629,29 @@ int main(int argc, char **argv)
 	 *     pigen_rtl_object of kind PIGEN_RTL_OBJECT_VARIABLE whose type is
 	 *     the lowered 8-bit type - the SAME record the landed
 	 *     pigen_lower_rtl_type memo yields for the signal's data type - and
-	 *     whose direction equals the semantic signal's direction. The
-	 *     payload object is DISTINCT from any control (it is an object;
-	 *     valid and ready are expression ids), and the two signals yield
-	 *     two DISTINCT payload objects.
-	 * The descriptor constant values and the constant-expression identity
-	 * of the valid/ready controls (WIRE ready 0, REG ready 1, valid 1)
-	 * belong to the sibling constant-controls section; no constant value,
-	 * valid/ready record content, or arena count delta is pinned here.
-	 * Staged red: every owner-construction and descriptor assert passes
-	 * against the landed owners (including the already-implemented
-	 * pigen_lower_rtl_type memo, which resolves the 8-bit type); the FIRST
-	 * deliberate unimplemented-behavior assert is Case 1's `rc == 0`,
-	 * marked below. Every later assert in this section requires
-	 * implemented behavior and is deliberate red as well. */
+	 *     whose direction equals the semantic signal's direction.
+	 *     The payload-vs-control distinction is namespace-level: a
+	 *     pigen_rtl_object_id can never equal a pigen_rtl_expr_id
+	 *     (independent struct-wrapped uint32_t arena counters with
+	 *     separate arenas in the model), so same-namespace distinctness is
+	 *     pinned instead: the two signals yield two DISTINCT payload
+	 *     objects in the object arena (an implementation sharing one
+	 *     object between the net and the variable is caught), and each of
+	 *     the four valid/ready control identities (wire valid, wire ready,
+	 *     reg valid, reg ready) resolves in the expression arena to a
+	 *     PIGEN_RTL_EXPR_INTEGER record whose literal is exactly one bit
+	 *     (literal_bit_count == 1, literal_negative == 0) - which holds
+	 *     for every interning variant, shared or per-signal records.
+	 * The descriptor constant VALUES (WIRE ready 0, REG ready 1, valid 1)
+	 * and the arena count deltas belong to the sibling sections (10) and
+	 * (11); no constant value or arena count delta is pinned here.
+	 * Staged red: every owner-construction and payload-shape assert passes
+	 * against the landed owners; the FIRST deliberate
+	 * unimplemented-behavior assert is the first control-record assert,
+	 * marked below: on a model without published controls the four
+	 * expressions are unresolved (PIGEN_INVALID_ID) and resolve to NULL.
+	 * Every later assert in this section requires implemented behavior and
+	 * is deliberate red as well. */
 	SECTION("t6-net-variable-payload") {
 		const char *text =
 			"module netvar : wire a ; reg b ;\n";
@@ -1676,10 +1685,15 @@ int main(int argc, char **argv)
 		const pigen_rtl_signal_endpoints *reg_endpoints;
 		const pigen_rtl_object *wire_payload_obj;
 		const pigen_rtl_object *reg_payload_obj;
+		const pigen_rtl_expr *wire_valid_re;
+		const pigen_rtl_expr *wire_ready_re;
+		const pigen_rtl_expr *reg_valid_re;
+		const pigen_rtl_expr *reg_ready_re;
 		int rc;
 		int payload_wire;
 		int payload_reg;
 		int distinct;
+		int control_witness;
 
 		/* Build the net/variable module through the owner APIs (section
 		 * (8)'s landed construction pattern, two INTERNAL signals of the
@@ -1800,20 +1814,53 @@ int main(int argc, char **argv)
 			reg_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
 		REQUIRE(payload_reg); /* Deliberate red: the stub populates nothing. */
 
-		/* The payload object is DISTINCT from any control (it is an
-		 * object; valid and ready are expression ids), and the two
-		 * signals yield two DISTINCT payload objects: an implementation
-		 * that shares one object between the net and the variable is
-		 * caught here. */
+		/* Same-namespace object-arena distinctness: the two signals
+		 * yield two DISTINCT payload objects - an implementation that
+		 * shares one object between the net and the variable is caught.
+		 * The payload-vs-control distinction is namespace-level (a
+		 * pigen_rtl_object_id can never equal a pigen_rtl_expr_id), so
+		 * no cross-arena index comparison is pinned here: on this fresh
+		 * model both arenas are empty before the declaration call (the
+		 * pre-call type memo publishes a type record, no object and no
+		 * expression), so the first payload object (index 0) and the
+		 * first control expression (index 0) MUST collide numerically in
+		 * any correct implementation. */
 		distinct = wire_endpoints->payload.index !=
-				wire_endpoints->valid.index &&
-			wire_endpoints->payload.index !=
-				wire_endpoints->ready.index &&
-			reg_endpoints->payload.index != reg_endpoints->valid.index &&
-			reg_endpoints->payload.index != reg_endpoints->ready.index &&
-			wire_endpoints->payload.index !=
 				reg_endpoints->payload.index;
 		REQUIRE(distinct); /* Deliberate red: the stub populates nothing. */
+
+		/* Same-namespace expression-arena witness for the
+		 * control-distinct intent: EACH of the four valid/ready control
+		 * identities resolves to a non-NULL PIGEN_RTL_EXPR_INTEGER record
+		 * whose literal is exactly one bit (literal_bit_count == 1,
+		 * literal_negative == 0). On a model without published controls
+		 * the four expressions are unresolved (PIGEN_INVALID_ID) and
+		 * pigen_rtl_expr_get returns NULL, so this is the first
+		 * deliberately-red assert of this section; under implemented
+		 * controls it holds for every interning variant, shared or
+		 * per-signal records. The descriptor constant VALUES (WIRE ready
+		 * 0, REG ready 1, both valid 1) are pinned by the sibling
+		 * constant-controls section (10), not here. */
+		wire_valid_re = pigen_rtl_expr_get(&rtl_e, wire_endpoints->valid);
+		wire_ready_re = pigen_rtl_expr_get(&rtl_e, wire_endpoints->ready);
+		reg_valid_re = pigen_rtl_expr_get(&rtl_e, reg_endpoints->valid);
+		reg_ready_re = pigen_rtl_expr_get(&rtl_e, reg_endpoints->ready);
+		control_witness = wire_valid_re && wire_ready_re &&
+			reg_valid_re && reg_ready_re &&
+			wire_valid_re->kind == PIGEN_RTL_EXPR_INTEGER &&
+			wire_ready_re->kind == PIGEN_RTL_EXPR_INTEGER &&
+			reg_valid_re->kind == PIGEN_RTL_EXPR_INTEGER &&
+			reg_ready_re->kind == PIGEN_RTL_EXPR_INTEGER &&
+			wire_valid_re->literal_bit_count == 1 &&
+			wire_ready_re->literal_bit_count == 1 &&
+			reg_valid_re->literal_bit_count == 1 &&
+			reg_ready_re->literal_bit_count == 1 &&
+			wire_valid_re->literal_negative == 0 &&
+			wire_ready_re->literal_negative == 0 &&
+			reg_valid_re->literal_negative == 0 &&
+			reg_ready_re->literal_negative == 0;
+		REQUIRE(control_witness); /* Deliberate red (first in this section):
+		 * without published controls the four records are NULL. */
 
 		pigen_rtl_lowering_free(&lowering_e);
 		pigen_free_rtl_model(&rtl_e);
