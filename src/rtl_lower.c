@@ -469,9 +469,9 @@ realization_endpoint_adapters[8] = {
 	[PIGEN_TRANSFER_REALIZATION_BOUNDARY] = {
 		PIGEN_TRANSFER_REALIZATION_BOUNDARY, 1},
 	[PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET] = {
-		PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET, 0},
+		PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET, 1},
 	[PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE] = {
-		PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE, 0},
+		PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE, 1},
 	[PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT] = {
 		PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT, 0},
 	[PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER] = {
@@ -660,6 +660,46 @@ static int boundary_endpoints(pigen_rtl_lowering *lowering,
 	return 1;
 }
 
+/* Lower one COMBINATIONAL_NET or PROCEDURAL_VARIABLE signal declaration into
+ * its payload shape. The payload object carries the signal's lowered data type
+ * and semantic direction (the existing pigen_lower_rtl_type memo yields the
+ * type record). The valid and ready controls are context-dependent for these
+ * realizations: no constant control is published in this stage, so the
+ * endpoints record holds invalid valid/ready expression identities. The input
+ * side exposes the same payload object. No storage instance is published.
+ * Returns the filled endpoints record, or a zeroed record on error. */
+static int net_variable_endpoints(pigen_rtl_lowering *lowering,
+	const pigen_semantic_signal *owner_signal, size_t signal_index,
+	pigen_rtl_module_id rtl_module, pigen_rtl_signal_endpoints *out)
+{
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_rtl_type_id data_type;
+	pigen_rtl_object_id payload;
+	pigen_source_span origin =
+		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+
+	/* The payload's type must lower first: a signal whose data type does not
+	 * lower fails the whole call with no partial record. */
+	data_type = pigen_lower_rtl_type(lowering, owner_signal->data_type);
+	if (data_type.index == PIGEN_INVALID_ID)
+		return 0;
+
+	payload = pigen_rtl_object_add_with_owner(rtl, rtl_module,
+		PIGEN_RTL_OBJECT_VARIABLE, data_type, owner_signal->direction,
+		(pigen_signal_id){(uint32_t)signal_index}, origin);
+	if (payload.index == PIGEN_INVALID_ID)
+		return 0;
+
+	/* valid and ready are context-dependent (no constant control published
+	 * in this stage); the input side exposes the same payload object. */
+	*out = (pigen_rtl_signal_endpoints){
+		payload,
+		(pigen_rtl_expr_id){PIGEN_INVALID_ID},
+		(pigen_rtl_expr_id){PIGEN_INVALID_ID},
+		payload, payload, payload};
+	return 1;
+}
+
 int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -738,6 +778,13 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 		if (realization == PIGEN_TRANSFER_REALIZATION_BOUNDARY)
 		{
 			if (!boundary_endpoints(lowering, owner_signal, i,
+				rtl_module, &endpoints))
+				goto fail;
+		}
+		else if (realization == PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET ||
+			realization == PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE)
+		{
+			if (!net_variable_endpoints(lowering, owner_signal, i,
 				rtl_module, &endpoints))
 				goto fail;
 		}
