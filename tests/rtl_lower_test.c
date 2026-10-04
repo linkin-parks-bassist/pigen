@@ -759,14 +759,14 @@ int main(int argc, char **argv)
 	 *     lowering.lowered_types[i] / lowering.lowered_expressions[i] slot
 	 *     equals the id pigen_rtl_type_get / pigen_rtl_expr_get can resolve
 	 *     in its RTL model (no dangling slots).
-	 * Staged red: every owner-construction assert passes against the landed
-	 * owners; the FIRST deliberate unimplemented-behavior assert in this
-	 * section is Case 1's first `!IS_INVALID_ID(id1)` (second pass, t8s),
-	 * marked below - the stub returns the sentinel for every valid identity,
-	 * so the second pass's valid-id check fails first. Every later assert in
-	 * this section requires implemented behavior and is also deliberate red.
-	 * This is the LAST test-contract section of the chain: the implementation
-	 * item makes the whole target green. */
+	 * Green: every assert in this section passes against the landed Task 5
+	 * type/expression lowering, including Case 1's first
+	 * `!IS_INVALID_ID(id1)` (second pass, t8s), which resolves to a valid
+	 * pigen_rtl_type_id - the memo map publishes one record per identity,
+	 * so the second pass's valid-id check holds first and every later assert
+	 * in this section holds as well. No stale red markers remain in this file.
+	 * This is the LAST test-contract section of the chain: the target is
+	 * green end to end. */
 	SECTION("t5-memoization") {
 		pigen_data_type_id unsized;
 		pigen_data_type_id t8s;
@@ -820,11 +820,11 @@ int main(int argc, char **argv)
 		 * then constants) and record every returned id, then lower the whole
 		 * set AGAIN and assert every returned id is identical, the memo map
 		 * counts and the RTL arena counts are unchanged - no duplicate growth.
-		 * The second pass's valid-id checks are this section's first
-		 * deliberate red asserts. */
+		 * The second pass's valid-id checks pass against the landed
+		 * lowering, which publishes one record per identity. */
 		/* First pass: lower the whole fixed set and record every returned id.
-		 * The stub returns the sentinel for each, so no id is asserted valid
-		 * yet - the first deliberate red is the second pass below. */
+		 * The landed lowering resolves each identity, so every recorded id
+		 * is valid - the second pass below re-lowers the same set. */
 		p1_t8s = pigen_lower_rtl_type(&lowering, t8s);
 		p1_t16u = pigen_lower_rtl_type(&lowering, t16u);
 		p1_c5 = pigen_lower_rtl_expression(&lowering, c5);
@@ -838,8 +838,8 @@ int main(int argc, char **argv)
 		/* Second pass over the WHOLE set: every returned id is identical to
 		 * the first pass and nothing grows. */
 		id1 = pigen_lower_rtl_type(&lowering, t8s);
-		REQUIRE(!IS_INVALID_ID(id1)); /* Deliberate red (first in this
-		 * section): the stub returns the sentinel for a valid type. */
+		REQUIRE(!IS_INVALID_ID(id1)); /* Green: the landed lowering
+		 * resolves the valid type to a pigen_rtl_type_id. */
 		REQUIRE(id1.index == p1_t8s.index);
 		REQUIRE(pigen_lower_rtl_type(&lowering, t16u).index == p1_t16u.index);
 		REQUIRE(pigen_lower_rtl_expression(&lowering, c5).index == p1_c5.index);
@@ -965,7 +965,7 @@ int main(int argc, char **argv)
 					d1->right.expression.index ==
 					d2->right.expression.index;
 			}
-			REQUIRE(deterministic); /* Deliberate red: stubs publish no records. */
+			REQUIRE(deterministic); /* Green: both builds publish identical records. */
 
 			/* The c5 constant: kind, low word, literal fields, child count
 			 * and the lowered record's own type record contents. */
@@ -1000,7 +1000,7 @@ int main(int argc, char **argv)
 					rt->state_domain == rt2->state_domain &&
 					rt->width == rt2->width;
 			}
-			REQUIRE(deterministic); /* Deliberate red: stubs publish no records. */
+			REQUIRE(deterministic); /* Green: both builds publish identical records. */
 
 			/* The 0x1234 constant: same record-content comparison. */
 			re = pigen_rtl_expr_get(&rtl,
@@ -1034,7 +1034,7 @@ int main(int argc, char **argv)
 					rt->state_domain == rt2->state_domain &&
 					rt->width == rt2->width;
 			}
-			REQUIRE(deterministic); /* Deliberate red: stubs publish no records. */
+			REQUIRE(deterministic); /* Green: both builds publish identical records. */
 
 			/* The conversion: kind, the conversion kept verbatim, and the
 			 * single operand's child id relative to the arena: the offset
@@ -1072,7 +1072,7 @@ int main(int argc, char **argv)
 						(kids2[0].index - base2);
 				}
 			}
-			REQUIRE(deterministic); /* Deliberate red: stubs publish no records. */
+			REQUIRE(deterministic); /* Green: both builds publish identical records. */
 
 			/* The second build owns its models: free them before the shared
 			 * tail so the shared tail frees only the first build. */
@@ -1089,13 +1089,13 @@ int main(int argc, char **argv)
 			if (lowering.lowered_types[i].index == PIGEN_INVALID_ID)
 				continue;
 			rt = pigen_rtl_type_get(&rtl, lowering.lowered_types[i]);
-			REQUIRE(rt); /* Deliberate red: stubs populate no map slots. */
+			REQUIRE(rt); /* Green: the type memo map slots resolve in the model. */
 		}
 		for (i = 0; i < lowering.lowered_expression_count; i++) {
 			if (lowering.lowered_expressions[i].index == PIGEN_INVALID_ID)
 				continue;
 			re = pigen_rtl_expr_get(&rtl, lowering.lowered_expressions[i]);
-			REQUIRE(re); /* Deliberate red: stubs populate no map slots. */
+			REQUIRE(re); /* Green: the expression memo map slots resolve in the model. */
 		}
 	}
 
@@ -1147,12 +1147,12 @@ int main(int argc, char **argv)
 	 *     deliberately not the frozen failure witness: it cannot by itself
 	 *     justify a frozen failure assertion once every promised adapter is
 	 *     implemented.
-	 * Staged red: every owner-construction and descriptor assert passes
-	 * against the landed owners; the FIRST deliberate unimplemented-
-	 * behavior assert in this section is Case 1's `rc == 0` (the stub
-	 * returns the -1 unimplemented sentinel), marked below - not a compile
-	 * or harness error. Every later assert in this section requires
-	 * implemented behavior and is deliberate red as well. */
+	 * Green: every owner-construction and descriptor assert passes against
+	 * the landed owners, and every lowering-behavior assert passes against
+	 * the landed Task 6 BOUNDARY declaration lowering: Case 1's `rc == 0`
+	 * reports success from the implementation, not a compile or
+	 * harness error. Every later assert in this section holds as well.
+	 * No stale red markers remain in this file. */
 	SECTION("t6-boundary") {
 		const char *text =
 			"module top : input value : abstract ;\n";
@@ -1274,11 +1274,11 @@ int main(int argc, char **argv)
 		 * success and the endpoints record for the signal holds distinct
 		 * payload (a resolvable RTL object), valid and ready (resolvable
 		 * RTL expressions), with the input side exposing the SAME three
-		 * objects. The first `rc == 0` is the section's first deliberate
-		 * red: the stub returns the -1 unimplemented sentinel. */
+		 * objects. The first `rc == 0` passes against the landed
+		 * lowering, which reports success for this module. */
 		rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
-		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
-		 * stub returns -1 without touching the maps or the RTL model. */
+		REQUIRE(rc == 0); /* Green: the landed lowering reports success
+		 * and publishes the endpoints record for the signal. */
 		REQUIRE(lowering_b.lowered_endpoint_count > signal.index);
 		endpoints = &lowering_b.lowered_endpoints[signal.index];
 		REQUIRE(!IS_INVALID_ID(endpoints->payload));
@@ -1306,7 +1306,7 @@ int main(int argc, char **argv)
 			valid_re->kind != PIGEN_RTL_EXPR_INVALID &&
 			ready_re->kind != PIGEN_RTL_EXPR_INVALID &&
 			endpoints->valid.index != endpoints->ready.index;
-		REQUIRE(distinct); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(distinct); /* Green: the landed lowering publishes distinct objects. */
 		/* The payload type is EXACTLY the signal's lowered 8-bit data
 		 * type - the SAME record the pigen_lower_rtl_type memo yields in
 		 * the shared model (pointer equality): a wrong-but-resolvable
@@ -1342,7 +1342,7 @@ int main(int argc, char **argv)
 		 * PIGEN_RTL_EXPR_INTEGER with the 1-bit type) is the constant,
 		 * independent of the boundary model. The constant-expression-
 		 * identity contract belongs to section (9); no value is pinned
-		 * here. Deliberate red: the stub publishes no records. */
+		 * here. Green: the landed lowering publishes the records. */
 		{
 			pigen_source_manager sources_c = {0};
 			pigen_semantic_model sem_c;
@@ -1362,8 +1362,8 @@ int main(int argc, char **argv)
 			one1bit = pigen_const_expr_intern_integer(&sem_c, 1, t1bit);
 			REQUIRE(!IS_INVALID_ID(one1bit));
 			const1 = pigen_lower_rtl_expression(&lowering_c, one1bit);
-			REQUIRE(!IS_INVALID_ID(const1)); /* Deliberate red: the stub
-			 * returns the sentinel for the valid 1-bit constant. */
+			REQUIRE(!IS_INVALID_ID(const1)); /* Green: the landed lowering
+			 * resolves the valid 1-bit constant. */
 			const_re = pigen_rtl_expr_get(&rtl_c, const1);
 			REQUIRE(const_re && const_re->kind == PIGEN_RTL_EXPR_INTEGER);
 
@@ -1397,8 +1397,8 @@ int main(int argc, char **argv)
 			not_constant = not_constant &&
 				endpoints->valid.index != const1.index &&
 				endpoints->ready.index != const1.index;
-			REQUIRE(not_constant); /* Deliberate red: the stub publishes
-			 * nothing, so valid_re/ready_re are NULL above. */
+			REQUIRE(not_constant); /* Green: the landed lowering publishes
+			 * context-dependent controls, not the constant records. */
 			pigen_rtl_lowering_free(&lowering_c);
 			pigen_free_rtl_model(&rtl_c);
 			pigen_free_semantic_model(&sem_c);
@@ -1408,13 +1408,13 @@ int main(int argc, char **argv)
 		/* Case 3: MEMO/STABILITY. A second call on the SAME lowering is
 		 * idempotent: no duplicate objects/expressions, the endpoints map
 		 * count is unchanged and the populated record is byte-identical.
-		 * Deliberate red: the stub publishes nothing. */
+		 * Green: the landed lowering publishes the records. */
 		object_count_before = rtl_b.object_count;
 		expression_count_before = rtl_b.expression_count;
 		endpoint_map_before = lowering_b.lowered_endpoint_count;
 		record_before = lowering_b.lowered_endpoints[signal.index];
 		rc = pigen_lower_rtl_module_declarations(&lowering_b, module);
-		REQUIRE(rc == 0); /* Deliberate red: the stub returns -1. */
+		REQUIRE(rc == 0); /* Green: the landed lowering reports success again. */
 		endpoints_again = &lowering_b.lowered_endpoints[signal.index];
 		record_again = *endpoints_again;
 		stable = rtl_b.object_count == object_count_before &&
@@ -1429,7 +1429,7 @@ int main(int argc, char **argv)
 				record_before.input_valid.index) &&
 			(record_again.input_ready.index ==
 				record_before.input_ready.index);
-		REQUIRE(stable); /* Deliberate red: the stub republishes nothing. */
+		REQUIRE(stable); /* Green: the repeat call republishes nothing new. */
 
 		/* A second independently built model (identical construction
 		 * sequence, fresh managers) yields identical endpoint ids at
@@ -1495,7 +1495,7 @@ int main(int argc, char **argv)
 				PIGEN_TRANSFER_TYPE_ABSTRACT, PIGEN_SEMANTIC_INPUT, name_d);
 			REQUIRE(signal_d.index != PIGEN_INVALID_ID);
 			REQUIRE(pigen_lower_rtl_module_declarations(&lowering_d,
-				module_d) == 0); /* Deliberate red: the stub returns -1. */
+				module_d) == 0); /* Green: the landed lowering reports success. */
 			REQUIRE(lowering_d.lowered_endpoint_count > signal_d.index);
 			ep1 = &lowering_b.lowered_endpoints[signal.index];
 			ep2 = &lowering_d.lowered_endpoints[signal_d.index];
@@ -1506,8 +1506,8 @@ int main(int argc, char **argv)
 				ep1->input_payload.index == ep2->input_payload.index &&
 				ep1->input_valid.index == ep2->input_valid.index &&
 				ep1->input_ready.index == ep2->input_ready.index;
-			REQUIRE(deterministic); /* Deliberate red: the stub populates
-			 * no records, so both are the all-invalid sentinel. */
+			REQUIRE(deterministic); /* Green: both builds publish identical
+			 * endpoints records at equal arena offsets. */
 			pigen_rtl_lowering_free(&lowering_d);
 			pigen_free_rtl_model(&rtl_d);
 			pigen_free_semantic_model(&sem_d);
@@ -1592,9 +1592,9 @@ int main(int argc, char **argv)
 
 			/* The different failing module reports the error: the
 			 * unlowerable signal data type fails the declaration
-			 * lowering, which must return -1. Deliberate red: the stub
-			 * returns -1 for every call, so this assert passes against
-			 * it and pins the stable witness for the implementation. */
+			 * lowering, which returns -1. Green: the landed lowering
+			 * refuses the negative exact integer deterministically, and
+			 * this assert pins the stable failure witness. */
 			rc = pigen_lower_rtl_module_declarations(&lowering_b, module2);
 			REQUIRE(rc == -1);
 		}
@@ -1621,11 +1621,11 @@ int main(int argc, char **argv)
 	 * descriptors are owner facts this contract rides on (green against the
 	 * landed owners): WIRE is concrete with realization COMBINATIONAL_NET,
 	 * and REG is concrete with realization PROCEDURAL_VARIABLE.
-	 *   Case 1: PAYLOAD SHAPE. The call reports success (the FIRST
-	 *     deliberate red of this section: the stub returns the -1
-	 *     unimplemented sentinel, not a compile or harness error) and the
+	 *   Case 1: PAYLOAD SHAPE. The call reports success (green against the
+	 *     landed lowering, not a compile or harness error) and the
 	 *     endpoints map grows past BOTH signal indices. For EACH signal,
-	 *     the endpoints payload is a valid id resolving to a
+	 *     the endpoints record is published in the model and every
+	 *     identity in it is resolvable: the endpoints payload is a valid id resolving to a
 	 *     pigen_rtl_object of kind PIGEN_RTL_OBJECT_VARIABLE whose type is
 	 *     the lowered 8-bit type - the SAME record the landed
 	 *     pigen_lower_rtl_type memo yields for the signal's data type - and
@@ -1645,13 +1645,13 @@ int main(int argc, char **argv)
 	 * The descriptor constant VALUES (WIRE ready 0, REG ready 1, valid 1)
 	 * and the arena count deltas belong to the sibling sections (10) and
 	 * (11); no constant value or arena count delta is pinned here.
-	 * Staged red: every owner-construction and payload-shape assert passes
-	 * against the landed owners; the FIRST deliberate
-	 * unimplemented-behavior assert is the first control-record assert,
-	 * marked below: on a model without published controls the four
-	 * expressions are unresolved (PIGEN_INVALID_ID) and resolve to NULL.
-	 * Every later assert in this section requires implemented behavior and
-	 * is deliberate red as well. */
+	 * Green: every assert in this section passes against the landed Task 6
+	 * net/variable declaration lowering; the first control-record assert,
+	 * marked below, holds because the implementation publishes the
+	 * one-bit valid/ready constant expressions for both signals, so the
+	 * four expressions resolve to PIGEN_RTL_EXPR_INTEGER records. Every
+	 * later assert in this section holds as well. No stale red
+	 * markers remain in this file. */
 	SECTION("t6-net-variable-payload") {
 		const char *text =
 			"module netvar : wire a ; reg b ;\n";
@@ -1778,11 +1778,11 @@ int main(int argc, char **argv)
 
 		/* Case 1: PAYLOAD SHAPE. The declaration lowering reports success
 		 * and the endpoints map covers BOTH signals. The first
-		 * `rc == 0` is this section's first deliberate red: the stub
-		 * returns the -1 unimplemented sentinel. */
+		 * `rc == 0` passes against the landed lowering, which reports
+		 * success for this module. */
 		rc = pigen_lower_rtl_module_declarations(&lowering_e, module);
-		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
-		 * stub returns -1 without touching the maps or the RTL model. */
+		REQUIRE(rc == 0); /* Green: the landed lowering reports success
+		 * and publishes the endpoints records for both signals. */
 		REQUIRE(lowering_e.lowered_endpoint_count >
 			(wire.index > reg.index ? wire.index : reg.index));
 
@@ -1807,12 +1807,12 @@ int main(int argc, char **argv)
 			wire_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
 			wire_payload_type == t8_record &&
 			wire_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
-		REQUIRE(payload_wire); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(payload_wire); /* Green: the landed lowering publishes the wire payload. */
 		payload_reg = reg_payload_obj &&
 			reg_payload_obj->kind == PIGEN_RTL_OBJECT_VARIABLE &&
 			reg_payload_type == t8_record &&
 			reg_payload_obj->direction == PIGEN_SEMANTIC_INTERNAL;
-		REQUIRE(payload_reg); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(payload_reg); /* Green: the landed lowering publishes the reg payload. */
 
 		/* Same-namespace object-arena distinctness: the two signals
 		 * yield two DISTINCT payload objects - an implementation that
@@ -1827,20 +1827,20 @@ int main(int argc, char **argv)
 		 * any correct implementation. */
 		distinct = wire_endpoints->payload.index !=
 				reg_endpoints->payload.index;
-		REQUIRE(distinct); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(distinct); /* Green: the landed lowering publishes distinct objects. */
 
 		/* Same-namespace expression-arena witness for the
 		 * control-distinct intent: EACH of the four valid/ready control
 		 * identities resolves to a non-NULL PIGEN_RTL_EXPR_INTEGER record
 		 * whose literal is exactly one bit (literal_bit_count == 1,
-		 * literal_negative == 0). On a model without published controls
-		 * the four expressions are unresolved (PIGEN_INVALID_ID) and
-		 * pigen_rtl_expr_get returns NULL, so this is the first
-		 * deliberately-red assert of this section; under implemented
-		 * controls it holds for every interning variant, shared or
-		 * per-signal records. The descriptor constant VALUES (WIRE ready
+		 * literal_negative == 0). Green: the landed lowering publishes
+		 * the one-bit valid/ready constant expressions for both signals,
+		 * so the four expressions resolve in the expression arena and the
+		 * assert holds for every interning variant, shared or per-signal
+		 * records. The descriptor constant VALUES (WIRE ready
 		 * 0, REG ready 1, both valid 1) are pinned by the sibling
-		 * constant-controls section (10), not here. */
+		 * constant-controls section (10), not here; the four records
+		 * hold for every interning variant. */
 		wire_valid_re = pigen_rtl_expr_get(&rtl_e, wire_endpoints->valid);
 		wire_ready_re = pigen_rtl_expr_get(&rtl_e, wire_endpoints->ready);
 		reg_valid_re = pigen_rtl_expr_get(&rtl_e, reg_endpoints->valid);
@@ -1859,8 +1859,8 @@ int main(int argc, char **argv)
 			wire_ready_re->literal_negative == 0 &&
 			reg_valid_re->literal_negative == 0 &&
 			reg_ready_re->literal_negative == 0;
-		REQUIRE(control_witness); /* Deliberate red (first in this section):
-		 * without published controls the four records are NULL. */
+		REQUIRE(control_witness); /* Green: the landed lowering publishes
+		 * the one-bit valid/ready constant records for both signals. */
 
 		pigen_rtl_lowering_free(&lowering_e);
 		pigen_free_rtl_model(&rtl_e);
