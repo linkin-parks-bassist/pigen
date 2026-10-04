@@ -1,19 +1,19 @@
-/* Task 5 shape-only contract for owner-based type/expression lowering.
+/* Task 5 plus Task 6 lowering contract for owner-based type/expression
+ * lowering, fully implemented against the landed owner APIs.
  *
- * It gates the landed skeleton interface:
+ * It gates the landed interface:
  *   pigen_rtl_lowering { semantics, rtl, lowered-type map, lowered-expr map }
  *   pigen_rtl_lowering_init(lowering, semantics, rtl)
  *   pigen_rtl_lowering_free(lowering)
  *   pigen_lower_rtl_type(lowering, type)
  *   pigen_lower_rtl_expression(lowering, expression)
  *
- * The skeleton stubs publish nothing: init zeroes the record and leaves both
- * identity memo maps empty, and both lowering entry points return the
- * unimplemented/invalid sentinel. The real lowering of
- * a validated source identity into an RTL record, its width/signedness/
- * child-order propagation, and its conversion and projection handling arrive
- * with the test-contract and implementation stages; this driver asserts only
- * the shape and the sentinel behavior that must never regress. */
+ * Every section is green against the landed lowering: init stores the models
+ * and leaves both identity memo maps empty, and each lowering entry point
+ * publishes a validated source identity as an RTL record with its
+ * width/signedness/child-order propagation, its conversion and projection
+ * handling, and the sentinel behavior that must never regress; this driver
+ * asserts each lowered record against owner-reported facts and that sentinel. */
 #include "check.h"
 #include <stdio.h>
 #include <string.h>
@@ -56,17 +56,17 @@ int main(int argc, char **argv)
 	}
 
 	/* (3) Type lowering preserves the owner-reported state, width, signedness
-	 * and range shape. This is the first type-family section of the Task 5
-	 * test-contract chain. Staged red: the invalid-id sentinel assert below is
-	 * the section's first assert and passes against the stub (which always
-	 * returns the sentinel); the first deliberate red is case 1's
-	 * `!IS_INVALID_ID(id)`, since the stub still returns the sentinel for a
-	 * valid type. Cases 1-3 build real owner data types and assert the lowered
-	 * pigen_rtl_type record matches exactly what the data-type owner reports
-	 * (signedness, state domain, width and packed range shape); case 4 pins the
-	 * invalid-id contract. Only the returned record is asserted - never an
-	 * imagined internal representation - so the implementer cannot shortcut the
-	 * preservation contract. */
+	 * and range shape. First type-family section of the Task 5 plus Task 6
+	 * lowering contract, fully implemented against the landed owner APIs.
+	 * The invalid-id sentinel assert below is the section's first assert and
+	 * passes against the landed lowering, which reports the sentinel for an
+	 * invalid id; case 1's `!IS_INVALID_ID(id)` and every later assert in this
+	 * section are green against the landed type lowering. Cases 1-3 build real
+	 * owner data types and assert the lowered pigen_rtl_type record matches
+	 * exactly what the data-type owner reports (signedness, state domain, width
+	 * and packed range shape); case 4 pins the invalid-id contract. Only the
+	 * returned record is asserted - never an imagined internal representation -
+	 * so the implementer cannot shortcut the preservation contract. */
 	SECTION("t5-type-lowering") {
 		pigen_data_type_id unsized;
 		pigen_const_expr_id width8;
@@ -107,7 +107,7 @@ int main(int argc, char **argv)
 		 * the owner-reported range shape (dimension count, packed width and a
 		 * valid packed element). */
 		id = pigen_lower_rtl_type(&lowering, t_signed);
-		REQUIRE(!IS_INVALID_ID(id)); /* Deliberate red: stub returns the sentinel. */
+		REQUIRE(!IS_INVALID_ID(id)); /* Green against the landed lowering. */
 		rt = pigen_rtl_type_get(&rtl, id);
 		REQUIRE(rt);
 		REQUIRE(rt->signedness == PIGEN_SIGN_SIGNED);
@@ -158,21 +158,21 @@ int main(int argc, char **argv)
 
 	/* (4) Expression lowering preserves the surviving width, signedness, every
 	 * explicit conversion/projection and child order. Second expression-family
-	 * section of the Task 5 test-contract chain. Staged red: the front-loaded
-	 * invalid-expression-id sentinel assert below is the section's first assert
-	 * and passes against the stub; the first deliberate red is case 1's
-	 * `!IS_INVALID_ID(eid)`, since the stub still returns the sentinel for a
-	 * valid constant expression. Cases 1-4 build real owner constant
-	 * expressions through the owner APIs and assert only the returned
-	 * pigen_rtl_expr record: its kind, the result type's signedness and width
-	 * exactly as the owner's resolved result data type reports them, every
-	 * explicit conversion and select kept on the record, and the lowered child
-	 * count and order. Child order is asserted by identity: the owner's
-	 * source children (as.binary.left/right, as.conversion.operand,
+	 * section of the Task 5 plus Task 6 lowering contract, fully implemented
+	 * against the landed owner APIs. The front-loaded invalid-expression-id
+	 * sentinel assert below is the section's first assert and passes against the
+	 * landed lowering; case 1's `!IS_INVALID_ID(eid)` and every later assert in
+	 * this section are green against the landed expression lowering. Cases 1-4
+	 * build real owner constant expressions through the owner APIs and assert
+	 * only the returned pigen_rtl_expr record: its kind, the result type's
+	 * signedness and width exactly as the owner's resolved result data type
+	 * reports them, every explicit conversion and select kept on the record, and
+	 * the lowered child count and order. Child order is asserted by identity:
+	 * the owner's source children (as.binary.left/right, as.conversion.operand,
 	 * as.select.base/left/right, as.sequence via pigen_const_expr_children)
-	 * lowered by identity must be exactly the lowered children, in order -
-	 * which a reordered or dropped-children implementation cannot shortcut.
-	 * Case 5 pins the invalid-expression-id contract. */
+	 * lowered by identity must be exactly the lowered children, in order - which
+	 * a reordered or dropped-children implementation cannot shortcut. Case 5
+	 * pins the invalid-expression-id contract. */
 	SECTION("t5-expression-lowering") {
 		pigen_data_type_id unsized;
 		pigen_data_type_id t4;
@@ -252,7 +252,7 @@ int main(int argc, char **argv)
 			pigen_data_type_packed_width(&sem, owner_expr->data_type), &w));
 		REQUIRE(w > 8); /* widening: the result is wider than the int[8] operands */
 		eid = pigen_lower_rtl_expression(&lowering, add_expr);
-		REQUIRE(!IS_INVALID_ID(eid)); /* Deliberate red: stub returns the sentinel. */
+		REQUIRE(!IS_INVALID_ID(eid)); /* Green against the landed lowering. */
 		re = pigen_rtl_expr_get(&rtl, eid);
 		REQUIRE(re && re->kind == PIGEN_RTL_EXPR_BINARY);
 		result_type = pigen_rtl_type_get(&rtl, re->type);
@@ -410,12 +410,12 @@ int main(int argc, char **argv)
 	 * expression lowered twice returns the same memoized RTL handle and does
 	 * not grow the RTL expression arena, a distinct constant of the same type
 	 * gets a different handle, and the identity memo slot is stable. Third
-	 * expression-family section of the Task 5 test-contract chain (the
-	 * constant-identity family). Staged red: the front-loaded
-	 * invalid-constant sentinel assert below is the section's first assert and
-	 * passes against the stub; the first deliberate red is case 1's
-	 * `!IS_INVALID_ID(eid)`, since the stub still returns the sentinel for a
-	 * valid constant expression. Cases 1-3 build real owner constant
+	 * expression-family section of the Task 5 plus Task 6 lowering contract
+	 * (the constant-identity family), fully implemented against the landed
+	 * owner APIs. The front-loaded invalid-constant sentinel assert below is
+	 * the section's first assert and passes against the landed lowering; case
+	 * 1's `!IS_INVALID_ID(eid)` and every later assert in this section are green
+	 * against the landed constant lowering. Cases 1-3 build real owner constant
 	 * expressions through the owner APIs and assert only the returned
 	 * pigen_rtl_expr_id and the public RTL expression-arena count - never an
 	 * imagined internal memo representation - so the implementer cannot
@@ -462,7 +462,7 @@ int main(int argc, char **argv)
 		 * same valid memoized RTL handle and the second call does not grow the
 		 * RTL expression arena. */
 		eid = pigen_lower_rtl_expression(&lowering, c5);
-		REQUIRE(!IS_INVALID_ID(eid)); /* Deliberate red: stub returns the sentinel. */
+		REQUIRE(!IS_INVALID_ID(eid)); /* Green against the landed lowering. */
 		arena_before = rtl.expression_count;
 		eid_again = pigen_lower_rtl_expression(&lowering, c5);
 		arena_after = rtl.expression_count;
@@ -548,12 +548,12 @@ int main(int argc, char **argv)
 			REQUIRE(cx.index != c5.index); /* distinct from INTEGER c5, same 5 */
 
 			/* The exact-integer constant lowers to a valid RTL handle distinct
-			 * from the bare integer constant's handle. Deliberate red: the
-			 * current type+expression+constant impl returns the sentinel for
-			 * EXACT_INTEGER (its packed width is INVALID_ID), so this is the
-			 * section's first exact-integer assert to abort. */
+			 * from the bare integer constant's handle: the landed lowering
+			 * publishes EXACT_INTEGER with a width derived from the owner
+			 * exact value, so every assert in this case is green against the
+			 * landed exact-integer lowering. */
 			exid = pigen_lower_rtl_expression(&lowering, cx);
-			REQUIRE(!IS_INVALID_ID(exid)); /* Deliberate red: impl sentinel. */
+			REQUIRE(!IS_INVALID_ID(exid)); /* Green against the landed lowering. */
 			REQUIRE(exid.index != eid.index);
 
 			/* The lowered record is an INTEGER carrying the owner-reported
@@ -602,30 +602,30 @@ int main(int argc, char **argv)
 
 	/* (6) Error reporting: an unbound signal and an absent expression each
 	 * report the failure as the RTL-expression sentinel. Fourth
-	 * expression-family section of the Task 5 test-contract chain (the
-	 * error-reporting family). A failed call may leave partial state behind:
-	 * the contract pins the reported sentinel, not the state a failure
-	 * leaves. Cases build one real validated model through the owner APIs (a
-	 * source file, a compilation scope, a module, a declared signal, and a
-	 * distinct UNBOUND PARAMETER symbol), then drive the two failure modes
-	 * and assert only the reported sentinels:
+	 * expression-family section of the Task 5 plus Task 6 lowering contract
+	 * (the error-reporting family), fully implemented against the landed
+	 * owner APIs. A failed call may leave partial state behind: the contract
+	 * pins the reported sentinel, not the state a failure leaves. Cases build
+	 * one real validated model through the owner APIs (a source file, a
+	 * compilation scope, a module, a declared signal, and a distinct UNBOUND
+	 * PARAMETER symbol), then drive the two failure modes and assert only the
+	 * reported sentinels:
 	 *   Case 1: a constant expression referencing the unbound PARAMETER symbol
 	 *     lowers to the RTL-expression sentinel. The witness is a distinct
-	 *     PARAMETER symbol (not the real signal): the const-expr owner interns
-	 *     only PIGEN_SYMBOL_PARAMETER symbols, and pigen_signal_add requires
-	 *     PIGEN_SYMBOL_SIGNAL, so the same symbol cannot serve both.
+	 *     PARAMETER symbol (not the real signal): the const-expr owner
+	 *     interns only PIGEN_SYMBOL_PARAMETER symbols, and
+	 *     pigen_signal_add requires PIGEN_SYMBOL_SIGNAL, so the same symbol
+	 *     cannot serve both.
 	 *   Case 2: a constant-expression id that does not exist in the semantic
-	 *     arena lowers to the sentinel.
+	 *     arena lowers to the sentinel. The landed lowering reports the
+	 *     sentinel for this absent id.
 	 *   Case 3: after both failures an already-lowered valid constant still
 	 *     returns its memoized valid RTL handle - memo stability across the
-	 *     failures.
-	 * Staged red: the sentinel guards pass against the stub, which returns
-	 * the sentinel for every input. The FIRST deliberate red assert in this
-	 * section is the valid-constant lowering `!IS_INVALID_ID(good_id)`,
-	 * marked below: it is the first assert that requires implemented
-	 * behavior, because only a real lowering memoizes a valid constant while
-	 * the stub returns the sentinel. Every later assert in this section
-	 * requires implemented behavior and is deliberate red as well. */
+	 *     failures. The landed lowering memoizes the valid constant, so the
+	 *     handle survives both failures.
+	 * Every assert in this section is green against the landed lowering,
+	 * which reports the sentinel for these failure inputs and memoizes the
+	 * valid constant; every former red marker is retired in this file. */
 	SECTION("t5-error-reporting") {
 		const char *text =
 			"module top : input value : logic ;\n";
@@ -706,14 +706,14 @@ int main(int argc, char **argv)
 		good = pigen_const_expr_intern_integer(&sem, 5, t16);
 		REQUIRE(!IS_INVALID_ID(good));
 		good_id = pigen_lower_rtl_expression(&lowering, good);
-		REQUIRE(!IS_INVALID_ID(good_id)); /* Deliberate red (first in this
-		 * section): the stub returns the sentinel for the valid constant. */
+		REQUIRE(!IS_INVALID_ID(good_id)); /* Green against the landed lowering
+		 * (the memoized valid constant). */
 
 		/* Case 1: a constant expression referencing the unbound PARAMETER
-		 * symbol reports the sentinel (a guard: the stub also returns the
-		 * sentinel). The witness is a PARAMETER symbol because the const-expr
-		 * owner interns only PIGEN_SYMBOL_PARAMETER symbols, and it is unbound
-		 * (no parameter value) so lowering must report the sentinel. */
+		 * symbol reports the sentinel: the landed lowering reports the sentinel
+		 * for these failure inputs. The witness is a PARAMETER symbol because
+		 * the const-expr owner interns only PIGEN_SYMBOL_PARAMETER symbols, and
+		 * it is unbound (no parameter value) so lowering must report it. */
 		sym_expr = pigen_const_expr_intern_symbol(&sem, param_symbol, t16);
 		REQUIRE(!IS_INVALID_ID(sym_expr));
 		eid = pigen_lower_rtl_expression(&lowering, sym_expr);
