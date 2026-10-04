@@ -1,7 +1,7 @@
 ---
 status: green
 revised_at: "2026-09-14T20:48:47+10:00"
-checked_at: '2026-09-13T15:07:12+10:00'
+checked_at: '2026-10-04T16:19:56+11:00'
 ---
 
 Pigen v1 extends ordinary SystemVerilog with ready/valid atomic transfers, independent data and transfer types, inline module-owned pipelines/fabrics and synchronous FSMs. It is source-to-source and does not change simulation timing.
