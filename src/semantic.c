@@ -2304,8 +2304,96 @@ const pigen_transfer_signal_use *pigen_transfer_signal_uses(
 	return model->transfer_signal_uses + transfer->first_signal_use;
 }
 
+/* The module's processes in arena (addition) order. Scans the flat process
+ * arena for records owned by the module and returns a model-owned, densely
+ * packed buffer of their ids; an invalid or empty owner returns NULL with
+ * the count left at zero. The buffer is a snapshot of stable arena indices
+ * taken at the call and is model-owned: freed by
+ * pigen_free_semantic_model, never by the caller. */
+pigen_process_id *pigen_module_processes(
+	pigen_semantic_model *model, pigen_module_id module,
+	size_t *process_count)
+{
+	pigen_process_id *buffer;
+	size_t i;
+	size_t count;
+
+	if (!model || !process_count)
+		return NULL;
+	*process_count = 0;
+	if (module.index == PIGEN_INVALID_ID ||
+		module.index >= model->module_count)
+		return NULL;
+	count = 0;
+	for (i = 0; i < model->process_count; i++)
+		if (model->processes[i].module.index == module.index)
+			count++;
+	if (!count)
+		return NULL;
+	buffer = pigen_resize(NULL, count * sizeof(*buffer));
+	count = 0;
+	for (i = 0; i < model->process_count; i++)
+		if (model->processes[i].module.index == module.index)
+			buffer[count++] = (pigen_process_id){(uint32_t)i};
+	*process_count = count;
+	model->module_process_buffers = pigen_resize(
+		model->module_process_buffers,
+		(model->module_process_buffer_count + 1) *
+			sizeof(*model->module_process_buffers));
+	model->module_process_buffers[model->module_process_buffer_count++] =
+		buffer;
+	return buffer;
+}
+
+/* One process's transfers in arena (addition) order. Scans the flat
+ * transfer arena for records owned by the process and returns a model-owned,
+ * densely packed buffer of their ids; an invalid or empty owner returns NULL
+ * with the count left at zero. The buffer is a snapshot of stable arena
+ * indices taken at the call and is model-owned: freed by
+ * pigen_free_semantic_model, never by the caller. */
+pigen_transfer_id *pigen_process_transfers(
+	pigen_semantic_model *model, pigen_process_id process,
+	size_t *transfer_count)
+{
+	pigen_transfer_id *buffer;
+	size_t i;
+	size_t count;
+
+	if (!model || !transfer_count)
+		return NULL;
+	*transfer_count = 0;
+	if (process.index == PIGEN_INVALID_ID ||
+		process.index >= model->process_count)
+		return NULL;
+	count = 0;
+	for (i = 0; i < model->transfer_count; i++)
+		if (model->transfers[i].process.index == process.index)
+			count++;
+	if (!count)
+		return NULL;
+	buffer = pigen_resize(NULL, count * sizeof(*buffer));
+	count = 0;
+	for (i = 0; i < model->transfer_count; i++)
+		if (model->transfers[i].process.index == process.index)
+			buffer[count++] = (pigen_transfer_id){(uint32_t)i};
+	*transfer_count = count;
+	model->process_transfer_buffers = pigen_resize(
+		model->process_transfer_buffers,
+		(model->process_transfer_buffer_count + 1) *
+			sizeof(*model->process_transfer_buffers));
+	model->process_transfer_buffers[model->process_transfer_buffer_count++] =
+		buffer;
+	return buffer;
+}
+
 void pigen_free_semantic_model(pigen_semantic_model *model)
 {
+	for (size_t i = 0; i < model->module_process_buffer_count; i++)
+		free(model->module_process_buffers[i]);
+	free(model->module_process_buffers);
+	for (size_t i = 0; i < model->process_transfer_buffer_count; i++)
+		free(model->process_transfer_buffers[i]);
+	free(model->process_transfer_buffers);
 	free(model->integers);
 	free(model->integer_limbs);
 	free(model->data_types);

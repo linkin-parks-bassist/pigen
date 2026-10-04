@@ -16,6 +16,7 @@
  * asserts each lowered record against owner-reported facts and that sentinel. */
 #include "check.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "pigen/rtl_lower.h"
@@ -3734,6 +3735,217 @@ int main(int argc, char **argv)
 		pigen_free_rtl_model(&rtl_k);
 		pigen_free_semantic_model(&sem_k);
 		pigen_free_sources(&sources_k);
+	}
+
+	/* (16) Task 8 shape: the two new lowering entry points and the two
+	 * owner-level enumeration accessors exist with their contracted shapes.
+	 * This is a shape-only, green-on-purpose section: it builds ONE valid
+	 * owner witness (a module with one clock domain, one process and one
+	 * transfer, constructed through the owner APIs with the owner-span
+	 * constraints - the process span contains the clock expression's span and
+	 * the transfer span is contained in the process span), asserts the
+	 * witness is valid, and pins the STUB behavior: both entry points return
+	 * their unimplemented sentinels (-1 and the PIGEN_INVALID_ID module) for
+	 * a valid lowering/module and for a NULL lowering, leaving the lowering
+	 * memo maps and every RTL arena count unchanged after each call, and the
+	 * enumeration accessors enumerate exactly the owner's records in arena
+	 * (addition) order (NULL/0 for an invalid or empty owner). No fire
+	 * identity, no predicate-atom lowering, no record publication: the
+	 * behavior arrives with the test-contract and implementation stages. */
+	SECTION("t8-skeleton") {
+		const char *text =
+			"module top : input clk : logic ; input d : logic ;\n";
+		pigen_source_manager sources_t = {0};
+		pigen_semantic_model sem_t;
+		pigen_rtl_model rtl_t = {0};
+		pigen_rtl_lowering lowering_t;
+		pigen_data_type_id t1;
+		pigen_const_expr_id width1;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_clk;
+		pigen_source_span name_d;
+		pigen_source_span process_span;
+		pigen_source_span transfer_span;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id clk_symbol;
+		pigen_symbol_id d_symbol;
+		pigen_module_id module;
+		pigen_signal_id clk;
+		pigen_signal_id d;
+		pigen_clock_domain_id domain;
+		pigen_expr_id clk_expr;
+		pigen_process_id process;
+		pigen_lvalue_id dest;
+		pigen_expr_id value;
+		pigen_transfer_id transfer;
+		const pigen_semantic_process *owner_process;
+		const pigen_semantic_transfer *owner_transfer;
+		const pigen_process_id *module_processes;
+		const pigen_transfer_id *process_transfers;
+		size_t module_process_count;
+		size_t process_transfer_count;
+		size_t object_before;
+		size_t expression_before;
+		size_t instance_before;
+		size_t equation_before;
+		size_t update_before;
+		size_t rtl_process_before;
+		size_t module_count_before;
+		int transfers_rc;
+		pigen_rtl_module_id composed;
+
+		/* Build the witness through the owner APIs (the section 8 pattern):
+		 * a 1-bit data type, a source file, the compilation scope, a module,
+		 * a declared clock signal and a declared data signal. The spans hold
+		 * the owner constraints: the module symbol's declaration spans the
+		 * whole file and the module scope uses the same span; each signal's
+		 * name span is contained in (and equal to) its declaration span. */
+		pigen_semantic_init(&sem_t, &sources_t);
+		pigen_rtl_lowering_init(&lowering_t, &sem_t, &rtl_t);
+		width1 = pigen_const_expr_intern_integer(&sem_t, 1,
+			pigen_data_type_unsized_integer(&sem_t));
+		t1 = pigen_data_type_sized_logic(&sem_t, 1, PIGEN_SIGN_UNSIGNED);
+		REQUIRE(!IS_INVALID_ID(width1) && !IS_INVALID_ID(t1));
+		source = pigen_source_add(&sources_t, "lower_transfers_shape.pigen",
+			text, strlen(text));
+		REQUIRE(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_clk = (pigen_source_span){source, 19, 22}; /* "clk" */
+		name_d = (pigen_source_span){source, 39, 40}; /* "d" */
+		process_span = (pigen_source_span){source, 13, 40};
+		transfer_span = (pigen_source_span){source, 33, 40};
+		sem_t.compilation_scope = pigen_scope_add(&sem_t,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		REQUIRE(sem_t.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, sem_t.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_t, sem_t.compilation_scope, whole);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_t, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_clk, name_clk, &clk_symbol, NULL) == PIGEN_DECLARE_OK);
+		clk = pigen_signal_add(&sem_t, (pigen_syntax_id){2}, module,
+			clk_symbol, t1, pigen_semantic_scalar_shape(&sem_t),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INPUT, name_clk);
+		REQUIRE(clk.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_d, name_d, &d_symbol, NULL) == PIGEN_DECLARE_OK);
+		d = pigen_signal_add(&sem_t, (pigen_syntax_id){3}, module,
+			d_symbol, t1, pigen_semantic_scalar_shape(&sem_t),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INTERNAL, name_d);
+		REQUIRE(d.index != PIGEN_INVALID_ID);
+
+		/* The owner-span family: the clock domain interns the declared clock
+		 * symbol and edge; the process carries the clock expression (a
+		 * PIGEN_EXPR_SYMBOL over the clock signal whose span the process span
+		 * contains) and a process span; the transfer carries a destination
+		 * lvalue (the data signal's projection) and a value of the SAME data
+		 * type and shape, and its span is contained in the process span. A
+		 * one-atom true guard is seeded directly in the predicate arena, the
+		 * way the semantic tests seed the model's predicate records. */
+		domain = pigen_clock_domain_intern(&sem_t, clk_symbol,
+			PIGEN_SEMANTIC_POSEDGE);
+		REQUIRE(!IS_INVALID_ID(domain));
+		clk_expr = pigen_expr_add_symbol(&sem_t, clk_symbol, t1, name_clk);
+		REQUIRE(!IS_INVALID_ID(clk_expr));
+		process = pigen_process_add(&sem_t, (pigen_syntax_id){4}, module,
+			domain, clk_expr, process_span);
+		REQUIRE(!IS_INVALID_ID(process));
+		dest = pigen_lvalue_resolve(&sem_t,
+			pigen_expr_add_symbol(&sem_t, d_symbol, t1, name_d));
+		REQUIRE(!IS_INVALID_ID(dest));
+		value = pigen_expr_add_integer(&sem_t, 1, t1, name_d);
+		REQUIRE(!IS_INVALID_ID(value));
+		sem_t.predicates = malloc(sizeof(*sem_t.predicates));
+		REQUIRE(sem_t.predicates);
+		sem_t.predicates[0] = (pigen_predicate){0};
+		sem_t.predicate_count = 1;
+		sem_t.predicate_capacity = 1;
+		transfer = pigen_transfer_add(&sem_t, (pigen_syntax_id){5}, module,
+			process, dest, value, (pigen_predicate_id){0}, domain,
+			NULL, 0, transfer_span);
+		/* The witness is valid BEFORE any stub call: the owner accepted the
+		 * process and the transfer with their spans. */
+		REQUIRE(!IS_INVALID_ID(transfer));
+		owner_process = pigen_process_get(&sem_t, process);
+		REQUIRE(owner_process &&
+			owner_process->module.index == module.index &&
+			owner_process->domain.index == domain.index);
+		owner_transfer = pigen_transfer_get(&sem_t, transfer);
+		REQUIRE(owner_transfer &&
+			owner_transfer->module.index == module.index &&
+			owner_transfer->process.index == process.index &&
+			owner_transfer->guard.index == 0);
+
+		/* The owner-level enumeration accessors (shape of Task 8): the
+		 * module enumerates exactly its one process and the process exactly
+		 * its one transfer, each in arena (addition) order, and an invalid
+		 * or empty owner returns NULL with the count left at zero. */
+		module_process_count = 0;
+		module_processes = pigen_module_processes(&sem_t, module,
+			&module_process_count);
+		REQUIRE(module_processes && module_process_count == 1 &&
+			module_processes[0].index == process.index);
+		process_transfer_count = 0;
+		process_transfers = pigen_process_transfers(&sem_t, process,
+			&process_transfer_count);
+		REQUIRE(process_transfers && process_transfer_count == 1 &&
+			process_transfers[0].index == transfer.index);
+		REQUIRE(pigen_module_processes(&sem_t, (pigen_module_id){99},
+			&module_process_count) == NULL && module_process_count == 0);
+		REQUIRE(pigen_process_transfers(&sem_t, (pigen_process_id){99},
+			&process_transfer_count) == NULL && process_transfer_count == 0);
+
+		/* The STUB contract (green on purpose): both entry points return
+		 * their unimplemented sentinels for a valid lowering/module and for
+		 * a NULL lowering, leaving the lowering memo maps and every RTL
+		 * arena count (object/expression/instance/equation/update/process/
+		 * module) unchanged after each call. No record publication of any
+		 * kind arrives until the test-contract and implementation stages. */
+		object_before = rtl_t.object_count;
+		expression_before = rtl_t.expression_count;
+		instance_before = rtl_t.instance_count;
+		equation_before = rtl_t.equation_count;
+		update_before = rtl_t.update_count;
+		rtl_process_before = rtl_t.process_count;
+		module_count_before = rtl_t.module_count;
+		transfers_rc = pigen_lower_rtl_transfers(&lowering_t, module);
+		REQUIRE(transfers_rc == -1); /* Green: the stub sentinel. */
+		composed = pigen_lower_rtl_module(&lowering_t, module);
+		REQUIRE(IS_INVALID_ID(composed)); /* Green: the stub sentinel. */
+		REQUIRE(transfers_rc == -1 &&
+			pigen_lower_rtl_transfers(NULL, module) == -1);
+		REQUIRE(IS_INVALID_ID(pigen_lower_rtl_module(NULL, module)));
+		REQUIRE(!lowering_t.lowered_types &&
+			!lowering_t.lowered_type_count &&
+			!lowering_t.lowered_type_capacity);
+		REQUIRE(!lowering_t.lowered_expressions &&
+			!lowering_t.lowered_expression_count &&
+			!lowering_t.lowered_expression_capacity);
+		REQUIRE(!lowering_t.lowered_endpoints &&
+			!lowering_t.lowered_endpoint_count &&
+			!lowering_t.lowered_endpoint_capacity);
+		REQUIRE(rtl_t.object_count == object_before &&
+			rtl_t.expression_count == expression_before &&
+			rtl_t.instance_count == instance_before &&
+			rtl_t.equation_count == equation_before &&
+			rtl_t.update_count == update_before &&
+			rtl_t.process_count == rtl_process_before &&
+			rtl_t.module_count == module_count_before);
+
+		pigen_rtl_lowering_free(&lowering_t);
+		pigen_free_rtl_model(&rtl_t);
+		pigen_free_semantic_model(&sem_t);
+		pigen_free_sources(&sources_t);
 	}
 
 	SECTION("t5-teardown") {

@@ -873,3 +873,29 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 	}
 	return 0;
 }
+
+/* Task 8 stub: no lowering yet. The fire identity, the predicate-atom
+ * conjunction, the lvalue/value lowering and the per-process publication all
+ * arrive with the test-contract and implementation stages; this stub reports
+ * the unimplemented sentinel without touching the lowering maps or the RTL
+ * model. */
+int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
+	pigen_module_id module)
+{
+	(void)lowering;
+	(void)module;
+	return -1;
+}
+
+/* Task 8 stub: no module composition yet. The pigen_rtl_module_add_with_owner
+ * call, the declaration lowering, endpoint binding, processes and transfers
+ * and the module record publication all arrive with the test-contract and
+ * implementation stages; this stub reports the unimplemented sentinel without
+ * touching the lowering maps or the RTL model. */
+pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
+	pigen_module_id module)
+{
+	(void)lowering;
+	(void)module;
+	return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+}

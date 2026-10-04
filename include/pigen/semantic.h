@@ -406,6 +406,10 @@ struct pigen_semantic_model {
 	pigen_transfer_signal_use *transfer_signal_uses;
 	size_t transfer_signal_use_count;
 	size_t transfer_signal_use_capacity;
+	pigen_process_id **module_process_buffers;
+	size_t module_process_buffer_count;
+	pigen_transfer_id **process_transfer_buffers;
+	size_t process_transfer_buffer_count;
 	pigen_width_constraint *width_constraints;
 	size_t width_constraint_count;
 	size_t width_constraint_capacity;
@@ -598,6 +602,19 @@ const pigen_semantic_transfer *pigen_transfer_get(
 	const pigen_semantic_model *model, pigen_transfer_id transfer);
 const pigen_transfer_signal_use *pigen_transfer_signal_uses(
 	const pigen_semantic_model *model, pigen_transfer_id transfer);
+/* Owner-level enumeration accessors for the flat process and transfer
+ * arenas: the module's processes and one process's transfers, each in arena
+ * (addition) order. The signature shape follows pigen_expr_children: an id
+ * pointer with a count out-param. Each call returns a model-owned buffer
+ * (a snapshot of stable arena indices), freed by
+ * pigen_free_semantic_model and never by the caller. An invalid or empty
+ * owner returns NULL and leaves the count at zero. */
+pigen_process_id *pigen_module_processes(
+	pigen_semantic_model *model, pigen_module_id module,
+	size_t *process_count);
+pigen_transfer_id *pigen_process_transfers(
+	pigen_semantic_model *model, pigen_process_id process,
+	size_t *transfer_count);
 void pigen_free_semantic_model(pigen_semantic_model *model);
 
 #endif

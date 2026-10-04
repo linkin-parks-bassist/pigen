@@ -90,4 +90,32 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 	pigen_module_id module);
 
+/* Task 8: lowers every transfer in one module. The canonical guard atoms of
+ * all the module's transfers combine into one fire identity shared by the
+ * destination updates and the source-ready equations; each transfer's
+ * destination lvalue (static, projection or concatenation; buffered
+ * destinations whole through their declaration endpoints) and its value are
+ * lowered, the assignment conversion applied above the value, with one RTL
+ * process per semantic process. Returns 0 on success and -1 on error; a
+ * failed call reports the error and the compile stops - it may leave partial
+ * state behind, and no test asserts that a failure left the model or the
+ * maps unchanged (how/should/compiler/builders/fail.md). The exact behavior
+ * arrives with the test-contract and implementation stages; the stub returns
+ * -1 (the unimplemented sentinel) without touching the lowering maps or the
+ * RTL model. */
+int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
+	pigen_module_id module);
+
+/* Task 8: composes and publishes one module's RTL module record - the
+ * module's objects, instances, equations and processes - and returns the
+ * published pigen_rtl_module_id (PIGEN_INVALID_ID on failure). A failed call
+ * reports the error and the compile stops - it may leave partial state
+ * behind, and no test asserts that a failure left the model or the maps
+ * unchanged (how/should/compiler/builders/fail.md). The exact behavior
+ * arrives with the test-contract and implementation stages; the stub returns
+ * the PIGEN_INVALID_ID module sentinel without touching the lowering maps or
+ * the RTL model. */
+pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
+	pigen_module_id module);
+
 #endif
