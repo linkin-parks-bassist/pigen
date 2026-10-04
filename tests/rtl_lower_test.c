@@ -1884,9 +1884,9 @@ int main(int argc, char **argv)
 	 * rides on are owner facts (green against the landed owners): WIRE is
 	 * valid_constant=1 / ready_constant=0, REG is valid_constant=1 /
 	 * ready_constant=1.
-	 *   Case 1: CONSTANT CONTROLS. The call reports success (the FIRST
-	 *     deliberate red of this section: the stub returns the -1
-	 *     unimplemented sentinel, not a compile or harness error). For
+	 *   Case 1: CONSTANT CONTROLS. The call reports success (rc == 0),
+	 *     green against the landed lowering (not a compile or harness
+	 *     error). For
 	 *     EACH signal, valid and ready are valid constant-expression
 	 *     handles: pigen_rtl_expr_get resolves each to a record of kind
 	 *     PIGEN_RTL_EXPR_INTEGER whose value carries the descriptor
@@ -1902,12 +1902,12 @@ int main(int argc, char **argv)
 	 *     per-signal count deltas belong to the sibling sections; only
 	 *     the control records and the no-control-object delta are pinned
 	 *     here.
-	 * Staged red: every owner-construction and descriptor assert passes
+	 * Green: every owner-construction and descriptor assert passes
 	 * against the landed owners (including the already-implemented
 	 * pigen_lower_rtl_type memo, which resolves the 8-bit type); the
-	 * FIRST deliberate unimplemented-behavior assert is Case 1's
-	 * `rc == 0`, marked below. Every later assert in this section
-	 * requires implemented behavior and is deliberate red as well. */
+	 * declaration lowering (Case 1's `rc == 0`) and every later
+	 * assert in this section pass against the landed lowering.
+	 * No stale red marker remains in this file. */
 	SECTION("t6-net-variable-controls") {
 		const char *text =
 			"module netvar : wire a ; reg b ;\n";
@@ -2045,11 +2045,11 @@ int main(int argc, char **argv)
 
 		/* Case 1: CONSTANT CONTROLS. The declaration lowering reports
 		 * success and the endpoints map covers BOTH signals. The first
-		 * `rc == 0` is this section's first deliberate red: the stub
-		 * returns the -1 unimplemented sentinel. */
+		 * `rc == 0` is green against the landed lowering; the
+		 * declaration lowering reports success. */
 		rc = pigen_lower_rtl_module_declarations(&lowering_f, module);
-		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
-		 * stub returns -1 without touching the maps or the RTL model. */
+		REQUIRE(rc == 0); /* Green against the landed lowering: the
+		 * declaration lowering reports success. */
 		REQUIRE(lowering_f.lowered_endpoint_count >
 			(wire.index > reg.index ? wire.index : reg.index));
 
@@ -2083,8 +2083,8 @@ int main(int argc, char **argv)
 			wire_ready_re->literal_bit_count == 1 &&
 			wire_valid_re->literal_negative == 0 &&
 			wire_ready_re->literal_negative == 0;
-		REQUIRE(controls_wire); /* Deliberate red: the stub populates
-		 * nothing, so both records are NULL above. */
+		REQUIRE(controls_wire); /* Green: the landed lowering populates
+		 * both WIRE control records. */
 		controls_reg = reg_valid_re && reg_ready_re &&
 			reg_valid_re->kind == PIGEN_RTL_EXPR_INTEGER &&
 			reg_ready_re->kind == PIGEN_RTL_EXPR_INTEGER &&
@@ -2094,7 +2094,7 @@ int main(int argc, char **argv)
 			reg_ready_re->literal_bit_count == 1 &&
 			reg_valid_re->literal_negative == 0 &&
 			reg_ready_re->literal_negative == 0;
-		REQUIRE(controls_reg); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(controls_reg); /* Green: the landed lowering populates the REG controls. */
 
 		/* The control carries NO published object: the endpoints record
 		 * has no object-id field for a control, so the witness is the
@@ -2105,7 +2105,7 @@ int main(int argc, char **argv)
 		 * is caught here. */
 		object_count_after = rtl_f.object_count;
 		no_object = (object_count_after - object_count_before) == 2;
-		REQUIRE(no_object); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(no_object); /* Green: the landed lowering publishes no control object. */
 
 		/* WIRE and REG differ EXACTLY in the ready constant (0 vs 1)
 		 * while both carry the valid constant 1: the ready value is the
@@ -2124,7 +2124,7 @@ int main(int argc, char **argv)
 				reg_ready_re->literal_bit_count &&
 			wire_ready_re->literal_negative ==
 				reg_ready_re->literal_negative;
-		REQUIRE(only_ready); /* Deliberate red: the stub populates nothing. */
+		REQUIRE(only_ready); /* Green: WIRE and REG differ only in the ready constant. */
 
 		pigen_rtl_lowering_free(&lowering_f);
 		pigen_free_rtl_model(&rtl_f);
@@ -2144,9 +2144,9 @@ int main(int argc, char **argv)
 	 * file, the compilation scope, a module symbol + pigen_module_add, a
 	 * PIGEN_SYMBOL_SIGNAL declaration per signal (matching data type and
 	 * declaration span) and pigen_signal_add with PIGEN_SEMANTIC_INTERNAL.
-	 *   Case 1: COUNT DELTAS. The call reports success (the FIRST deliberate
-	 *     red of this section: the stub returns the -1 unimplemented
-	 *     sentinel, not a compile or harness error). The object-arena delta
+	 *   Case 1: COUNT DELTAS. The call reports success (rc == 0), green
+	 *     against the landed lowering (not a compile or harness error).
+	 *     The object-arena delta
 	 *     for the whole module is EXACTLY two - one payload object per
 	 *     signal - because a constant control carries no published object;
 	 *     the expression-arena delta is AT MOST two per signal (four for the
@@ -2166,13 +2166,13 @@ int main(int argc, char **argv)
 	 * widths (section (10)) and the per-control record contents are NOT
 	 * re-asserted here; only the arena count deltas, the no-instance pin and
 	 * the second-pass idempotence are pinned in this section.
-	 * Staged red: every owner-construction and descriptor assert passes
+	 * Green: every owner-construction and descriptor assert passes
 	 * against the landed owners (including the already-implemented
-	 * pigen_lower_rtl_type memo, which resolves the 8-bit type); the FIRST
-	 * deliberate unimplemented-behavior assert is Case 1's `rc == 0`,
-	 * marked below, staged behind section (8)'s still-active red. Every
-	 * later assert in this section requires implemented behavior and is
-	 * deliberate red as well. */
+	 * pigen_lower_rtl_type memo, which resolves the 8-bit type); the
+	 * declaration lowering (Case 1's `rc == 0`) and every later
+	 * assert in this section pass against the landed lowering.
+	 * No stale red marker remains in this
+	 * file. */
 	SECTION("t6-net-variable-counts") {
 		const char *text =
 			"module netvar : wire a ; reg b ;\n";
@@ -2299,8 +2299,8 @@ int main(int argc, char **argv)
 		REQUIRE(t8_record);
 
 		/* Case 1: COUNT DELTAS. Snapshot all three arenas BEFORE the first
-		 * declaration call; the first `rc == 0` is this section's first
-		 * deliberate red (the stub returns the -1 unimplemented sentinel).
+		 * declaration call; the first `rc == 0` is green against the
+		 * landed lowering, which reports success.
 		 * The net/variable realizations have no storage: the object
 		 * delta is exactly one payload per signal, the expression delta
 		 * is bounded by the two constant controls per signal, and no
@@ -2310,8 +2310,8 @@ int main(int argc, char **argv)
 		instance_before = rtl_g.instance_count;
 		REQUIRE(instance_before == 0); /* no instances before the call */
 		rc = pigen_lower_rtl_module_declarations(&lowering_g, module);
-		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
-		 * stub returns -1 without touching the maps or the RTL model. */
+		REQUIRE(rc == 0); /* Green against the landed lowering: the
+		 * declaration lowering reports success. */
 		REQUIRE(lowering_g.lowered_endpoint_count >
 			(wire.index > reg.index ? wire.index : reg.index));
 		object_delta = rtl_g.object_count - object_before;
@@ -2324,13 +2324,13 @@ int main(int argc, char **argv)
 		 * between the two signals - is caught here. */
 		no_storage = object_delta == 2 && instance_delta == 0 &&
 			expression_delta >= 2 && expression_delta <= 4;
-		REQUIRE(no_storage); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(no_storage); /* Green: the landed lowering publishes one payload, no instance. */
 
 		/* Case 2: IDEMPOTENCE. A second call on the SAME lowering and
 		 * module publishes NOTHING new: all three arena counts are
 		 * unchanged and each signal's endpoints record is byte-identical
-		 * to after the first call. Deliberate red: the stub returns -1
-		 * and republishes nothing. */
+		 * to after the first call. Green against the landed lowering,
+		 * which republishes nothing on the second pass. */
 		wire_record = lowering_g.lowered_endpoints[wire.index];
 		reg_record = lowering_g.lowered_endpoints[reg.index];
 		object_before = rtl_g.object_count;
@@ -2338,7 +2338,7 @@ int main(int argc, char **argv)
 		instance_before = rtl_g.instance_count;
 		endpoint_map_before = lowering_g.lowered_endpoint_count;
 		rc = pigen_lower_rtl_module_declarations(&lowering_g, module);
-		REQUIRE(rc == 0); /* Deliberate red: the stub returns -1. */
+		REQUIRE(rc == 0); /* Green against the landed lowering. */
 		wire_again = lowering_g.lowered_endpoints[wire.index];
 		reg_again = lowering_g.lowered_endpoints[reg.index];
 		idempotent = rtl_g.object_count == object_before &&
@@ -2360,7 +2360,7 @@ int main(int argc, char **argv)
 				reg_record.input_payload.index) &&
 			(reg_again.input_valid.index == reg_record.input_valid.index) &&
 			(reg_again.input_ready.index == reg_record.input_ready.index);
-		REQUIRE(idempotent); /* Deliberate red: the stub republishes nothing. */
+		REQUIRE(idempotent); /* Green: the landed lowering is idempotent. */
 
 		pigen_rtl_lowering_free(&lowering_g);
 		pigen_free_rtl_model(&rtl_g);
@@ -2790,11 +2790,11 @@ int main(int argc, char **argv)
 	 * pigen_lower_rtl_module_declarations + the RTL model's instance arena
 	 * (pigen_rtl_model.instances / .instance_count; the record is
 	 * pigen_rtl_instance in include/pigen/rtl.h:111-117):
-	 *   Case 1: DISTINCT INSTANCES. The call reports success (the
-	 *     FIRST deliberate red of this section: the stub returns the -1
-	 *     unimplemented sentinel, not a compile or harness error, staged
-	 *     behind section (8)'s still-active red); the instance arena
-	 *     grows by EXACTLY four (snapshotted before the call); and the
+	 *   Case 1: DISTINCT INSTANCES. The call reports success (rc == 0),
+	 *     green against the landed lowering (not a compile or harness
+	 *     error); the instance arena
+	 *     grows by exactly four, as the landed lowering publishes one
+	 *     instance per signal (snapshotted before the call); and the
 	 *     four newly published records are MUTUALLY DISTINCT - no two of
 	 *     the four records are field-identical (origin, semantic_module,
 	 *     parameters, connections and module compared), so the set of
@@ -2815,11 +2815,11 @@ int main(int argc, char **argv)
 	 * and the instance's module field is invalid until a later
 	 * owner-resolution stage, so that mapping is an implementation design
 	 * decision, not an owner-checkable fact here.
-	 * Staged red: every owner-construction and descriptor assert passes
-	 * against the landed owners; the FIRST deliberate
-	 * unimplemented-behavior assert is Case 1's `rc == 0`, marked below.
-	 * Every later assert in this section requires implemented behavior
-	 * and is deliberate red as well. */
+	 * Green: every owner-construction and descriptor assert passes
+	 * against the landed owners; the declaration lowering (Case 1's
+	 * `rc == 0`) and every later assert in this section pass against
+	 * the landed lowering, which reports success. No stale red marker
+	 * remains in this file. */
 	SECTION("t6-storage-instances") {
 		const char *text =
 			"module store : buf a ; port b ; fifo c ; skid d ;\n";
@@ -2996,16 +2996,16 @@ int main(int argc, char **argv)
 		/* Case 1: DISTINCT INSTANCES. The declaration lowering reports
 		 * success, the instance arena grows by exactly four, and the
 		 * four newly published records are mutually distinct. The first
-		 * `rc == 0` is this section's first deliberate red: the stub
-		 * returns the -1 unimplemented sentinel, staged behind section
-		 * (8)'s still-active red. */
+		 * `rc == 0` is green against the landed lowering; the
+		 * declaration lowering reports success and the instance
+		 * arena grows by exactly four. */
 		instance_before = rtl_i.instance_count;
 		REQUIRE(rtl_i.instances == NULL && instance_before == 0);
 		rc = pigen_lower_rtl_module_declarations(&lowering_i, module);
-		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
-		 * stub returns -1 without touching the maps or the RTL model. */
+		REQUIRE(rc == 0); /* Green against the landed lowering: the
+		 * declaration lowering reports success. */
 		exact_delta = rtl_i.instance_count == instance_before + 4;
-		REQUIRE(exact_delta); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(exact_delta); /* Green: the landed lowering publishes four instances. */
 
 		/* The four newly published records [instance_before ..
 		 * instance_before+4) are MUTUALLY DISTINCT: no two of the four
@@ -3041,7 +3041,7 @@ int main(int argc, char **argv)
 				}
 			}
 		}
-		REQUIRE(distinct); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(distinct); /* Green: the four landed instances are mutually distinct. */
 
 		pigen_rtl_lowering_free(&lowering_i);
 		pigen_free_rtl_model(&rtl_i);
@@ -3067,10 +3067,10 @@ int main(int argc, char **argv)
 	 * model's instance and expression arenas (the instance record is
 	 * pigen_rtl_instance in include/pigen/rtl.h:111-117, whose ordered
 	 * parameters range indexes rtl_i.instance_parameters):
-	 *   Case 1: DEPTH ROUND-TRIP. (a) The call reports success - the
-	 *     section's FIRST deliberate red: the stub returns the -1 unimplemented
-	 *     sentinel, not a compile or harness error, staged behind section
-	 *     (8)'s still-active red. (b) The FIFO signal's published
+	 *   Case 1: DEPTH ROUND-TRIP. (a) The call reports success - green
+	 *     against the landed lowering (not a compile or harness error).
+	 *     The FIFO depth round-trips exactly as the landed lowering
+	 *     publishes it. (b) The FIFO signal's published
 	 *     pigen_rtl_instance carries its semantic depth: the depth value 4
 	 *     round-trips EXACTLY from the const-expr argument the test built,
 	 *     witnessed on the parameter expression that sits in the instance's
@@ -3099,10 +3099,10 @@ int main(int argc, char **argv)
 	 * instance instantiates - there is no owner API resolving a
 	 * pigen_rtl_module_id to a primitive definition name, so that mapping is
 	 * an implementation design decision, not an owner-checkable fact here.
-	 * Staged red: every owner-construction and descriptor assert passes
-	 * against the landed owners; the FIRST deliberate unimplemented-behavior
-	 * assert is Case 1's `rc == 0`, marked below. Every later assert in this
-	 * section requires implemented behavior and is deliberate red as well. */
+	 * Green: every owner-construction and descriptor assert passes
+	 * against the landed owners; the declaration lowering (Case 1's
+	 * `rc == 0`) and every later assert in this section pass against the
+	 * landed lowering. No stale red marker remains in this file. */
 	SECTION("t6-storage-fifo-depth") {
 		const char *text =
 			"module store : buf a ; port b ; fifo c ; skid d ;\n";
@@ -3302,15 +3302,15 @@ int main(int argc, char **argv)
 		/* Case 1: DEPTH ROUND-TRIP. The declaration lowering reports
 		 * success, the FIFO instance carries the depth argument's interned
 		 * value as a parameter record, and the three fixed-capacity
-		 * instances carry no depth parameter. The first `rc == 0` is this
-		 * section's first deliberate red: the stub returns the -1
-		 * unimplemented sentinel, staged behind section (8)'s still-active
-		 * red. */
+		 * instances carry no depth parameter. The first `rc == 0` is
+		 * green against the landed lowering, which reports success and
+		 * publishes the FIFO depth parameter record; the three
+		 * fixed-capacity instances carry no depth parameter. */
 		instance_before = rtl_j.instance_count;
 		REQUIRE(rtl_j.instances == NULL && instance_before == 0);
 		rc = pigen_lower_rtl_module_declarations(&lowering_j, module);
-		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
-		 * stub returns -1 without touching the maps or the RTL model. */
+		REQUIRE(rc == 0); /* Green against the landed lowering: the
+		 * declaration lowering reports success. */
 
 		/* The four storage instances are published at the four new arena
 		 * slots in declaration order: BUF, PORT, FIFO, SKID. (Section (13)
@@ -3362,8 +3362,8 @@ int main(int argc, char **argv)
 				continue;
 			fifo_has_depth = 1;
 		}
-		REQUIRE(fifo_has_depth); /* Deliberate red: the stub publishes no
-		 * instance and no parameter record. */
+		REQUIRE(fifo_has_depth); /* Green: the landed lowering publishes the
+		 * FIFO depth parameter record. */
 
 		/* (c) The depth is sourced from the transfer argument, not a
 		 * spelling match: the only realization consulted is
@@ -3387,8 +3387,8 @@ int main(int argc, char **argv)
 				pe->value == expected_depth)
 				buf_has_depth = 1;
 		}
-		REQUIRE(!buf_has_depth); /* Deliberate red: the stub publishes
-		 * nothing; a fixed-capacity implementation publishes no depth. */
+		REQUIRE(!buf_has_depth); /* Green: a fixed-capacity realization
+		 * publishes no depth parameter. */
 		port_has_depth = 0;
 		for (size_t p = 0; p < port_instance->parameters.count; p++) {
 			const pigen_rtl_expr *pe = pigen_rtl_expr_get(&rtl_j,
@@ -3398,7 +3398,7 @@ int main(int argc, char **argv)
 				pe->value == expected_depth)
 				port_has_depth = 1;
 		}
-		REQUIRE(!port_has_depth); /* Deliberate red: no depth parameter. */
+		REQUIRE(!port_has_depth); /* Green: no depth parameter. */
 		skid_has_depth = 0;
 		for (size_t p = 0; p < skid_instance->parameters.count; p++) {
 			const pigen_rtl_expr *pe = pigen_rtl_expr_get(&rtl_j,
@@ -3408,7 +3408,7 @@ int main(int argc, char **argv)
 				pe->value == expected_depth)
 				skid_has_depth = 1;
 		}
-		REQUIRE(!skid_has_depth); /* Deliberate red: no depth parameter. */
+		REQUIRE(!skid_has_depth); /* Green: no depth parameter. */
 
 		pigen_rtl_lowering_free(&lowering_j);
 		pigen_free_rtl_model(&rtl_j);
@@ -3434,9 +3434,9 @@ int main(int argc, char **argv)
 	 *   Case 1: COUNT DELTAS. Snapshot all THREE arenas (object_count,
 	 *     expression_count, instance_count) BEFORE the first
 	 *     pigen_lower_rtl_module_declarations call; the call reports success
-	 *     rc == 0 - the section's FIRST deliberate red (the stub -1 sentinel,
-	 *     staged behind section (8)'s still-active red, NOT a compile/harness
-	 *     error). Then:
+	 *     rc == 0, green against the landed lowering, NOT a compile/harness
+	 *     error. The landed lowering reports success and the declaration
+	 *     lowering publishes the four storage signals. Then:
 	 *     (a) the OBJECT-arena delta is EXACTLY four - one VARIABLE payload
 	 *         object per storage signal (section (12)'s payload shape), and no
 	 *         other objects are published by the declaration lowering for
@@ -3489,13 +3489,13 @@ int main(int argc, char **argv)
 	 * matrix (section (12)), the distinct-instance publication and
 	 * cross-contamination (section (13)), and the FIFO depth parameter
 	 * round-trip and descriptor facts (section (14)).
-	 * Staged red: every owner-construction and descriptor assert passes
+	 * Green: every owner-construction and descriptor assert passes
 	 * against the landed owners (including the already-implemented
 	 * pigen_lower_rtl_type memo, which resolves the 8-bit type with no
-	 * expression publish); the FIRST deliberate unimplemented-behavior assert
-	 * is Case 1's `rc == 0`, marked below, staged behind section (8)'s
-	 * still-active red. Every later assert in this section requires
-	 * implemented behavior and is deliberate red as well. */
+	 * expression publish); the declaration lowering (Case 1's `rc == 0`)
+	 * and every later assert in this section pass against the landed
+	 * lowering, which reports success. No stale red marker remains
+	 * in this file. */
 	SECTION("t6-storage-counts") {
 		const char *text =
 			"module store : buf a ; port b ; fifo c ; skid d ;\n";
@@ -3649,8 +3649,8 @@ int main(int argc, char **argv)
 		REQUIRE(t8_record);
 
 		/* Case 1: COUNT DELTAS. Snapshot all three arenas BEFORE the first
-		 * declaration call; the first `rc == 0` is this section's first
-		 * deliberate red (the stub returns the -1 unimplemented sentinel).
+		 * declaration call; the first `rc == 0` is green against the
+		 * landed lowering.
 		 * The storage realizations own their primitive: exactly one payload
 		 * object and exactly one instance per signal, and at most the shared
 		 * FIFO depth argument as the sole interned expression. */
@@ -3659,8 +3659,8 @@ int main(int argc, char **argv)
 		instance_before = rtl_k.instance_count;
 		REQUIRE(instance_before == 0); /* no instances before the call */
 		rc = pigen_lower_rtl_module_declarations(&lowering_k, module);
-		REQUIRE(rc == 0); /* Deliberate red (first in this section): the
-		 * stub returns -1 without touching the maps or the RTL model. */
+		REQUIRE(rc == 0); /* Green against the landed lowering: the
+		 * declaration lowering reports success. */
 		REQUIRE(lowering_k.lowered_endpoint_count > buf.index);
 		REQUIRE(lowering_k.lowered_endpoint_count > port.index);
 		REQUIRE(lowering_k.lowered_endpoint_count > fifo.index);
@@ -3678,14 +3678,14 @@ int main(int argc, char **argv)
 		 * delta; the upper bound 1 pins the single shared depth record. */
 		count_deltas = object_delta == 4 && instance_delta == 4 &&
 			expression_delta <= 1;
-		REQUIRE(count_deltas); /* Deliberate red: the stub publishes nothing. */
+		REQUIRE(count_deltas); /* Green: the landed lowering publishes the count deltas. */
 
 		/* Case 2: IDEMPOTENCE. A second call on the SAME lowering and module
 		 * publishes NOTHING new: all three arena counts and the endpoints-map
 		 * count are unchanged and each of the four signals' endpoints record
 		 * is field-identical to after the first call (all six fields per
-		 * signal). Deliberate red: the stub returns -1 and republishes
-		 * nothing. */
+		 * signal). Green against the landed lowering, which republishes
+		 * nothing on the second pass. */
 		buf_record = lowering_k.lowered_endpoints[buf.index];
 		port_record = lowering_k.lowered_endpoints[port.index];
 		fifo_record = lowering_k.lowered_endpoints[fifo.index];
@@ -3695,7 +3695,7 @@ int main(int argc, char **argv)
 		instance_before = rtl_k.instance_count;
 		endpoint_map_before = lowering_k.lowered_endpoint_count;
 		rc = pigen_lower_rtl_module_declarations(&lowering_k, module);
-		REQUIRE(rc == 0); /* Deliberate red: the stub returns -1. */
+		REQUIRE(rc == 0); /* Green against the landed lowering. */
 		buf_again = lowering_k.lowered_endpoints[buf.index];
 		port_again = lowering_k.lowered_endpoints[port.index];
 		fifo_again = lowering_k.lowered_endpoints[fifo.index];
@@ -3728,7 +3728,7 @@ int main(int argc, char **argv)
 			(skid_again.input_payload.index == skid_record.input_payload.index) &&
 			(skid_again.input_valid.index == skid_record.input_valid.index) &&
 			(skid_again.input_ready.index == skid_record.input_ready.index);
-		REQUIRE(idempotent); /* Deliberate red: the stub republishes nothing. */
+		REQUIRE(idempotent); /* Green: the landed lowering is idempotent. */
 
 		pigen_rtl_lowering_free(&lowering_k);
 		pigen_free_rtl_model(&rtl_k);
