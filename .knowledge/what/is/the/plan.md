@@ -1,12 +1,12 @@
 ---
 status: green
-revised_at: "2026-10-05T01:10:59+11:00"
+revised_at: "2026-10-05T03:26:09+11:00"
 checked_at: "2026-09-30T20:31:54+10:00"
 ---
 
 The approved immediate work is the quarantined elastic RTL vertical slice.
 
-1. Task 8 atomic transfers sharing one fire (what/is/elastic/rtl/task/eight.md): its shape is established - the owner-level process/transfer enumeration accessors and the pigen_lower_rtl_transfers / pigen_lower_rtl_module entry points - and the remaining product steps are, in order: the fire-identity test contract (one shared conjunction per transfer, the join / repeated-projection / static-only-assignment / exclusive-producer / process-order gate families, make rtl-lower-test), staged red against the stubs; the transfer-lowering implementation; the module-composition implementation; then the full-suite integration gate. The fire-identity test contract is planned and its Relies-on owner API names are verified on master; it is the next approved step, followed by the transfer-lowering implementation.
+1. Task 8 atomic transfers sharing one fire (what/is/elastic/rtl/task/eight.md): its shape is established - the owner-level process/transfer enumeration accessors and the pigen_lower_rtl_transfers / pigen_lower_rtl_module entry points - and the t8-skeleton section of tests/rtl_lower_test.c is deliberately red at its first behavioral assert (the valid single-transfer witness must lower, pigen_lower_rtl_transfers returns 0). The remaining product steps are, in order: complete the fire-identity test contract (one shared conjunction per transfer, the join / repeated-projection / static-only-assignment / exclusive-producer / process-order gate families, make rtl-lower-test); the transfer-lowering implementation; the module-composition implementation; then the full-suite integration gate.
 2. Task 9 exact ordered output, Task 10 terminal SV emission, Task 11 quarantined composition/simulation, then Task 12 verification and accurate status. Exact contracts belong to the corresponding task leaves. Task 7 (ready-cycle validation) is deferred to Pigen 1.0 (what/is/the/elastic/rtl/task/order.md).
 3. Complete retained-core, pipeline, FSM, child-instance and fabric migration and compatibility gates at what/are/the/remaining/architecture/migration/gates.md. Switch production only when every retained subsystem uses one structured path and its corresponding textual machinery is deleted in the same change. No validator bridge, fallback, second dialect or per-file choice.
 4. Fix the co-slice defect in what/is/broken.md (the last destination receives the whole aggregate; Verilator reports it as WIDTHTRUNC in coslice.sv and transfer_block.sv). Treat the remaining Verilator lint warnings from `make verify` as possible compiler defects, then make the lint fail on warnings so `make verify` cannot pass with them.

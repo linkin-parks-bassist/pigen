@@ -3737,21 +3737,20 @@ int main(int argc, char **argv)
 		pigen_free_sources(&sources_k);
 	}
 
-	/* (16) Task 8 shape: the two new lowering entry points and the two
-	 * owner-level enumeration accessors exist with their contracted shapes.
-	 * This is a shape-only, green-on-purpose section: it builds ONE valid
-	 * owner witness (a module with one clock domain, one process and one
-	 * transfer, constructed through the owner APIs with the owner-span
-	 * constraints - the process span contains the clock expression's span and
-	 * the transfer span is contained in the process span), asserts the
-	 * witness is valid, and pins the STUB behavior: both entry points return
-	 * their unimplemented sentinels (-1 and the PIGEN_INVALID_ID module) for
-	 * a valid lowering/module and for a NULL lowering, leaving the lowering
-	 * memo maps and every RTL arena count unchanged after each call, and the
-	 * enumeration accessors enumerate exactly the owner's records in arena
-	 * (addition) order (NULL/0 for an invalid or empty owner). No fire
-	 * identity, no predicate-atom lowering, no record publication: the
-	 * behavior arrives with the test-contract and implementation stages. */
+	/* (16) Task 8 fire-identity base: the section builds ONE valid owner
+	 * witness (a module with one clock domain, one process and one transfer,
+	 * constructed through the owner APIs with the owner-span constraints -
+	 * the process span contains the clock expression's span and the transfer
+	 * span is contained in the process span), asserts the witness is valid,
+	 * and keeps the green enumeration-accessor shape asserts: the accessors
+	 * enumerate exactly the owner's records in arena (addition) order
+	 * (NULL/0 for an invalid or empty owner). It then STAGES RED at the first
+	 * behavioral assert: the valid witness now lowers, so
+	 * pigen_lower_rtl_transfers(&lowering, module) must return 0. The
+	 * unimplemented entry point currently returns -1, so that assert fails
+	 * here; nothing is asserted about the fire identity, and nothing asserts
+	 * that the -1 left the model or maps unchanged (a failed compile may
+	 * leave partial state behind). */
 	SECTION("t8-skeleton") {
 		const char *text =
 			"module top : input clk : logic ; input d : logic ;\n";
@@ -3786,15 +3785,6 @@ int main(int argc, char **argv)
 		const pigen_transfer_id *process_transfers;
 		size_t module_process_count;
 		size_t process_transfer_count;
-		size_t object_before;
-		size_t expression_before;
-		size_t instance_before;
-		size_t equation_before;
-		size_t update_before;
-		size_t rtl_process_before;
-		size_t module_count_before;
-		int transfers_rc;
-		pigen_rtl_module_id composed;
 
 		/* Build the witness through the owner APIs (the section 8 pattern):
 		 * a 1-bit data type, a source file, the compilation scope, a module,
@@ -3905,42 +3895,13 @@ int main(int argc, char **argv)
 		REQUIRE(pigen_process_transfers(&sem_t, (pigen_process_id){99},
 			&process_transfer_count) == NULL && process_transfer_count == 0);
 
-		/* The STUB contract (green on purpose): both entry points return
-		 * their unimplemented sentinels for a valid lowering/module and for
-		 * a NULL lowering, leaving the lowering memo maps and every RTL
-		 * arena count (object/expression/instance/equation/update/process/
-		 * module) unchanged after each call. No record publication of any
-		 * kind arrives until the test-contract and implementation stages. */
-		object_before = rtl_t.object_count;
-		expression_before = rtl_t.expression_count;
-		instance_before = rtl_t.instance_count;
-		equation_before = rtl_t.equation_count;
-		update_before = rtl_t.update_count;
-		rtl_process_before = rtl_t.process_count;
-		module_count_before = rtl_t.module_count;
-		transfers_rc = pigen_lower_rtl_transfers(&lowering_t, module);
-		REQUIRE(transfers_rc == -1); /* Green: the stub sentinel. */
-		composed = pigen_lower_rtl_module(&lowering_t, module);
-		REQUIRE(IS_INVALID_ID(composed)); /* Green: the stub sentinel. */
-		REQUIRE(transfers_rc == -1 &&
-			pigen_lower_rtl_transfers(NULL, module) == -1);
-		REQUIRE(IS_INVALID_ID(pigen_lower_rtl_module(NULL, module)));
-		REQUIRE(!lowering_t.lowered_types &&
-			!lowering_t.lowered_type_count &&
-			!lowering_t.lowered_type_capacity);
-		REQUIRE(!lowering_t.lowered_expressions &&
-			!lowering_t.lowered_expression_count &&
-			!lowering_t.lowered_expression_capacity);
-		REQUIRE(!lowering_t.lowered_endpoints &&
-			!lowering_t.lowered_endpoint_count &&
-			!lowering_t.lowered_endpoint_capacity);
-		REQUIRE(rtl_t.object_count == object_before &&
-			rtl_t.expression_count == expression_before &&
-			rtl_t.instance_count == instance_before &&
-			rtl_t.equation_count == equation_before &&
-			rtl_t.update_count == update_before &&
-			rtl_t.process_count == rtl_process_before &&
-			rtl_t.module_count == module_count_before);
+		/* The FIRST DELIBERATE RED: the valid owner witness now lowers, so
+		 * the entry point must report 0. The unimplemented entry point
+		 * returns -1 today, so this assert fails - at exactly this point,
+		 * after the preserved green asserts above. No fire-identity
+		 * identity is asserted here, and nothing asserts that the -1 left
+		 * the model or the memo maps unchanged. */
+		REQUIRE(pigen_lower_rtl_transfers(&lowering_t, module) == 0);
 
 		pigen_rtl_lowering_free(&lowering_t);
 		pigen_free_rtl_model(&rtl_t);
