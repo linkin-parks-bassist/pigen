@@ -4601,6 +4601,222 @@ int main(int argc, char **argv)
 			pigen_free_sources(&sources_d);
 		}
 
+		/* (6) MODULE COMPOSITION (RED): after the base witness's transfers
+		 * have lowered, composing the module publishes its module record - the
+		 * entry point returns a valid module identity (the invalid return is
+		 * the owner's rejection path only) and the published record's
+		 * object/instance/equation/process ranges cover exactly the records
+		 * published for the witness, in arena order: the destination payload
+		 * objects through their declaration endpoints, the source-ready
+		 * equations on the input-ready endpoints, and one RTL process per
+		 * semantic process with its own updates. The witness is the base
+		 * witness module: two processes (the base process owns both
+		 * transfers, the second owns none). Per how/should/compiler/builders/
+		 * fail.md the failure path may leave partial state behind; nothing
+		 * below asserts that a failed composition left the model or the maps
+		 * unchanged. */
+		{
+			pigen_rtl_module_id composed;
+			const pigen_rtl_module *composed_get;
+			const pigen_rtl_object *comp_obj;
+			const pigen_rtl_instance *comp_inst;
+			const pigen_rtl_equation *comp_eq;
+			const pigen_rtl_process *comp_proc;
+			const pigen_process_id *comp_sem_processes;
+			const pigen_transfer_id *comp_sem_transfers;
+			size_t comp_sem_process_count;
+			size_t comp_sem_transfer_count;
+			int m_objects, m_instances, m_equations, m_processes;
+
+			composed = pigen_lower_rtl_module(&lowering_t, module);
+			REQUIRE(!IS_INVALID_ID(composed));
+			composed_get = pigen_rtl_module_get(&rtl_t, composed);
+			REQUIRE(composed_get);
+			/* OBJECTS: the composed range covers exactly the objects published
+			 * for the witness module - no record escapes the range and no
+			 * foreign record enters it. Every destination update and
+			 * source-ready equation targets its signal's published payload
+			 * object, so the endpoint payloads d and e must both sit in the
+			 * range, and every object in the range is this module's. */
+			m_objects = 1;
+			for (i = composed_get->objects.first; i < composed_get->objects.first +
+				composed_get->objects.count && m_objects; i++) {
+				comp_obj = pigen_rtl_object_get(&rtl_t,
+					(pigen_rtl_object_id){(uint32_t)i});
+				if (!comp_obj ||
+					comp_obj->module.index != composed.index)
+					m_objects = 0;
+			}
+			if (!IS_INVALID_ID(lowering_t.lowered_endpoints[d.index]
+					.payload) &&
+				!IS_INVALID_ID(lowering_t.lowered_endpoints[e.index]
+					.payload)) {
+				m_objects &= composed_get->objects.count >= 2 &&
+					composed_get->objects.first <=
+						lowering_t.lowered_endpoints[d.index]
+							.payload.index &&
+					lowering_t.lowered_endpoints[d.index].payload.index <
+						composed_get->objects.first +
+							composed_get->objects.count &&
+					composed_get->objects.first <=
+						lowering_t.lowered_endpoints[e.index]
+							.payload.index &&
+					lowering_t.lowered_endpoints[e.index].payload.index <
+						composed_get->objects.first +
+							composed_get->objects.count;
+			}
+			REQUIRE(m_objects);
+			/* INSTANCES: the composed range holds only this module's
+			 * instances. The witness declares no storage, so the range is
+			 * empty today; a foreign or unowned instance in the range fails
+			 * this. */
+			m_instances = 1;
+			for (i = composed_get->instances.first;
+				i < composed_get->instances.first +
+					composed_get->instances.count && m_instances; i++) {
+				comp_inst = pigen_rtl_instance_get(&rtl_t,
+					(pigen_rtl_instance_id){(uint32_t)i});
+				if (!comp_inst ||
+					comp_inst->module.index != composed.index)
+					m_instances = 0;
+			}
+			REQUIRE(m_instances);
+			/* EQUATIONS: the composed range covers exactly the equations
+			 * published for the witness module - including the source-ready
+			 * equations on the input-ready endpoints of d and e - and every
+			 * equation in the range is this module's. A ready equation left
+			 * out of the range (or a foreign one in it) fails this. */
+			m_equations = 1;
+			for (i = composed_get->equations.first;
+				i < composed_get->equations.first +
+					composed_get->equations.count && m_equations; i++) {
+				comp_eq = pigen_rtl_equation_get(&rtl_t,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				if (!comp_eq ||
+					comp_eq->module.index != composed.index)
+					m_equations = 0;
+			}
+			if (!IS_INVALID_ID(lowering_t.lowered_endpoints[d.index]
+					.input_ready) &&
+				!IS_INVALID_ID(lowering_t.lowered_endpoints[e.index]
+					.input_ready)) {
+				for (j = 0; j < rtl_t.equation_count && m_equations; j++) {
+					const pigen_rtl_equation *ready =
+						pigen_rtl_equation_get(&rtl_t,
+							(pigen_rtl_equation_id){(uint32_t)j});
+					if (!ready)
+						continue;
+					if (ready->destination.index ==
+						lowering_t.lowered_endpoints[d.index]
+							.input_ready.index ||
+						ready->destination.index ==
+						lowering_t.lowered_endpoints[e.index]
+							.input_ready.index) {
+						m_equations &=
+							composed_get->equations.first <= j &&
+							j < composed_get->equations.first +
+								composed_get->equations.count;
+					}
+				}
+			}
+			REQUIRE(m_equations);
+			/* PROCESSES: one RTL process per semantic process, in arena
+			 * (addition) order [first, second] - the base process owns its
+			 * two transfers' updates and the empty second process owns none -
+			 * and every process in the range is this module's. A merged,
+			 * missing or reordered RTL process fails this. */
+			m_processes = 1;
+			comp_sem_process_count = 0;
+			comp_sem_processes = pigen_module_processes(&sem_t, module,
+				&comp_sem_process_count);
+			if (!comp_sem_processes ||
+				comp_sem_process_count !=
+					composed_get->processes.count)
+				m_processes = 0;
+			for (i = composed_get->processes.first;
+				i < composed_get->processes.first +
+					composed_get->processes.count && m_processes; i++) {
+				comp_proc = pigen_rtl_process_get(&rtl_t,
+					(pigen_rtl_process_id){(uint32_t)i});
+				if (!comp_proc ||
+					comp_proc->module.index != composed.index)
+					m_processes = 0;
+			}
+			if (m_processes) {
+				for (i = 0;
+					i < composed_get->processes.count &&
+					i < comp_sem_process_count && m_processes; i++) {
+					const pigen_rtl_process *ordered =
+						pigen_rtl_process_get(&rtl_t,
+							(pigen_rtl_process_id){
+								(uint32_t)(
+									composed_get->processes.first +
+									i)});
+					if (!ordered)
+						m_processes = 0;
+					else if (i == 0) {
+						/* The base process's RTL process owns exactly
+						 * its two transfers' destination updates:
+						 * one update each, in transfer arena
+						 * order, on the d and e payload objects. */
+						comp_sem_transfer_count = 0;
+						comp_sem_transfers =
+							pigen_process_transfers(
+								&sem_t,
+								comp_sem_processes[0],
+								&comp_sem_transfer_count);
+						if (!comp_sem_transfers ||
+							comp_sem_transfer_count !=
+								ordered->updates.count)
+							m_processes = 0;
+						for (j = 0;
+							j < comp_sem_transfer_count &&
+							m_processes; j++) {
+							const pigen_semantic_transfer
+								*own =
+									pigen_transfer_get(
+										&sem_t,
+										comp_sem_transfers[j]);
+							const pigen_rtl_update
+								*up =
+									pigen_rtl_update_get(
+										&rtl_t,
+										(pigen_rtl_update_id){
+											(uint32_t)(
+												ordered->updates
+													.first +
+												j)});
+							pigen_rtl_object_id want;
+							const pigen_semantic_lvalue *own_dest =
+								pigen_lvalue_get(&sem_t,
+									own->destination);
+							if (!own || !up || !own_dest)
+								m_processes = 0;
+							else {
+								want = lowering_t
+									.lowered_endpoints[
+										own_dest->as
+											.projection
+											.signal.index]
+									.payload;
+								m_processes &=
+									!IS_INVALID_ID(want) &&
+									up->destination.index ==
+										want.index;
+							}
+						}
+					} else if (i == 1) {
+						/* The second semantic process owns no
+						 * transfers: its RTL process publishes an
+						 * empty updates range. */
+						m_processes &=
+							ordered->updates.count == 0;
+					}
+				}
+			}
+			REQUIRE(m_processes);
+		}
+
 		pigen_rtl_lowering_free(&lowering_t);
 		pigen_free_rtl_model(&rtl_t);
 		pigen_free_semantic_model(&sem_t);
