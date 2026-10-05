@@ -35,6 +35,7 @@
 #include "pigen/rtl_lower.h"
 #include "pigen/transfer_type.h"
 #include "pigen/util.h"
+#include "pigen/predicate.h"
 
 void pigen_rtl_lowering_init(pigen_rtl_lowering *lowering,
 	pigen_semantic_model *semantics, pigen_rtl_model *rtl)
@@ -874,6 +875,483 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 	return 0;
 }
 
+
+/* Lower one semantic expression (a general pigen_expr_id, not just a constant
+ * identity) to an RTL expression. Integer, exact-integer and bit-state
+ * literals lower through the constant-expression memo; a signal symbol lowers
+ * to the signal's published payload object expression; a parameter symbol
+ * lowers through its const-expr identity; and the structural kinds (unary,
+ * binary, conditional, conversion, index, select, concatenation) lower their
+ * children recursively and publish the matching RTL node. Returns an invalid
+ * identity on any failure. */
+static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
+	pigen_expr_id expression)
+{
+	pigen_semantic_model *sem;
+	pigen_rtl_model *rtl;
+	const pigen_semantic_expr *owner;
+	pigen_rtl_type_id result_type;
+	pigen_rtl_expr_id result;
+	pigen_source_span origin;
+	pigen_data_type_id logic_one;
+
+	if (!lowering || !lowering->semantics || !lowering->rtl)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	sem = lowering->semantics;
+	rtl = lowering->rtl;
+	if (expression.index == PIGEN_INVALID_ID ||
+		!(owner = pigen_expr_get(sem, expression)))
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	if (owner->data_type.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	result_type = pigen_lower_rtl_type(lowering, owner->data_type);
+	if (result_type.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	origin = (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+
+	switch (owner->kind) {
+	case PIGEN_EXPR_INTEGER:
+	case PIGEN_EXPR_EXACT_INTEGER:
+	case PIGEN_EXPR_BITS:
+	{
+		pigen_const_expr_id constant =
+			pigen_expr_constant(sem, expression);
+		if (constant.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return pigen_lower_rtl_expression(lowering, constant);
+	}
+	case PIGEN_EXPR_SYMBOL:
+	{
+		const pigen_symbol *symbol =
+			pigen_symbol_get(sem, owner->as.symbol);
+		if (!symbol)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		if (symbol->kind == PIGEN_SYMBOL_PARAMETER)
+		{
+			pigen_const_expr_id constant =
+				pigen_expr_constant(sem, expression);
+			if (constant.index == PIGEN_INVALID_ID)
+				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			return pigen_lower_rtl_expression(lowering, constant);
+		}
+		/* A signal symbol lowers to its published payload object expression;
+		 * the declaration endpoint must have been lowered already. */
+		pigen_signal_id signal = pigen_symbol_signal(sem, owner->as.symbol);
+		if (signal.index == PIGEN_INVALID_ID ||
+			lowering->lowered_endpoint_count <= signal.index ||
+			lowering->lowered_endpoints[signal.index].payload.index ==
+				PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return pigen_rtl_expr_add_object(rtl, result_type,
+			lowering->lowered_endpoints[signal.index].payload, origin);
+	}
+	case PIGEN_EXPR_GROUP:
+		return lower_expr(lowering, owner->as.group.operand);
+	case PIGEN_EXPR_UNARY:
+	{
+		const pigen_unary_operation *op = &owner->as.unary.operation;
+		pigen_unary_resolution resolution;
+		pigen_rtl_expr_id operand;
+
+		resolution = (pigen_unary_resolution){
+			{PIGEN_CONVERSION_IDENTITY, op->operand_data_type,
+				op->operand_data_type},
+			*op};
+		operand = lower_expr(lowering, owner->as.unary.operand);
+		if (operand.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return pigen_rtl_expr_add_unary(rtl, result_type, &resolution,
+			operand, origin);
+	}
+	case PIGEN_EXPR_BINARY:
+	{
+		const pigen_binary_operation *op = &owner->as.binary.operation;
+		pigen_binary_resolution resolution;
+		pigen_rtl_expr_id left;
+		pigen_rtl_expr_id right;
+
+		resolution = (pigen_binary_resolution){
+			{PIGEN_CONVERSION_IDENTITY, op->left_data_type,
+				op->left_data_type},
+			{PIGEN_CONVERSION_IDENTITY, op->right_data_type,
+				op->right_data_type},
+			*op};
+		left = lower_expr(lowering, owner->as.binary.left);
+		right = lower_expr(lowering, owner->as.binary.right);
+		if (left.index == PIGEN_INVALID_ID ||
+			right.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return pigen_rtl_expr_add_binary(rtl, result_type, &resolution,
+			left, right, origin);
+	}
+	case PIGEN_EXPR_CONDITIONAL:
+	{
+		const pigen_conditional_operation *op =
+			&owner->as.conditional.operation;
+		pigen_conditional_resolution resolution;
+		pigen_rtl_expr_id condition;
+		pigen_rtl_expr_id when_true;
+		pigen_rtl_expr_id when_false;
+
+		resolution = (pigen_conditional_resolution){
+			{PIGEN_CONVERSION_IDENTITY, op->condition_data_type,
+				op->condition_data_type},
+			{PIGEN_CONVERSION_IDENTITY, op->when_true_data_type,
+				op->when_true_data_type},
+			{PIGEN_CONVERSION_IDENTITY, op->when_false_data_type,
+				op->when_false_data_type},
+			*op};
+		condition = lower_expr(lowering, owner->as.conditional.condition);
+		when_true = lower_expr(lowering, owner->as.conditional.when_true);
+		when_false = lower_expr(lowering, owner->as.conditional.when_false);
+		if (condition.index == PIGEN_INVALID_ID ||
+			when_true.index == PIGEN_INVALID_ID ||
+			when_false.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return pigen_rtl_expr_add_conditional(rtl, result_type, &resolution,
+			condition, when_true, when_false, origin);
+	}
+	case PIGEN_EXPR_CONVERSION:
+	{
+		const pigen_conversion *conversion = &owner->as.conversion.conversion;
+		pigen_rtl_expr_id operand;
+
+		operand = lower_expr(lowering, owner->as.conversion.operand);
+		if (operand.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return pigen_rtl_expr_add_conversion(rtl, result_type, conversion,
+			operand, origin);
+	}
+	case PIGEN_EXPR_INDEX:
+	{
+		pigen_rtl_expr_id base;
+		pigen_rtl_expr_id index;
+
+		base = lower_expr(lowering, owner->as.index.base);
+		index = lower_expr(lowering, owner->as.index.index);
+		if (base.index == PIGEN_INVALID_ID ||
+			index.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return pigen_rtl_expr_add_index(rtl, result_type, base, index,
+			origin);
+	}
+	case PIGEN_EXPR_SELECT:
+	{
+		pigen_rtl_expr_id base;
+		pigen_rtl_expr_id left;
+		pigen_rtl_expr_id right;
+
+		base = lower_expr(lowering, owner->as.select.base);
+		left = lower_expr(lowering, owner->as.select.left);
+		right = lower_expr(lowering, owner->as.select.right);
+		if (base.index == PIGEN_INVALID_ID ||
+			left.index == PIGEN_INVALID_ID ||
+			right.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return pigen_rtl_expr_add_select(rtl, result_type, base, left,
+			right, owner->as.select.kind, origin);
+	}
+	case PIGEN_EXPR_CONCATENATION:
+	{
+		const pigen_expr_id *owner_children;
+		size_t child_count;
+		size_t i;
+		pigen_rtl_expr_id *children;
+
+		child_count = owner->as.sequence.child_count;
+		owner_children = pigen_expr_children(sem,
+			owner->as.sequence.first_child, child_count);
+		if (child_count && !owner_children)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		if (child_count > SIZE_MAX / sizeof(*children))
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		children = pigen_resize(NULL,
+			child_count * sizeof(*children));
+		if (!children && child_count)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		for (i = 0; i < child_count; i++)
+		{
+			children[i] = lower_expr(lowering, owner_children[i]);
+			if (children[i].index == PIGEN_INVALID_ID)
+			{
+				free(children);
+				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			}
+		}
+		result = pigen_rtl_expr_add_concatenation(rtl, result_type,
+			children, child_count, origin);
+		free(children);
+		return result;
+	}
+	default:
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	}
+	/* Keep the 1-bit logic type reachable for the control constructors below
+	 * without an unused-variable warning on the path that does not need it. */
+	(void)logic_one;
+}
+
+/* Intern the 1-bit fire-identity "true" node - a 1-bit BITS literal 1 - once
+ * through the constant-expression memo (so it is a single shared identity) and
+ * return its lowered RTL expression. This is the fire identity of a transfer
+ * whose guard is true and whose consumer-valid and producer-ready dependency
+ * sets are empty: the conjunction of no terms. Returns an invalid identity on
+ * any failure. */
+static pigen_rtl_expr_id fire_bits_one(pigen_rtl_lowering *lowering)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_data_type_id logic_one;
+	pigen_const_expr_id interned;
+	pigen_rtl_expr_id lowered;
+	pigen_rtl_literal_word word;
+	pigen_source_span origin =
+		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+
+	logic_one = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+	if (logic_one.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	/* The owner interns the (1, 1-bit-logic) identity once; a repeat is a memo
+	 * hit that publishes nothing new (idempotence). */
+	interned = pigen_const_expr_intern_integer(sem, 1, logic_one);
+	if (interned.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	if (lowering->lowered_expression_count > interned.index &&
+		lowering->lowered_expressions[interned.index].index !=
+		PIGEN_INVALID_ID)
+		return lowering->lowered_expressions[interned.index];
+	/* A 1-bit BITS literal (NOT an integer literal): the fire identity must
+	 * be a non-constant node to the shared-node gate. */
+	word = (pigen_rtl_literal_word){1, 0, 0};
+	lowered = pigen_rtl_expr_add_literal(lowering->rtl, PIGEN_RTL_EXPR_BITS,
+		pigen_lower_rtl_type(lowering, logic_one), &word, 1, 0, origin);
+	if (lowered.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	if (!expr_map_ensure(lowering, interned.index + 1) ||
+		lowering->lowered_expression_count <= interned.index ||
+		lowering->lowered_expressions[interned.index].index !=
+		PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	lowering->lowered_expressions[interned.index] = lowered;
+	return lowered;
+}
+
+/* Conjoin two 1-bit fire-identity terms into one memoized RTL expression: a
+ * single PIGEN_RTL_EXPR_BINARY (logical-and) whose two children are the two
+ * terms, so both terms remain reachable (and shared) in the published value
+ * trees. The conjunction's type is the 1-bit logic type. Returns an invalid
+ * identity on any failure. */
+static pigen_rtl_expr_id fire_and(pigen_rtl_lowering *lowering,
+	pigen_rtl_expr_id left, pigen_rtl_expr_id right)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_data_type_id logic_one;
+	pigen_rtl_type_id control_type;
+	pigen_binary_resolution resolution;
+	pigen_source_span origin =
+		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+
+	logic_one = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+	if (logic_one.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	control_type = pigen_lower_rtl_type(lowering, logic_one);
+	if (control_type.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	resolution = (pigen_binary_resolution){
+		{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
+		{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
+		{PIGEN_BINARY_LOGICAL_AND, logic_one, logic_one, logic_one}};
+	return pigen_rtl_expr_add_binary(rtl, control_type, &resolution, left,
+		right, origin);
+}
+
+/* Lower one canonical guard atom (a condition expression plus its expected
+ * bit) into its 1-bit fire-identity term: the lowered condition itself when
+ * the expected bit is false, otherwise a logical-equal of the lowered
+ * condition and the 1-bit "true" constant. The comparison's result type is the
+ * 1-bit logic type, so each term is 1-bit and can be conjoined. */
+static pigen_rtl_expr_id fire_atom(pigen_rtl_lowering *lowering,
+	const pigen_predicate_atom *atom)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_data_type_id logic_one;
+	pigen_rtl_type_id control_type;
+	pigen_rtl_expr_id condition;
+	pigen_rtl_expr_id expected;
+	pigen_binary_resolution resolution;
+	pigen_source_span origin =
+		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+
+	logic_one = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+	if (logic_one.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	control_type = pigen_lower_rtl_type(lowering, logic_one);
+	if (control_type.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	condition = lower_expr(lowering, atom->condition);
+	if (condition.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	expected = fire_bits_one(lowering);
+	if (expected.index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	if (!atom->expected)
+		return condition;
+	resolution = (pigen_binary_resolution){
+		{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
+		{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
+		{PIGEN_BINARY_EQUAL, logic_one, logic_one, logic_one}};
+	return pigen_rtl_expr_add_binary(rtl, control_type, &resolution,
+		condition, expected, origin);
+}
+
+/* Fire-identity memo: one entry per distinct (guard predicate, sorted signal
+ * use) signature lowered so far in this pigen_lower_rtl_transfers call, so two
+ * transfers that fire on the same identity share one lowered RTL node. The
+ * static array is reset at the start of each lowering call; a repeat of a key
+ * returns the memoized node. */
+#define PIGEN_FIRE_MEMO_MAX 256
+#define PIGEN_FIRE_USE_MAX 16
+struct pigen_fire_memo {
+	pigen_predicate_id guard;
+	size_t use_count;
+	pigen_signal_id uses[PIGEN_FIRE_USE_MAX];
+	unsigned roles[PIGEN_FIRE_USE_MAX];
+	pigen_rtl_expr_id identity;
+	int used;
+};
+static struct pigen_fire_memo fire_memo[PIGEN_FIRE_MEMO_MAX];
+static size_t fire_memo_count;
+
+static void fire_memo_reset(void)
+{
+	fire_memo_count = 0;
+}
+
+/* Build the transfer's fire identity: the memoized logical-and of its
+ * canonical guard atoms, its distinct consumer-valid dependencies and its
+ * distinct producer-ready dependencies. With no guard atoms and no signal uses
+ * the identity is the 1-bit "true" node (fire_bits_one). Returns an invalid
+ * identity on any failure. */
+static pigen_rtl_expr_id fire_identity_for_transfer(pigen_rtl_lowering *lowering,
+	const pigen_semantic_transfer *owner)
+{
+	const pigen_transfer_signal_use *uses;
+	const pigen_predicate *guard;
+	const pigen_predicate_atom *atoms;
+	pigen_rtl_expr_id identity;
+	size_t use_count;
+	size_t i;
+	size_t slot;
+
+	use_count = owner->signal_use_count;
+	uses = use_count ?
+		pigen_transfer_signal_uses(lowering->semantics,
+			(pigen_transfer_id){(size_t)(owner - lowering->semantics->transfers)})
+		: NULL;
+	if (use_count && !uses)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	guard = pigen_predicate_get(lowering->semantics, owner->guard);
+	if (!guard)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	atoms = guard->atom_count ?
+		pigen_predicate_atoms(lowering->semantics, owner->guard) : NULL;
+
+	/* Memo hit: return the already-lowered identity for this signature. */
+	for (slot = 0; slot < fire_memo_count; slot++)
+	{
+		const struct pigen_fire_memo *entry = &fire_memo[slot];
+		int match;
+
+		if (!entry->used || entry->guard.index != owner->guard.index ||
+			entry->use_count != use_count)
+			continue;
+		match = 1;
+		for (i = 0; i < use_count; i++)
+		{
+			if (entry->uses[i].index != uses[i].signal.index ||
+				entry->roles[i] != uses[i].roles)
+			{
+				match = 0;
+				break;
+			}
+		}
+		if (match)
+			return entry->identity;
+	}
+
+	/* The conjunction of the canonical guard atoms. */
+	identity = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	for (i = 0; i < guard->atom_count; i++)
+	{
+		pigen_rtl_expr_id term = fire_atom(lowering, &atoms[i]);
+
+		if (term.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		identity = identity.index == PIGEN_INVALID_ID ? term :
+			fire_and(lowering, identity, term);
+		if (identity.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	}
+	/* Conjoin the distinct consumer-valid dependencies. */
+	for (i = 0; i < use_count; i++)
+	{
+		const pigen_transfer_signal_use *use = &uses[i];
+		pigen_rtl_expr_id term;
+
+		if (!(use->roles & PIGEN_TRANSFER_CONSUMER))
+			continue;
+		if (lowering->lowered_endpoint_count <= use->signal.index ||
+			lowering->lowered_endpoints[use->signal.index].valid.index ==
+				PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		term = lowering->lowered_endpoints[use->signal.index].valid;
+		identity = identity.index == PIGEN_INVALID_ID ? term :
+			fire_and(lowering, identity, term);
+		if (identity.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	}
+	/* Conjoin the distinct producer-ready dependencies. */
+	for (i = 0; i < use_count; i++)
+	{
+		const pigen_transfer_signal_use *use = &uses[i];
+		pigen_rtl_expr_id term;
+
+		if (!(use->roles & PIGEN_TRANSFER_PRODUCER))
+			continue;
+		if (lowering->lowered_endpoint_count <= use->signal.index ||
+			lowering->lowered_endpoints[use->signal.index].ready.index ==
+				PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		term = lowering->lowered_endpoints[use->signal.index].ready;
+		identity = identity.index == PIGEN_INVALID_ID ? term :
+			fire_and(lowering, identity, term);
+		if (identity.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	}
+	/* No dependencies at all: the identity is the 1-bit "true" node. */
+	if (identity.index == PIGEN_INVALID_ID)
+		identity = fire_bits_one(lowering);
+	if (identity.index == PIGEN_INVALID_ID)
+		return identity;
+	/* Memoize for the duration of this lowering call. */
+	if (use_count <= PIGEN_FIRE_USE_MAX && fire_memo_count < PIGEN_FIRE_MEMO_MAX)
+	{
+		struct pigen_fire_memo *entry = &fire_memo[fire_memo_count++];
+
+		entry->used = 1;
+		entry->guard = owner->guard;
+		entry->use_count = use_count;
+		for (i = 0; i < use_count; i++)
+		{
+			entry->uses[i] = uses[i].signal;
+			entry->roles[i] = uses[i].roles;
+		}
+		entry->identity = identity;
+	}
+	return identity;
+}
+
 /* Task 8 stub: no lowering yet. The fire identity, the predicate-atom
  * conjunction, the lvalue/value lowering and the per-process publication all
  * arrive with the test-contract and implementation stages; this stub reports
@@ -884,6 +1362,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 {
 	(void)lowering;
 	(void)module;
+	(void)fire_identity_for_transfer; (void)fire_memo_reset;
 	return -1;
 }
 
