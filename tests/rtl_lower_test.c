@@ -4509,6 +4509,7 @@ int main(int argc, char **argv)
 			pigen_lvalue_id dest1, dest2;
 			pigen_expr_id val1, val2;
 			pigen_transfer_id tr1, tr2;
+			const pigen_rtl_update *upd1_d, *upd2_d;
 			int d_order;
 
 			pigen_semantic_init(&sem_d, &sources_d);
@@ -4584,15 +4585,39 @@ int main(int argc, char **argv)
 			REQUIRE(!IS_INVALID_ID(tr1) && !IS_INVALID_ID(tr2));
 			REQUIRE(pigen_lower_rtl_transfers(&lowering_d, module_d) == 0);
 			/* Two semantic processes lower to two RTL processes in arena
-			 * (addition) order, each owning its own updates: process1's
-			 * updates precede process2's and no update is shared. A
-			 * merged/single RTL process or reordered processes fails this. */
+			 * (addition) order, each owning exactly its own updates on its
+			 * own destination payload: process1's single update (dest d)
+			 * and process2's single update (dest e), nothing shared. A
+			 * merged/single RTL process, reordered processes or a
+			 * cross-process update fails this. */
 			d_order = (rtl_d.process_count == 2);
 			if (d_order) {
 				rtlp = pigen_rtl_process_get(&rtl_d,
 					(pigen_rtl_process_id){0});
-				if (rtlp && rtlp->updates.count == 0)
+				if (!rtlp || rtlp->updates.count != 1)
 					d_order = 0;
+				upd1_d = (rtlp && rtlp->updates.count == 1) ?
+					pigen_rtl_update_get(&rtl_d,
+						(pigen_rtl_update_id){rtlp->updates.first}) :
+					NULL;
+				d_order = d_order && upd1_d &&
+					upd1_d->destination.index ==
+						lowering_d.lowered_endpoints[d_sig_d.index]
+							.payload.index;
+			}
+			if (d_order) {
+				rtlp = pigen_rtl_process_get(&rtl_d,
+					(pigen_rtl_process_id){1});
+				if (!rtlp || rtlp->updates.count != 1)
+					d_order = 0;
+				upd2_d = (rtlp && rtlp->updates.count == 1) ?
+					pigen_rtl_update_get(&rtl_d,
+						(pigen_rtl_update_id){rtlp->updates.first}) :
+					NULL;
+				d_order = d_order && upd2_d &&
+					upd2_d->destination.index ==
+						lowering_d.lowered_endpoints[e_sig_d.index]
+							.payload.index;
 			}
 			REQUIRE(d_order);
 			pigen_rtl_lowering_free(&lowering_d);
