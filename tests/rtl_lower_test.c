@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "pigen/rtl_lower.h"
+#include "pigen/predicate.h"
 #include "pigen/semantic.h"
 #include "pigen/source.h"
 
@@ -4840,6 +4841,186 @@ int main(int argc, char **argv)
 				}
 			}
 			REQUIRE(m_processes);
+		}
+
+		/* (7) GUARD AND DEPENDENCY FIRE IDENTITY (RED): every witness so
+		 * far seeds its guard as the zero-atom predicate and passes NULL,
+		 * 0 signal uses to pigen_transfer_add, so the staged fire-identity
+		 * asserts pin only that the destination update and the source-ready
+		 * equation share one non-constant node. This witness closes that
+		 * escape: its guard is built through the owner predicate API as a
+		 * two-atom conjunction (g == 1 AND f == 0 - the expected-0 atom is
+		 * the negation) and its transfer carries five distinct (signal,
+		 * role) uses, making the guard-atom conjunction, the endpoint
+		 * valid/ready conjuncts and the (signal, role) dedup observable to
+		 * the assertion suite that follows. The witness is a fresh
+		 * one-process module: clock clk, destination payload d, guard
+		 * conditions g and f, consumer c and producer p; its single
+		 * transfer assigns the 1-bit constant 1 to d under the guard. */
+		{
+			const char *text_g =
+				"module guard : input clk : logic ; input d : logic ; "
+				"input g : logic ; input f : logic ; input c : logic ; "
+				"input p : logic ;\n";
+			pigen_source_manager sources_g = {0};
+			pigen_semantic_model sem_g;
+			pigen_rtl_model rtl_g = {0};
+			pigen_rtl_lowering lowering_g;
+			pigen_data_type_id td_g;
+			pigen_source_id source_g;
+			pigen_source_span whole_g, name_clk_g, name_d_g, name_g_g;
+			pigen_source_span name_f_g, name_c_g, name_p_g, proc_g;
+			pigen_source_span tr_g;
+			pigen_scope_id scope_g;
+			pigen_symbol_id mod_g, clk_g, d_g, g_g, f_g, c_g, p_g;
+			pigen_module_id module_g;
+			pigen_signal_id clk_sig_g, d_sig_g, g_sig_g, f_sig_g;
+			pigen_signal_id c_sig_g, p_sig_g;
+			pigen_clock_domain_id dom_g;
+			pigen_expr_id clk_e_g, val_g, g_e, f_e;
+			pigen_process_id proc_id_g;
+			pigen_lvalue_id dest_g;
+			pigen_predicate_id true_g, guard_g;
+			const pigen_predicate *guard_get;
+			const pigen_predicate_atom *guard_atoms;
+			pigen_transfer_signal_use uses_g[5];
+			pigen_transfer_id tr_id_g;
+			const pigen_semantic_transfer *tr_get;
+
+			pigen_semantic_init(&sem_g, &sources_g);
+			pigen_rtl_lowering_init(&lowering_g, &sem_g, &rtl_g);
+			td_g = pigen_data_type_sized_logic(&sem_g, 1, PIGEN_SIGN_UNSIGNED);
+			REQUIRE(!IS_INVALID_ID(td_g));
+			source_g = pigen_source_add(&sources_g, "lower_guard.pigen",
+				text_g, strlen(text_g));
+			REQUIRE(source_g.index != PIGEN_INVALID_ID);
+			whole_g = (pigen_source_span){source_g, 0, strlen(text_g)};
+			name_clk_g = (pigen_source_span){source_g, 21, 3};
+			name_d_g = (pigen_source_span){source_g, 41, 1};
+			name_g_g = (pigen_source_span){source_g, 59, 1};
+			name_f_g = (pigen_source_span){source_g, 77, 1};
+			name_c_g = (pigen_source_span){source_g, 95, 1};
+			name_p_g = (pigen_source_span){source_g, 113, 1};
+			proc_g = (pigen_source_span){source_g, 15, 124};
+			tr_g = (pigen_source_span){source_g, 35, 52};
+			sem_g.compilation_scope = pigen_scope_add(&sem_g,
+				(pigen_scope_id){PIGEN_INVALID_ID},
+				(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+			REQUIRE(pigen_symbol_declare(&sem_g, sem_g.compilation_scope,
+				PIGEN_SYMBOL_MODULE,
+				(pigen_data_type_id){PIGEN_INVALID_ID},
+				whole_g, whole_g, &mod_g, NULL) == PIGEN_DECLARE_OK);
+			scope_g = pigen_scope_add(&sem_g, sem_g.compilation_scope,
+				whole_g);
+			module_g = pigen_module_add(&sem_g, (pigen_syntax_id){1},
+				mod_g, scope_g, whole_g);
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_clk_g, name_clk_g,
+				&clk_g, NULL) == PIGEN_DECLARE_OK);
+			clk_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){2},
+				module_g, clk_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_clk_g);
+			(void)clk_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_d_g, name_d_g,
+				&d_g, NULL) == PIGEN_DECLARE_OK);
+			d_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){3},
+				module_g, d_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INTERNAL, name_d_g);
+			(void)d_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_g_g, name_g_g,
+				&g_g, NULL) == PIGEN_DECLARE_OK);
+			g_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){4},
+				module_g, g_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_g_g);
+			(void)g_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_f_g, name_f_g,
+				&f_g, NULL) == PIGEN_DECLARE_OK);
+			f_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){5},
+				module_g, f_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_f_g);
+			(void)f_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_c_g, name_c_g,
+				&c_g, NULL) == PIGEN_DECLARE_OK);
+			c_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){6},
+				module_g, c_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_c_g);
+			(void)c_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_p_g, name_p_g,
+				&p_g, NULL) == PIGEN_DECLARE_OK);
+			p_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){7},
+				module_g, p_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_p_g);
+			(void)p_sig_g;
+			dom_g = pigen_clock_domain_intern(&sem_g, clk_g,
+				PIGEN_SEMANTIC_POSEDGE);
+			clk_e_g = pigen_expr_add_symbol(&sem_g, clk_g, td_g,
+				name_clk_g);
+			proc_id_g = pigen_process_add(&sem_g, (pigen_syntax_id){8},
+				module_g, dom_g, clk_e_g, proc_g);
+			dest_g = pigen_lvalue_resolve(&sem_g,
+				pigen_expr_add_symbol(&sem_g, d_g, td_g, name_d_g));
+			val_g = pigen_expr_add_integer(&sem_g, 1, td_g, name_d_g);
+			/* The guard is built through the owner predicate API, not
+			 * seeded: true AND (g == 1) AND (f == 0). The expected-0
+			 * atom is the negation; the owner reports the two atoms in
+			 * condition-index order, g before f. */
+			true_g = pigen_predicate_true(&sem_g);
+			REQUIRE(!IS_INVALID_ID(true_g));
+			g_e = pigen_expr_add_symbol(&sem_g, g_g, td_g, name_g_g);
+			f_e = pigen_expr_add_symbol(&sem_g, f_g, td_g, name_f_g);
+			guard_g = pigen_predicate_and_condition(&sem_g, true_g, g_e, 1);
+			guard_g = pigen_predicate_and_condition(&sem_g, guard_g, f_e, 0);
+			REQUIRE(!IS_INVALID_ID(guard_g));
+			guard_get = pigen_predicate_get(&sem_g, guard_g);
+			REQUIRE(guard_get && guard_get->atom_count == 2 &&
+				!guard_get->impossible);
+			guard_atoms = pigen_predicate_atoms(&sem_g, guard_g);
+			REQUIRE(guard_atoms &&
+				guard_atoms[0].condition.index == g_e.index &&
+				guard_atoms[0].expected == 1 &&
+				guard_atoms[1].condition.index == f_e.index &&
+				guard_atoms[1].expected == 0);
+			/* Five distinct (signal, role) uses, no duplicates: the
+			 * destination payload d is both written and read, c is the
+			 * consumer, p the producer, and g and f are each read as
+			 * guard conditions. */
+			uses_g[0] = (pigen_transfer_signal_use){d_sig_g,
+				PIGEN_TRANSFER_SIGNAL_WRITE | PIGEN_TRANSFER_SIGNAL_READ};
+			uses_g[1] = (pigen_transfer_signal_use){c_sig_g,
+				PIGEN_TRANSFER_CONSUMER};
+			uses_g[2] = (pigen_transfer_signal_use){p_sig_g,
+				PIGEN_TRANSFER_PRODUCER};
+			uses_g[3] = (pigen_transfer_signal_use){g_sig_g,
+				PIGEN_TRANSFER_SIGNAL_READ};
+			uses_g[4] = (pigen_transfer_signal_use){f_sig_g,
+				PIGEN_TRANSFER_SIGNAL_READ};
+			tr_id_g = pigen_transfer_add(&sem_g, (pigen_syntax_id){9},
+				module_g, proc_id_g, dest_g, val_g, guard_g, dom_g,
+				uses_g, 5, tr_g);
+			REQUIRE(!IS_INVALID_ID(tr_id_g));
+			tr_get = pigen_transfer_get(&sem_g, tr_id_g);
+			REQUIRE(tr_get && tr_get->guard.index == guard_g.index &&
+				tr_get->signal_use_count == 5);
+			/* RED entry-point gate: the stubbed lowering rejects today;
+			 * this line runs only once the lowering lands, behind the
+			 * first deliberate red above. Nothing is asserted after it
+			 * in this child. */
+			REQUIRE(pigen_lower_rtl_transfers(&lowering_g, module_g) == 0);
+			pigen_rtl_lowering_free(&lowering_g);
+			pigen_free_rtl_model(&rtl_g);
+			pigen_free_semantic_model(&sem_g);
+			pigen_free_sources(&sources_g);
 		}
 
 		pigen_rtl_lowering_free(&lowering_t);
