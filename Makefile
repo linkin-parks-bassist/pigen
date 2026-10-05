@@ -63,7 +63,7 @@ rtl-name-test:
 	/tmp/pigen-rtl-name-test
 
 rtl-lower-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-rtl-lower-test tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c $(SEMANTIC_SOURCES) src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-rtl-lower-test tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
 	/tmp/pigen-rtl-lower-test $(T)
 
 fabric-test: pigen
