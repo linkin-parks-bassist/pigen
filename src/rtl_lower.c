@@ -29,6 +29,7 @@
  * context-dependent valid and ready control expressions, the input side
   * exposing the same three objects); the other realizations return the
   * unimplemented sentinel until their own implementation stages. */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1352,18 +1353,141 @@ static pigen_rtl_expr_id fire_identity_for_transfer(pigen_rtl_lowering *lowering
 	return identity;
 }
 
-/* Task 8 stub: no lowering yet. The fire identity, the predicate-atom
- * conjunction, the lvalue/value lowering and the per-process publication all
- * arrive with the test-contract and implementation stages; this stub reports
- * the unimplemented sentinel without touching the lowering maps or the RTL
- * model. */
 int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
-	(void)lowering;
-	(void)module;
-	(void)fire_identity_for_transfer; (void)fire_memo_reset;
-	return -1;
+	pigen_semantic_model *sem;
+	pigen_rtl_model *rtl;
+	pigen_rtl_module_id rtl_module;
+	pigen_process_id *processes;
+	size_t process_count;
+	size_t pi;
+
+	if (!lowering || !lowering->semantics || !lowering->rtl)
+		return -1;
+	sem = lowering->semantics;
+	rtl = lowering->rtl;
+	if (module.index == PIGEN_INVALID_ID ||
+		!pigen_module_get(sem, module))
+		return -1;
+	if (pigen_lower_rtl_module_declarations(lowering, module))
+		return -1;
+	fire_memo_reset();
+	rtl_module = rtl_module_for_semantic(rtl, module);
+	if (rtl_module.index == PIGEN_INVALID_ID)
+		return -1;
+	processes = pigen_module_processes(sem, module, &process_count);
+	if (!processes && process_count)
+		return -1;
+	for (pi = 0; pi < process_count; pi++)
+	{
+		const pigen_semantic_process *owner_process;
+		const pigen_semantic_clock_domain *owner_domain;
+		pigen_rtl_expr_id clock_expr;
+		pigen_transfer_id *transfers;
+		size_t transfer_count;
+		pigen_rtl_update_id *update_ids;
+		size_t update_count;
+		size_t ti;
+
+		owner_process = pigen_process_get(sem, processes[pi]);
+		if (!owner_process)
+			return -1;
+		owner_domain = pigen_clock_domain_get(sem, owner_process->domain);
+		if (!owner_domain)
+			return -1;
+		clock_expr = lower_expr(lowering, owner_process->clock);
+		fprintf(stderr, "DBG: process[%zu] clock_expr=%u\n", pi, clock_expr.index);
+		if (clock_expr.index == PIGEN_INVALID_ID)
+			return -1;
+		transfers = pigen_process_transfers(sem, processes[pi],
+			&transfer_count);
+		if (!transfers && transfer_count)
+			return -1;
+		if (transfer_count > SIZE_MAX / sizeof(*update_ids))
+			return -1;
+		update_ids = transfer_count ?
+			pigen_resize(NULL, transfer_count * sizeof(*update_ids)) : NULL;
+		if (!update_ids && transfer_count)
+			return -1;
+		update_count = 0;
+		for (ti = 0; ti < transfer_count; ti++)
+		{
+			const pigen_semantic_transfer *owner;
+			const pigen_semantic_lvalue *lval;
+			pigen_rtl_expr_id fire;
+			pigen_signal_id dest_signal;
+			pigen_rtl_object_id dest_payload;
+			pigen_rtl_object_id dest_input_ready;
+			pigen_rtl_update_id update_id;
+
+			owner = pigen_transfer_get(sem, transfers[ti]);
+			if (!owner)
+			{
+				free(update_ids);
+				return -1;
+			}
+			fire = fire_identity_for_transfer(lowering, owner);
+			fprintf(stderr, "DBG: t[%zu] fire=%u\n", ti, fire.index);
+			if (fire.index == PIGEN_INVALID_ID)
+			{
+				free(update_ids);
+				return -1;
+			}
+			lval = pigen_lvalue_get(sem, owner->destination);
+			fprintf(stderr, "DBG: t[%zu] lval=%p kind=%d\n", ti, (void*)lval, lval ? (int)lval->kind : -1);
+			if (!lval || lval->kind != PIGEN_LVALUE_PROJECTION)
+			{
+				free(update_ids);
+				return -1;
+			}
+			dest_signal = lval->as.projection.signal;
+			if (dest_signal.index == PIGEN_INVALID_ID ||
+				lowering->lowered_endpoint_count <= dest_signal.index ||
+				lowering->lowered_endpoints[dest_signal.index].payload.index ==
+					PIGEN_INVALID_ID)
+			{
+				free(update_ids);
+				return -1;
+			}
+			dest_payload =
+				lowering->lowered_endpoints[dest_signal.index].payload;
+			dest_input_ready =
+				lowering->lowered_endpoints[dest_signal.index].input_ready;
+			{
+				pigen_rtl_equation_id eq_id = pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+					dest_input_ready, fire, owner->span);
+				fprintf(stderr, "DBG: t[%zu] eq=%u dest_ready=%u\n", ti, eq_id.index, dest_input_ready.index);
+				if (eq_id.index == PIGEN_INVALID_ID)
+				{
+					free(update_ids);
+					return -1;
+				}
+			}
+			update_id = pigen_rtl_update_add_with_owner(rtl, rtl_module,
+				dest_payload, fire, owner->span);
+			fprintf(stderr, "DBG: t[%zu] upd=%u dest_payload=%u\n", ti, update_id.index, dest_payload.index);
+			if (update_id.index == PIGEN_INVALID_ID)
+			{
+				free(update_ids);
+				return -1;
+			}
+			update_ids[update_count++] = update_id;
+		}
+		{
+			pigen_rtl_process_id proc_id = pigen_rtl_process_add_with_owner(rtl, rtl_module, clock_expr,
+				owner_domain->edge, update_ids, update_count,
+				owner_process->span);
+			fprintf(stderr, "DBG: process[%zu] proc=%u clock=%u edge=%d updates=%zu\n", pi, proc_id.index, clock_expr.index, (int)owner_domain->edge, update_count);
+			if (proc_id.index == PIGEN_INVALID_ID)
+			{
+				free(update_ids);
+				return -1;
+			}
+		}
+		free(update_ids);
+	}
+	return 0;
 }
 
 /* Task 8 stub: no module composition yet. The pigen_rtl_module_add_with_owner
