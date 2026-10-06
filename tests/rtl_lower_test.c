@@ -4949,12 +4949,12 @@ int main(int argc, char **argv)
 				text_g, strlen(text_g));
 			REQUIRE(source_g.index != PIGEN_INVALID_ID);
 			whole_g = (pigen_source_span){source_g, 0, strlen(text_g)};
-			name_clk_g = (pigen_source_span){source_g, 21, 3};
-			name_d_g = (pigen_source_span){source_g, 41, 1};
-			name_g_g = (pigen_source_span){source_g, 59, 1};
-			name_f_g = (pigen_source_span){source_g, 77, 1};
-			name_c_g = (pigen_source_span){source_g, 95, 1};
-			name_p_g = (pigen_source_span){source_g, 113, 1};
+			name_clk_g = (pigen_source_span){source_g, 21, 24};
+			name_d_g = (pigen_source_span){source_g, 41, 42};
+			name_g_g = (pigen_source_span){source_g, 59, 60};
+			name_f_g = (pigen_source_span){source_g, 77, 78};
+			name_c_g = (pigen_source_span){source_g, 95, 96};
+			name_p_g = (pigen_source_span){source_g, 113, 114};
 			proc_g = (pigen_source_span){source_g, 15, 124};
 			tr_g = (pigen_source_span){source_g, 35, 52};
 			sem_g.compilation_scope = pigen_scope_add(&sem_g,
