@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-06T14:22:08+11:00"
+revised_at: "2026-10-07T08:22:52+11:00"
 ---
 
 The structured frontend and elastic RTL work remain incomplete. Passing focused tests do not establish full compiler acceptance.
@@ -10,5 +10,5 @@ The structured frontend and elastic RTL work remain incomplete. Passing focused 
 - **The elastic RTL vertical slice is incomplete.** Task 6 declaration lowering is complete, but the vertical slice's atomic fire, ready graph, ordered output, SV emission, quarantined composition and verification (Tasks 8-12) remain unimplemented. The declaration-lowering contract and evidence are owned by `what/is/elastic/rtl/task/six.md`; the remaining vertical-slice steps, in order, by `what/is/the/plan.md`.
 - **Plain pigen_rtl_module_add leaves the new record partly uninitialized.** src/rtl.c's pigen_rtl_module_add sets only record->origin; semantic_module and the objects/instances/equations/processes owner ranges stay uninitialized, unlike pigen_rtl_module_add_with_owner which initializes every field. Any owner-tagged add (e.g. pigen_rtl_object_add_with_owner) under such a module reads the uninitialized owner range, so acceptance is nondeterministic. No production caller exists today (only tests/rtl_test.c uses the plain form); declaration lowering adds RTL modules through the with-owner constructor.
 - **Structured frontend is unlinked from production ./pigen.** The production Makefile target still compiles the textual prototype rather than the structured syntax, resolution, semantic and RTL path. See does/the/structured/frontend/run/in/production.md.
-- **Retained-subsystem migration and frontend gaps.** Core, pipeline, FSM, child-instance and fabric migration remains subject to what/are/the/remaining/architecture/migration/gates.md. Accepted parameter/type/aggregate/array/expression forms and macro concatenation/stringification/required arguments remain incomplete. Delete textual machinery only when the corresponding retained subsystem uses the structured path.
+- **Retained-subsystem build and frontend gaps.** Core, pipeline, FSM, child-instance and fabric are specified from the spec and built on the structured path, subject to what/are/the/remaining/architecture/migration/gates.md. Accepted parameter/type/aggregate/array/expression forms and macro concatenation/stringification/required arguments remain incomplete. Delete textual machinery only when the corresponding retained subsystem's structured path covers the spec.
 - **`make verify` passes but does not fail on lint warnings.** With Verilator 5.020 and Icarus 13.0 installed, `make verify` exits 0 (checked 2026-10-03). Its Verilator lint runs with `-Wno-fatal`, so width warnings such as the co-slice truncation above pass silently.
