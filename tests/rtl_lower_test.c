@@ -126,6 +126,60 @@ static int rtest_shares_nonconst(const pigen_rtl_model *model,
 	return found;
 }
 
+/* Count the DISTINCT expression identities reachable from one RTL
+ * expression root (the root itself plus every descendant, in the model's
+ * child links) whose record has the given kind. When operand is a valid
+ * identity, only nodes that match it are counted - the node's own identity
+ * equals it (a childless control leaf), or its first child equals it (the
+ * negation wrapper); when it is invalid, no operand test is applied.
+ * Recursion is identity-based through the model's child links: a node
+ * referenced twice from the same tree is counted once, so the probe reports
+ * the deduplicated conjunction shape. Returns 0 when the root is invalid or
+ * the model holds no such record. */
+static int rtest_count_reachable_kind(const pigen_rtl_model *model,
+	pigen_rtl_expr_id root, pigen_rtl_expr_kind kind,
+	pigen_rtl_expr_id operand)
+{
+	int *seen;
+	const pigen_rtl_expr_id *children;
+	const pigen_rtl_expr *record;
+	size_t capacity;
+	size_t child_count;
+	size_t i;
+	int total = 0;
+
+	if (IS_INVALID_ID(root) || root.index >= model->expression_count)
+		return 0;
+	capacity = model->expression_count + 1;
+	seen = calloc(capacity, sizeof(*seen));
+	if (!seen)
+		return 0;
+	if (seen[root.index]) {
+		free(seen);
+		return 0;
+	}
+	seen[root.index] = 1;
+	record = pigen_rtl_expr_get(model, root);
+	if (record && record->kind == kind) {
+		if (IS_INVALID_ID(operand))
+			total++;
+		else if (root.index == operand.index)
+			total++;
+		else if (record->child_count >= 1) {
+			children = pigen_rtl_expr_children(model, root,
+				&child_count);
+			if (children && children[0].index == operand.index)
+				total++;
+		}
+	}
+	children = pigen_rtl_expr_children(model, root, &child_count);
+	for (i = 0; i < child_count; i++)
+		total += rtest_count_reachable_kind(model, children[i], kind,
+			operand);
+	free(seen);
+	return total;
+}
+
 int main(int argc, char **argv)
 {
 	pigen_source_manager sources = {0};
@@ -5017,6 +5071,269 @@ int main(int argc, char **argv)
 			 * first deliberate red above. Nothing is asserted after it
 			 * in this child. */
 			REQUIRE(pigen_lower_rtl_transfers(&lowering_g, module_g) == 0);
+
+			/* The guard-atom and endpoint-conjunct assertions (7.1)-(7.6)
+			 * pin the escape this witness exposes: its guard is the
+			 * two-atom conjunction (g == 1 AND f == 0, the expected-0 atom
+			 * the negation) and its transfer carries five distinct
+			 * (signal, role) uses, so the shared fire identity must be the
+			 * memoized conjunction of the two lowered guard atoms, the
+			 * consumer-valid and producer-ready endpoint controls and
+			 * nothing else. Staged RED behind the first deliberate red
+			 * above; nothing here may add a second failure point. */
+			{
+				const pigen_semantic_transfer *tr_g_get;
+				const pigen_transfer_signal_use *tr_g_uses;
+				const pigen_rtl_update *upd_g;
+				const pigen_rtl_equation *eq_g;
+				pigen_rtl_expr_id upd_val_g;
+				pigen_rtl_expr_id rdy_val_g;
+				int *seen_u_g;
+				int *seen_r_g;
+				pigen_rtl_expr_id *arena_u_g;
+				pigen_rtl_expr_id *arena_r_g;
+				size_t cap_g;
+				size_t u_cnt_g = 0;
+				size_t r_cnt_g = 0;
+				pigen_rtl_expr_id g_fire_g;
+				pigen_rtl_expr_id g_neg_g;
+				const pigen_rtl_expr *fire_rec_g;
+				size_t fire_cc_g;
+				const pigen_rtl_expr_id *fire_ch_g;
+				size_t i;
+
+				/* (7.1) Locate the transfer's single destination update and
+				 * its single source-ready equation by endpoint identity and
+				 * REQUIRE both carry a valid value: the entry contract
+				 * publishes the fire identity on exactly these two records.
+				 * A missing or empty record fails here, before any tree
+				 * probe. */
+				tr_g_get = pigen_transfer_get(&sem_g, tr_id_g);
+				tr_g_uses = pigen_transfer_signal_uses(&sem_g, tr_id_g);
+				REQUIRE(tr_g_get && tr_g_uses);
+				upd_val_g = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				rdy_val_g = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				for (i = 0; i < rtl_g.update_count; i++) {
+					upd_g = pigen_rtl_update_get(&rtl_g,
+						(pigen_rtl_update_id){(uint32_t)i});
+					if (upd_g &&
+						upd_g->destination.index ==
+							lowering_g.lowered_endpoints
+								[d_sig_g.index].payload.index) {
+						upd_val_g = upd_g->value;
+						break;
+					}
+				}
+				for (i = 0; i < rtl_g.equation_count; i++) {
+					eq_g = pigen_rtl_equation_get(&rtl_g,
+						(pigen_rtl_equation_id){(uint32_t)i});
+					if (eq_g &&
+						eq_g->destination.index ==
+							lowering_g.lowered_endpoints
+								[d_sig_g.index].input_ready.index) {
+						rdy_val_g = eq_g->value;
+						break;
+					}
+				}
+				REQUIRE(!IS_INVALID_ID(upd_val_g) &&
+					!IS_INVALID_ID(rdy_val_g));
+
+				/* (7.2) The update value and the ready value share one
+				 * non-constant fire-identity node (the family (1) check):
+				 * a re-lowered copy leaves no shared non-constant node. */
+				REQUIRE(rtest_shares_nonconst(&rtl_g, upd_val_g,
+					rdy_val_g));
+
+				/* Collect the distinct reachable node sets once, from both
+				 * roots, with the file-local collector and an arena sized
+				 * to the model's expression count: the endpoint-conjunct,
+				 * guard-atom and dedup probes below all test membership
+				 * against these two identity sets. */
+				cap_g = rtl_g.expression_count + 1;
+				seen_u_g = calloc(cap_g, sizeof(*seen_u_g));
+				seen_r_g = calloc(cap_g, sizeof(*seen_r_g));
+				arena_u_g = malloc(cap_g * sizeof(*arena_u_g));
+				arena_r_g = malloc(cap_g * sizeof(*arena_r_g));
+				REQUIRE(seen_u_g && seen_r_g && arena_u_g && arena_r_g);
+				REQUIRE(rtest_collect_exprs(&rtl_g, upd_val_g, seen_u_g,
+					arena_u_g, cap_g, &u_cnt_g) &&
+					rtest_collect_exprs(&rtl_g, rdy_val_g, seen_r_g,
+					arena_r_g, cap_g, &r_cnt_g));
+
+				/* (7.3) Endpoint conjuncts: for EVERY distinct signal use
+				 * the endpoint control the use contributes must be a
+				 * reachable identity in BOTH sets - c's valid control for
+				 * the consumer use, p's ready control for the producer
+				 * use. A fire identity that forgets one endpoint control,
+				 * or reaches it from only one side, fails here. */
+				for (i = 0; i < tr_g_get->signal_use_count; i++) {
+					pigen_rtl_expr_id ctl_g =
+						(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+					int have_u = 0;
+					int have_r = 0;
+					size_t k;
+
+					if (tr_g_uses[i].roles & PIGEN_TRANSFER_CONSUMER)
+						ctl_g = lowering_g.lowered_endpoints
+							[tr_g_uses[i].signal.index].valid;
+					if (tr_g_uses[i].roles & PIGEN_TRANSFER_PRODUCER)
+						ctl_g = lowering_g.lowered_endpoints
+							[tr_g_uses[i].signal.index].ready;
+					if (IS_INVALID_ID(ctl_g))
+						continue;
+					for (k = 0; k < u_cnt_g; k++)
+						if (arena_u_g[k].index == ctl_g.index)
+							have_u = 1;
+					for (k = 0; k < r_cnt_g; k++)
+						if (arena_r_g[k].index == ctl_g.index)
+							have_r = 1;
+					REQUIRE(have_u && have_r);
+				}
+
+				/* (7.4) Guard-atom coverage: EACH canonical atom's
+				 * condition lowers to an identity reachable from BOTH
+				 * sets; ADDITIONALLY both sets contain a UNARY node
+				 * wrapping the f-condition (expected 0) lowered identity -
+				 * the negation - while the g-condition (expected 1)
+				 * identity is present with no such negation requirement.
+				 * A fire identity that drops an atom, or passes the
+				 * expected-0 atom through un-negated, fails here. */
+				for (i = 0; i < guard_get->atom_count; i++) {
+					pigen_rtl_expr_id atom_lo_g;
+					int have_u = 0;
+					int have_r = 0;
+					size_t k;
+
+					atom_lo_g = lowering_g.lowered_expressions
+						[guard_atoms[i].condition.index];
+					for (k = 0; k < u_cnt_g; k++)
+						if (arena_u_g[k].index == atom_lo_g.index)
+							have_u = 1;
+					for (k = 0; k < r_cnt_g; k++)
+						if (arena_r_g[k].index == atom_lo_g.index)
+							have_r = 1;
+					REQUIRE(!IS_INVALID_ID(atom_lo_g) && have_u &&
+						have_r);
+				}
+				g_neg_g = lowering_g.lowered_expressions[f_e.index];
+				REQUIRE(!IS_INVALID_ID(g_neg_g));
+				REQUIRE(rtest_count_reachable_kind(&rtl_g, upd_val_g,
+					PIGEN_RTL_EXPR_UNARY, g_neg_g) >= 1);
+				REQUIRE(rtest_count_reachable_kind(&rtl_g, rdy_val_g,
+					PIGEN_RTL_EXPR_UNARY, g_neg_g) >= 1);
+				REQUIRE(rtest_count_reachable_kind(&rtl_g, upd_val_g,
+					PIGEN_RTL_EXPR_BINARY, g_neg_g) == 0);
+				REQUIRE(rtest_count_reachable_kind(&rtl_g, rdy_val_g,
+					PIGEN_RTL_EXPR_BINARY, g_neg_g) == 0);
+
+				/* (7.5) Endpoint-control dedup: the identity set contains
+				 * c's valid control EXACTLY once and p's ready control
+				 * EXACTLY once in each set - the one CONSUMER and the one
+				 * PRODUCER use contribute their endpoint control once, not
+				 * per occurrence, per side. A per-occurrence re-lowering
+				 * (one conjunct copy per use, per side) inflates the count
+				 * and fails here. The control is the constant literal the
+				 * declaration lowering published, so a set that reaches the
+				 * VALUE without the control identity (a re-interned copy)
+				 * also fails. */
+				REQUIRE(pigen_rtl_expr_get(&rtl_g,
+					lowering_g.lowered_endpoints[c_sig_g.index].valid)
+					&& pigen_rtl_expr_get(&rtl_g,
+					lowering_g.lowered_endpoints[c_sig_g.index].valid)
+					->kind == PIGEN_RTL_EXPR_INTEGER);
+				REQUIRE(pigen_rtl_expr_get(&rtl_g,
+					lowering_g.lowered_endpoints[p_sig_g.index].ready)
+					&& pigen_rtl_expr_get(&rtl_g,
+					lowering_g.lowered_endpoints[p_sig_g.index].ready)
+					->kind == PIGEN_RTL_EXPR_INTEGER);
+				REQUIRE(rtest_count_reachable_kind(&rtl_g, upd_val_g,
+					PIGEN_RTL_EXPR_INTEGER, lowering_g.lowered_endpoints
+						[c_sig_g.index].valid) == 1);
+				REQUIRE(rtest_count_reachable_kind(&rtl_g, rdy_val_g,
+					PIGEN_RTL_EXPR_INTEGER, lowering_g.lowered_endpoints
+						[c_sig_g.index].valid) == 1);
+				REQUIRE(rtest_count_reachable_kind(&rtl_g, upd_val_g,
+					PIGEN_RTL_EXPR_INTEGER, lowering_g.lowered_endpoints
+						[p_sig_g.index].ready) == 1);
+				REQUIRE(rtest_count_reachable_kind(&rtl_g, rdy_val_g,
+					PIGEN_RTL_EXPR_INTEGER, lowering_g.lowered_endpoints
+						[p_sig_g.index].ready) == 1);
+
+				/* (7.6) Conjunction shape: the shared fire-identity node
+				 * itself - the ready equation's value per the entry
+				 * contract, else the deepest common non-INTEGER ancestor
+				 * of the two reachable sets - is a two-child logical AND,
+				 * not a bare atom or a constant. The two sides of the
+				 * conjunction are the guard-atom branch and the
+				 * endpoint-control branch: each side must itself reach
+				 * the g-condition (expected 1) lowered identity and the
+				 * consumer-valid control. A fire identity that is a bare
+				 * atom, a constant, or a re-association that loses an
+				 * operand fails here. */
+				g_fire_g = rdy_val_g;
+				if (IS_INVALID_ID(g_fire_g) ||
+					(pigen_rtl_expr_get(&rtl_g, g_fire_g)->kind
+						== PIGEN_RTL_EXPR_INTEGER)) {
+					g_fire_g = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+					for (i = 0; i < u_cnt_g; i++) {
+						pigen_rtl_expr_id cand_g = arena_u_g[i];
+						int in_r_g = 0;
+						size_t k;
+
+						for (k = 0; k < r_cnt_g; k++)
+							if (arena_r_g[k].index ==
+								cand_g.index)
+								in_r_g = 1;
+						if (in_r_g &&
+							pigen_rtl_expr_get(&rtl_g, cand_g)->
+							kind != PIGEN_RTL_EXPR_INTEGER)
+							g_fire_g = cand_g;
+					}
+				}
+				fire_rec_g = pigen_rtl_expr_get(&rtl_g, g_fire_g);
+				REQUIRE(fire_rec_g &&
+					fire_rec_g->kind == PIGEN_RTL_EXPR_BINARY &&
+					fire_rec_g->child_count == 2 &&
+					fire_rec_g->as.binary.resolution.operation
+						.operator == PIGEN_BINARY_LOGICAL_AND);
+				fire_ch_g = pigen_rtl_expr_children(&rtl_g, g_fire_g,
+					&fire_cc_g);
+				REQUIRE(fire_ch_g && fire_cc_g == 2);
+				for (i = 0; i < fire_cc_g; i++) {
+					int *seen_s_g;
+					pigen_rtl_expr_id *arena_s_g;
+					size_t s_cnt_g = 0;
+					int have_atom = 0;
+					int have_ctl = 0;
+					pigen_rtl_expr_id atom_lo_g;
+					pigen_rtl_expr_id ctl_g;
+					size_t k;
+
+					seen_s_g = calloc(cap_g, sizeof(*seen_s_g));
+					arena_s_g = malloc(cap_g * sizeof(*arena_s_g));
+					REQUIRE(seen_s_g && arena_s_g);
+					REQUIRE(rtest_collect_exprs(&rtl_g, fire_ch_g[i],
+						seen_s_g, arena_s_g, cap_g, &s_cnt_g));
+					atom_lo_g = lowering_g.lowered_expressions
+						[g_e.index];
+					ctl_g = lowering_g.lowered_endpoints
+						[c_sig_g.index].valid;
+					for (k = 0; k < s_cnt_g; k++) {
+						if (arena_s_g[k].index == atom_lo_g.index)
+							have_atom = 1;
+						if (arena_s_g[k].index == ctl_g.index)
+							have_ctl = 1;
+					}
+					REQUIRE(have_atom && have_ctl);
+					free(seen_s_g);
+					free(arena_s_g);
+				}
+
+				free(seen_u_g);
+				free(seen_r_g);
+				free(arena_u_g);
+				free(arena_r_g);
+			}
 			pigen_rtl_lowering_free(&lowering_g);
 			pigen_free_rtl_model(&rtl_g);
 			pigen_free_semantic_model(&sem_g);
