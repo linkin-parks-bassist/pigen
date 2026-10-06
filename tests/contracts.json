@@ -136,7 +136,67 @@
   },
   {
     "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
-    "command": ["make", "rtl-lower-test"]
+    "command": ["make", "rtl-lower-test", "T=t5-skeleton"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t5-type-lowering"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t5-expression-lowering"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t5-constant-identity"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t5-error-reporting"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t5-memoization"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t6-boundary"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t6-net-variable-payload"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t6-net-variable-controls"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t6-net-variable-counts"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t6-storage-matrix"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t6-storage-instances"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t6-storage-fifo-depth"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t6-storage-counts"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-accessor"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t5-teardown"]
   },
   {
     "covers": [
