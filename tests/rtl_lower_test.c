@@ -3998,6 +3998,379 @@ int main(int argc, char **argv)
 		pigen_free_sources(&sources_t);
 	}
 
+	/* Task 8 module-composition gate family, its own section. The section
+	 * builds its own isolated base witness (module "top" with clock clk and
+	 * data signals d and e, one base process that owns two transfers - the
+	 * first with destination d, the second with destination e - and a second,
+	 * empty process), lowers the transfers through
+	 * pigen_lower_rtl_transfers (which must report 0 first), then composes the
+	 * module with pigen_lower_rtl_module and requires that the entry point
+	 * returns a valid module identity (the invalid return is the owner's
+	 * rejection path only) and that the published record's object, instance,
+	 * equation and process ranges cover exactly the records published for the
+	 * witness, in arena order. RED until module composition lands: today the
+	 * stubbed pigen_lower_rtl_module returns PIGEN_INVALID_ID, so the section
+	 * fails at REQUIRE(!IS_INVALID_ID(composed)). */
+	SECTION("t8-module") {
+		const char *text =
+			"module top : input clk : logic ; input d : logic ; input e : logic ;\n";
+		pigen_source_manager sources_t = {0};
+		pigen_semantic_model sem_t;
+		pigen_rtl_model rtl_t = {0};
+		pigen_rtl_lowering lowering_t;
+		pigen_data_type_id t1;
+		pigen_const_expr_id width1;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_clk;
+		pigen_source_span name_d;
+		pigen_source_span name_e;
+		pigen_source_span process_span;
+		pigen_source_span process_span2;
+		pigen_source_span transfer_span;
+		pigen_source_span transfer_span2;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id clk_symbol;
+		pigen_symbol_id d_symbol;
+		pigen_symbol_id e_symbol;
+		pigen_module_id module;
+		pigen_signal_id clk;
+		pigen_signal_id d;
+		pigen_signal_id e;
+		pigen_clock_domain_id domain;
+		pigen_expr_id clk_expr;
+		pigen_process_id process;
+		pigen_process_id process2;
+		pigen_lvalue_id dest;
+		pigen_lvalue_id dest2;
+		pigen_expr_id value;
+		pigen_expr_id value2;
+		pigen_transfer_id transfer;
+		pigen_transfer_id transfer2;
+		size_t i, j;
+
+		/* Build the witness through the owner APIs: a 1-bit data type, a
+		 * source file, the compilation scope, a module, the declared clock and
+		 * data signals d and e, the base process (clock expression whose span
+		 * the process span contains), the first transfer with destination d,
+		 * a second empty process, and a second transfer on the base process
+		 * with destination e, added after the first so the arena (addition)
+		 * order is [first, second]. A one-atom true guard is seeded directly
+		 * in the predicate arena. */
+		pigen_semantic_init(&sem_t, &sources_t);
+		pigen_rtl_lowering_init(&lowering_t, &sem_t, &rtl_t);
+		width1 = pigen_const_expr_intern_integer(&sem_t, 1,
+			pigen_data_type_unsized_integer(&sem_t));
+		t1 = pigen_data_type_sized_logic(&sem_t, 1, PIGEN_SIGN_UNSIGNED);
+		REQUIRE(!IS_INVALID_ID(width1) && !IS_INVALID_ID(t1));
+		source = pigen_source_add(&sources_t, "lower_module.pigen",
+			text, strlen(text));
+		REQUIRE(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_clk = (pigen_source_span){source, 19, 22}; /* "clk" */
+		name_d = (pigen_source_span){source, 39, 40}; /* "d" */
+		name_e = (pigen_source_span){source, 57, 58}; /* "e" */
+		process_span = (pigen_source_span){source, 13, 40};
+		process_span2 = (pigen_source_span){source, 13, 60};
+		transfer_span = (pigen_source_span){source, 33, 40};
+		transfer_span2 = (pigen_source_span){source, 33, 40};
+		sem_t.compilation_scope = pigen_scope_add(&sem_t,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		REQUIRE(sem_t.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, sem_t.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_t, sem_t.compilation_scope, whole);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_t, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_clk, name_clk, &clk_symbol, NULL) ==
+			PIGEN_DECLARE_OK);
+		clk = pigen_signal_add(&sem_t, (pigen_syntax_id){2}, module,
+			clk_symbol, t1, pigen_semantic_scalar_shape(&sem_t),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INPUT, name_clk);
+		REQUIRE(clk.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_d, name_d, &d_symbol, NULL) == PIGEN_DECLARE_OK);
+		d = pigen_signal_add(&sem_t, (pigen_syntax_id){3}, module,
+			d_symbol, t1, pigen_semantic_scalar_shape(&sem_t),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INTERNAL, name_d);
+		REQUIRE(d.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_e, name_e, &e_symbol, NULL) == PIGEN_DECLARE_OK);
+		e = pigen_signal_add(&sem_t, (pigen_syntax_id){7}, module,
+			e_symbol, t1, pigen_semantic_scalar_shape(&sem_t),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INTERNAL, name_e);
+		REQUIRE(e.index != PIGEN_INVALID_ID);
+		domain = pigen_clock_domain_intern(&sem_t, clk_symbol,
+			PIGEN_SEMANTIC_POSEDGE);
+		REQUIRE(!IS_INVALID_ID(domain));
+		clk_expr = pigen_expr_add_symbol(&sem_t, clk_symbol, t1, name_clk);
+		REQUIRE(!IS_INVALID_ID(clk_expr));
+		process = pigen_process_add(&sem_t, (pigen_syntax_id){4}, module,
+			domain, clk_expr, process_span);
+		REQUIRE(!IS_INVALID_ID(process));
+		dest = pigen_lvalue_resolve(&sem_t,
+			pigen_expr_add_symbol(&sem_t, d_symbol, t1, name_d));
+		REQUIRE(!IS_INVALID_ID(dest));
+		value = pigen_expr_add_integer(&sem_t, 1, t1, name_d);
+		REQUIRE(!IS_INVALID_ID(value));
+		sem_t.predicates = malloc(sizeof(*sem_t.predicates));
+		REQUIRE(sem_t.predicates);
+		sem_t.predicates[0] = (pigen_predicate){0};
+		sem_t.predicate_count = 1;
+		sem_t.predicate_capacity = 1;
+		transfer = pigen_transfer_add(&sem_t, (pigen_syntax_id){5}, module,
+			process, dest, value, (pigen_predicate_id){0}, domain,
+			NULL, 0, transfer_span);
+		REQUIRE(!IS_INVALID_ID(transfer));
+		process2 = pigen_process_add(&sem_t, (pigen_syntax_id){6}, module,
+			domain, clk_expr, process_span2);
+		REQUIRE(!IS_INVALID_ID(process2));
+		dest2 = pigen_lvalue_resolve(&sem_t,
+			pigen_expr_add_symbol(&sem_t, e_symbol, t1, name_e));
+		REQUIRE(!IS_INVALID_ID(dest2));
+		value2 = pigen_expr_add_integer(&sem_t, 1, t1, name_e);
+		REQUIRE(!IS_INVALID_ID(value2));
+		transfer2 = pigen_transfer_add(&sem_t, (pigen_syntax_id){8}, module,
+			process, dest2, value2, (pigen_predicate_id){0}, domain,
+			NULL, 0, transfer_span2);
+		REQUIRE(!IS_INVALID_ID(transfer2));
+
+		/* The base witness's transfers lower first: the entry point must
+		 * report 0 before the module is composed. */
+		REQUIRE(pigen_lower_rtl_transfers(&lowering_t, module) == 0);
+
+		/* (6) MODULE COMPOSITION (RED): after the base witness's transfers
+		 * have lowered, composing the module publishes its module record - the
+		 * entry point returns a valid module identity (the invalid return is
+		 * the owner's rejection path only) and the published record's
+		 * object/instance/equation/process ranges cover exactly the records
+		 * published for the witness, in arena order: the destination payload
+		 * objects through their declaration endpoints, the source-ready
+		 * equations on the input-ready endpoints, and one RTL process per
+		 * semantic process with its own updates. The witness is the base
+		 * witness module: two processes (the base process owns both
+		 * transfers, the second owns none). Per how/should/compiler/builders/
+		 * fail.md the failure path may leave partial state behind; nothing
+		 * below asserts that a failed composition left the model or the maps
+		 * unchanged. */
+		{
+			pigen_rtl_module_id composed;
+			const pigen_rtl_module *composed_get;
+			const pigen_rtl_object *comp_obj;
+			const pigen_rtl_instance *comp_inst;
+			const pigen_rtl_equation *comp_eq;
+			const pigen_rtl_process *comp_proc;
+			const pigen_process_id *comp_sem_processes;
+			const pigen_transfer_id *comp_sem_transfers;
+			size_t comp_sem_process_count;
+			size_t comp_sem_transfer_count;
+			int m_objects, m_instances, m_equations, m_processes;
+
+			composed = pigen_lower_rtl_module(&lowering_t, module);
+			REQUIRE(!IS_INVALID_ID(composed));
+			composed_get = pigen_rtl_module_get(&rtl_t, composed);
+			REQUIRE(composed_get);
+			/* OBJECTS: the composed range covers exactly the objects published
+			 * for the witness module - no record escapes the range and no
+			 * foreign record enters it. Every destination update and
+			 * source-ready equation targets its signal's published payload
+			 * object, so the endpoint payloads d and e must both sit in the
+			 * range, and every object in the range is this module's. */
+			m_objects = 1;
+			for (i = composed_get->objects.first; i < composed_get->objects.first +
+				composed_get->objects.count && m_objects; i++) {
+				comp_obj = pigen_rtl_object_get(&rtl_t,
+					(pigen_rtl_object_id){(uint32_t)i});
+				if (!comp_obj ||
+					comp_obj->module.index != composed.index)
+					m_objects = 0;
+			}
+			if (!IS_INVALID_ID(lowering_t.lowered_endpoints[d.index]
+					.payload) &&
+				!IS_INVALID_ID(lowering_t.lowered_endpoints[e.index]
+					.payload)) {
+				m_objects &= composed_get->objects.count >= 2 &&
+					composed_get->objects.first <=
+						lowering_t.lowered_endpoints[d.index]
+							.payload.index &&
+					lowering_t.lowered_endpoints[d.index].payload.index <
+						composed_get->objects.first +
+							composed_get->objects.count &&
+					composed_get->objects.first <=
+						lowering_t.lowered_endpoints[e.index]
+							.payload.index &&
+					lowering_t.lowered_endpoints[e.index].payload.index <
+						composed_get->objects.first +
+							composed_get->objects.count;
+			}
+			REQUIRE(m_objects);
+			/* INSTANCES: the composed range holds only this module's
+			 * instances. The witness declares no storage, so the range is
+			 * empty today; a foreign or unowned instance in the range fails
+			 * this. */
+			m_instances = 1;
+			for (i = composed_get->instances.first;
+				i < composed_get->instances.first +
+					composed_get->instances.count && m_instances; i++) {
+				comp_inst = pigen_rtl_instance_get(&rtl_t,
+					(pigen_rtl_instance_id){(uint32_t)i});
+				if (!comp_inst ||
+					comp_inst->module.index != composed.index)
+					m_instances = 0;
+			}
+			REQUIRE(m_instances);
+			/* EQUATIONS: the composed range covers exactly the equations
+			 * published for the witness module - including the source-ready
+			 * equations on the input-ready endpoints of d and e - and every
+			 * equation in the range is this module's. A ready equation left
+			 * out of the range (or a foreign one in it) fails this. */
+			m_equations = 1;
+			for (i = composed_get->equations.first;
+				i < composed_get->equations.first +
+					composed_get->equations.count && m_equations; i++) {
+				comp_eq = pigen_rtl_equation_get(&rtl_t,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				if (!comp_eq ||
+					comp_eq->module.index != composed.index)
+					m_equations = 0;
+			}
+			if (!IS_INVALID_ID(lowering_t.lowered_endpoints[d.index]
+					.input_ready) &&
+				!IS_INVALID_ID(lowering_t.lowered_endpoints[e.index]
+					.input_ready)) {
+				for (j = 0; j < rtl_t.equation_count && m_equations; j++) {
+					const pigen_rtl_equation *ready =
+						pigen_rtl_equation_get(&rtl_t,
+							(pigen_rtl_equation_id){(uint32_t)j});
+					if (!ready)
+						continue;
+					if (ready->destination.index ==
+						lowering_t.lowered_endpoints[d.index]
+							.input_ready.index ||
+						ready->destination.index ==
+						lowering_t.lowered_endpoints[e.index]
+							.input_ready.index) {
+						m_equations &=
+							composed_get->equations.first <= j &&
+							j < composed_get->equations.first +
+								composed_get->equations.count;
+					}
+				}
+			}
+			REQUIRE(m_equations);
+			/* PROCESSES: one RTL process per semantic process, in arena
+			 * (addition) order [first, second] - the base process owns its
+			 * two transfers' updates and the empty second process owns none -
+			 * and every process in the range is this module's. A merged,
+			 * missing or reordered RTL process fails this. */
+			m_processes = 1;
+			comp_sem_process_count = 0;
+			comp_sem_processes = pigen_module_processes(&sem_t, module,
+				&comp_sem_process_count);
+			if (!comp_sem_processes ||
+				comp_sem_process_count !=
+					composed_get->processes.count)
+				m_processes = 0;
+			for (i = composed_get->processes.first;
+				i < composed_get->processes.first +
+					composed_get->processes.count && m_processes; i++) {
+				comp_proc = pigen_rtl_process_get(&rtl_t,
+					(pigen_rtl_process_id){(uint32_t)i});
+				if (!comp_proc ||
+					comp_proc->module.index != composed.index)
+					m_processes = 0;
+			}
+			if (m_processes) {
+				for (i = 0;
+					i < composed_get->processes.count &&
+					i < comp_sem_process_count && m_processes; i++) {
+					const pigen_rtl_process *ordered =
+						pigen_rtl_process_get(&rtl_t,
+							(pigen_rtl_process_id){
+								(uint32_t)(
+									composed_get->processes.first +
+									i)});
+					if (!ordered)
+						m_processes = 0;
+					else if (i == 0) {
+						/* The base process's RTL process owns exactly
+						 * its two transfers' destination updates:
+						 * one update each, in transfer arena
+						 * order, on the d and e payload objects. */
+						comp_sem_transfer_count = 0;
+						comp_sem_transfers =
+							pigen_process_transfers(
+								&sem_t,
+								comp_sem_processes[0],
+								&comp_sem_transfer_count);
+						if (!comp_sem_transfers ||
+							comp_sem_transfer_count !=
+								ordered->updates.count)
+							m_processes = 0;
+						for (j = 0;
+							j < comp_sem_transfer_count &&
+							m_processes; j++) {
+							const pigen_semantic_transfer
+								*own =
+									pigen_transfer_get(
+										&sem_t,
+										comp_sem_transfers[j]);
+							const pigen_rtl_update
+								*up =
+									pigen_rtl_update_get(
+										&rtl_t,
+										(pigen_rtl_update_id){
+											(uint32_t)(
+												ordered->updates
+													.first +
+												j)});
+							pigen_rtl_object_id want;
+							const pigen_semantic_lvalue *own_dest =
+								pigen_lvalue_get(&sem_t,
+									own->destination);
+							if (!own || !up || !own_dest)
+								m_processes = 0;
+							else {
+								want = lowering_t
+									.lowered_endpoints[
+										own_dest->as
+											.projection
+											.signal.index]
+									.payload;
+								m_processes &=
+									!IS_INVALID_ID(want) &&
+									up->destination.index ==
+										want.index;
+							}
+						}
+					} else if (i == 1) {
+						/* The second semantic process owns no
+						 * transfers: its RTL process publishes an
+						 * empty updates range. */
+						m_processes &=
+							ordered->updates.count == 0;
+					}
+				}
+			}
+			REQUIRE(m_processes);
+		}
+
+		pigen_rtl_lowering_free(&lowering_t);
+		pigen_free_rtl_model(&rtl_t);
+		pigen_free_semantic_model(&sem_t);
+		pigen_free_sources(&sources_t);
+	}
+
 	SECTION("t5-teardown") {
 	/* free releases the (empty) maps and zeroes the record. */
 	pigen_rtl_lowering_free(&lowering);
