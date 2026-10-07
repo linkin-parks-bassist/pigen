@@ -196,6 +196,10 @@
   },
   {
     "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-module"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
     "command": ["make", "rtl-lower-test", "T=t5-teardown"]
   },
   {
