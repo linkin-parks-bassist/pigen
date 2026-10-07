@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-07T23:07:16+11:00"
+revised_at: "2026-10-08T01:04:24+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -10,7 +10,7 @@ Shape established. `pigen_lower_rtl_transfers` / `pigen_lower_rtl_module` are de
 
 Module composition landed. `pigen_lower_rtl_module` composes the module record from the transfer lowering's already-published state: it resolves the module through the lowering memo and publishes the record's four owner ranges as the arena-contiguous records created for this module, in arena order — the object range covers the module's signals' payload objects, the equation range its transfers' source-ready equations, and one RTL process per semantic process (arena order) each owning exactly its own transfers' destination updates, each update's destination the destination signal's payload object and its value the shared fire identity equal to the matching source-ready equation's value. The invalid return is the owner's rejection path only (no rollback contract). The t8-module section of tests/rtl_lower_test.c is its own green tests/contracts.json entry (make rtl-lower-test T=t8-module), so every landing gate re-runs it.
 
-Fire-identity regression stance. The shared-nonconstant-node property is enforced permanently on master by a GREEN section, t8-fire-identity, of tests/rtl_lower_test.c registered as its own tests/contracts.json entry (make rtl-lower-test T=t8-fire-identity): it lowers the base zero-dependency transfer and asserts the destination-update and source-ready-equation value trees share one memoized non-constant node (not the INTEGER "valid 1" constant, not a re-lowered copy). Because it is a green manifest entry, every landing gate re-runs it, so a regression of fire_bits_one to return the INTEGER constant or to build two distinct fire nodes fails the suite on master. It is not a hidden packet: hidden packets run only when re-merged into a landing candidate and would not catch a regression that leaves the manifest suite green.
+Fire-identity and join coverage. The shared-nonconstant-node contract (destination updates and source-ready equations share one memoized non-constant fire-identity node) is pinned by two accepted hidden test packets, not by master's manifest: t8-fire-identity (SECTION t8-fire-identity plus the file-local helpers rtest_collect_exprs / rtest_shares_nonconst and one contracts.json entry) and t8-join (SECTION t8-join, reusing the same helpers). Both are accepted and stay hidden from the implementer; the standalone helper re-add was impossible (uncalled statics trip -Werror=unused-function) and redundant, since the fire-identity packet re-establishes both helpers with its calling section. The next step that lands this coverage and makes the join green is destination publication (what/is/the/task/eight/lowering/destination/publication.md).
 
 Remaining gate families — join, repeated projection, static-only assignment, process order, and the guard-and-dependency witness — are separate sections of the same file, each its own `make rtl-lower-test T=<section>` command, each red until its lowering lands and each absent from the file until its test packet lands; the rtl-lower-test manifest carries one entry per present section, so every manifest command passes on master.
 
