@@ -1119,7 +1119,18 @@ static pigen_rtl_expr_id fire_bits_one(pigen_rtl_lowering *lowering)
 	if (lowering->lowered_expression_count > interned.index &&
 		lowering->lowered_expressions[interned.index].index !=
 		PIGEN_INVALID_ID)
-		return lowering->lowered_expressions[interned.index];
+	{
+		pigen_rtl_expr_id memoized =
+			lowering->lowered_expressions[interned.index];
+		/* The declaration lowering may already have published the interned
+		 * (1, 1-bit-logic) control as an INTEGER constant node. The fire
+		 * identity must be a non-constant node, so reuse the memo only when it
+		 * is the BITS fire-identity node; otherwise fall through and create it. */
+		if (pigen_rtl_expr_get(lowering->rtl, memoized) &&
+			pigen_rtl_expr_get(lowering->rtl, memoized)->kind ==
+			PIGEN_RTL_EXPR_BITS)
+			return memoized;
+	}
 	/* A 1-bit BITS literal (NOT an integer literal): the fire identity must
 	 * be a non-constant node to the shared-node gate. */
 	word = (pigen_rtl_literal_word){1, 0, 0};
@@ -1128,9 +1139,18 @@ static pigen_rtl_expr_id fire_bits_one(pigen_rtl_lowering *lowering)
 	if (lowered.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	if (!expr_map_ensure(lowering, interned.index + 1) ||
-		lowering->lowered_expression_count <= interned.index ||
-		lowering->lowered_expressions[interned.index].index !=
-		PIGEN_INVALID_ID)
+		lowering->lowered_expression_count <= interned.index)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	/* The declaration lowering may have published the interned control as an
+	 * INTEGER constant; the fire identity must own the slot, so replace a
+	 * non-BITS occupant but never a live fire-identity BITS node. */
+	if (lowering->lowered_expressions[interned.index].index !=
+		PIGEN_INVALID_ID &&
+		pigen_rtl_expr_get(lowering->rtl,
+			lowering->lowered_expressions[interned.index]) &&
+		pigen_rtl_expr_get(lowering->rtl,
+			lowering->lowered_expressions[interned.index])->kind ==
+		PIGEN_RTL_EXPR_BITS)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	lowering->lowered_expressions[interned.index] = lowered;
 	return lowered;
@@ -1397,7 +1417,6 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 		if (!owner_domain)
 			return -1;
 		clock_expr = lower_expr(lowering, owner_process->clock);
-		fprintf(stderr, "DBG: process[%zu] clock_expr=%u\n", pi, clock_expr.index);
 		if (clock_expr.index == PIGEN_INVALID_ID)
 			return -1;
 		transfers = pigen_process_transfers(sem, processes[pi],
@@ -1428,14 +1447,12 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 				return -1;
 			}
 			fire = fire_identity_for_transfer(lowering, owner);
-			fprintf(stderr, "DBG: t[%zu] fire=%u\n", ti, fire.index);
 			if (fire.index == PIGEN_INVALID_ID)
 			{
 				free(update_ids);
 				return -1;
 			}
 			lval = pigen_lvalue_get(sem, owner->destination);
-			fprintf(stderr, "DBG: t[%zu] lval=%p kind=%d\n", ti, (void*)lval, lval ? (int)lval->kind : -1);
 			if (!lval || lval->kind != PIGEN_LVALUE_PROJECTION)
 			{
 				free(update_ids);
@@ -1457,7 +1474,6 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			{
 				pigen_rtl_equation_id eq_id = pigen_rtl_equation_add_with_owner(rtl, rtl_module,
 					dest_input_ready, fire, owner->span);
-				fprintf(stderr, "DBG: t[%zu] eq=%u dest_ready=%u\n", ti, eq_id.index, dest_input_ready.index);
 				if (eq_id.index == PIGEN_INVALID_ID)
 				{
 					free(update_ids);
@@ -1466,7 +1482,6 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			}
 			update_id = pigen_rtl_update_add_with_owner(rtl, rtl_module,
 				dest_payload, fire, owner->span);
-			fprintf(stderr, "DBG: t[%zu] upd=%u dest_payload=%u\n", ti, update_id.index, dest_payload.index);
 			if (update_id.index == PIGEN_INVALID_ID)
 			{
 				free(update_ids);
@@ -1478,7 +1493,6 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			pigen_rtl_process_id proc_id = pigen_rtl_process_add_with_owner(rtl, rtl_module, clock_expr,
 				owner_domain->edge, update_ids, update_count,
 				owner_process->span);
-			fprintf(stderr, "DBG: process[%zu] proc=%u clock=%u edge=%d updates=%zu\n", pi, proc_id.index, clock_expr.index, (int)owner_domain->edge, update_count);
 			if (proc_id.index == PIGEN_INVALID_ID)
 			{
 				free(update_ids);
