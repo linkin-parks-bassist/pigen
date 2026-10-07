@@ -1504,15 +1504,166 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	return 0;
 }
 
-/* Task 8 stub: no module composition yet. The pigen_rtl_module_add_with_owner
- * call, the declaration lowering, endpoint binding, processes and transfers
- * and the module record publication all arrive with the test-contract and
- * implementation stages; this stub reports the unimplemented sentinel without
- * touching the lowering maps or the RTL model. */
+/* Task 8 (6) module composition: returns the published module identity whose
+ * four record ranges - objects, instances, equations and processes - cover
+ * exactly the witness's records in arena order. The transfer lowering
+ * (pigen_lower_rtl_transfers) already published those records through the
+ * owner constructors, and each constructor extends the module's matching owner
+ * range as it appends; a module's ranges therefore sit at the tail of each
+ * arena and grow only with the records it owns. The composition reuses that
+ * publication state and does not re-derive it (it does NOT re-run the transfer
+ * lowering, which is non-idempotent: a repeat run would reset the module memo,
+ * recreate the module and re-append records). It resolves the module through
+ * the memo, checks each of the four ranges is exactly the arena tail, and that
+ * the processes and per-process updates match the semantic owner (one RTL
+ * process per semantic process, in arena order, each owning exactly its own
+ * updates, each update's destination the destination signal's payload object
+ * and its value the transfer's shared fire identity, equal to the source-ready
+ * equation's value). A merged, missing or reordered process, or a range that
+ * admits a foreign record or drops the witness's own, fails the gate. The
+ * invalid return is the owner's rejection path only: a failure may leave
+ * partial state behind and is not a rollback contract
+ * (how/should/compiler/builders/fail.md). */
 pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
-	(void)lowering;
-	(void)module;
-	return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	pigen_semantic_model *sem;
+	pigen_rtl_model *rtl;
+	pigen_rtl_module_id rtl_module;
+	const pigen_rtl_module *record;
+	pigen_process_id *processes;
+	size_t process_count;
+	size_t pi;
+	size_t expected_equations;
+
+	if (!lowering || !lowering->semantics || !lowering->rtl)
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	sem = lowering->semantics;
+	rtl = lowering->rtl;
+	if (module.index == PIGEN_INVALID_ID ||
+		!pigen_module_get(sem, module))
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+
+	/* Resolve the published module through the memo: a prior transfer lowering
+	 * of this module is a memo hit and returns the module that owns the
+	 * published records. If nothing was lowered the memo is empty and the
+	 * range checks below fail on the empty ranges. */
+	rtl_module = rtl_module_for_semantic(rtl, module);
+	if (rtl_module.index == PIGEN_INVALID_ID)
+		return rtl_module;
+	record = pigen_rtl_module_get(rtl, rtl_module);
+	if (!record)
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+
+	/* Each owner range must sit exactly at the tail of its arena: the range
+	 * covers the arena-contiguous records the transfer lowering created for
+	 * this module and no other, and admits no foreign record and drops none of
+	 * the witness's own. */
+	if (record->objects.first + record->objects.count != rtl->object_count ||
+		record->instances.first + record->instances.count !=
+			rtl->instance_count ||
+		record->equations.first + record->equations.count !=
+			rtl->equation_count ||
+		record->processes.first + record->processes.count !=
+			rtl->process_count)
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+
+	/* The processes must be exactly one RTL process per semantic process, in
+	 * arena order, each owning exactly its own transfers' destination updates:
+	 * a merged, missing or reordered process, or a process owning a foreign or
+	 * dropped update, fails the gate. */
+	processes = pigen_module_processes(sem, module, &process_count);
+	if (!processes && process_count)
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	if (record->processes.count != process_count)
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	expected_equations = 0;
+	for (pi = 0; pi < process_count; pi++)
+	{
+		const pigen_semantic_process *owner_process =
+			pigen_process_get(sem, processes[pi]);
+		const pigen_rtl_process *rtl_process =
+			pigen_rtl_process_get(rtl,
+				(pigen_rtl_process_id){
+					record->processes.first + pi});
+		const pigen_semantic_transfer *owner_transfer;
+		const pigen_rtl_update *update;
+		const pigen_rtl_equation *equation;
+		pigen_transfer_id *transfers;
+		size_t transfer_count;
+		size_t ti;
+		size_t first;
+
+		if (!owner_process)
+			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+		if (!rtl_process ||
+			rtl_process->module.index != rtl_module.index ||
+			rtl_process->updates.first + rtl_process->updates.count !=
+				rtl->update_count)
+			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+		transfers = pigen_process_transfers(sem, processes[pi],
+			&transfer_count);
+		if (!transfers && transfer_count)
+			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+		if (rtl_process->updates.count != transfer_count)
+			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+		first = rtl_process->updates.first;
+		for (ti = 0; ti < transfer_count; ti++)
+		{
+			pigen_signal_id dest_signal;
+			const pigen_semantic_lvalue *lval;
+
+			owner_transfer = pigen_transfer_get(sem, transfers[ti]);
+			if (!owner_transfer)
+				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+			lval = pigen_lvalue_get(sem, owner_transfer->destination);
+			if (!lval || lval->kind != PIGEN_LVALUE_PROJECTION)
+				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+			dest_signal = lval->as.projection.signal;
+			if (dest_signal.index == PIGEN_INVALID_ID ||
+				lowering->lowered_endpoint_count <= dest_signal.index ||
+				lowering->lowered_endpoints[dest_signal.index].payload.index
+					== PIGEN_INVALID_ID)
+				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+			/* The update's destination is the destination signal's payload
+			 * object and its value is the transfer's shared fire identity: the
+			 * source-ready equation the transfer lowering published for this
+			 * very transfer (at the matching global position) carries that same
+			 * fire identity, so the two published values must be the same node. */
+			update = pigen_rtl_update_get(rtl,
+				(pigen_rtl_update_id){first + ti});
+			if (!update ||
+				update->module.index != rtl_module.index ||
+				update->destination.index !=
+					lowering->lowered_endpoints[dest_signal.index]
+						.payload.index)
+				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+			equation = pigen_rtl_equation_get(rtl,
+				(pigen_rtl_equation_id){
+					record->equations.first + expected_equations});
+			if (!equation ||
+				equation->module.index != rtl_module.index ||
+				equation->value.index != update->value.index)
+				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+			expected_equations += 1;
+		}
+	}
+	/* The declaration lowering publishes exactly one payload object per signal
+	 * in the module and the transfer lowering publishes exactly one source-
+	 * ready equation per transfer; the composed module's object and equation
+	 * ranges must cover exactly those records. */
+	{
+		size_t signal_count;
+		size_t i;
+
+		signal_count = 0;
+		for (i = 0; i < sem->signal_count; i++)
+			if (sem->signals[i].module.index == module.index)
+				signal_count++;
+		if (record->objects.count != signal_count)
+			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	}
+	if (record->equations.count != expected_equations)
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	return rtl_module;
 }
