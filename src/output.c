@@ -234,6 +234,18 @@ pigen_rtl_process_id pigen_output_item_process(const pigen_output_model *model,
 	return item.as.process;
 }
 
+pigen_output_coverage_result pigen_output_validate_coverage(
+	const pigen_output_model *model, const pigen_source_manager *manager)
+{
+	/* The real gate algorithm (exact contiguous non-overlapping OPAQUE span
+	 * coverage, the expected-end source-length bound, and the
+	 * GAP/OVERLAP/REVERSAL/WRONG_SOURCE reasons) arrives with the
+	 * implementation stage; the stub returns INVALID. */
+	(void)model;
+	(void)manager;
+	return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_INVALID };
+}
+
 int pigen_build_output_model(pigen_output_model *model)
 {
 	if (!model)

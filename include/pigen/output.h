@@ -63,6 +63,32 @@ typedef struct {
 	size_t nested_layout_capacity;
 } pigen_output_model;
 
+/* The monotonic-coverage gate's verdict. */
+typedef enum {
+	PIGEN_OUTPUT_COVERAGE_OK,
+	PIGEN_OUTPUT_COVERAGE_EMPTY,
+	PIGEN_OUTPUT_COVERAGE_GAP,
+	PIGEN_OUTPUT_COVERAGE_OVERLAP,
+	PIGEN_OUTPUT_COVERAGE_REVERSAL,
+	PIGEN_OUTPUT_COVERAGE_WRONG_SOURCE,
+	PIGEN_OUTPUT_COVERAGE_INVALID
+} pigen_output_coverage_reason;
+
+/* The monotonic-coverage gate's result. ok is 1 when the model's OPAQUE spans
+ * cover exactly their source, 0 otherwise; reason names the verdict. */
+typedef struct {
+	int ok;
+	pigen_output_coverage_reason reason;
+} pigen_output_coverage_result;
+
+/* Pure read-only validation of the model's OPAQUE spans against one source.
+ * It checks that the spans form an exact, contiguous, non-overlapping,
+ * monotonically increasing coverage of one source, bounded by the expected
+ * end (the source's length). It never mutates the model or the manager and
+ * takes no ownership; the result is returned by value. */
+pigen_output_coverage_result pigen_output_validate_coverage(
+	const pigen_output_model *model, const pigen_source_manager *manager);
+
 /* Zeroes the model: no owned arrays, no counts. */
 void pigen_output_model_init(pigen_output_model *model);
 
