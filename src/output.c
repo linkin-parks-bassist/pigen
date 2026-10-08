@@ -237,13 +237,55 @@ pigen_rtl_process_id pigen_output_item_process(const pigen_output_model *model,
 pigen_output_coverage_result pigen_output_validate_coverage(
 	const pigen_output_model *model, const pigen_source_manager *manager)
 {
-	/* The real gate algorithm (exact contiguous non-overlapping OPAQUE span
-	 * coverage, the expected-end source-length bound, and the
-	 * GAP/OVERLAP/REVERSAL/WRONG_SOURCE reasons) arrives with the
-	 * implementation stage; the stub returns INVALID. */
-	(void)model;
-	(void)manager;
-	return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_INVALID };
+	size_t i;
+	size_t opaque_count = 0;
+	size_t cursor = 0;
+	size_t end;
+	const pigen_source_file *file;
+
+	if (!model || !manager)
+		return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_INVALID };
+
+	/* Count the OPAQUE spans in slot order first so that a model with none of
+	 * them reads EMPTY regardless of its structured items. */
+	for (i = 0; i < model->item_count; i++)
+		if (model->items[i].kind == PIGEN_OUTPUT_OPAQUE)
+			opaque_count++;
+	if (opaque_count == 0)
+		return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_EMPTY };
+
+	/* The manager is the single-source authority the caller passes; its first
+	 * file's length is the expected end the run must reach exactly. */
+	file = pigen_source_get(manager, (pigen_source_id){0});
+	if (!file)
+		return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_INVALID };
+	end = file->length;
+
+	for (i = 0; i < model->item_count; i++)
+	{
+		pigen_source_span s;
+
+		if (model->items[i].kind != PIGEN_OUTPUT_OPAQUE)
+			continue;
+		s = model->items[i].as.span;
+		if (!pigen_source_get(manager, s.source))
+			return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_INVALID };
+		if (s.source.index != 0u)
+			return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_WRONG_SOURCE };
+		if (s.end <= s.start || s.end > end)
+			return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_REVERSAL };
+		if (s.start < cursor)
+			return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_OVERLAP };
+		if (s.start > cursor)
+			return (pigen_output_coverage_result){ 0, PIGEN_OUTPUT_COVERAGE_GAP };
+		cursor = s.end;
+	}
+
+	if (cursor != end)
+		return (pigen_output_coverage_result){ 0,
+			cursor < end ? PIGEN_OUTPUT_COVERAGE_GAP
+			             : PIGEN_OUTPUT_COVERAGE_OVERLAP };
+	return (pigen_output_coverage_result){ 1, PIGEN_OUTPUT_COVERAGE_OK };
 }
 
 int pigen_build_output_model(pigen_output_model *model)

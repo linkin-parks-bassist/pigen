@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-07T15:36:48+11:00"
+revised_at: "2026-10-09T04:07:52+11:00"
 ---
 
 The structured frontend and elastic RTL work remain incomplete. Passing focused tests do not establish full compiler acceptance.
