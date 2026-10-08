@@ -76,7 +76,7 @@ int main(int argc, char **argv)
 			pigen_output_model empty;
 
 			pigen_output_model_init(&empty);
-			REQUIRE(pigen_build_output_model(&empty) == 0);
+			REQUIRE(pigen_build_output_model(&empty, NULL, NULL) == 0);
 			REQUIRE(pigen_output_item_count(&empty) == 0);
 			pigen_free_output_model(&empty);
 		}

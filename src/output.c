@@ -288,12 +288,15 @@ pigen_output_coverage_result pigen_output_validate_coverage(
 	return (pigen_output_coverage_result){ 1, PIGEN_OUTPUT_COVERAGE_OK };
 }
 
-int pigen_build_output_model(pigen_output_model *model)
+int pigen_build_output_model(pigen_output_model *model,
+	const pigen_syntax_tree *syntax, const pigen_rtl_lowering *lowering)
 {
 	if (!model)
 		return -1;
 	/* The exact ordered build arrives with the implementation stage; the
 	 * stub succeeds with zero items. */
+	(void)syntax;
+	(void)lowering;
 	(void)pigen_output_item_count(model);
 	return 0;
 }
