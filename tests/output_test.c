@@ -88,6 +88,105 @@ int main(int argc, char **argv)
 			!model.nested_layout_capacity);
 	}
 
+	SECTION("t9-nesting") {
+		/* The ordered output model's owner-managed nested-layout range: the
+		 * model opens each module's nested scope when the module is appended
+		 * (pigen_output_item_open) and grows it as children are appended
+		 * (pigen_output_item_add_child), keeping the module item's layout
+		 * field in lockstep; the caller never sets the range by hand. Slot
+		 * indices are concrete positions in the model's ordered item array. */
+		pigen_output_model model;
+		pigen_source_span span = { (pigen_source_id){1}, 7, 9 };
+		pigen_rtl_module_id modA = { 1 };
+		pigen_rtl_module_id modB = { 2 };
+		pigen_rtl_module_id modC = { 4 };
+		pigen_output_item opaque = {0};
+		pigen_output_item mod_item = {0};
+		pigen_output_item empty_mod = {0};
+		pigen_output_item passive = {0};
+		pigen_output_item child = {0};
+		pigen_rtl_object_id c1obj = { 11 };
+		pigen_rtl_object_id c2obj = { 12 };
+		size_t mod_index, c1, c2, b_index, passive_index;
+		pigen_rtl_record_range r;
+		pigen_output_item item;
+
+		pigen_output_model_init(&model);
+
+		/* (a) A top-level OPAQUE append (slot 0), then the owner opens a
+		 * module (slot 1): the caller-supplied layout is discarded and the
+		 * owner range starts empty at (slot + 1, 0) = (2, 0). */
+		opaque.kind = PIGEN_OUTPUT_OPAQUE;
+		opaque.as.span = span;
+		REQUIRE(pigen_output_item_add(&model, opaque) == 0);
+
+		mod_item.kind = PIGEN_OUTPUT_MODULE;
+		mod_item.as.module = modA;
+		mod_item.layout = (pigen_rtl_record_range){ 99, 99 }; /* caller value */
+		mod_index = pigen_output_item_open(&model, mod_item);
+		REQUIRE(mod_index == 1);
+		item = pigen_output_item_get(&model, mod_index);
+		REQUIRE(item.kind == PIGEN_OUTPUT_MODULE &&
+			item.as.module.index == modA.index);
+		r = pigen_output_item_layout(&model, mod_index);
+		REQUIRE(r.first == 2 && r.count == 0);
+		REQUIRE(item.layout.first == 2 && item.layout.count == 0);
+
+		/* (b) Two children appended into the module's open scope: slots 2 and
+		 * 3, in order; the module's range grows to (2, 2) and its layout
+		 * field stays in lockstep. The whole model now holds four slots. */
+		child.kind = PIGEN_OUTPUT_RTL_OBJECT;
+		child.as.object = c1obj;
+		c1 = pigen_output_item_add_child(&model, modA, child);
+		REQUIRE(c1 == 2);
+		child.as.object = c2obj;
+		c2 = pigen_output_item_add_child(&model, modA, child);
+		REQUIRE(c2 == 3);
+		REQUIRE(pigen_output_item_count(&model) == 4);
+
+		r = pigen_output_item_layout(&model, mod_index);
+		REQUIRE(r.first == 2 && r.count == 2);
+		item = pigen_output_item_get(&model, mod_index);
+		REQUIRE(item.layout.first == 2 && item.layout.count == 2);
+		/* The range's slots are exactly the two children, in order. */
+		REQUIRE(pigen_output_item_kind(&model, c1) == PIGEN_OUTPUT_RTL_OBJECT);
+		REQUIRE(pigen_output_item_object(&model, c1).index == c1obj.index);
+		REQUIRE(pigen_output_item_kind(&model, c2) == PIGEN_OUTPUT_RTL_OBJECT);
+		REQUIRE(pigen_output_item_object(&model, c2).index == c2obj.index);
+
+		/* (c) A second module opened with no children keeps an empty range
+		 * (slot + 1, 0) = (5, 0). */
+		empty_mod.kind = PIGEN_OUTPUT_MODULE;
+		empty_mod.as.module = modB;
+		b_index = pigen_output_item_open(&model, empty_mod);
+		REQUIRE(b_index == 4);
+		r = pigen_output_item_layout(&model, b_index);
+		REQUIRE(r.first == 5 && r.count == 0);
+		item = pigen_output_item_get(&model, b_index);
+		REQUIRE(item.layout.first == 5 && item.layout.count == 0);
+
+		/* (d) A module appended without an open scope (passive, via plain
+		 * pigen_output_item_add) reads back the empty range {0, 0}, and so
+		 * does an out-of-range slot. Under the slot API the old "missing
+		 * identity" and "invalid id" cases collapse into these: _layout takes
+		 * only a slot, never an identity. */
+		passive.kind = PIGEN_OUTPUT_MODULE;
+		passive.as.module = modC;
+		passive_index = pigen_output_item_add(&model, passive);
+		REQUIRE(passive_index == 5);
+		r = pigen_output_item_layout(&model, passive_index);
+		REQUIRE(r.first == 0 && r.count == 0);
+		r = pigen_output_item_layout(&model, pigen_output_item_count(&model));
+		REQUIRE(r.first == 0 && r.count == 0);
+
+		/* (e) Freeing zeroes both owned arrays: every pointer NULL, every
+		 * count and capacity zero. */
+		pigen_free_output_model(&model);
+		REQUIRE(!model.items && !model.item_count && !model.item_capacity);
+		REQUIRE(!model.nested_layouts && !model.nested_layout_count &&
+			!model.nested_layout_capacity);
+	}
+
 	SECTION("t9-coverage") {
 		/* The ordered output model's exact monotonic-coverage gate: the
 		 * model's OPAQUE spans must form a contiguous, non-overlapping,
