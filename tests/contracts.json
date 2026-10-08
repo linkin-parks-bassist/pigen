@@ -203,6 +203,22 @@
     "command": ["make", "rtl-lower-test", "T=t5-teardown"]
   },
   {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-fire-identity"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-join"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-guard"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-ownership"]
+  },
+  {
     "covers": [
       "src/pigen.c",
       "src/blocks.c",
