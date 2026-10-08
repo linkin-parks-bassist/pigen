@@ -501,6 +501,49 @@ int main(int argc, char **argv)
 			pigen_free_output_model(&model);
 			pigen_free_sources(&m8);
 		}
+
+		/* (m1) MULTI-FILE OK: the manager holds TWO files of DIFFERENT
+		 * lengths (first length 5, second length 10). The gate must bound the
+		 * run by the manager's FIRST file's length, so a single OPAQUE span
+		 * covering [0,5) of the first file is a complete contiguous run ->
+		 * {1, OK}. A run bounded by the MAX file length (10) would see the
+		 * cursor stop at 5, short of 10, and report {0, GAP}. */
+		{
+			pigen_source_manager m9 = {0};
+			pigen_source_id f0, f1;
+
+			f0 = pigen_source_add(&m9, "a.pigen", text15, 5);
+			f1 = pigen_source_add(&m9, "b.pigen", text15, 10);
+			REQUIRE(f0.index == 0 && f1.index == 1);
+			pigen_output_model_init(&model);
+			opaque.as.span = (pigen_source_span){ f0, 0, 5 };
+			REQUIRE(pigen_output_item_add(&model, opaque) == 0);
+			r = pigen_output_validate_coverage(&model, &m9);
+			REQUIRE(r.ok == 1 && r.reason == PIGEN_OUTPUT_COVERAGE_OK);
+			pigen_free_output_model(&model);
+			pigen_free_sources(&m9);
+		}
+
+		/* (m2) MULTI-FILE REVERSAL: the same two-file manager (first length
+		 * 5, second length 10). An OPAQUE span [0,10) of the first file
+		 * exceeds that file's length (5) while still naming the valid first
+		 * source -> {0, REVERSAL}. A run bounded by the MAX file length (10)
+		 * would accept [0,10) as complete and report {1, OK}. */
+		{
+			pigen_source_manager m10 = {0};
+			pigen_source_id f0, f1;
+
+			f0 = pigen_source_add(&m10, "a.pigen", text15, 5);
+			f1 = pigen_source_add(&m10, "b.pigen", text15, 10);
+			REQUIRE(f0.index == 0 && f1.index == 1);
+			pigen_output_model_init(&model);
+			opaque.as.span = (pigen_source_span){ f0, 0, 10 };
+			REQUIRE(pigen_output_item_add(&model, opaque) == 0);
+			r = pigen_output_validate_coverage(&model, &m10);
+			REQUIRE(r.ok == 0 && r.reason == PIGEN_OUTPUT_COVERAGE_REVERSAL);
+			pigen_free_output_model(&model);
+			pigen_free_sources(&m10);
+		}
 	}
 
 	return check_finish();
