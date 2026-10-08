@@ -139,6 +139,10 @@
     "command": ["make", "output-model-test", "T=t9-skeleton"]
   },
   {
+    "covers": ["src/output.c", "src/source.c", "src/util.c"],
+    "command": ["make", "output-model-test", "T=t9-coverage"]
+  },
+  {
     "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
     "command": ["make", "rtl-lower-test", "T=t5-skeleton"]
   },
