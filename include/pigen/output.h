@@ -13,7 +13,10 @@
  * nested items in the same array. OPAQUE slots carry only a source span (their
  * text stays in the source manager); a structured slot carries only the
  * matching structured identity, copied by value. No API returns or searches
- * opaque source text. */
+ * opaque source text. A module item's nested-layout range is owner-managed:
+ * the model opens the module's nested scope when the module is appended
+ * (pigen_output_item_open) and grows the range as children are appended
+ * (pigen_output_item_add_child); the caller never sets the range by hand. */
 typedef enum {
 	PIGEN_OUTPUT_OPAQUE,
 	PIGEN_OUTPUT_MODULE,
@@ -27,7 +30,9 @@ typedef enum {
  * only its matching identity (a value copy, no ownership transfer) and its
  * span is invalid. The layout field is the half-open range [first, first +
  * count) of this item's nested items in the model's item array; it is
- * meaningful for a module item and empty for every other kind. */
+ * meaningful for a module item and empty for every other kind. The range is
+ * owner-managed by the model (pigen_output_item_open / _add_child); the
+ * caller never sets it. */
 typedef struct {
 	pigen_output_kind kind;
 	union {
@@ -42,10 +47,13 @@ typedef struct {
 } pigen_output_item;
 
 /* The ordered output model. It owns items (the ordered slot array) and the
- * per-module nested-layout ranges; the layout of each module item lives in
- * the item itself, and the ranges array is the parallel, owner-managed view
- * keyed by arena index. All three pointers are NULL and all counts zero for a
- * freshly initialized model. */
+ * per-module nested-layout ranges. The layout of each module item lives in the
+ * item itself and is owner-managed: it is opened by pigen_output_item_open and
+ * grown by pigen_output_item_add_child. The nested_layouts array is the
+ * parallel, owner-managed view keyed by the module's arena index (its
+ * identity), so a module item's layout field always reflects its range there.
+ * All three pointers are NULL and all counts zero for a freshly initialized
+ * model. */
 typedef struct {
 	pigen_output_item *items;
 	size_t item_count;
@@ -62,6 +70,27 @@ void pigen_output_model_init(pigen_output_model *model);
  * the appended slot's index (PIGEN_INVALID_ID on failure). The identity or
  * span is copied by value; the model takes no ownership of it. */
 size_t pigen_output_item_add(pigen_output_model *model, pigen_output_item item);
+
+/* Appends a module item and opens its nested scope: the module's nested
+ * range starts empty at the end of the item array (first = the module item's
+ * slot + 1, count = 0) and is recorded in the owner-managed nested_layouts
+ * array keyed by the module's identity. The item's caller-supplied layout is
+ * discarded; the model owns the range. Returns the appended module item's slot
+ * (PIGEN_INVALID_ID on failure). The identity is copied by value. */
+size_t pigen_output_item_open(pigen_output_model *model, pigen_output_item item);
+
+/* Appends a child into the module's open nested scope, growing the module's
+ * range (count += 1) and keeping the module item's layout in lockstep. Returns
+ * the appended child's slot index (PIGEN_INVALID_ID on failure, including an
+ * unknown module identity). The child's identity or span is copied by value. */
+size_t pigen_output_item_add_child(pigen_output_model *model,
+	pigen_rtl_module_id module, pigen_output_item child);
+
+/* Reads back the owner-managed nested range for a module. Returns {0, 0} for a
+ * module with no owned nested scope, a missing identity, or an
+ * out-of-range/invalid slot. */
+pigen_rtl_record_range pigen_output_item_layout(const pigen_output_model *model,
+	size_t module_slot);
 
 /* The ordered slot count. */
 size_t pigen_output_item_count(const pigen_output_model *model);

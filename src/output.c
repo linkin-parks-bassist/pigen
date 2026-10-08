@@ -1,10 +1,15 @@
-/* Ordered output model for one generated design (Task 9 skeleton).
+/* Ordered output model for one generated design (Task 9).
  *
  * The model owns the ordered slot array and the per-module nested-layout
- * ranges; every public accessor is a shape-only read. The syntax-tree build
- * walk, the monotonic-coverage gate, nested-failure restoration and the
- * missing-identity diagnostic arrive with the implementation stage; the
- * builder stub succeeds with zero items. */
+ * ranges. Nesting ownership is implemented: pigen_output_item_open opens a
+ * module's nested scope (its range starts empty at the end of the item array)
+ * and pigen_output_item_add_child appends a child into that open scope, growing
+ * the range and keeping the module item's layout in lockstep.
+ * pigen_output_item_layout reads the owner-managed range back. Every other
+ * accessor is a shape-only read. The syntax-tree build walk, the
+ * monotonic-coverage gate, nested-failure restoration and the
+ * missing-identity diagnostic still arrive later; the builder stub succeeds
+ * with zero items. */
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +42,30 @@ static void item_ensure(pigen_output_model *model, size_t needed)
 	model->item_capacity = capacity;
 }
 
+/* Grow the owner-managed nested-layout array so that index < needed is
+ * addressable, zeroing the grown tail so a sparse module identity reads an
+ * empty range until a scope is opened for it. The allocator exits on failure,
+ * so this cannot return NULL. */
+static void nested_ensure(pigen_output_model *model, size_t needed)
+{
+	size_t old_capacity = model->nested_layout_capacity;
+	size_t capacity = old_capacity;
+
+	if (needed <= old_capacity)
+		return;
+	if (!capacity)
+		capacity = 8;
+	while (capacity < needed)
+		capacity *= 2;
+	model->nested_layouts =
+		pigen_resize(model->nested_layouts, capacity * sizeof(*model->nested_layouts));
+	model->nested_layout_capacity = capacity;
+	if (needed > model->nested_layout_count)
+		model->nested_layout_count = needed;
+	memset(model->nested_layouts + old_capacity, 0,
+		(capacity - old_capacity) * sizeof(*model->nested_layouts));
+}
+
 size_t pigen_output_item_add(pigen_output_model *model, pigen_output_item item)
 {
 	size_t index;
@@ -48,6 +77,67 @@ size_t pigen_output_item_add(pigen_output_model *model, pigen_output_item item)
 	model->items[index] = item;
 	model->item_count++;
 	return index;
+}
+
+size_t pigen_output_item_open(pigen_output_model *model, pigen_output_item item)
+{
+	size_t slot;
+	uint32_t key;
+
+	if (!model || item.kind != PIGEN_OUTPUT_MODULE)
+		return PIGEN_INVALID_ID;
+	key = item.as.module.index;
+	if (key == PIGEN_INVALID_ID)
+		return PIGEN_INVALID_ID;
+	nested_ensure(model, (size_t)key + 1);
+	item.layout = (pigen_rtl_record_range){ model->item_count + 1, 0 };
+	slot = pigen_output_item_add(model, item);
+	if (slot == PIGEN_INVALID_ID)
+		return PIGEN_INVALID_ID;
+	model->nested_layouts[key] = item.layout;
+	return slot;
+}
+
+size_t pigen_output_item_add_child(pigen_output_model *model,
+	pigen_rtl_module_id module, pigen_output_item child)
+{
+	size_t slot;
+	uint32_t key;
+
+	if (!model)
+		return PIGEN_INVALID_ID;
+	key = module.index;
+	if (key == PIGEN_INVALID_ID || (size_t)key >= model->nested_layout_count)
+		return PIGEN_INVALID_ID;
+	if (model->nested_layouts[key].count == 0 &&
+		model->nested_layouts[key].first == 0)
+		return PIGEN_INVALID_ID;
+	child.layout = (pigen_rtl_record_range){0, 0};
+	slot = pigen_output_item_add(model, child);
+	if (slot == PIGEN_INVALID_ID)
+		return PIGEN_INVALID_ID;
+	model->nested_layouts[key].count++;
+	model->items[model->nested_layouts[key].first - 1].layout =
+		model->nested_layouts[key];
+	return slot;
+}
+
+pigen_rtl_record_range pigen_output_item_layout(const pigen_output_model *model,
+	size_t module_slot)
+{
+	pigen_rtl_record_range empty = {0, 0};
+	pigen_output_item item;
+	uint32_t key;
+
+	if (!model || module_slot >= model->item_count)
+		return empty;
+	item = model->items[module_slot];
+	if (item.kind != PIGEN_OUTPUT_MODULE)
+		return empty;
+	key = item.as.module.index;
+	if (key == PIGEN_INVALID_ID || (size_t)key >= model->nested_layout_capacity)
+		return empty;
+	return model->nested_layouts[key];
 }
 
 size_t pigen_output_item_count(const pigen_output_model *model)
