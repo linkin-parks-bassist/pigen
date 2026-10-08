@@ -28,6 +28,158 @@
 #define INVALID_EXPR ((pigen_const_expr_id){PIGEN_INVALID_ID})
 #define IS_INVALID_ID(id) ((id).index == PIGEN_INVALID_ID)
 
+/* Collect every expression identity reachable from one RTL expression root
+ * (the root itself plus every descendant, in the RTL model's child links).
+ * Returns 0 when the root is invalid, already visited, or the model holds no
+ * such record. The caller owns the out-arena, whose size must be at least the
+ * model's expression count. */
+static int rtest_collect_exprs(const pigen_rtl_model *model,
+	pigen_rtl_expr_id root, int *seen, pigen_rtl_expr_id *out,
+	size_t out_capacity, size_t *out_count)
+{
+	size_t child_count;
+	const pigen_rtl_expr_id *children;
+	const pigen_rtl_expr *record;
+	size_t i;
+
+	if (IS_INVALID_ID(root) || root.index >= model->expression_count)
+		return 0;
+	record = pigen_rtl_expr_get(model, root);
+	if (!record)
+		return 0;
+	if (seen[root.index])
+		return 1;
+	seen[root.index] = 1;
+	if (*out_count < out_capacity)
+		out[(*out_count)++] = root;
+	children = pigen_rtl_expr_children(model, root, &child_count);
+	for (i = 0; i < child_count; i++)
+		if (!rtest_collect_exprs(model, children[i], seen, out,
+			out_capacity, out_count))
+			return 0;
+	return 1;
+}
+
+/* 1 when some non-constant RTL expression identity is reachable from BOTH
+ * roots. A constant (integer) node is never a fire-identity conjunction, so
+ * the two roots sharing only a lowered constant does not satisfy the
+ * one-shared-fire-identity contract: this is the check that pins the fire
+ * identity as a single memoized conjunction referenced by both the
+ * destination update and the source-ready equation rather than re-lowered
+ * into two distinct copies. */
+static int rtest_shares_nonconst(const pigen_rtl_model *model,
+	pigen_rtl_expr_id a, pigen_rtl_expr_id b)
+{
+	int *seen_a;
+	int *seen_b;
+	pigen_rtl_expr_id *a_arena;
+	pigen_rtl_expr_id *b_arena;
+	size_t a_count = 0;
+	size_t b_count = 0;
+	size_t capacity;
+	const pigen_rtl_expr *record;
+	size_t i, j;
+	int found = 0;
+
+	if (IS_INVALID_ID(a) || IS_INVALID_ID(b))
+		return 0;
+	capacity = model->expression_count + 1;
+	seen_a = calloc(capacity, sizeof(*seen_a));
+	seen_b = calloc(capacity, sizeof(*seen_b));
+	a_arena = malloc(capacity * sizeof(*a_arena));
+	b_arena = malloc(capacity * sizeof(*b_arena));
+	if (!seen_a || !seen_b || !a_arena || !b_arena) {
+		free(seen_a);
+		free(seen_b);
+		free(a_arena);
+		free(b_arena);
+		return 0;
+	}
+	if (!rtest_collect_exprs(model, a, seen_a, a_arena, capacity, &a_count)) {
+		free(seen_a);
+		free(seen_b);
+		free(a_arena);
+		free(b_arena);
+		return 0;
+	}
+	if (!rtest_collect_exprs(model, b, seen_b, b_arena, capacity, &b_count)) {
+		free(seen_a);
+		free(seen_b);
+		free(a_arena);
+		free(b_arena);
+		return 0;
+	}
+	for (i = 0; i < a_count && !found; i++) {
+		for (j = 0; j < b_count; j++) {
+			if (a_arena[i].index == b_arena[j].index) {
+				record = pigen_rtl_expr_get(model, a_arena[i]);
+				if (record && record->kind != PIGEN_RTL_EXPR_INTEGER)
+					found = 1;
+				break;
+			}
+		}
+	}
+	free(seen_a);
+	free(seen_b);
+	free(a_arena);
+	free(b_arena);
+	return found;
+}
+
+/* Count the DISTINCT expression identities reachable from one RTL
+ * expression root (the root itself plus every descendant, in the model's
+ * child links) whose record has the given kind. When operand is a valid
+ * identity, only nodes that match it are counted - the node's own identity
+ * equals it (a childless control leaf), or its first child equals it (the
+ * negation wrapper); when it is invalid, no operand test is applied.
+ * Recursion is identity-based through the model's child links: a node
+ * referenced twice from the same tree is counted once, so the probe reports
+ * the deduplicated conjunction shape. Returns 0 when the root is invalid or
+ * the model holds no such record. */
+static int rtest_count_reachable_kind(const pigen_rtl_model *model,
+	pigen_rtl_expr_id root, pigen_rtl_expr_kind kind,
+	pigen_rtl_expr_id operand)
+{
+	int *seen;
+	const pigen_rtl_expr_id *children;
+	const pigen_rtl_expr *record;
+	size_t capacity;
+	size_t child_count;
+	size_t i;
+	int total = 0;
+
+	if (IS_INVALID_ID(root) || root.index >= model->expression_count)
+		return 0;
+	capacity = model->expression_count + 1;
+	seen = calloc(capacity, sizeof(*seen));
+	if (!seen)
+		return 0;
+	if (seen[root.index]) {
+		free(seen);
+		return 0;
+	}
+	seen[root.index] = 1;
+	record = pigen_rtl_expr_get(model, root);
+	if (record && record->kind == kind) {
+		if (IS_INVALID_ID(operand))
+			total++;
+		else if (root.index == operand.index)
+			total++;
+		else if (record->child_count >= 1) {
+			children = pigen_rtl_expr_children(model, root,
+				&child_count);
+			if (children && children[0].index == operand.index)
+				total++;
+		}
+	}
+	children = pigen_rtl_expr_children(model, root, &child_count);
+	for (i = 0; i < child_count; i++)
+		total += rtest_count_reachable_kind(model, children[i], kind,
+			operand);
+	free(seen);
+	return total;
+}
+
 
 int main(int argc, char **argv)
 {
@@ -4380,6 +4532,1207 @@ int main(int argc, char **argv)
 	REQUIRE(!lowering.lowered_expressions &&
 		!lowering.lowered_expression_count &&
 		!lowering.lowered_expression_capacity);
+	}
+
+	SECTION("t8-fire-identity") {
+		/* The base witness source: one clock plus two data signals; this
+		 * packet asserts only on the base transfer's destination d, so the
+		 * second signal stays declared but unused by the fire identity. */
+		const char *text =
+			"module top : input clk : logic ; input d : logic ; input e : logic ;\n";
+		pigen_source_manager sources_t = {0};
+		pigen_semantic_model sem_t;
+		pigen_rtl_model rtl_t = {0};
+		pigen_rtl_lowering lowering_t;
+		pigen_data_type_id t1;
+		pigen_const_expr_id width1;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_clk;
+		pigen_source_span name_d;
+		pigen_source_span name_e;
+		pigen_source_span process_span;
+		pigen_source_span transfer_span;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id clk_symbol;
+		pigen_symbol_id d_symbol;
+		pigen_symbol_id e_symbol;
+		pigen_module_id module;
+		pigen_signal_id clk;
+		pigen_signal_id d;
+		pigen_signal_id e;
+		pigen_clock_domain_id domain;
+		pigen_expr_id clk_expr;
+		pigen_process_id process;
+		pigen_lvalue_id dest;
+		pigen_expr_id value;
+		pigen_transfer_id transfer;
+		size_t i, j;
+		const pigen_rtl_update *upd;
+		const pigen_rtl_equation *eq;
+
+		/* Build the witness through the owner APIs (the section 8 pattern):
+		 * a 1-bit data type, a source file, the compilation scope, a module,
+		 * a declared clock signal and a declared data signal. The spans hold
+		 * the owner constraints: the module symbol's declaration spans the
+		 * whole file and the module scope uses the same span; each signal's
+		 * name span is contained in (and equal to) its declaration span. */
+		pigen_semantic_init(&sem_t, &sources_t);
+		pigen_rtl_lowering_init(&lowering_t, &sem_t, &rtl_t);
+		width1 = pigen_const_expr_intern_integer(&sem_t, 1,
+			pigen_data_type_unsized_integer(&sem_t));
+		t1 = pigen_data_type_sized_logic(&sem_t, 1, PIGEN_SIGN_UNSIGNED);
+		REQUIRE(!IS_INVALID_ID(width1) && !IS_INVALID_ID(t1));
+		source = pigen_source_add(&sources_t, "lower_fire_identity.pigen",
+			text, strlen(text));
+		REQUIRE(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_clk = (pigen_source_span){source, 19, 22}; /* "clk" */
+		name_d = (pigen_source_span){source, 39, 40}; /* "d" */
+		name_e = (pigen_source_span){source, 57, 58}; /* "e" */
+		process_span = (pigen_source_span){source, 13, 40};
+		transfer_span = (pigen_source_span){source, 33, 40};
+		sem_t.compilation_scope = pigen_scope_add(&sem_t,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		REQUIRE(sem_t.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, sem_t.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_t, sem_t.compilation_scope, whole);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_t, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_clk, name_clk, &clk_symbol, NULL) == PIGEN_DECLARE_OK);
+		clk = pigen_signal_add(&sem_t, (pigen_syntax_id){2}, module,
+			clk_symbol, t1, pigen_semantic_scalar_shape(&sem_t),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INPUT, name_clk);
+		REQUIRE(clk.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_d, name_d, &d_symbol, NULL) == PIGEN_DECLARE_OK);
+		d = pigen_signal_add(&sem_t, (pigen_syntax_id){3}, module,
+			d_symbol, t1, pigen_semantic_scalar_shape(&sem_t),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INTERNAL, name_d);
+		REQUIRE(d.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_t, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_e, name_e, &e_symbol, NULL) == PIGEN_DECLARE_OK);
+		e = pigen_signal_add(&sem_t, (pigen_syntax_id){7}, module,
+			e_symbol, t1, pigen_semantic_scalar_shape(&sem_t),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INTERNAL, name_e);
+		REQUIRE(e.index != PIGEN_INVALID_ID);
+
+		/* The owner-span family: the clock domain interns the declared clock
+		 * symbol and edge; the process carries the clock expression (a
+		 * PIGEN_EXPR_SYMBOL over the clock signal whose span the process span
+		 * contains) and a process span; the transfer carries a destination
+		 * lvalue (the data signal's projection) and a value of the SAME data
+		 * type and shape, and its span is contained in the process span. A
+		 * one-atom true guard is seeded directly in the predicate arena, the
+		 * way the semantic tests seed the model's predicate records. */
+		domain = pigen_clock_domain_intern(&sem_t, clk_symbol,
+			PIGEN_SEMANTIC_POSEDGE);
+		REQUIRE(!IS_INVALID_ID(domain));
+		clk_expr = pigen_expr_add_symbol(&sem_t, clk_symbol, t1, name_clk);
+		REQUIRE(!IS_INVALID_ID(clk_expr));
+		process = pigen_process_add(&sem_t, (pigen_syntax_id){4}, module,
+			domain, clk_expr, process_span);
+		REQUIRE(!IS_INVALID_ID(process));
+		dest = pigen_lvalue_resolve(&sem_t,
+			pigen_expr_add_symbol(&sem_t, d_symbol, t1, name_d));
+		REQUIRE(!IS_INVALID_ID(dest));
+		value = pigen_expr_add_integer(&sem_t, 1, t1, name_d);
+		REQUIRE(!IS_INVALID_ID(value));
+		sem_t.predicates = malloc(sizeof(*sem_t.predicates));
+		REQUIRE(sem_t.predicates);
+		sem_t.predicates[0] = (pigen_predicate){0};
+		sem_t.predicate_count = 1;
+		sem_t.predicate_capacity = 1;
+		transfer = pigen_transfer_add(&sem_t, (pigen_syntax_id){5}, module,
+			process, dest, value, (pigen_predicate_id){0}, domain,
+			NULL, 0, transfer_span);
+		/* The witness is valid BEFORE any stub call: the owner accepted the
+		 * process and the transfer with their spans. */
+		REQUIRE(!IS_INVALID_ID(transfer));
+
+		/* The base witness lowers: the entry point must report 0. */
+		REQUIRE(pigen_lower_rtl_transfers(&lowering_t, module) == 0);
+
+		/* (1) FIRE IDENTITY (RED): the base single transfer's fire identity
+		 * is ONE shared conjunction - the canonical guard atoms conjoined
+		 * with the distinct consumer-valid and producer-ready dependencies -
+		 * and every destination update of the transfer AND the source-ready
+		 * equation carry that SAME lowered RTL expression identity (one
+		 * memoized expression id), not a re-lowered copy. The witness is the
+		 * base transfer (one-atom true guard, dest d projection): its
+		 * destination update value tree and its source-ready equation value
+		 * tree must share a non-constant fire-identity node. */
+		{
+			const pigen_semantic_transfer *base_t =
+				pigen_transfer_get(&sem_t, transfer);
+			pigen_rtl_expr_id upd_value;
+			pigen_rtl_expr_id ready_value;
+			int base_shared;
+
+			REQUIRE(base_t);
+			/* The transfer owns exactly one destination update and one
+			 * source-ready equation: the update writes the projected payload,
+			 * the equation drives the source ready control. */
+			upd_value = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			ready_value = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			for (i = 0; i < rtl_t.update_count; i++) {
+				upd = pigen_rtl_update_get(&rtl_t,
+					(pigen_rtl_update_id){(uint32_t)i});
+				if (upd &&
+					upd->destination.index ==
+						lowering_t.lowered_endpoints[d.index]
+							.payload.index) {
+					upd_value = upd->value;
+					break;
+				}
+			}
+			for (j = 0; j < rtl_t.equation_count; j++) {
+				eq = pigen_rtl_equation_get(&rtl_t,
+					(pigen_rtl_equation_id){(uint32_t)j});
+				if (eq &&
+					eq->destination.index ==
+						lowering_t.lowered_endpoints[d.index]
+							.input_ready.index) {
+					ready_value = eq->value;
+					break;
+				}
+			}
+			REQUIRE(!IS_INVALID_ID(upd_value));
+			base_shared = rtest_shares_nonconst(&rtl_t, upd_value,
+				ready_value);
+			/* The fire identity is shared by the update and the ready
+			 * equation as one memoized non-constant node: a re-lowered copy
+			 * (two structurally-identical but distinct ids) leaves no shared
+			 * non-constant node and fails this. */
+			REQUIRE(base_shared);
+		}
+
+		pigen_rtl_lowering_free(&lowering_t);
+		pigen_free_rtl_model(&rtl_t);
+		pigen_free_semantic_model(&sem_t);
+		pigen_free_sources(&sources_t);
+	}
+
+	SECTION("t8-join") {
+		/* The (2) JOIN gate family: two transfers in one module sharing ONE
+		 * destination fire on ONE shared fire identity - the same lowered
+		 * expression identity on both destination updates, not two re-lowered
+		 * copies. The witness builds its own isolated module (one clock, one
+		 * data signal, one process, two transfers whose destination lvalue is
+		 * the same payload signal) on its own source and models. The probe
+		 * helper rtest_shares_nonconst is defined once at the top of this file
+		 * by the t8-fire-identity packet and is not redefined here. */
+		const char *text_join =
+			"module join : input clk : logic ; input d : logic ;\n";
+		pigen_source_manager sources_a = {0};
+		pigen_semantic_model sem_a;
+		pigen_rtl_model rtl_a = {0};
+		pigen_rtl_lowering lowering_a;
+		pigen_data_type_id ta;
+		pigen_source_id source_a;
+		pigen_source_span whole_a, name_clk_a, name_d_a;
+		pigen_source_span proc_a, tr_a_span;
+		pigen_scope_id scope_a;
+		pigen_symbol_id mod_a, clk_a, d_a;
+		pigen_module_id module_a;
+		pigen_signal_id clk_sig_a, d_sig_a;
+		pigen_clock_domain_id dom_a;
+		pigen_expr_id clk_e_a;
+		pigen_process_id proc_id_a;
+		pigen_lvalue_id dest_a;
+		pigen_expr_id val_a;
+		pigen_transfer_id tr_x, tr_y;
+		pigen_rtl_expr_id x_val, y_val;
+		int join_shared;
+		size_t i;
+		const pigen_rtl_update *upd;
+
+		pigen_semantic_init(&sem_a, &sources_a);
+		pigen_rtl_lowering_init(&lowering_a, &sem_a, &rtl_a);
+		ta = pigen_data_type_sized_logic(&sem_a, 1, PIGEN_SIGN_UNSIGNED);
+		REQUIRE(!IS_INVALID_ID(ta));
+		source_a = pigen_source_add(&sources_a, "lower_join.pigen",
+			text_join, strlen(text_join));
+		REQUIRE(source_a.index != PIGEN_INVALID_ID);
+		whole_a = (pigen_source_span){source_a, 0, strlen(text_join)};
+		name_clk_a = (pigen_source_span){source_a, 20, 23};
+		name_d_a = (pigen_source_span){source_a, 40, 41};
+		proc_a = (pigen_source_span){source_a, 13, 41};
+		tr_a_span = (pigen_source_span){source_a, 33, 41};
+		sem_a.compilation_scope = pigen_scope_add(&sem_a,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		REQUIRE(sem_a.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_a, sem_a.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole_a, whole_a, &mod_a, NULL) == PIGEN_DECLARE_OK);
+		scope_a = pigen_scope_add(&sem_a, sem_a.compilation_scope, whole_a);
+		module_a = pigen_module_add(&sem_a, (pigen_syntax_id){1}, mod_a,
+			scope_a, whole_a);
+		REQUIRE(module_a.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_a, scope_a, PIGEN_SYMBOL_SIGNAL,
+			ta, name_clk_a, name_clk_a, &clk_a, NULL) ==
+			PIGEN_DECLARE_OK);
+		clk_sig_a = pigen_signal_add(&sem_a, (pigen_syntax_id){2},
+			module_a, clk_a, ta, pigen_semantic_scalar_shape(&sem_a),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INPUT, name_clk_a);
+		(void)clk_sig_a;
+		REQUIRE(pigen_symbol_declare(&sem_a, scope_a, PIGEN_SYMBOL_SIGNAL,
+			ta, name_d_a, name_d_a, &d_a, NULL) == PIGEN_DECLARE_OK);
+		d_sig_a = pigen_signal_add(&sem_a, (pigen_syntax_id){3},
+			module_a, d_a, ta, pigen_semantic_scalar_shape(&sem_a),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INTERNAL, name_d_a);
+		dom_a = pigen_clock_domain_intern(&sem_a, clk_a,
+			PIGEN_SEMANTIC_POSEDGE);
+		clk_e_a = pigen_expr_add_symbol(&sem_a, clk_a, ta, name_clk_a);
+		proc_id_a = pigen_process_add(&sem_a, (pigen_syntax_id){4},
+			module_a, dom_a, clk_e_a, proc_a);
+		dest_a = pigen_lvalue_resolve(&sem_a,
+			pigen_expr_add_symbol(&sem_a, d_a, ta, name_d_a));
+		val_a = pigen_expr_add_integer(&sem_a, 1, ta, name_d_a);
+		sem_a.predicates = malloc(sizeof(*sem_a.predicates));
+		sem_a.predicates[0] = (pigen_predicate){0};
+		sem_a.predicate_count = 1;
+		sem_a.predicate_capacity = 1;
+		tr_x = pigen_transfer_add(&sem_a, (pigen_syntax_id){5}, module_a,
+			proc_id_a, dest_a, val_a, (pigen_predicate_id){0}, dom_a,
+			NULL, 0, tr_a_span);
+		tr_y = pigen_transfer_add(&sem_a, (pigen_syntax_id){6}, module_a,
+			proc_id_a, dest_a, val_a, (pigen_predicate_id){0}, dom_a,
+			NULL, 0, tr_a_span);
+		REQUIRE(!IS_INVALID_ID(tr_x) && !IS_INVALID_ID(tr_y));
+		REQUIRE(pigen_lower_rtl_transfers(&lowering_a, module_a) == 0);
+		/* Both transfers' destination updates (same payload object) must
+		 * carry the SAME non-constant fire-identity node: the join fires
+		 * on one shared identity, not two re-lowered copies. */
+		x_val = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		y_val = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		for (i = 0; i < rtl_a.update_count; i++) {
+			upd = pigen_rtl_update_get(&rtl_a,
+				(pigen_rtl_update_id){(uint32_t)i});
+			if (upd &&
+				upd->destination.index ==
+					lowering_a.lowered_endpoints[d_sig_a.index]
+						.payload.index) {
+				if (IS_INVALID_ID(x_val))
+					x_val = upd->value;
+				else
+					y_val = upd->value;
+			}
+		}
+		REQUIRE(!IS_INVALID_ID(x_val) && !IS_INVALID_ID(y_val));
+		join_shared = rtest_shares_nonconst(&rtl_a, x_val, y_val);
+		/* The join's fire identity is one shared non-constant node: a
+		 * re-lowered copy (two structurally-identical but distinct ids)
+		 * leaves no shared non-constant node and fails this. */
+		REQUIRE(join_shared);
+		pigen_rtl_lowering_free(&lowering_a);
+		pigen_free_rtl_model(&rtl_a);
+		pigen_free_semantic_model(&sem_a);
+		pigen_free_sources(&sources_a);
+	}
+
+	SECTION("t8-guard") {
+		/* GUARD AND DEPENDENCY FIRE IDENTITY: every other section seeds its
+		 * guard as the zero-atom predicate and passes NULL, 0 signal uses to
+		 * pigen_transfer_add, so its fire-identity asserts pin only that the
+		 * destination update and the source-ready equation share one
+		 * non-constant node. This witness closes that escape: its guard is
+		 * built through the owner predicate API as a two-atom conjunction
+		 * (g == 1 AND f == 0 - the expected-0 atom is the negation) and its
+		 * transfer carries five distinct (signal, role) uses, making the
+		 * guard-atom conjunction, the endpoint valid/ready conjuncts and the
+		 * (signal, role) dedup observable to the assertion suite below. The
+		 * witness is a fresh one-process module: clock clk, destination
+		 * payload d, guard conditions g and f, consumer c and producer p;
+		 * its single transfer assigns the 1-bit constant 1 to d under the
+		 * guard. */
+		{
+			const char *text_g =
+				"module guard : input clk : logic ; input d : logic ; "
+				"input g : logic ; input f : logic ; input c : logic ; "
+				"input p : logic ;\n";
+			pigen_source_manager sources_g = {0};
+			pigen_semantic_model sem_g;
+			pigen_rtl_model rtl_g = {0};
+			pigen_rtl_lowering lowering_g;
+			pigen_data_type_id td_g;
+			pigen_source_id source_g;
+			pigen_source_span whole_g, name_clk_g, name_d_g, name_g_g;
+			pigen_source_span name_f_g, name_c_g, name_p_g, proc_g;
+			pigen_source_span tr_g;
+			pigen_scope_id scope_g;
+			pigen_symbol_id mod_g, clk_g, d_g, g_g, f_g, c_g, p_g;
+			pigen_module_id module_g;
+			pigen_signal_id clk_sig_g, d_sig_g, g_sig_g, f_sig_g;
+			pigen_signal_id c_sig_g, p_sig_g;
+			pigen_clock_domain_id dom_g;
+			pigen_expr_id clk_e_g, val_g, g_e, f_e;
+			pigen_process_id proc_id_g;
+			pigen_lvalue_id dest_g;
+			pigen_predicate_id true_g, guard_g;
+			const pigen_predicate *guard_get;
+			const pigen_predicate_atom *guard_atoms;
+			pigen_transfer_signal_use uses_g[5];
+			pigen_transfer_id tr_id_g;
+			const pigen_semantic_transfer *tr_get;
+
+			pigen_semantic_init(&sem_g, &sources_g);
+			pigen_rtl_lowering_init(&lowering_g, &sem_g, &rtl_g);
+			td_g = pigen_data_type_sized_logic(&sem_g, 1, PIGEN_SIGN_UNSIGNED);
+			REQUIRE(!IS_INVALID_ID(td_g));
+			source_g = pigen_source_add(&sources_g, "lower_guard.pigen",
+				text_g, strlen(text_g));
+			REQUIRE(source_g.index != PIGEN_INVALID_ID);
+			whole_g = (pigen_source_span){source_g, 0, strlen(text_g)};
+			name_clk_g = (pigen_source_span){source_g, 21, 24};
+			name_d_g = (pigen_source_span){source_g, 41, 42};
+			name_g_g = (pigen_source_span){source_g, 59, 60};
+			name_f_g = (pigen_source_span){source_g, 77, 78};
+			name_c_g = (pigen_source_span){source_g, 95, 96};
+			name_p_g = (pigen_source_span){source_g, 113, 114};
+			proc_g = (pigen_source_span){source_g, 15, 124};
+			tr_g = (pigen_source_span){source_g, 35, 52};
+			sem_g.compilation_scope = pigen_scope_add(&sem_g,
+				(pigen_scope_id){PIGEN_INVALID_ID},
+				(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+			REQUIRE(pigen_symbol_declare(&sem_g, sem_g.compilation_scope,
+				PIGEN_SYMBOL_MODULE,
+				(pigen_data_type_id){PIGEN_INVALID_ID},
+				whole_g, whole_g, &mod_g, NULL) == PIGEN_DECLARE_OK);
+			scope_g = pigen_scope_add(&sem_g, sem_g.compilation_scope,
+				whole_g);
+			module_g = pigen_module_add(&sem_g, (pigen_syntax_id){1},
+				mod_g, scope_g, whole_g);
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_clk_g, name_clk_g,
+				&clk_g, NULL) == PIGEN_DECLARE_OK);
+			clk_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){2},
+				module_g, clk_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_clk_g);
+			(void)clk_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_d_g, name_d_g,
+				&d_g, NULL) == PIGEN_DECLARE_OK);
+			d_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){3},
+				module_g, d_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INTERNAL, name_d_g);
+			(void)d_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_g_g, name_g_g,
+				&g_g, NULL) == PIGEN_DECLARE_OK);
+			g_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){4},
+				module_g, g_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_g_g);
+			(void)g_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_f_g, name_f_g,
+				&f_g, NULL) == PIGEN_DECLARE_OK);
+			f_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){5},
+				module_g, f_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_f_g);
+			(void)f_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_c_g, name_c_g,
+				&c_g, NULL) == PIGEN_DECLARE_OK);
+			c_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){6},
+				module_g, c_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_c_g);
+			(void)c_sig_g;
+			REQUIRE(pigen_symbol_declare(&sem_g, scope_g,
+				PIGEN_SYMBOL_SIGNAL, td_g, name_p_g, name_p_g,
+				&p_g, NULL) == PIGEN_DECLARE_OK);
+			p_sig_g = pigen_signal_add(&sem_g, (pigen_syntax_id){7},
+				module_g, p_g, td_g, pigen_semantic_scalar_shape(&sem_g),
+				(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+				PIGEN_SEMANTIC_INPUT, name_p_g);
+			(void)p_sig_g;
+			dom_g = pigen_clock_domain_intern(&sem_g, clk_g,
+				PIGEN_SEMANTIC_POSEDGE);
+			clk_e_g = pigen_expr_add_symbol(&sem_g, clk_g, td_g,
+				name_clk_g);
+			proc_id_g = pigen_process_add(&sem_g, (pigen_syntax_id){8},
+				module_g, dom_g, clk_e_g, proc_g);
+			dest_g = pigen_lvalue_resolve(&sem_g,
+				pigen_expr_add_symbol(&sem_g, d_g, td_g, name_d_g));
+			val_g = pigen_expr_add_integer(&sem_g, 1, td_g, name_d_g);
+			/* The guard is built through the owner predicate API, not
+			 * seeded: true AND (g == 1) AND (f == 0). The expected-0
+			 * atom is the negation; the owner reports the two atoms in
+			 * condition-index order, g before f. */
+			true_g = pigen_predicate_true(&sem_g);
+			REQUIRE(!IS_INVALID_ID(true_g));
+			g_e = pigen_expr_add_symbol(&sem_g, g_g, td_g, name_g_g);
+			f_e = pigen_expr_add_symbol(&sem_g, f_g, td_g, name_f_g);
+			guard_g = pigen_predicate_and_condition(&sem_g, true_g, g_e, 1);
+			guard_g = pigen_predicate_and_condition(&sem_g, guard_g, f_e, 0);
+			REQUIRE(!IS_INVALID_ID(guard_g));
+			guard_get = pigen_predicate_get(&sem_g, guard_g);
+			REQUIRE(guard_get && guard_get->atom_count == 2 &&
+				!guard_get->impossible);
+			guard_atoms = pigen_predicate_atoms(&sem_g, guard_g);
+			REQUIRE(guard_atoms &&
+				guard_atoms[0].condition.index == g_e.index &&
+				guard_atoms[0].expected == 1 &&
+				guard_atoms[1].condition.index == f_e.index &&
+				guard_atoms[1].expected == 0);
+			/* Five distinct (signal, role) uses, no duplicates: the
+			 * destination payload d is both written and read, c is the
+			 * consumer, p the producer, and g and f are each read as
+			 * guard conditions. */
+			uses_g[0] = (pigen_transfer_signal_use){d_sig_g,
+				PIGEN_TRANSFER_SIGNAL_WRITE | PIGEN_TRANSFER_SIGNAL_READ};
+			uses_g[1] = (pigen_transfer_signal_use){c_sig_g,
+				PIGEN_TRANSFER_CONSUMER};
+			uses_g[2] = (pigen_transfer_signal_use){p_sig_g,
+				PIGEN_TRANSFER_PRODUCER};
+			uses_g[3] = (pigen_transfer_signal_use){g_sig_g,
+				PIGEN_TRANSFER_SIGNAL_READ};
+			uses_g[4] = (pigen_transfer_signal_use){f_sig_g,
+				PIGEN_TRANSFER_SIGNAL_READ};
+			tr_id_g = pigen_transfer_add(&sem_g, (pigen_syntax_id){9},
+				module_g, proc_id_g, dest_g, val_g, guard_g, dom_g,
+				uses_g, 5, tr_g);
+			REQUIRE(!IS_INVALID_ID(tr_id_g));
+			tr_get = pigen_transfer_get(&sem_g, tr_id_g);
+			REQUIRE(tr_get && tr_get->guard.index == guard_g.index &&
+				tr_get->signal_use_count == 5);
+			/* Entry-point gate: REQUIRE the transfer lowering succeeds so
+			 * the fire-identity assertions below run against the published
+			 * RTL records. */
+			REQUIRE(pigen_lower_rtl_transfers(&lowering_g, module_g) == 0);
+
+			/* The guard-atom and endpoint-conjunct assertions (7.1)-(7.6)
+			 * pin the escape this witness exposes: its guard is the
+			 * two-atom conjunction (g == 1 AND f == 0, the expected-0 atom
+			 * the negation) and its transfer carries five distinct
+			 * (signal, role) uses, so the shared fire identity must be the
+			 * memoized conjunction of the two lowered guard atoms, the
+			 * consumer-valid and producer-ready endpoint controls and
+			 * nothing else. */
+			{
+				const pigen_semantic_transfer *tr_g_get;
+				const pigen_transfer_signal_use *tr_g_uses;
+				const pigen_rtl_update *upd_g;
+				const pigen_rtl_equation *eq_g;
+				pigen_rtl_expr_id upd_val_g;
+				pigen_rtl_expr_id rdy_val_g;
+				int *seen_u_g;
+				int *seen_r_g;
+				pigen_rtl_expr_id *arena_u_g;
+				pigen_rtl_expr_id *arena_r_g;
+				size_t cap_g;
+				size_t u_cnt_g = 0;
+				size_t r_cnt_g = 0;
+				pigen_rtl_expr_id g_fire_g;
+				const pigen_rtl_expr *fire_rec_g;
+				size_t i;
+
+				/* (7.1) Locate the transfer's single destination update and
+				 * its single source-ready equation by endpoint identity and
+				 * REQUIRE both carry a valid value: the entry contract
+				 * publishes the fire identity on exactly these two records.
+				 * A missing or empty record fails here, before any tree
+				 * probe. */
+				tr_g_get = pigen_transfer_get(&sem_g, tr_id_g);
+				tr_g_uses = pigen_transfer_signal_uses(&sem_g, tr_id_g);
+				REQUIRE(tr_g_get && tr_g_uses);
+				upd_val_g = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				rdy_val_g = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				for (i = 0; i < rtl_g.update_count; i++) {
+					upd_g = pigen_rtl_update_get(&rtl_g,
+						(pigen_rtl_update_id){(uint32_t)i});
+					if (upd_g &&
+						upd_g->destination.index ==
+							lowering_g.lowered_endpoints
+								[d_sig_g.index].payload.index) {
+						upd_val_g = upd_g->value;
+						break;
+					}
+				}
+				for (i = 0; i < rtl_g.equation_count; i++) {
+					eq_g = pigen_rtl_equation_get(&rtl_g,
+						(pigen_rtl_equation_id){(uint32_t)i});
+					if (eq_g &&
+						eq_g->destination.index ==
+							lowering_g.lowered_endpoints
+								[d_sig_g.index].input_ready.index) {
+						rdy_val_g = eq_g->value;
+						break;
+					}
+				}
+				REQUIRE(!IS_INVALID_ID(upd_val_g) &&
+					!IS_INVALID_ID(rdy_val_g));
+
+				/* (7.2) The update value and the ready value share one
+				 * non-constant fire-identity node (the family (1) check):
+				 * a re-lowered copy leaves no shared non-constant node. */
+				REQUIRE(rtest_shares_nonconst(&rtl_g, upd_val_g,
+					rdy_val_g));
+
+				/* Collect the distinct reachable node sets once, from both
+				 * roots, with the file-local collector and an arena sized
+				 * to the model's expression count: the endpoint-conjunct,
+				 * guard-atom and dedup probes below all test membership
+				 * against these two identity sets. */
+				cap_g = rtl_g.expression_count + 1;
+				seen_u_g = calloc(cap_g, sizeof(*seen_u_g));
+				seen_r_g = calloc(cap_g, sizeof(*seen_r_g));
+				arena_u_g = malloc(cap_g * sizeof(*arena_u_g));
+				arena_r_g = malloc(cap_g * sizeof(*arena_r_g));
+				REQUIRE(seen_u_g && seen_r_g && arena_u_g && arena_r_g);
+				REQUIRE(rtest_collect_exprs(&rtl_g, upd_val_g, seen_u_g,
+					arena_u_g, cap_g, &u_cnt_g) &&
+					rtest_collect_exprs(&rtl_g, rdy_val_g, seen_r_g,
+					arena_r_g, cap_g, &r_cnt_g));
+
+				/* (7.3) Endpoint conjuncts: for EVERY distinct signal use
+				 * the endpoint control the use contributes must be a
+				 * reachable identity in BOTH sets - c's valid control for
+				 * the consumer use, p's ready control for the producer
+				 * use. A fire identity that forgets one endpoint control,
+				 * or reaches it from only one side, fails here. */
+				for (i = 0; i < tr_g_get->signal_use_count; i++) {
+					pigen_rtl_expr_id ctl_g =
+						(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+					int have_u = 0;
+					int have_r = 0;
+					size_t k;
+
+					if (tr_g_uses[i].roles & PIGEN_TRANSFER_CONSUMER)
+						ctl_g = lowering_g.lowered_endpoints
+							[tr_g_uses[i].signal.index].valid;
+					if (tr_g_uses[i].roles & PIGEN_TRANSFER_PRODUCER)
+						ctl_g = lowering_g.lowered_endpoints
+							[tr_g_uses[i].signal.index].ready;
+					if (IS_INVALID_ID(ctl_g))
+						continue;
+					for (k = 0; k < u_cnt_g; k++)
+						if (arena_u_g[k].index == ctl_g.index)
+							have_u = 1;
+					for (k = 0; k < r_cnt_g; k++)
+						if (arena_r_g[k].index == ctl_g.index)
+							have_r = 1;
+					REQUIRE(have_u && have_r);
+				}
+
+								/* (7.4) Guard-atom coverage: EACH canonical atom's
+				 * condition (a signal symbol read) lowers by the same path
+				 * fire_atom uses - lower_expr's PIGEN_EXPR_SYMBOL case - to
+				 * the signal's published payload OBJECT, the OBJECT
+				 * expression wrapping lowered_endpoints[signal].payload
+				 * (the atom's condition is a pigen_expr_id with no
+				 * const-expr, so the const-expression memo is never indexed
+				 * here). REQUIRE each atom's OBJECT identity reachable from
+				 * BOTH sets; the expected-1 atom's 1-bit-true EQUAL wrapper
+				 * (the BINARY PIGEN_BINARY_EQUAL whose operand is the g
+				 * OBJECT) reachable in BOTH as well; and the expected-0
+				 * atom's bare OBJECT node present in each set and NOT the
+				 * first child of any positive PIGEN_BINARY_EQUAL - a
+				 * negation-ignoring lowering that uses f positive makes
+				 * f's OBJECT the first child of an EQUAL and fails here.
+				 * No UNARY node is probed: the correct lowering never
+				 * produces one. */
+				for (i = 0; i < guard_get->atom_count; i++) {
+					pigen_rtl_object_id want_g;
+					pigen_rtl_expr_id obj_g;
+					int have_u = 0;
+					int have_r = 0;
+					int bare_g = 1;
+					int wrapper_u_g = 0;
+					int wrapper_r_g = 0;
+					size_t k;
+
+					want_g = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+					if (guard_atoms[i].condition.index == g_e.index)
+						want_g = lowering_g.lowered_endpoints
+							[g_sig_g.index].payload;
+					else if (guard_atoms[i].condition.index == f_e.index)
+						want_g = lowering_g.lowered_endpoints
+							[f_sig_g.index].payload;
+					REQUIRE(!IS_INVALID_ID(want_g));
+					obj_g = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+					for (k = 0; k < u_cnt_g; k++) {
+						const pigen_rtl_expr *rec_g = pigen_rtl_expr_get
+							(&rtl_g, arena_u_g[k]);
+
+						if (rec_g &&
+							rec_g->kind == PIGEN_RTL_EXPR_OBJECT &&
+							rec_g->object.index == want_g.index) {
+							if (IS_INVALID_ID(obj_g))
+								obj_g = arena_u_g[k];
+						}
+					}
+					for (k = 0; k < r_cnt_g; k++) {
+						const pigen_rtl_expr *rec_g = pigen_rtl_expr_get
+							(&rtl_g, arena_r_g[k]);
+
+						if (rec_g &&
+							rec_g->kind == PIGEN_RTL_EXPR_OBJECT &&
+							rec_g->object.index == want_g.index) {
+							if (IS_INVALID_ID(obj_g))
+								obj_g = arena_r_g[k];
+						}
+					}
+					REQUIRE(!IS_INVALID_ID(obj_g) &&
+						pigen_rtl_expr_get(&rtl_g, obj_g)->kind
+							== PIGEN_RTL_EXPR_OBJECT);
+					for (k = 0; k < u_cnt_g; k++)
+						if (arena_u_g[k].index == obj_g.index)
+							have_u = 1;
+					for (k = 0; k < r_cnt_g; k++)
+						if (arena_r_g[k].index == obj_g.index)
+							have_r = 1;
+					REQUIRE(have_u && have_r);
+					if (guard_atoms[i].expected == 1) {
+						/* The expected-1 atom: its 1-bit-true EQUAL
+							 * wrapper is a BINARY PIGEN_BINARY_EQUAL whose
+							 * first child is the g OBJECT; REQUIRE one such
+							 * node reachable in BOTH sets. */
+						for (k = 0; k < u_cnt_g; k++) {
+							const pigen_rtl_expr *rec_g =
+								pigen_rtl_expr_get(&rtl_g,
+									arena_u_g[k]);
+							const pigen_rtl_expr_id *ch_g;
+							size_t cc_g;
+
+							if (rec_g &&
+								rec_g->kind ==
+									PIGEN_RTL_EXPR_BINARY &&
+								rec_g->as.binary.resolution
+									.operation.operator
+										== PIGEN_BINARY_EQUAL) {
+								ch_g = pigen_rtl_expr_children
+									(&rtl_g, arena_u_g[k], &cc_g);
+								if (ch_g && cc_g == 2 &&
+									ch_g[0].index == obj_g.index)
+									wrapper_u_g = 1;
+							}
+						}
+						for (k = 0; k < r_cnt_g; k++) {
+							const pigen_rtl_expr *rec_g =
+								pigen_rtl_expr_get(&rtl_g,
+									arena_r_g[k]);
+							const pigen_rtl_expr_id *ch_g;
+							size_t cc_g;
+
+							if (rec_g &&
+								rec_g->kind ==
+									PIGEN_RTL_EXPR_BINARY &&
+								rec_g->as.binary.resolution
+									.operation.operator
+										== PIGEN_BINARY_EQUAL) {
+								ch_g = pigen_rtl_expr_children
+									(&rtl_g, arena_r_g[k], &cc_g);
+								if (ch_g && cc_g == 2 &&
+									ch_g[0].index == obj_g.index)
+									wrapper_r_g = 1;
+							}
+						}
+						REQUIRE(wrapper_u_g && wrapper_r_g);
+					} else {
+						/* The expected-0 atom (the negation): the OBJECT
+							 * node is NOT the first child of any positive
+							 * PIGEN_BINARY_EQUAL reachable in either set -
+							 * an implementation that uses the condition
+							 * positive makes the OBJECT the first child of
+							 * an EQUAL and fails here. */
+						for (k = 0; k < u_cnt_g; k++) {
+							const pigen_rtl_expr *rec_g =
+								pigen_rtl_expr_get(&rtl_g,
+									arena_u_g[k]);
+							const pigen_rtl_expr_id *ch_g;
+							size_t cc_g;
+
+							if (rec_g &&
+								rec_g->kind ==
+									PIGEN_RTL_EXPR_BINARY &&
+								rec_g->as.binary.resolution
+									.operation.operator
+										== PIGEN_BINARY_EQUAL) {
+								ch_g = pigen_rtl_expr_children
+									(&rtl_g, arena_u_g[k], &cc_g);
+								if (ch_g && cc_g == 2 &&
+									ch_g[0].index == obj_g.index)
+									bare_g = 0;
+							}
+						}
+						for (k = 0; k < r_cnt_g; k++) {
+							const pigen_rtl_expr *rec_g =
+								pigen_rtl_expr_get(&rtl_g,
+									arena_r_g[k]);
+							const pigen_rtl_expr_id *ch_g;
+							size_t cc_g;
+
+							if (rec_g &&
+								rec_g->kind ==
+									PIGEN_RTL_EXPR_BINARY &&
+								rec_g->as.binary.resolution
+									.operation.operator
+										== PIGEN_BINARY_EQUAL) {
+								ch_g = pigen_rtl_expr_children
+									(&rtl_g, arena_r_g[k], &cc_g);
+								if (ch_g && cc_g == 2 &&
+									ch_g[0].index == obj_g.index)
+									bare_g = 0;
+							}
+						}
+						REQUIRE(bare_g);
+					}
+				}
+
+				/* (7.5) Endpoint-control dedup: the consumer-valid control
+				 * (the CONSUMER use) and the producer-ready control (the
+				 * PRODUCER use) are NOT two distinct literals. For this
+				 * witness's 1-bit-logic endpoints the declaration lowering
+				 * publishes both from the one interned 1-bit "valid/ready 1"
+				 * control, so c's valid and p's ready are the SAME single
+				 * INTEGER identity. The left-associative fire-identity chain
+				 * conjoins the consumer-valid term and the producer-ready
+				 * term, so that shared identity appears at TWO endpoint-
+				 * control positions in the chain (not once, not four times):
+				 * a per-occurrence re-lowering (a fresh copy per endpoint)
+				 * would not share the one identity and a balanced tree that
+				 * dropped a position would reach it once. REQUIRE the shared
+				 * identity to be reachable exactly twice in each value set -
+				 * the consumer-valid and the producer-ready positions - and
+				 * REQUIRE c's valid and p's ready to be the one shared node.
+				 * Reaching the VALUE without the control identity (a
+				 * re-interned copy) fails the count. */
+				{
+					pigen_rtl_expr_id cvalid_g = lowering_g
+						.lowered_endpoints[c_sig_g.index].valid;
+					pigen_rtl_expr_id pready_g = lowering_g
+						.lowered_endpoints[p_sig_g.index].ready;
+					REQUIRE(pigen_rtl_expr_get(&rtl_g, cvalid_g) &&
+						pigen_rtl_expr_get(&rtl_g, cvalid_g)->
+						kind == PIGEN_RTL_EXPR_INTEGER);
+					REQUIRE(pigen_rtl_expr_get(&rtl_g, pready_g) &&
+						pigen_rtl_expr_get(&rtl_g, pready_g)->
+						kind == PIGEN_RTL_EXPR_INTEGER);
+					REQUIRE(!IS_INVALID_ID(cvalid_g) &&
+						!IS_INVALID_ID(pready_g) &&
+						cvalid_g.index == pready_g.index);
+					REQUIRE(rtest_count_reachable_kind(&rtl_g, upd_val_g,
+						PIGEN_RTL_EXPR_INTEGER, cvalid_g) == 2);
+					REQUIRE(rtest_count_reachable_kind(&rtl_g, rdy_val_g,
+						PIGEN_RTL_EXPR_INTEGER, pready_g) == 2);
+				}
+
+				/* (7.6) Conjunction shape: the shared fire-identity node
+				 * itself - the ready equation's value per the entry
+				 * contract, else the deepest common non-INTEGER ancestor of
+				 * the two reachable sets - is a two-child logical AND, not a
+				 * bare atom or a constant. The conjunction is a
+				 * left-associative chain, so its top's last child is a leaf
+				 * endpoint control and NO single side reaches both a guard
+				 * atom and the control; the guard-atom terms and the
+				 * endpoint-control term are all carried by the whole
+				 * reachable set. REQUIRE, over the whole reachable set of
+				 * the fire identity: the g-condition (expected 1) payload
+				 * OBJECT is reachable, the f-condition (expected 0) payload
+				 * OBJECT is reachable and is NOT the first child of any
+				 * positive PIGEN_BINARY_EQUAL, and the shared valid/ready
+				 * control identity is reachable. A fire identity that is a
+				 * bare atom, a constant, or a re-association that loses an
+				 * operand - or a negation-ignoring lowering that folds f
+				 * into a positive EQUAL - still fails here. */
+				g_fire_g = rdy_val_g;
+				if (IS_INVALID_ID(g_fire_g) ||
+					(pigen_rtl_expr_get(&rtl_g, g_fire_g)->kind
+						== PIGEN_RTL_EXPR_INTEGER)) {
+					g_fire_g = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+					for (i = 0; i < u_cnt_g; i++) {
+						pigen_rtl_expr_id cand_g = arena_u_g[i];
+						int in_r_g = 0;
+						size_t k;
+
+						for (k = 0; k < r_cnt_g; k++)
+							if (arena_r_g[k].index ==
+								cand_g.index)
+								in_r_g = 1;
+						if (in_r_g &&
+							pigen_rtl_expr_get(&rtl_g, cand_g)->
+							kind != PIGEN_RTL_EXPR_INTEGER)
+							g_fire_g = cand_g;
+					}
+				}
+				fire_rec_g = pigen_rtl_expr_get(&rtl_g, g_fire_g);
+				REQUIRE(fire_rec_g &&
+					fire_rec_g->kind == PIGEN_RTL_EXPR_BINARY &&
+					fire_rec_g->child_count == 2 &&
+					fire_rec_g->as.binary.resolution.operation
+						.operator == PIGEN_BINARY_LOGICAL_AND);
+				{
+					int *seen_f_g;
+					pigen_rtl_expr_id *arena_f_g;
+					size_t f_cnt_g = 0;
+					int g_obj_g = 0;
+					int f_obj_g = 0;
+					int f_bare_g = 1;
+					int ctl_g = 0;
+					pigen_rtl_expr_id f_obj_id_g;
+					size_t k;
+
+					seen_f_g = calloc(cap_g, sizeof(*seen_f_g));
+					arena_f_g = malloc(cap_g * sizeof(*arena_f_g));
+					REQUIRE(seen_f_g && arena_f_g);
+					REQUIRE(rtest_collect_exprs(&rtl_g, g_fire_g,
+						seen_f_g, arena_f_g, cap_g, &f_cnt_g));
+					/* The g-condition (expected 1) lowers to its published
+						 * payload OBJECT by the fire_atom path (the symbol
+						 * read): the OBJECT expression wrapping the payload
+						 * object, never indexed in the const-expression
+						 * memo. */
+					for (k = 0; k < f_cnt_g; k++) {
+						const pigen_rtl_expr *rec_g = pigen_rtl_expr_get
+							(&rtl_g, arena_f_g[k]);
+
+						if (rec_g &&
+							rec_g->kind == PIGEN_RTL_EXPR_OBJECT &&
+							rec_g->object.index == lowering_g
+								.lowered_endpoints[g_sig_g.index]
+								.payload.index)
+							g_obj_g = 1;
+					}
+					/* The f-condition (expected 0) lowers to its bare
+						 * payload OBJECT (fire_atom returns the lowered
+						 * condition unchanged for expected 0); REQUIRE the
+						 * OBJECT identity reachable. */
+					for (k = 0; k < f_cnt_g; k++) {
+						const pigen_rtl_expr *rec_g = pigen_rtl_expr_get
+							(&rtl_g, arena_f_g[k]);
+
+						if (rec_g &&
+							rec_g->kind == PIGEN_RTL_EXPR_OBJECT &&
+							rec_g->object.index == lowering_g
+								.lowered_endpoints[f_sig_g.index]
+								.payload.index)
+							f_obj_g = 1;
+					}
+					/* The f OBJECT is NOT the first child of any positive
+						 * PIGEN_BINARY_EQUAL reachable in the fire identity -
+						 * a negation-ignoring lowering that uses f positive
+						 * makes f's OBJECT the first child of an EQUAL and
+						 * fails here. */
+					if (f_obj_g) {
+						f_obj_id_g = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+						for (k = 0; k < f_cnt_g; k++) {
+							const pigen_rtl_expr *rec_g = pigen_rtl_expr_get
+								(&rtl_g, arena_f_g[k]);
+
+							if (rec_g &&
+								rec_g->kind == PIGEN_RTL_EXPR_OBJECT &&
+								rec_g->object.index == lowering_g
+									.lowered_endpoints[f_sig_g.index]
+									.payload.index) {
+								f_obj_id_g = arena_f_g[k];
+								break;
+							}
+						}
+						for (k = 0; k < f_cnt_g; k++) {
+							const pigen_rtl_expr *rec_g = pigen_rtl_expr_get
+								(&rtl_g, arena_f_g[k]);
+							const pigen_rtl_expr_id *ch_g;
+							size_t cc_g;
+
+							if (rec_g &&
+								rec_g->kind == PIGEN_RTL_EXPR_BINARY &&
+								rec_g->as.binary.resolution
+									.operation.operator
+										== PIGEN_BINARY_EQUAL) {
+								ch_g = pigen_rtl_expr_children(&rtl_g,
+									arena_f_g[k], &cc_g);
+								if (ch_g && cc_g == 2 &&
+									ch_g[0].index == f_obj_id_g.index)
+									f_bare_g = 0;
+							}
+						}
+					}
+					/* The shared valid/ready control identity (c's valid,
+						 * which is p's ready) is reachable in the fire
+						 * identity - the endpoint-control term is carried. */
+					for (k = 0; k < f_cnt_g; k++)
+						if (arena_f_g[k].index == lowering_g
+							.lowered_endpoints[c_sig_g.index].valid.index)
+							ctl_g = 1;
+					REQUIRE(g_obj_g && f_obj_g && f_bare_g && ctl_g);
+					free(seen_f_g);
+					free(arena_f_g);
+				}
+				free(seen_u_g);
+				free(seen_r_g);
+				free(arena_u_g);
+				free(arena_r_g);
+			}
+			pigen_rtl_lowering_free(&lowering_g);
+			pigen_free_rtl_model(&rtl_g);
+			pigen_free_semantic_model(&sem_g);
+			pigen_free_sources(&sources_g);
+		}
+	}
+
+	SECTION("t8-ownership") {
+		const char *text =
+			"module top : input clk : logic ; input s : buf ; output d : buf ;\n";
+		pigen_source_manager sources_o = {0};
+		pigen_semantic_model sem_o;
+		pigen_rtl_model rtl_o = {0};
+		pigen_rtl_lowering lowering_o;
+		pigen_data_type_id t1;
+		pigen_source_id source;
+		pigen_source_span whole;
+		pigen_source_span name_clk;
+		pigen_source_span name_s;
+		pigen_source_span name_d;
+		pigen_source_span process_span;
+		pigen_source_span transfer_span;
+		pigen_scope_id module_scope;
+		pigen_symbol_id module_symbol;
+		pigen_symbol_id clk_symbol;
+		pigen_symbol_id s_symbol;
+		pigen_symbol_id d_symbol;
+		pigen_module_id module;
+		pigen_signal_id clk;
+		pigen_signal_id s;
+		pigen_signal_id d;
+		pigen_clock_domain_id domain;
+		pigen_expr_id clk_expr;
+		pigen_process_id process;
+		pigen_lvalue_id dest;
+		pigen_expr_id value;
+		pigen_transfer_id transfer;
+
+		/* Build the owner-validated witness through the owner APIs: one 1-bit
+		 * type, one source, the compilation scope, the module, the clock, one
+		 * buf source s (input) and one buf destination d (internal/output),
+		 * one process on the clock domain, and one transfer d <= s guarded by
+		 * the seeded true predicate. No signal uses are attached, so the
+		 * witness is already ownership-legal (the resolver's exclusive-
+		 * producer/consumer law is the guarantee it was admitted under) and
+		 * its fire identity is the non-constant 1-bit BITS node. */
+		pigen_semantic_init(&sem_o, &sources_o);
+		pigen_rtl_lowering_init(&lowering_o, &sem_o, &rtl_o);
+		t1 = pigen_data_type_sized_logic(&sem_o, 1, PIGEN_SIGN_UNSIGNED);
+		REQUIRE(!IS_INVALID_ID(t1));
+		source = pigen_source_add(&sources_o, "lower_ownership.pigen",
+			text, strlen(text));
+		REQUIRE(source.index != PIGEN_INVALID_ID);
+		whole = (pigen_source_span){source, 0, strlen(text)};
+		name_clk = (pigen_source_span){source, 19, 22}; /* "clk" */
+		name_s = (pigen_source_span){source, 46, 47}; /* "s" */
+		name_d = (pigen_source_span){source, 62, 63}; /* "d" */
+		process_span = (pigen_source_span){source, 13, 64};
+		transfer_span = (pigen_source_span){source, 46, 64};
+		sem_o.compilation_scope = pigen_scope_add(&sem_o,
+			(pigen_scope_id){PIGEN_INVALID_ID},
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+		REQUIRE(sem_o.compilation_scope.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_o, sem_o.compilation_scope,
+			PIGEN_SYMBOL_MODULE,
+			(pigen_data_type_id){PIGEN_INVALID_ID},
+			whole, whole, &module_symbol, NULL) == PIGEN_DECLARE_OK);
+		module_scope = pigen_scope_add(&sem_o, sem_o.compilation_scope, whole);
+		REQUIRE(module_scope.index != PIGEN_INVALID_ID);
+		module = pigen_module_add(&sem_o, (pigen_syntax_id){1}, module_symbol,
+			module_scope, whole);
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_o, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_clk, name_clk, &clk_symbol, NULL) ==
+			PIGEN_DECLARE_OK);
+		clk = pigen_signal_add(&sem_o, (pigen_syntax_id){2}, module,
+			clk_symbol, t1, pigen_semantic_scalar_shape(&sem_o),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
+			PIGEN_SEMANTIC_INPUT, name_clk);
+		REQUIRE(clk.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_o, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_s, name_s, &s_symbol, NULL) ==
+			PIGEN_DECLARE_OK);
+		s = pigen_signal_add(&sem_o, (pigen_syntax_id){3}, module,
+			s_symbol, t1, pigen_semantic_scalar_shape(&sem_o),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
+			PIGEN_SEMANTIC_INPUT, name_s);
+		REQUIRE(s.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_symbol_declare(&sem_o, module_scope, PIGEN_SYMBOL_SIGNAL,
+			t1, name_d, name_d, &d_symbol, NULL) ==
+			PIGEN_DECLARE_OK);
+		d = pigen_signal_add(&sem_o, (pigen_syntax_id){4}, module,
+			d_symbol, t1, pigen_semantic_scalar_shape(&sem_o),
+			(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
+			PIGEN_SEMANTIC_INTERNAL, name_d);
+		REQUIRE(d.index != PIGEN_INVALID_ID);
+		domain = pigen_clock_domain_intern(&sem_o, clk_symbol,
+			PIGEN_SEMANTIC_POSEDGE);
+		REQUIRE(!IS_INVALID_ID(domain));
+		clk_expr = pigen_expr_add_symbol(&sem_o, clk_symbol, t1, name_clk);
+		REQUIRE(!IS_INVALID_ID(clk_expr));
+		process = pigen_process_add(&sem_o, (pigen_syntax_id){5}, module,
+			domain, clk_expr, process_span);
+		REQUIRE(!IS_INVALID_ID(process));
+		dest = pigen_lvalue_resolve(&sem_o,
+			pigen_expr_add_symbol(&sem_o, d_symbol, t1, name_d));
+		REQUIRE(!IS_INVALID_ID(dest));
+		value = pigen_expr_add_symbol(&sem_o, s_symbol, t1, name_s);
+		REQUIRE(!IS_INVALID_ID(value));
+		/* Seed the one-atom true guard directly in the predicate arena, as
+		 * the t8-module witness does: a valid guard the lowering can consume
+		 * (the witness is already ownership-legal, so it carries no signal
+		 * uses and no guard atoms). */
+		sem_o.predicates = malloc(sizeof(*sem_o.predicates));
+		REQUIRE(sem_o.predicates);
+		sem_o.predicates[0] = (pigen_predicate){0};
+		sem_o.predicate_count = 1;
+		sem_o.predicate_capacity = 1;
+		transfer = pigen_transfer_add(&sem_o, (pigen_syntax_id){6}, module,
+			process, dest, value, (pigen_predicate_id){0}, domain,
+			NULL, 0, transfer_span);
+		REQUIRE(!IS_INVALID_ID(transfer));
+
+		/* (b) The lowering returns 0: it consumes the owner-validated
+		 * identities and re-checks no ownership. */
+		REQUIRE(pigen_lower_rtl_transfers(&lowering_o, module) == 0);
+
+		/* One RTL process per semantic process, in arena order; each owns
+		 * exactly its own transfers' destination updates. */
+		{
+			const pigen_process_id *sem_processes;
+			size_t sem_process_count;
+			const pigen_transfer_id *sem_transfers;
+			size_t sem_transfer_count;
+			size_t pc;
+			int one_per_process = 1;
+
+			sem_processes = pigen_module_processes(&sem_o, module,
+				&sem_process_count);
+			REQUIRE(sem_processes && sem_process_count == 1);
+			if (!sem_processes || sem_process_count != 1)
+				one_per_process = 0;
+			for (pc = 0; pc < sem_process_count && one_per_process; pc++) {
+				const pigen_rtl_process *proc =
+					pigen_rtl_process_get(&rtl_o,
+						(pigen_rtl_process_id){(uint32_t)pc});
+				sem_transfers = pigen_process_transfers(&sem_o,
+					sem_processes[pc], &sem_transfer_count);
+				if (!proc || proc->module.index == PIGEN_INVALID_ID)
+					one_per_process = 0;
+				else if (!sem_transfers ||
+					sem_transfer_count != proc->updates.count)
+					one_per_process = 0;
+				else if (pc == 0 && sem_transfer_count != 1)
+					one_per_process = 0;
+			}
+			REQUIRE(one_per_process);
+
+			/* The single transfer's destination update: its value is the
+			 * shared non-constant fire identity, equal (node-for-node) to
+			 * its matching source-ready equation's value. */
+			if (sem_transfers && sem_transfer_count == 1) {
+				const pigen_semantic_transfer *own =
+					pigen_transfer_get(&sem_o, sem_transfers[0]);
+				const pigen_semantic_lvalue *own_dest =
+					pigen_lvalue_get(&sem_o, own ? own->destination :
+						(pigen_lvalue_id){PIGEN_INVALID_ID});
+				const pigen_rtl_process *proc =
+					pigen_rtl_process_get(&rtl_o,
+						(pigen_rtl_process_id){0});
+				const pigen_rtl_update *up =
+					proc ? pigen_rtl_update_get(&rtl_o,
+						(pigen_rtl_update_id){
+							(uint32_t)proc->updates.first}) : NULL;
+				const pigen_rtl_expr *upd_val;
+				pigen_rtl_object_id want_payload;
+				pigen_rtl_object_id want_ready;
+				size_t j;
+				const pigen_rtl_expr *eq_val = NULL;
+				int value_is_shared_nonconst = 0;
+				int value_is_nonconst = 0;
+
+				if (!own || !own_dest || !up)
+					one_per_process = 0;
+				else {
+					/* The update's destination is the destination
+					 * signal's payload object. */
+					want_payload = lowering_o.lowered_endpoints[
+						own_dest->as.projection.signal.index].payload;
+					if (IS_INVALID_ID(want_payload) ||
+						up->destination.index != want_payload.index)
+						one_per_process = 0;
+
+					upd_val = pigen_rtl_expr_get(&rtl_o, up->value);
+					/* The update's value is a non-constant node (the
+					 * fire identity is the 1-bit BITS node, never a
+					 * lowered integer constant). */
+					value_is_nonconst =
+						upd_val &&
+						upd_val->kind != PIGEN_RTL_EXPR_INTEGER;
+
+					/* Find the matching source-ready equation: its
+					 * destination is the destination signal's
+					 * input_ready object. Its value must be the very
+					 * same shared node as the update's value, and
+					 * that shared node must be non-constant. */
+					want_ready = lowering_o.lowered_endpoints[
+						own_dest->as.projection.signal.index]
+						.input_ready;
+					if (IS_INVALID_ID(want_ready))
+						one_per_process = 0;
+					for (j = 0;
+						j < rtl_o.equation_count && one_per_process;
+						j++) {
+						const pigen_rtl_equation *eq =
+							pigen_rtl_equation_get(&rtl_o,
+								(pigen_rtl_equation_id){
+									(uint32_t)j});
+						if (!eq ||
+							eq->destination.index !=
+								want_ready.index)
+							continue;
+						eq_val = pigen_rtl_expr_get(&rtl_o,
+							eq->value);
+						if (!eq_val)
+							one_per_process = 0;
+						else if (eq->value.index != up->value.index)
+							one_per_process = 0;
+						else
+							value_is_shared_nonconst =
+								rtest_shares_nonconst(&rtl_o,
+									up->value, eq->value);
+						break;
+					}
+					/* Two distinct values (update and equation) that
+					 * share no non-constant node do not satisfy the
+					 * contract, even if the roots are the same node;
+					 * the child-link walk is what detects sharing. */
+					REQUIRE(one_per_process);
+					REQUIRE(value_is_nonconst);
+					REQUIRE(value_is_shared_nonconst);
+				}
+			}
+		}
+
+		pigen_rtl_lowering_free(&lowering_o);
+		pigen_free_rtl_model(&rtl_o);
+		pigen_free_semantic_model(&sem_o);
+		pigen_free_sources(&sources_o);
 	}
 
 	pigen_free_rtl_model(&rtl);
