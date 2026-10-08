@@ -219,6 +219,18 @@
     "command": ["make", "rtl-lower-test", "T=t8-ownership"]
   },
   {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-projection"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-static"]
+  },
+  {
+    "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
+    "command": ["make", "rtl-lower-test", "T=t8-process-order"]
+  },
+  {
     "covers": [
       "src/pigen.c",
       "src/blocks.c",
