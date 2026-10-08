@@ -187,6 +187,141 @@ int main(int argc, char **argv)
 			!model.nested_layout_capacity);
 	}
 
+	SECTION("t9-failed-append") {
+		/* The ordered output model's failed-nested-append state-invariance
+		 * guarantee: a rejected pigen_output_item_add_child returns
+		 * PIGEN_INVALID_ID and leaves the item count, the opened module's
+		 * owner-managed range, and the module item's own layout field
+		 * unchanged. The only post-append call, pigen_output_item_add, fails
+		 * only on a NULL model (which add_child checks first), and pigen_resize
+		 * exits on OOM rather than returning, so there is no reachable
+		 * post-append failure: the testable contract is that every pre-append
+		 * rejection is an observable no-op. This section exercises only landed
+		 * APIs and passes on master as committed. */
+		pigen_output_model model;
+		pigen_source_span span = { (pigen_source_id){1}, 7, 9 };
+		pigen_rtl_module_id modA = { 1 };
+		pigen_rtl_module_id modB = { 4 };
+		pigen_rtl_module_id modC = { 2 };
+		pigen_rtl_module_id oor = { 100 };
+		pigen_output_item opaque = {0};
+		pigen_output_item mod_item = {0};
+		pigen_output_item passive = {0};
+		pigen_output_item child = {0};
+		pigen_rtl_object_id c1obj = { 11 };
+		pigen_rtl_object_id c2obj = { 12 };
+		pigen_rtl_object_id c3obj = { 13 };
+		size_t mod_index, c1, c2, passive_index;
+		pigen_rtl_record_range r;
+		pigen_output_item item;
+
+		pigen_output_model_init(&model);
+
+		/* (a) Baseline: an opaque item (slot 0), the owner opens a module
+		 * (slot 1) whose range starts empty at (slot + 1, 0) = (2, 0), then two
+		 * children (slots 2, 3) grow the range to (2, 2) and hold the module
+		 * item's layout field in lockstep. */
+		opaque.kind = PIGEN_OUTPUT_OPAQUE;
+		opaque.as.span = span;
+		REQUIRE(pigen_output_item_add(&model, opaque) == 0);
+
+		mod_item.kind = PIGEN_OUTPUT_MODULE;
+		mod_item.as.module = modA;
+		mod_item.layout = (pigen_rtl_record_range){ 99, 99 }; /* caller value */
+		mod_index = pigen_output_item_open(&model, mod_item);
+		REQUIRE(mod_index == 1);
+		REQUIRE(pigen_output_item_layout(&model, mod_index).first == 2 &&
+			pigen_output_item_layout(&model, mod_index).count == 0);
+
+		child.kind = PIGEN_OUTPUT_RTL_OBJECT;
+		child.as.object = c1obj;
+		c1 = pigen_output_item_add_child(&model, modA, child);
+		REQUIRE(c1 == 2);
+		child.as.object = c2obj;
+		c2 = pigen_output_item_add_child(&model, modA, child);
+		REQUIRE(c2 == 3);
+		REQUIRE(pigen_output_item_count(&model) == 4);
+		r = pigen_output_item_layout(&model, mod_index);
+		REQUIRE(r.first == 2 && r.count == 2);
+		item = pigen_output_item_get(&model, mod_index);
+		REQUIRE(item.layout.first == 2 && item.layout.count == 2);
+
+		/* (b) Build the unopened-scope witness, then snapshot the baseline the
+		 * invariance checks hold against. A module appended passively (pigen_
+		 * output_item_add, no open) reads back the empty range {0, 0} even
+		 * though its key sits in the owner array: opening modB (key 4) first
+		 * grows the nested-layout array past key 2, so modC's key (2) is in
+		 * range yet unopened, and the passive append of modC lands at slot 5.
+		 * The count is now 6; the opened module's range is still (2, 2). */
+		{
+			pigen_output_item b_item = {0};
+
+			b_item.kind = PIGEN_OUTPUT_MODULE;
+			b_item.as.module = modB;
+			REQUIRE(pigen_output_item_open(&model, b_item) == 4);
+		}
+		passive.kind = PIGEN_OUTPUT_MODULE;
+		passive.as.module = modC;
+		passive_index = pigen_output_item_add(&model, passive);
+		REQUIRE(passive_index == 5);
+		REQUIRE(pigen_output_item_count(&model) == 6);
+		r = pigen_output_item_layout(&model, passive_index);
+		REQUIRE(r.first == 0 && r.count == 0);
+		r = pigen_output_item_layout(&model, mod_index);
+		REQUIRE(r.first == 2 && r.count == 2);
+		item = pigen_output_item_get(&model, mod_index);
+		REQUIRE(item.layout.first == 2 && item.layout.count == 2);
+
+		/* The add_child into that unopened scope is rejected, and the count,
+		 * the opened module's range, and its layout field are all unchanged. */
+		REQUIRE(pigen_output_item_add_child(&model, modC, child) ==
+			PIGEN_INVALID_ID);
+		REQUIRE(pigen_output_item_count(&model) == 6);
+		r = pigen_output_item_layout(&model, mod_index);
+		REQUIRE(r.first == 2 && r.count == 2);
+		item = pigen_output_item_get(&model, mod_index);
+		REQUIRE(item.layout.first == 2 && item.layout.count == 2);
+
+		/* (c) Rejected append with a PIGEN_INVALID_ID module identity: the
+		 * key is invalid before any range is consulted, and nothing changes. */
+		REQUIRE(pigen_output_item_add_child(&model,
+			(pigen_rtl_module_id){ PIGEN_INVALID_ID }, child) == PIGEN_INVALID_ID);
+		REQUIRE(pigen_output_item_count(&model) == 6);
+
+		/* (d) Rejected append with a module key beyond the owner array's
+		 * populated count (out of range): nothing changes. */
+		REQUIRE(pigen_output_item_add_child(&model, oor, child) ==
+			PIGEN_INVALID_ID);
+		REQUIRE(pigen_output_item_count(&model) == 6);
+
+		/* (e) Rejected append with a NULL model: no crash, and no observable
+		 * change to the live model. */
+		REQUIRE(pigen_output_item_add_child(NULL, modA, child) == PIGEN_INVALID_ID);
+		REQUIRE(pigen_output_item_count(&model) == 6);
+		r = pigen_output_item_layout(&model, mod_index);
+		REQUIRE(r.first == 2 && r.count == 2);
+		item = pigen_output_item_get(&model, mod_index);
+		REQUIRE(item.layout.first == 2 && item.layout.count == 2);
+
+		/* (f) Control success into the open module: a child (slot 6) grows the
+		 * count to 7 and the range to (2, 3), proving the (a)-(e) snapshot was
+		 * a real baseline and the invariance assertions are not vacuous. */
+		child.as.object = c3obj;
+		REQUIRE(pigen_output_item_add_child(&model, modA, child) == 6);
+		REQUIRE(pigen_output_item_count(&model) == 7);
+		r = pigen_output_item_layout(&model, mod_index);
+		REQUIRE(r.first == 2 && r.count == 3);
+		item = pigen_output_item_get(&model, mod_index);
+		REQUIRE(item.layout.first == 2 && item.layout.count == 3);
+
+		/* (g) Freeing zeroes both owned arrays: every pointer NULL, every
+		 * count and capacity zero. */
+		pigen_free_output_model(&model);
+		REQUIRE(!model.items && !model.item_count && !model.item_capacity);
+		REQUIRE(!model.nested_layouts && !model.nested_layout_count &&
+			!model.nested_layout_capacity);
+	}
+
 	SECTION("t9-coverage") {
 		/* The ordered output model's exact monotonic-coverage gate: the
 		 * model's OPAQUE spans must form a contiguous, non-overlapping,
