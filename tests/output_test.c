@@ -544,6 +544,33 @@ int main(int argc, char **argv)
 			pigen_free_output_model(&model);
 			pigen_free_sources(&m10);
 		}
+
+		/* (n1) NULL MODEL: the model argument is NULL while the manager is a
+		 * real, non-empty, valid manager (one source). The gate must reject the
+		 * NULL argument before touching it -> {0, INVALID}. */
+		{
+			pigen_source_manager m11 = {0};
+			pigen_source_id s11;
+
+			s11 = pigen_source_add(&m11, "n1.pigen", text15,
+				sizeof(text15) - 1);
+			REQUIRE(s11.index != PIGEN_INVALID_ID);
+			pigen_output_model_init(&model);
+			r = pigen_output_validate_coverage(NULL, &m11);
+			REQUIRE(r.ok == 0 && r.reason == PIGEN_OUTPUT_COVERAGE_INVALID);
+			pigen_free_output_model(&model);
+			pigen_free_sources(&m11);
+		}
+
+		/* (n2) NULL MANAGER: the manager argument is NULL while the model is a
+		 * real, valid, init'd model. The gate must reject the NULL argument
+		 * before touching it -> {0, INVALID}. */
+		{
+			pigen_output_model_init(&model);
+			r = pigen_output_validate_coverage(&model, NULL);
+			REQUIRE(r.ok == 0 && r.reason == PIGEN_OUTPUT_COVERAGE_INVALID);
+			pigen_free_output_model(&model);
+		}
 	}
 
 	return check_finish();
