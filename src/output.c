@@ -288,17 +288,130 @@ pigen_output_coverage_result pigen_output_validate_coverage(
 	return (pigen_output_coverage_result){ 1, PIGEN_OUTPUT_COVERAGE_OK };
 }
 
+/* Resolve the published RTL identity a structured syntax node lowers to, if
+ * any. node_index is the node's own id (its position in the syntax tree's
+ * node array). The node maps to its semantic record (the record whose syntax
+ * field is node_index), then to the matching RTL record through that record's
+ * semantic provenance field (the module's semantic_module, the object's
+ * semantic_signal). A structured node with no published identity is the
+ * missing-lowered-identity error, not part of this walk. Returns 1 and fills
+ * *item (its layout stays zero; the model owns it) when an identity is
+ * published, 0 otherwise. */
+static int node_identity(uint32_t node_index, const pigen_syntax_node *node,
+	const pigen_rtl_lowering *lowering, pigen_output_item *item)
+{
+	const pigen_semantic_model *sem = lowering->semantics;
+	const pigen_rtl_model *rtl = lowering->rtl;
+	size_t i;
+
+	switch (node->kind)
+	{
+	case PIGEN_SYNTAX_MODULE:
+		for (i = 0; i < sem->module_count; i++)
+			if (sem->modules[i].syntax.index == node_index)
+			{
+				for (size_t j = 0; j < rtl->module_count; j++)
+					if (rtl->modules[j].semantic_module.index == i)
+					{
+						item->kind = PIGEN_OUTPUT_MODULE;
+						item->as.module = (pigen_rtl_module_id){j};
+						return 1;
+					}
+			}
+		return 0;
+	case PIGEN_SYNTAX_SIGNAL_DECLARATOR:
+		for (i = 0; i < sem->signal_count; i++)
+			if (sem->signals[i].syntax.index == node_index)
+			{
+				for (size_t j = 0; j < rtl->object_count; j++)
+					if (rtl->objects[j].semantic_signal.index == i)
+					{
+						item->kind = PIGEN_OUTPUT_RTL_OBJECT;
+						item->as.object = (pigen_rtl_object_id){j};
+						return 1;
+					}
+			}
+		return 0;
+	default:
+		/* A kind whose lowering does not publish a record through its
+		 * semantic provenance is not an emitted identity in this walk. */
+		return 0;
+	}
+}
+
+static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
+	const pigen_rtl_lowering *lowering, uint32_t node_index,
+	pigen_rtl_module_id module, int in_module);
+
+/* Recurse over one node's children in source order. */
+static int emit_children(pigen_output_model *model, const pigen_syntax_tree *syntax,
+	const pigen_rtl_lowering *lowering, const pigen_syntax_node *node,
+	pigen_rtl_module_id module, int in_module)
+{
+	for (uint32_t child = node->first_child.index;
+		child != PIGEN_INVALID_ID;
+		child = pigen_syntax_get(syntax, (pigen_syntax_id){child})->next_sibling.index)
+		if (emit_node(model, syntax, lowering, child, module, in_module))
+			return -1;
+	return 0;
+}
+
+/* Emit one node and, for a module, open its nested scope so its children nest
+ * inside it. Top-level items (outside any open module) are appended flat; the
+ * compilation-unit root itself is never emitted. */
+static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
+	const pigen_rtl_lowering *lowering, uint32_t node_index,
+	pigen_rtl_module_id module, int in_module)
+{
+	const pigen_syntax_node *node;
+	pigen_output_item item = {0};
+
+	node = pigen_syntax_get(syntax, (pigen_syntax_id){node_index});
+	if (!node)
+		return -1;
+	if (node->kind == PIGEN_SYNTAX_OPAQUE)
+	{
+		item.kind = PIGEN_OUTPUT_OPAQUE;
+		item.as.span = node->location.source_span;
+		if (in_module)
+			return pigen_output_item_add_child(model, module, item) ==
+				PIGEN_INVALID_ID ? -1 : 0;
+		return pigen_output_item_add(model, item) == PIGEN_INVALID_ID ? -1 : 0;
+	}
+	if (node->kind != PIGEN_SYNTAX_COMPILATION_UNIT &&
+		node_identity(node_index, node, lowering, &item))
+	{
+		if (item.kind == PIGEN_OUTPUT_MODULE)
+		{
+			module = item.as.module;
+			in_module = 1;
+			/* The module item opens its nested scope: its children nest
+			 * inside it, so it is appended with open, not a flat add. */
+			return pigen_output_item_open(model, item) == PIGEN_INVALID_ID ?
+				-1 : emit_children(model, syntax, lowering, node, module, 1);
+		}
+		if (in_module)
+			return pigen_output_item_add_child(model, module, item) ==
+				PIGEN_INVALID_ID ? -1 : emit_children(model, syntax, lowering, node, module, 1);
+		return pigen_output_item_add(model, item) == PIGEN_INVALID_ID ? -1 :
+			emit_children(model, syntax, lowering, node, module, in_module);
+	}
+	/* A structured node with no published identity is the next step, not an
+	 * error here; a non-emitted container is skipped. */
+	return emit_children(model, syntax, lowering, node, module, in_module);
+}
+
 int pigen_build_output_model(pigen_output_model *model,
 	const pigen_syntax_tree *syntax, const pigen_rtl_lowering *lowering)
 {
-	if (!model)
+	const pigen_syntax_node *root;
+
+	if (!model || !syntax || !lowering)
 		return -1;
-	/* The exact ordered build arrives with the implementation stage; the
-	 * stub succeeds with zero items. */
-	(void)syntax;
-	(void)lowering;
-	(void)pigen_output_item_count(model);
-	return 0;
+	root = pigen_syntax_get(syntax, (pigen_syntax_id){0});
+	if (!root)
+		return -1;
+	return emit_node(model, syntax, lowering, 0, (pigen_rtl_module_id){PIGEN_INVALID_ID}, 0);
 }
 
 void pigen_free_output_model(pigen_output_model *model)
