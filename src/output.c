@@ -401,13 +401,26 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	return emit_children(model, syntax, lowering, node, module, in_module);
 }
 
+int pigen_output_error_is_set(const pigen_output_error *error)
+{
+	if (!error || !error->message)
+		return 0;
+	if (error->span.start > error->span.end)
+		return 0;
+	return 1;
+}
+
 int pigen_build_output_model(pigen_output_model *model,
-	const pigen_syntax_tree *syntax, const pigen_rtl_lowering *lowering)
+	const pigen_syntax_tree *syntax, const pigen_rtl_lowering *lowering,
+	pigen_output_error *error)
 {
 	const pigen_syntax_node *root;
 
+	if (error)
+		*error = (pigen_output_error){0};
 	if (!model || !syntax || !lowering)
 		return -1;
+	(void)error;
 	root = pigen_syntax_get(syntax, (pigen_syntax_id){0});
 	if (!root)
 		return -1;

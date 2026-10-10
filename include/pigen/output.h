@@ -83,6 +83,21 @@ typedef struct {
 	pigen_output_coverage_reason reason;
 } pigen_output_coverage_result;
 
+/* The diagnostic reported by the build walk at a node's span, following the
+ * codebase error idiom: a span (the node's location.source_span) and a borrowed
+ * static message (no ownership; the string outlives the diagnostic). An unset
+ * diagnostic is all-zero (a NULL message and an all-invalid span). */
+typedef struct {
+	pigen_source_span span;
+	const char *message;
+} pigen_output_error;
+
+/* True (1) when the diagnostic is set: a non-NULL message AND a valid span
+ * (span.start <= span.end). False (0) for a NULL error, a NULL message, or an
+ * all-invalid/unset span. This is the test's way to distinguish a NULL-argument
+ * -1 (no diagnostic) from a real missing-identity diagnostic. */
+int pigen_output_error_is_set(const pigen_output_error *error);
+
 /* Pure read-only validation of the model's OPAQUE spans against one source.
  * It checks that the spans form an exact, contiguous, non-overlapping,
  * monotonically increasing coverage of one source, bounded by the expected
@@ -151,12 +166,17 @@ pigen_rtl_process_id pigen_output_item_process(const pigen_output_model *model,
 
 /* Builds the ordered output model for one generated design by walking the
  * completed syntax tree against the finished RTL lowering. The exact
- * syntax-tree walk, monotonic-coverage gate and nested-failure restoration
- * arrive with the implementation stage; the stub returns 0 (succeeds) with
- * zero items. A failed call returns -1 and may leave partial state behind,
- * and no test asserts what a failure left (how/should/compiler/builders/fail.md). */
+ * syntax-tree walk, monotonic-coverage gate, nested-failure restoration and the
+ * missing-lowered-identity diagnostic arrive with the implementation stage; the
+ * stub returns 0 (succeeds) with zero items and leaves *error unset. A failed
+ * call returns -1 and may leave partial state behind, and no test asserts what
+ * a failure left (how/should/compiler/builders/fail.md). When error is non-NULL
+ * it is zeroed before any walk (the NULL-argument path never fills it); a
+ * missing-lowered-identity diagnostic is reported through it in the
+ * implementation stage. */
 int pigen_build_output_model(pigen_output_model *model,
-	const pigen_syntax_tree *syntax, const pigen_rtl_lowering *lowering);
+	const pigen_syntax_tree *syntax, const pigen_rtl_lowering *lowering,
+	pigen_output_error *error);
 
 /* Releases the owned arrays and zeroes the model: every pointer NULL, every
  * count zero. */
