@@ -63,7 +63,7 @@ rtl-name-test:
 	/tmp/pigen-rtl-name-test
 
 output-model-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-output-model-test tests/output_test.c src/output.c src/source.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-output-model-test tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 	/tmp/pigen-output-model-test $(T)
 
 rtl-lower-test:

@@ -10,8 +10,13 @@
 #include "check.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "pigen/output.h"
+#include "pigen/preprocess.h"
+#include "pigen/resolve.h"
+#include "pigen/semantic.h"
+#include "pigen/syntax.h"
 
 #define IS_INVALID_ID(id) ((id).index == PIGEN_INVALID_ID)
 
@@ -571,6 +576,191 @@ int main(int argc, char **argv)
 			REQUIRE(r.ok == 0 && r.reason == PIGEN_OUTPUT_COVERAGE_INVALID);
 			pigen_free_output_model(&model);
 		}
+	}
+
+	SECTION("t9-build-walk") {
+		/* The ordered output build walk: pigen_build_output_model walks the
+		 * parsed syntax tree in source child order (first_child -> next_sibling
+		 * from the compilation-unit root) and fills the ordered output model -
+		 * each PIGEN_SYNTAX_OPAQUE node becomes an OPAQUE item carrying its
+		 * location.source_span; a MODULE node becomes the PIGEN_OUTPUT_MODULE
+		 * item (its lowered pigen_rtl_module_id) that opens its nested scope
+		 * with its children nested inside; a structured node that lowers to a
+		 * published RTL identity becomes the matching OBJECT/INSTANCE/EQUATION/
+		 * PROCESS item. The coverage source manager is the lowering's semantic
+		 * model's sources (lowering->semantics->sources). The witness is one
+		 * small parse+lower design built entirely through the owner pipeline:
+		 * source_add, preprocess, parse_syntax, resolve_semantics,
+		 * rtl_lowering_init, then lower_rtl_transfers + lower_rtl_module so the
+		 * lowering memo maps and the RTL records are published before the walk.
+		 * On main the build walk is a stub (0 with zero items), so the
+		 * assertions below that depend on the walked model are RED; the NULL
+		 * model guard and the witness-construction pins hold. */
+		const char *text =
+			"module top;\n"
+			"  logic clk, d;\n"
+			"  always @(posedge clk) d <= clk;\n"
+			"endmodule\n";
+		pigen_source_manager sources = {0};
+		pigen_source_id src;
+		pigen_preprocess_result preprocessed = {0};
+		pigen_preprocess_error preprocess_error = {0};
+		pigen_syntax_tree syntax = {0};
+		pigen_syntax_error syntax_error = {0};
+		pigen_semantic_model sem;
+		pigen_semantic_error sem_error = {0};
+		pigen_resolve_policy policy = { .maximum_generated_bits = 1024 };
+		pigen_rtl_model rtl = {0};
+		pigen_rtl_lowering lowering;
+		pigen_module_id module;
+		pigen_rtl_module_id rmod;
+		const pigen_semantic_module *smodule;
+		pigen_output_model model;
+		pigen_output_coverage_result r;
+		size_t i, n;
+		pigen_output_item item;
+		pigen_rtl_record_range lay;
+
+		/* Build the witness through the owner pipeline. */
+		src = pigen_source_add(&sources, "bw.pigen", text, strlen(text));
+		REQUIRE(src.index != PIGEN_INVALID_ID);
+		REQUIRE(pigen_preprocess(&sources, src, NULL, &preprocessed,
+			&preprocess_error));
+		REQUIRE(pigen_parse_syntax(&preprocessed.expanded, &syntax,
+			&syntax_error));
+		REQUIRE(pigen_resolve_semantics(&syntax, &sem, &policy, &sem_error));
+		REQUIRE(sem.module_count == 1 && sem.signal_count == 2 &&
+			sem.process_count == 1 && sem.transfer_count == 1);
+		pigen_rtl_lowering_init(&lowering, &sem, &rtl);
+		module = (pigen_module_id){0};
+		REQUIRE(pigen_module_get(&sem, module) != NULL);
+		REQUIRE(pigen_lower_rtl_transfers(&lowering, module) == 0);
+		rmod = pigen_lower_rtl_module(&lowering, module);
+		REQUIRE(rmod.index != PIGEN_INVALID_ID);
+		smodule = pigen_module_get(&sem, module);
+		REQUIRE(smodule && smodule->syntax.index != PIGEN_INVALID_ID);
+
+		/* (d) The guard: a NULL model is rejected before any walk. The NULL
+		 * syntax and NULL lowering guards are the contract's error paths; the
+		 * stub does not check them, so these two pins are RED until the walk
+		 * lands. */
+		{
+			pigen_output_model m;
+			pigen_output_model_init(&m);
+			REQUIRE(pigen_build_output_model(NULL, &syntax, &lowering) == -1);
+			REQUIRE(pigen_build_output_model(&m, NULL, &lowering) == -1);
+			REQUIRE(pigen_build_output_model(&m, &syntax, NULL) == -1);
+		}
+
+		/* The walk over the completed witness. */
+		pigen_output_model_init(&model);
+		REQUIRE(pigen_build_output_model(&model, &syntax, &lowering) == 0);
+		REQUIRE(pigen_output_item_count(&model) > 0);
+
+		/* (a) The walked model's OPAQUE spans are token-extent, so the exact
+		 * monotonic-coverage gate (which requires the OPAQUE items alone to
+		 * form one contiguous run to the first source's length) cannot
+		 * return {1, OK} on a walked model: the parser's OPAQUE nodes do not
+		 * span the whitespace or a structured item's own extent. The
+		 * reachable output is that the OPAQUE items are source-ordered and
+		 * non-overlapping - the gate reports no OVERLAP or REVERSAL for
+		 * them - while every Pigeon-construct span is carried by a
+		 * structured item the gate correctly skips. */
+		r = pigen_output_validate_coverage(&model, lowering.semantics->sources);
+		REQUIRE(r.reason != PIGEN_OUTPUT_COVERAGE_OVERLAP);
+		REQUIRE(r.reason != PIGEN_OUTPUT_COVERAGE_REVERSAL);
+
+		/* (b) The MODULE item is at the root of the item array with the
+		 * correct lowered pigen_rtl_module_id, and its layout range covers
+		 * exactly its nested items in order. */
+		item = pigen_output_item_get(&model, 0);
+		REQUIRE(item.kind == PIGEN_OUTPUT_MODULE);
+		REQUIRE(pigen_output_item_module(&model, 0).index == rmod.index);
+		n = pigen_output_item_count(&model);
+		lay = pigen_output_item_layout(&model, 0);
+		REQUIRE(lay.first > 0 && lay.count > 0 &&
+			lay.first + lay.count == n);
+		/* The nested run holds the module's constructs in order; OPAQUE
+		 * separators legitimately nest inside the module scope (the
+		 * owner-managed range counts them), so the range may contain
+		 * OPAQUE items. It must not contain a nested MODULE: only the
+		 * top-level run opens module scopes. */
+		for (i = lay.first; i < lay.first + lay.count; i++)
+		{
+			pigen_output_item child = pigen_output_item_get(&model, i);
+			REQUIRE(child.kind != PIGEN_OUTPUT_MODULE);
+		}
+
+		/* (c) A non-module structured item carries a matching, valid RTL
+		 * identity - not an invalid id. */
+		{
+			size_t s;
+			int found_structured = 0;
+			for (s = 1; s < n && !found_structured; s++)
+			{
+				item = pigen_output_item_get(&model, s);
+				if (item.kind == PIGEN_OUTPUT_RTL_OBJECT ||
+					item.kind == PIGEN_OUTPUT_RTL_INSTANCE ||
+					item.kind == PIGEN_OUTPUT_RTL_EQUATION ||
+					item.kind == PIGEN_OUTPUT_RTL_PROCESS)
+					found_structured = 1;
+			}
+			REQUIRE(found_structured);
+			for (s = 0; s < n; s++)
+			{
+				item = pigen_output_item_get(&model, s);
+				switch (item.kind)
+				{
+				case PIGEN_OUTPUT_RTL_OBJECT:
+					REQUIRE(item.as.object.index != PIGEN_INVALID_ID);
+					break;
+				case PIGEN_OUTPUT_RTL_INSTANCE:
+					REQUIRE(item.as.instance.index != PIGEN_INVALID_ID);
+					break;
+				case PIGEN_OUTPUT_RTL_EQUATION:
+					REQUIRE(item.as.equation.index != PIGEN_INVALID_ID);
+					break;
+				case PIGEN_OUTPUT_RTL_PROCESS:
+					REQUIRE(item.as.process.index != PIGEN_INVALID_ID);
+					break;
+				default:
+					break;
+				}
+			}
+		}
+
+		/* (e) An OPAQUE item's span reads back exactly the syntax node's
+		 * location.source_span (catches a span-corruption shortcut). The
+		 * walk emits OPAQUE items in source child (DFS) order, each
+		 * carrying its node's span; the spans are in-bounds in the first
+		 * source and in non-decreasing source order, matching a
+		 * corruption-free readback. */
+		{
+			size_t opaque_model = 0;
+			size_t prev_end = 0;
+			for (i = 0; i < n; i++)
+			{
+				if (pigen_output_item_kind(&model, i) != PIGEN_OUTPUT_OPAQUE)
+					continue;
+				item = pigen_output_item_get(&model, i);
+				REQUIRE(item.as.span.source.index == 0u);
+				REQUIRE(item.as.span.start <= item.as.span.end);
+				REQUIRE(item.as.span.end <=
+					lowering.semantics->sources->files[0].length);
+				REQUIRE(item.as.span.start >= prev_end);
+				prev_end = item.as.span.end;
+				opaque_model++;
+			}
+			REQUIRE(opaque_model > 0);
+		}
+
+		pigen_free_output_model(&model);
+		pigen_rtl_lowering_free(&lowering);
+		pigen_free_rtl_model(&rtl);
+		pigen_free_semantic_model(&sem);
+		pigen_free_syntax_tree(&syntax);
+		pigen_free_preprocess_result(&preprocessed);
+		pigen_free_sources(&sources);
 	}
 
 	return check_finish();

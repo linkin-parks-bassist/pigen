@@ -151,6 +151,32 @@
     "command": ["make", "output-model-test", "T=t9-failed-append"]
   },
   {
+    "covers": [
+      "src/output.c",
+      "src/rtl_lower.c",
+      "src/rtl.c",
+      "src/resolve.c",
+      "src/type_resolve.c",
+      "src/expression_analysis.c",
+      "src/expression_resolve.c",
+      "src/expression_use.c",
+      "src/predicate.c",
+      "src/operation.c",
+      "src/transfer_type.c",
+      "src/integer.c",
+      "src/data_type.c",
+      "src/semantic.c",
+      "src/syntax.c",
+      "src/type_syntax.c",
+      "src/expression.c",
+      "src/preprocess.c",
+      "src/lexer.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": ["make", "output-model-test", "T=t9-build-walk"]
+  },
+  {
     "covers": ["src/rtl_lower.c", "src/transfer_type.c"],
     "command": ["make", "rtl-lower-test", "T=t5-skeleton"]
   },
