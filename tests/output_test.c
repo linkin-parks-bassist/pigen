@@ -79,9 +79,11 @@ int main(int argc, char **argv)
 		/* The build walk rejects a NULL syntax or lowering before any walk. */
 		{
 			pigen_output_model empty;
+			pigen_output_error err = {0};
 
 			pigen_output_model_init(&empty);
-			REQUIRE(pigen_build_output_model(&empty, NULL, NULL) == -1);
+			REQUIRE(pigen_build_output_model(&empty, NULL, NULL, &err) == -1);
+			REQUIRE(!pigen_output_error_is_set(&err));
 			pigen_free_output_model(&empty);
 		}
 
@@ -645,16 +647,25 @@ int main(int argc, char **argv)
 		 * lands. */
 		{
 			pigen_output_model m;
+			pigen_output_error err = {0};
 			pigen_output_model_init(&m);
-			REQUIRE(pigen_build_output_model(NULL, &syntax, &lowering) == -1);
-			REQUIRE(pigen_build_output_model(&m, NULL, &lowering) == -1);
-			REQUIRE(pigen_build_output_model(&m, &syntax, NULL) == -1);
+			REQUIRE(pigen_build_output_model(NULL, &syntax, &lowering, &err) == -1);
+			REQUIRE(!pigen_output_error_is_set(&err));
+			REQUIRE(pigen_build_output_model(&m, NULL, &lowering, &err) == -1);
+			REQUIRE(!pigen_output_error_is_set(&err));
+			REQUIRE(pigen_build_output_model(&m, &syntax, NULL, &err) == -1);
+			REQUIRE(!pigen_output_error_is_set(&err));
 		}
 
 		/* The walk over the completed witness. */
-		pigen_output_model_init(&model);
-		REQUIRE(pigen_build_output_model(&model, &syntax, &lowering) == 0);
-		REQUIRE(pigen_output_item_count(&model) > 0);
+		{
+			pigen_output_error err = {0};
+
+			pigen_output_model_init(&model);
+			REQUIRE(pigen_build_output_model(&model, &syntax, &lowering, &err) == 0);
+			REQUIRE(!pigen_output_error_is_set(&err));
+			REQUIRE(pigen_output_item_count(&model) > 0);
+		}
 
 		/* (a) The walked model's OPAQUE spans are token-extent, so the exact
 		 * monotonic-coverage gate (which requires the OPAQUE items alone to
