@@ -71,13 +71,12 @@ int main(int argc, char **argv)
 		REQUIRE(zero_span.source.index == PIGEN_INVALID_ID &&
 			zero_span.start == 0 && zero_span.end == 0);
 
-		/* The builder stub succeeds with zero items. */
+		/* The build walk rejects a NULL syntax or lowering before any walk. */
 		{
 			pigen_output_model empty;
 
 			pigen_output_model_init(&empty);
-			REQUIRE(pigen_build_output_model(&empty, NULL, NULL) == 0);
-			REQUIRE(pigen_output_item_count(&empty) == 0);
+			REQUIRE(pigen_build_output_model(&empty, NULL, NULL) == -1);
 			pigen_free_output_model(&empty);
 		}
 
