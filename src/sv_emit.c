@@ -1,12 +1,22 @@
 #include "pigen/sv_emit.h"
 
-static int __attribute__((unused)) render_expression(
+static int render_expression(
 	const pigen_rtl_model *rtl, const pigen_rtl_expr *expr, char **buf)
 {
 	(void)rtl;
 	(void)expr;
 	(void)buf;
 	return -1;
+}
+
+int pigen_sv_render_expression(const pigen_rtl_model *rtl,
+	const pigen_rtl_expr *expr, char **text)
+{
+	if (text)
+		*text = NULL;
+	if (!rtl || !expr || !text)
+		return -1;
+	return render_expression(rtl, expr, text);
 }
 
 int pigen_emit_systemverilog(const pigen_source_manager *sources,
