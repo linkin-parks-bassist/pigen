@@ -20,6 +20,46 @@
 
 #define IS_INVALID_ID(id) ((id).index == PIGEN_INVALID_ID)
 
+/* Mirror the build walk's emit_node/emit_children for identity resolution:
+ * visit node_index, then its children in first_child -> next_sibling source
+ * order, recursing. When the node is a signal declarator, resolve its expected
+ * RTL object exactly as the emission rule does (the semantic signal whose
+ * syntax is the node's own index, then the RTL object whose semantic_signal is
+ * that signal) and append it to expected. The root is visited but never
+ * emitted, exactly as in the walk, so this yields the declarators in the same
+ * DFS order the walk emits their objects. */
+static void expected_signal_objects(const pigen_syntax_tree *syntax,
+	const pigen_semantic_model *sem, const pigen_rtl_model *rtl,
+	uint32_t node_index, pigen_rtl_object_id *expected,
+	size_t *expected_count)
+{
+	const pigen_syntax_node *node;
+
+	node = pigen_syntax_get(syntax, (pigen_syntax_id){ node_index });
+	REQUIRE(node != NULL);
+	if (node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR)
+	{
+		size_t sig = 0;
+		size_t obj = 0;
+		while (sig < sem->signal_count &&
+			sem->signals[sig].syntax.index != node_index)
+			sig++;
+		REQUIRE(sig < sem->signal_count);
+		while (obj < rtl->object_count &&
+			rtl->objects[obj].semantic_signal.index != sig)
+			obj++;
+		REQUIRE(obj < rtl->object_count);
+		REQUIRE(*expected_count < 64);
+		expected[(*expected_count)++] = (pigen_rtl_object_id){ obj };
+	}
+	for (uint32_t child = node->first_child.index;
+		child != PIGEN_INVALID_ID;
+		child = pigen_syntax_get(syntax,
+			(pigen_syntax_id){ child })->next_sibling.index)
+		expected_signal_objects(syntax, sem, rtl, child, expected,
+			expected_count);
+}
+
 int main(int argc, char **argv)
 {
 	check_init(argc, argv);
@@ -701,8 +741,17 @@ int main(int argc, char **argv)
 			REQUIRE(child.kind != PIGEN_OUTPUT_MODULE);
 		}
 
-		/* (c) A non-module structured item carries a matching, valid RTL
-		 * identity - not an invalid id. */
+		/* (c) Each emitted structured identity must MATCH the specific
+		 * declarator node it was emitted for - not merely be a valid id. Two
+		 * separate pins: (i) the general non-INVALID pin over every structured
+		 * slot, a weaker guarantee the section still carries; (ii) the
+		 * matching-identity pin that walks the syntax tree in source order
+		 * (mirroring the build walk) and requires each emitted RTL_OBJECT to
+		 * equal the object independently resolved for its own declarator node
+		 * (the semantic signal whose syntax is the node's index, then the RTL
+		 * object whose semantic_signal is that signal). On the witness this
+		 * pins clk->object[0] and d->object[1]; a walk that emits object[0]
+		 * for d's declarator is rejected. */
 		{
 			size_t s;
 			int found_structured = 0;
@@ -737,6 +786,41 @@ int main(int argc, char **argv)
 					break;
 				}
 			}
+		}
+		/* (c2) The matching-identity pin: collect the model's RTL_OBJECT items
+		 * in item-array (DFS) order and, in the same source-order DFS over
+		 * first_child/next_sibling from the compilation-unit root, collect the
+		 * object each signal declarator node independently resolves to. The
+		 * two lists must have equal length and each emitted object must equal
+		 * its own declarator's resolved object - a valid-but-wrong identity on
+		 * a sibling is the discriminating case (d must not carry clk's
+		 * object[0]). */
+		{
+			const pigen_semantic_model *sem = lowering.semantics;
+			const pigen_rtl_model *rtl = lowering.rtl;
+			pigen_rtl_object_id emitted[64];
+			pigen_rtl_object_id expected[64];
+			size_t emitted_count = 0;
+			size_t expected_count = 0;
+			size_t s;
+			size_t k;
+			for (s = 0; s < n; s++)
+			{
+				item = pigen_output_item_get(&model, s);
+				if (item.kind == PIGEN_OUTPUT_RTL_OBJECT)
+				{
+					REQUIRE(emitted_count < 64);
+					emitted[emitted_count++] = item.as.object;
+				}
+			}
+			/* Source-order DFS from the compilation-unit root (node 0),
+			 * mirroring the build walk's emit_node/emit_children. */
+			expected_signal_objects(&syntax, sem, rtl, 0, expected,
+				&expected_count);
+			REQUIRE(expected_count > 0);
+			REQUIRE(emitted_count == expected_count);
+			for (k = 0; k < emitted_count; k++)
+				REQUIRE(emitted[k].index == expected[k].index);
 		}
 
 		/* (e) An OPAQUE item's span reads back exactly the syntax node's
