@@ -124,6 +124,7 @@ int main(int argc, char **argv)
 			pigen_output_model_init(&empty);
 			REQUIRE(pigen_build_output_model(&empty, NULL, NULL, &err) == -1);
 			REQUIRE(!pigen_output_error_is_set(&err));
+			REQUIRE(pigen_output_error_is_set((pigen_output_error *)NULL) == 0);
 			pigen_free_output_model(&empty);
 		}
 
