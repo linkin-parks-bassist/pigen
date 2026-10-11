@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-11T21:50:28+11:00"
+revised_at: "2026-10-12T00:15:58+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -8,4 +8,4 @@ Terminal SV emitter. Create sv_emit.h/sv_emit.c/sv_emit_test.c. Precedence-aware
 
 pigen_emit_systemverilog(sources, layout, rtl, output_string) consumes validated coverage and named RTL. Use one fixed precedence per expression kind, structurally necessary parentheses and one private operator rendering table; render conversions from RTL types only. The golden test contains leading/trailing opaque comments, signed conversion, concat, primitive parameter, equation and guarded update. Malformed coverage, unnamed objects, invalid children and out-of-bounds spans leave no partial output. Structural search for strstr, strchr, pigen_symbol_lookup, pigen_data_type_ or pigen_transfer_type_ in sv_emit.c must have no matches. Files sv_emit.h/c, sv_emit_test.c, Makefile.
 
-The public shape is in place: include/pigen/sv_emit.h exposes pigen_emit_systemverilog(const pigen_source_manager*, const pigen_output_model*, const pigen_rtl_model*, char**) with the 0/-1 ownership contract, and src/sv_emit.c is a stub (returns -1, leaves *output_string NULL, no partial output) behind one file-local static render_expression(rtl, expr, buf) seam. make sv-emit-test (T=t10-skeleton) pins that shape. The rendering itself is unimplemented; its remaining steps, in order, are the precedence-aware expression renderer, the whole-design golden emission, and the no-partial-output plus structural no-search gates.
+The public shape is in place: include/pigen/sv_emit.h exposes pigen_emit_systemverilog(const pigen_source_manager*, const pigen_output_model*, const pigen_rtl_model*, char**) with the 0/-1 ownership contract, and src/sv_emit.c is a stub (returns -1, leaves *output_string NULL, no partial output) behind one file-local static render_expression(rtl, expr, buf) seam. make sv-emit-test (T=t10-skeleton) pins that shape. The rendering itself is unimplemented. Its remaining steps, in order: (1) expose the public expression test seam pigen_sv_render_expression(const pigen_rtl_model*, const pigen_rtl_expr*, char**) in sv_emit.h as a thin wrapper over the file-local renderer, still the -1 stub; (2) implement the precedence-aware expression renderer behind that seam (recursive over the RTL expression kind, one fixed precedence per kind, structurally necessary parentheses, conversions from the RTL operand and target type only); (3) the whole-design golden emission; (4) the no-partial-output plus structural no-search gates.
