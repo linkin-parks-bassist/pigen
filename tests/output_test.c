@@ -60,6 +60,89 @@ static void expected_signal_objects(const pigen_syntax_tree *syntax,
 			expected_count);
 }
 
+/* One self-contained parse+lower witness for the missing-identity section.
+ * Each NEGATIVE sub-block builds its own copy so that post-processing the
+ * RTL model to delete one published record never leaks into the next
+ * sub-block. The owner pipeline is the real one, so every module and object
+ * is published; the sub-block then removes the single record it needs. */
+struct mi_witness {
+	pigen_source_manager sources;
+	pigen_source_id src;
+	pigen_preprocess_result preprocessed;
+	pigen_syntax_tree syntax;
+	pigen_semantic_model sem;
+	pigen_rtl_model rtl;
+	pigen_rtl_lowering lowering;
+	const pigen_syntax_node *module_node;
+	const pigen_syntax_node *first_declarator;
+};
+
+static int mi_build(struct mi_witness *w, const char *text)
+{
+	pigen_preprocess_error pe = {0};
+	pigen_syntax_error se = {0};
+	pigen_semantic_error sme = {0};
+	pigen_resolve_policy policy = { .maximum_generated_bits = 1024 };
+	pigen_module_id module = (pigen_module_id){0};
+	size_t i;
+
+	memset(w, 0, sizeof(*w));
+	w->src = pigen_source_add(&w->sources, "mi.pigen", text, strlen(text));
+	if (w->src.index == PIGEN_INVALID_ID)
+		return 0;
+	if (!pigen_preprocess(&w->sources, w->src, NULL, &w->preprocessed, &pe))
+		return 0;
+	if (!pigen_parse_syntax(&w->preprocessed.expanded, &w->syntax, &se))
+		return 0;
+	if (!pigen_resolve_semantics(&w->syntax, &w->sem, &policy, &sme))
+		return 0;
+	if (w->sem.module_count != 1 || w->sem.signal_count != 2 ||
+		w->sem.process_count != 1 || w->sem.transfer_count != 1)
+		return 0;
+	pigen_rtl_lowering_init(&w->lowering, &w->sem, &w->rtl);
+	if (!pigen_module_get(&w->sem, module))
+		return 0;
+	if (pigen_lower_rtl_transfers(&w->lowering, module) != 0)
+		return 0;
+	if (pigen_lower_rtl_module(&w->lowering, module).index == PIGEN_INVALID_ID)
+		return 0;
+	/* Read back the node the diagnostic must point at: the one MODULE node
+	 * and the first SIGNAL_DECLARATOR node, in arena order (clk). */
+	for (i = 0; i < w->syntax.node_count; i++)
+	{
+		if (!w->module_node &&
+			w->syntax.nodes[i].kind == PIGEN_SYNTAX_MODULE)
+			w->module_node = &w->syntax.nodes[i];
+		if (!w->first_declarator &&
+			w->syntax.nodes[i].kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR)
+			w->first_declarator = &w->syntax.nodes[i];
+	}
+	if (!w->module_node || !w->first_declarator)
+		return 0;
+	/* Both nodes carry a real, in-bounds source span on the witness source. */
+	if (w->module_node->location.source_span.start >=
+		w->module_node->location.source_span.end)
+		return 0;
+	if (w->module_node->location.source_span.source.index != w->src.index)
+		return 0;
+	if (w->first_declarator->location.source_span.start >=
+		w->first_declarator->location.source_span.end)
+		return 0;
+	if (w->first_declarator->location.source_span.source.index != w->src.index)
+		return 0;
+	return 1;
+}
+
+static void mi_free(struct mi_witness *w)
+{
+	pigen_rtl_lowering_free(&w->lowering);
+	pigen_free_rtl_model(&w->rtl);
+	pigen_free_semantic_model(&w->sem);
+	pigen_free_syntax_tree(&w->syntax);
+	pigen_free_preprocess_result(&w->preprocessed);
+	pigen_free_sources(&w->sources);
+}
+
 int main(int argc, char **argv)
 {
 	check_init(argc, argv);
@@ -873,6 +956,109 @@ int main(int argc, char **argv)
 		pigen_free_syntax_tree(&syntax);
 		pigen_free_preprocess_result(&preprocessed);
 		pigen_free_sources(&sources);
+	}
+
+	SECTION("t9-missing-identity") {
+		/* The build walk's missing-lowered-identity diagnostic: a structured
+		 * node the walk is REQUIRED to lower - a PIGEN_SYNTAX_MODULE node (the
+		 * module) or a PIGEN_SYNTAX_SIGNAL_DECLARATOR node (a signal object) -
+		 * that has no published RTL identity (no matching semantic record, or
+		 * the semantic record has no matching RTL record) is reported at the
+		 * node's location.source_span and the walk returns -1, stopping.
+		 * Container kinds (SIGNAL_DECLARATION, CLOCKED_PROCESS,
+		 * PROCEDURAL_BLOCK, IF_STATEMENT, NONBLOCKING_ASSIGNMENT, PARAMETER,
+		 * TYPEDEF) are not required to carry an identity and keep recursing, so
+		 * the diagnostic never fires on them.
+		 *
+		 * Each witness is one small parse+lower design built entirely through
+		 * the owner pipeline (source_add, preprocess, parse_syntax,
+		 * resolve_semantics, rtl_lowering_init, lower_rtl_transfers,
+		 * lower_rtl_module), via mi_build. On the real pipeline every module
+		 * and object is published, so the fully-lowered walk is the POSITIVE
+		 * witness (it passes on the skeleton). The two NEGATIVE witnesses
+		 * post-process the published RTL model to delete the one record the
+		 * walk needs (the module for missing-module, the first object for
+		 * missing-declarator), while the parse tree stays a real parse of the
+		 * same text; each builds its own witness so the deletion never leaks
+		 * into the next case. The expected diagnostic span is read back from
+		 * the syntax node's own location.source_span. On main the diagnostic
+		 * is not yet wired - the walk skips an identity-less node and returns
+		 * 0 with the error left unset - so the two negative pins are RED
+		 * until the implementation lands. A walk that always returned -1 with
+		 * a garbage span, or that always returned 0, fails the POSITIVE or a
+		 * span pin respectively. */
+		const char *text =
+			"module top;\n"
+			"  logic clk, d;\n"
+			"  always @(posedge clk) d <= clk;\n"
+			"endmodule\n";
+
+		/* POSITIVE: the fully-lowered witness resolves every required
+		 * identity (1 module, 2 objects), so the walk succeeds and leaves the
+		 * diagnostic unset. This pins pass on the skeleton. */
+		{
+			struct mi_witness w;
+			pigen_output_model model;
+			pigen_output_error err = {0};
+
+			REQUIRE(mi_build(&w, text));
+			pigen_output_model_init(&model);
+			REQUIRE(pigen_build_output_model(&model, &w.syntax, &w.lowering,
+				&err) == 0);
+			REQUIRE(!pigen_output_error_is_set(&err));
+			pigen_free_output_model(&model);
+			mi_free(&w);
+		}
+
+		/* NEGATIVE missing-module: delete the one published RTL module record
+		 * so the MODULE node's semantic record has no matching RTL record.
+		 * The walk must report the diagnostic at the module node's span and
+		 * return -1, stopping. */
+		{
+			struct mi_witness w;
+			pigen_output_model model;
+			pigen_output_error err = {0};
+
+			REQUIRE(mi_build(&w, text));
+			REQUIRE(w.rtl.module_count == 1);
+			w.rtl.module_count = 0;
+			pigen_output_model_init(&model);
+			REQUIRE(pigen_build_output_model(&model, &w.syntax, &w.lowering,
+				&err) == -1);
+			REQUIRE(pigen_output_error_is_set(&err));
+			REQUIRE(err.span.source.index == w.module_node->location
+				.source_span.source.index);
+			REQUIRE(err.span.start == w.module_node->location.source_span.start);
+			REQUIRE(err.span.end == w.module_node->location.source_span.end);
+			pigen_free_output_model(&model);
+			mi_free(&w);
+		}
+
+		/* NEGATIVE missing-declarator: invalidate the first object's provenance
+		 * so the first SIGNAL_DECLARATOR (clk) has no matching RTL object
+		 * record, while the module still resolves. The walk must report the
+		 * diagnostic at the declarator node's span and return -1, stopping. */
+		{
+			struct mi_witness w;
+			pigen_output_model model;
+			pigen_output_error err = {0};
+
+			REQUIRE(mi_build(&w, text));
+			REQUIRE(w.rtl.object_count == 2);
+			w.rtl.objects[0].semantic_signal = (pigen_signal_id){
+				PIGEN_INVALID_ID };
+			pigen_output_model_init(&model);
+			REQUIRE(pigen_build_output_model(&model, &w.syntax, &w.lowering,
+				&err) == -1);
+			REQUIRE(pigen_output_error_is_set(&err));
+			REQUIRE(err.span.source.index == w.first_declarator->location
+				.source_span.source.index);
+			REQUIRE(err.span.start == w.first_declarator->location.source_span
+				.start);
+			REQUIRE(err.span.end == w.first_declarator->location.source_span.end);
+			pigen_free_output_model(&model);
+			mi_free(&w);
+		}
 	}
 
 	return check_finish();
