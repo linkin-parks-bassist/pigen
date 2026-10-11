@@ -139,6 +139,10 @@
     "command": ["make", "sv-emit-test", "T=t10-skeleton"]
   },
   {
+    "covers": ["src/sv_emit.c", "src/rtl.c", "src/source.c", "src/rtl_name.c", "src/util.c"],
+    "command": ["make", "sv-emit-test", "T=t10-expr-render"]
+  },
+  {
     "covers": ["src/output.c", "src/source.c", "src/util.c"],
     "command": ["make", "output-model-test", "T=t9-skeleton"]
   },
