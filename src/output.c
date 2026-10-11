@@ -5,11 +5,11 @@
  * module's nested scope (its range starts empty at the end of the item array)
  * and pigen_output_item_add_child appends a child into that open scope, growing
  * the range and keeping the module item's layout in lockstep.
- * pigen_output_item_layout reads the owner-managed range back. Every other
- * accessor is a shape-only read. The syntax-tree build walk, the
- * monotonic-coverage gate, nested-failure restoration and the
- * missing-identity diagnostic still arrive later; the builder stub succeeds
- * with zero items. */
+ * pigen_output_item_layout reads the owner-managed range back. The syntax-tree
+ * build walk, the monotonic-coverage gate and the missing-lowered-identity
+ * diagnostic are implemented: pigen_build_output_model walks a fully-lowered
+ * tree to a model of the same order as the source, and reports a missing
+ * identity at its node's span. */
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -341,27 +341,30 @@ static int node_identity(uint32_t node_index, const pigen_syntax_node *node,
 
 static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, uint32_t node_index,
-	pigen_rtl_module_id module, int in_module);
+	pigen_rtl_module_id module, int in_module, pigen_output_error *error);
 
 /* Recurse over one node's children in source order. */
 static int emit_children(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, const pigen_syntax_node *node,
-	pigen_rtl_module_id module, int in_module)
+	pigen_rtl_module_id module, int in_module, pigen_output_error *error)
 {
 	for (uint32_t child = node->first_child.index;
 		child != PIGEN_INVALID_ID;
 		child = pigen_syntax_get(syntax, (pigen_syntax_id){child})->next_sibling.index)
-		if (emit_node(model, syntax, lowering, child, module, in_module))
+		if (emit_node(model, syntax, lowering, child, module, in_module, error))
 			return -1;
 	return 0;
 }
 
 /* Emit one node and, for a module, open its nested scope so its children nest
  * inside it. Top-level items (outside any open module) are appended flat; the
- * compilation-unit root itself is never emitted. */
+ * compilation-unit root itself is never emitted. A node the walk is required to
+ * lower (a module or a signal declarator) that has no published identity is the
+ * missing-lowered-identity diagnostic: it is reported at the node's own span
+ * through error (when non-NULL) and the walk stops, returning -1. */
 static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, uint32_t node_index,
-	pigen_rtl_module_id module, int in_module)
+	pigen_rtl_module_id module, int in_module, pigen_output_error *error)
 {
 	const pigen_syntax_node *node;
 	pigen_output_item item = {0};
@@ -388,17 +391,29 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 			/* The module item opens its nested scope: its children nest
 			 * inside it, so it is appended with open, not a flat add. */
 			return pigen_output_item_open(model, item) == PIGEN_INVALID_ID ?
-				-1 : emit_children(model, syntax, lowering, node, module, 1);
+				-1 : emit_children(model, syntax, lowering, node, module, 1, error);
 		}
 		if (in_module)
 			return pigen_output_item_add_child(model, module, item) ==
-				PIGEN_INVALID_ID ? -1 : emit_children(model, syntax, lowering, node, module, 1);
+				PIGEN_INVALID_ID ? -1 : emit_children(model, syntax, lowering, node, module, 1, error);
 		return pigen_output_item_add(model, item) == PIGEN_INVALID_ID ? -1 :
-			emit_children(model, syntax, lowering, node, module, in_module);
+			emit_children(model, syntax, lowering, node, module, in_module, error);
 	}
-	/* A structured node with no published identity is the next step, not an
-	 * error here; a non-emitted container is skipped. */
-	return emit_children(model, syntax, lowering, node, module, in_module);
+	/* A node the walk is required to lower (a module or a signal declarator)
+	 * with no published identity is the missing-lowered-identity error: report
+	 * it at the node's own span and stop. Any other kind with no identity is a
+	 * non-emitted container and keeps recursing. */
+	if (node->kind == PIGEN_SYNTAX_MODULE ||
+		node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR)
+	{
+		if (error)
+		{
+			error->span = node->location.source_span;
+			error->message = "structured node has no published RTL identity";
+		}
+		return -1;
+	}
+	return emit_children(model, syntax, lowering, node, module, in_module, error);
 }
 
 int pigen_output_error_is_set(const pigen_output_error *error)
@@ -420,11 +435,11 @@ int pigen_build_output_model(pigen_output_model *model,
 		*error = (pigen_output_error){0};
 	if (!model || !syntax || !lowering)
 		return -1;
-	(void)error;
 	root = pigen_syntax_get(syntax, (pigen_syntax_id){0});
 	if (!root)
 		return -1;
-	return emit_node(model, syntax, lowering, 0, (pigen_rtl_module_id){PIGEN_INVALID_ID}, 0);
+	return emit_node(model, syntax, lowering, 0, (pigen_rtl_module_id){PIGEN_INVALID_ID}, 0,
+		error);
 }
 
 void pigen_free_output_model(pigen_output_model *model)

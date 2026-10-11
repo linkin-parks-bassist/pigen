@@ -165,15 +165,18 @@ pigen_rtl_process_id pigen_output_item_process(const pigen_output_model *model,
 	size_t index);
 
 /* Builds the ordered output model for one generated design by walking the
- * completed syntax tree against the finished RTL lowering. The exact
- * syntax-tree walk, monotonic-coverage gate, nested-failure restoration and the
- * missing-lowered-identity diagnostic arrive with the implementation stage; the
- * stub returns 0 (succeeds) with zero items and leaves *error unset. A failed
- * call returns -1 and may leave partial state behind, and no test asserts what
- * a failure left (how/should/compiler/builders/fail.md). When error is non-NULL
- * it is zeroed before any walk (the NULL-argument path never fills it); a
- * missing-lowered-identity diagnostic is reported through it in the
- * implementation stage. */
+ * completed syntax tree in source child order against the finished RTL lowering.
+ * An OPAQUE node emits its span; a module node opens its nested scope; a
+ * structured node emits its published RTL identity. A node the walk is required
+ * to lower (a module or a signal declarator) that has no published identity is
+ * the missing-lowered-identity diagnostic: when error is non-NULL it is filled
+ * with the node's own span and a static message, the walk stops and -1 is
+ * returned; with a NULL error the walk still returns -1. Every other kind with
+ * no identity is a non-emitted container and the walk keeps recursing. A NULL
+ * model/syntax/lowering returns -1 before any walk and leaves error unset. A
+ * failed call may leave partial state behind, and no test asserts what a
+ * failure left (how/should/compiler/builders/fail.md). When error is non-NULL
+ * it is zeroed before any walk and left unset on a clean walk (return 0). */
 int pigen_build_output_model(pigen_output_model *model,
 	const pigen_syntax_tree *syntax, const pigen_rtl_lowering *lowering,
 	pigen_output_error *error);
