@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-12T00:41:35+11:00"
+revised_at: "2026-10-12T00:49:21+11:00"
 ---
 
 `pigen_emit_systemverilog` renders one finished, named RTL lowering to a single SystemVerilog text. It is the terminal emitter of the structured path (what/is/elastic/rtl/task/order.md) and consumes only already-resolved records; it never re-derives meaning.
@@ -14,9 +14,7 @@ Emission rule: walk `layout` items in array order (a MODULE item's nested range 
 
 Names: a record's final name is the `pigen_rtl_name` in `rtl->names` whose identity (role kind + origin span, per `same_identity`) matches the record's role and origin; render `name->text` directly. No generated text is ever re-searched or re-interpreted.
 
-Expression rendering: recursive descent over `pigen_rtl_expr` kind — one fixed precedence per kind, structurally necessary parentheses, one private operator table. Kinds: INTEGER/BITS (literals), OBJECT (a name), UNARY/BINARY (operator from `as.unary.resolution`/`as.binary.resolution`), CONDITIONAL (`? :`), CONVERSION (rendered from the RTL operand and target type only), INDEX (`[idx]`), SELECT (`[left:right]` / `[idx]` per `as.select.kind`), CONCATENATION (`{a,b,...}` over children). Child order is `first_child`/`child_count` via `pigen_rtl_expr_children`.
-
-The public expression test seam `int pigen_sv_render_expression(const pigen_rtl_model *rtl, const pigen_rtl_expr *expr, char **text);` in `include/pigen/sv_emit.h` renders one finished, named expression. It returns 0 with `*text` a newly-allocated NUL-terminated string the caller frees, or -1 leaving `*text` NULL and no partial output; the model's `names` arena must already be populated, and an OBJECT expression renders the final name whose (role, origin) identity matches its object. It is the seam the Task 10 expression-renderer test packet drives; the precedence rendering it delegates to is a file-local stub (-1) until the separate renderer item.
+Expression rendering: recursive descent over `pigen_rtl_expr` kind. One fixed precedence level per kind, structurally necessary parentheses, and one private operator-rendering table. Kinds: INTEGER/BITS (literals), OBJECT (a name), UNARY/BINARY (operator from `as.unary.resolution`/`as.binary.resolution`), CONDITIONAL (`? :`), CONVERSION (rendered from the RTL operand and target type only), INDEX (`[idx]`), SELECT (`[left:right]` / `[idx]` per `as.select.kind`), CONCATENATION (`{a,b,...}` over children). Child order is `first_child`/`child_count` via `pigen_rtl_expr_children`. The renderer is reached in tests through the public seam `int pigen_sv_render_expression(const pigen_rtl_model *rtl, const pigen_rtl_expr *expr, char **text);` in `include/pigen/sv_emit.h`: a thin package-internal wrapper over the file-local renderer, returning 0 with a newly-allocated, NUL-terminated text the caller frees, or -1 leaving `*text` NULL with no partial output. It is a shape-only seam until the precedence-aware rendering lands; the public surface is only `pigen_emit_systemverilog` and this test seam.
 
 Types: widths, signedness and packed dimensions come from `pigen_rtl_type` (`signedness`, `state_domain`, `width`, `dimensions`, `dimension_count`) only. Conversions render from the RTL operand expression and target type; the emitter never consults a semantic symbol, data type, or transfer type.
 
