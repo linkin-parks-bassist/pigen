@@ -128,6 +128,23 @@ int main(int argc, char **argv)
 			pigen_free_output_model(&empty);
 		}
 
+		/* The is_set contract in full: 1 only when a non-NULL message is
+		 * paired with a valid span (start <= end, including start == end);
+		 * 0 for a NULL message or for an invalid span (start > end) even
+		 * with a message present. */
+		REQUIRE(pigen_output_error_is_set(&(pigen_output_error){
+				(pigen_source_span){ (pigen_source_id){1}, 0, 5 }, "m" })
+			== 1);
+		REQUIRE(pigen_output_error_is_set(&(pigen_output_error){
+				(pigen_source_span){ (pigen_source_id){1}, 5, 5 }, "m" })
+			== 1);
+		REQUIRE(pigen_output_error_is_set(&(pigen_output_error){
+				(pigen_source_span){ (pigen_source_id){1}, 5, 2 }, "m" })
+			== 0);
+		REQUIRE(pigen_output_error_is_set(&(pigen_output_error){
+				(pigen_source_span){ (pigen_source_id){1}, 0, 5 }, NULL })
+			== 0);
+
 		/* Freeing zeroes the model: every pointer NULL, every count zero. */
 		pigen_free_output_model(&model);
 		REQUIRE(!model.items && !model.item_count && !model.item_capacity);
