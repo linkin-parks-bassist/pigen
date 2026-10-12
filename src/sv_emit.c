@@ -1035,7 +1035,7 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 	{
 		buf_append_str(b, "{");
 		if (!render_children(b, rtl, expr, expr->child_count,
-			PRC_STRUCT, ", "))
+			PRC_STRUCT, ","))
 			return -1;
 		buf_append_str(b, "}");
 		return 0;
