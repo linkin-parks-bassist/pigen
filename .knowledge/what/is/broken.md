@@ -1,12 +1,11 @@
 ---
 status: green
-revised_at: "2026-10-12T14:21:24+11:00"
+revised_at: "2026-10-13T10:33:36+11:00"
 ---
 
 The structured frontend and elastic RTL work remain incomplete. Passing focused tests do not establish full compiler acceptance.
 
 - **Co-slice gives the last destination the whole aggregate.** For a multi-destination co-sliced transfer the prototype assigns the full packed aggregate to the last destination instead of its slice. In `tests/coslice.pigen` (four 8-bit destinations) the emitted `state_delay <= ({source + 8'd1, source + 8'd2, source, state});` assigns 32 bits to an 8-bit register; `tests/transfer_block.pigen` emits the same pattern (24 bits into 8). Verilog's implicit truncation keeps the low bits, which here happen to be the correct slice, so `coslice-test` and the other simulations pass. Verilator reports both as `WIDTHTRUNC` warnings, which `make verify` does not treat as failures (its lint runs with `-Wno-fatal`). This violates the packed bit-stream order contract and would produce wrong values whenever the last destination is not the lowest slice.
-- **C test harness can false-pass on an externally overwritten artifact.** The fifteen `pigen-*-test` `Makefile` targets build and execute a fixed shared `/tmp/pigen-<name>` path that another build or editor can overwrite between compile and execute. Contract, verified corrected-harness evidence and the protected-harness routing are owned by what/is/the/test/harness/artifact/ownership/contract.md.
 - **The elastic RTL vertical slice is incomplete.** Task 6 declaration lowering is complete, but the vertical slice's atomic fire, ready graph, ordered output, SV emission, quarantined composition and verification (Tasks 8-12) remain unimplemented. The declaration-lowering contract and evidence are owned by `what/is/elastic/rtl/task/six.md`; the remaining vertical-slice steps, in order, by `what/is/the/plan.md`.
 - **Plain pigen_rtl_module_add leaves the new record partly uninitialized.** src/rtl.c's pigen_rtl_module_add sets only record->origin; semantic_module and the objects/instances/equations/processes owner ranges stay uninitialized, unlike pigen_rtl_module_add_with_owner which initializes every field. Any owner-tagged add (e.g. pigen_rtl_object_add_with_owner) under such a module reads the uninitialized owner range, so acceptance is nondeterministic. No production caller exists today (only tests/rtl_test.c uses the plain form); declaration lowering adds RTL modules through the with-owner constructor.
 - **Structured frontend is unlinked from production ./pigen.** The production Makefile target still compiles the textual prototype rather than the structured syntax, resolution, semantic and RTL path. See does/the/structured/frontend/run/in/production.md.
