@@ -623,11 +623,13 @@ int pigen_emit_systemverilog(const pigen_source_manager *sources,
 			goto fail;
 		}
 	}
-	*output_string = b.data;
+	if (output_string)
+		*output_string = b.data;
 	return 0;
 fail:
 	free(b.data);
-	*output_string = NULL;
+	if (output_string)
+		*output_string = NULL;
 	return -1;
 }
 
