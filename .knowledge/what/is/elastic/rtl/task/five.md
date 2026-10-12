@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-04T09:01:57+11:00"
+revised_at: "2026-10-12T20:34:55+11:00"
 checked_at: "2026-09-30T20:31:53+10:00"
 ---
 
@@ -16,4 +16,4 @@ tests/rtl_lower_test.c has seven families: initialization; sentinel guards; type
 
 Useful witness constraints: pigen_const_expr_intern_symbol accepts a matching PARAMETER symbol, whereas pigen_signal_add requires a SIGNAL symbol, so an unbound-parameter failure witness and a real signal must be distinct symbols. Bottom-up publication places a child before its parent, so deterministic relative offsets need not be non-negative.
 
-Task 6 owns realization-based declaration and endpoint population. Every realization is implemented: BOUNDARY (three-port input shape), net/variable payloads plus their 1-bit valid/ready constant controls, and the four storage realizations (one instance each, FIFO carrying its semantic depth parameter). All fifteen sections of tests/rtl_lower_test.c are green. See what/is/elastic/rtl/task/six.md.
+Task 6 owns realization-based declaration and endpoint population. Every realization is implemented: BOUNDARY (three-port input shape), net/variable payloads plus their 1-bit valid/ready constant controls, and the four storage realizations (one instance each, FIFO carrying its semantic depth parameter). The full tests/rtl_lower_test.c suite — all 24 sections: the six Task 5 type/expression adapters, the eight Task 6 sections, and the Task 8 transfer sections added to the same file — is green. See what/is/elastic/rtl/task/six.md.
