@@ -15,64 +15,124 @@ test: pigen source-test preprocess-test transfer-type-test syntax-model-test int
 	./tests/smoke.sh ./pigen
 
 source-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-source-test tests/source_test.c src/source.c src/util.c
-	/tmp/pigen-source-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-source-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-source-test tests/source_test.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-source-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 preprocess-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-preprocess-test tests/preprocess_test.c src/preprocess.c src/lexer.c src/source.c src/util.c
-	/tmp/pigen-preprocess-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-preprocess-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-preprocess-test tests/preprocess_test.c src/preprocess.c src/lexer.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-preprocess-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 transfer-type-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-transfer-type-test tests/transfer_type_test.c src/transfer_type.c
-	/tmp/pigen-transfer-type-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-transfer-type-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-transfer-type-test tests/transfer_type_test.c src/transfer_type.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-transfer-type-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 syntax-model-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-syntax-model-test tests/syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES)
-	/tmp/pigen-syntax-model-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-syntax-model-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-syntax-model-test tests/syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-syntax-model-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 integer-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-integer-test tests/integer_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c
-	/tmp/pigen-integer-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-integer-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-integer-test tests/integer_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-integer-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 semantic-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-semantic-test tests/semantic_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c
-	/tmp/pigen-semantic-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-semantic-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-semantic-test tests/semantic_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-semantic-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 predicate-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-predicate-test tests/predicate_test.c src/predicate.c $(SEMANTIC_SOURCES) src/source.c src/util.c
-	/tmp/pigen-predicate-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-predicate-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-predicate-test tests/predicate_test.c src/predicate.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-predicate-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 expression-resolve-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-expression-resolve-test tests/expression_resolve_test.c src/expression_analysis.c src/expression_resolve.c src/type_resolve.c $(SEMANTIC_SOURCES) src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
-	/tmp/pigen-expression-resolve-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-expression-resolve-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-expression-resolve-test tests/expression_resolve_test.c src/expression_analysis.c src/expression_resolve.c src/type_resolve.c $(SEMANTIC_SOURCES) src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-expression-resolve-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 expression-use-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-expression-use-test tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
-	/tmp/pigen-expression-use-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-expression-use-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-expression-use-test tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-expression-use-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 resolve-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-resolve-test tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
-	/tmp/pigen-resolve-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-resolve-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-resolve-test tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-resolve-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 rtl-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-rtl-test tests/rtl_test.c src/rtl.c src/source.c src/util.c
-	/tmp/pigen-rtl-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-rtl-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-test tests/rtl_test.c src/rtl.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-rtl-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 rtl-name-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-rtl-name-test tests/rtl_name_test.c src/rtl_name.c src/source.c src/util.c
-	/tmp/pigen-rtl-name-test
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-rtl-name-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-name-test tests/rtl_name_test.c src/rtl_name.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-rtl-name-test || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 output-model-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-output-model-test tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
-	/tmp/pigen-output-model-test $(T)
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-output-model-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-output-model-test tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-output-model-test $(T) || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 rtl-lower-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-rtl-lower-test tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
-	/tmp/pigen-rtl-lower-test $(T)
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-rtl-lower-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-lower-test tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-rtl-lower-test $(T) || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 sv-emit-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c
-	/tmp/pigen-sv-emit-test $(T)
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-sv-emit-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-sv-emit-test $(T) || status=$$?; \
+	rm -rf $$dir; exit $$status
 
 fabric-test: pigen
 	./tests/fabric_smoke.sh ./pigen
