@@ -16,6 +16,7 @@ test: pigen source-test preprocess-test transfer-type-test syntax-model-test int
 
 source-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-source-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-source-test tests/source_test.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-source-test || status=$$?; \
@@ -23,6 +24,7 @@ source-test:
 
 preprocess-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-preprocess-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-preprocess-test tests/preprocess_test.c src/preprocess.c src/lexer.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-preprocess-test || status=$$?; \
@@ -30,6 +32,7 @@ preprocess-test:
 
 transfer-type-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-transfer-type-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-transfer-type-test tests/transfer_type_test.c src/transfer_type.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-transfer-type-test || status=$$?; \
@@ -37,6 +40,7 @@ transfer-type-test:
 
 syntax-model-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-syntax-model-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-syntax-model-test tests/syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-syntax-model-test || status=$$?; \
@@ -44,6 +48,7 @@ syntax-model-test:
 
 integer-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-integer-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-integer-test tests/integer_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-integer-test || status=$$?; \
@@ -51,6 +56,7 @@ integer-test:
 
 semantic-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-semantic-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-semantic-test tests/semantic_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-semantic-test || status=$$?; \
@@ -58,6 +64,7 @@ semantic-test:
 
 predicate-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-predicate-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-predicate-test tests/predicate_test.c src/predicate.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-predicate-test || status=$$?; \
@@ -65,6 +72,7 @@ predicate-test:
 
 expression-resolve-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-expression-resolve-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-expression-resolve-test tests/expression_resolve_test.c src/expression_analysis.c src/expression_resolve.c src/type_resolve.c $(SEMANTIC_SOURCES) src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-expression-resolve-test || status=$$?; \
@@ -72,6 +80,7 @@ expression-resolve-test:
 
 expression-use-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-expression-use-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-expression-use-test tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-expression-use-test || status=$$?; \
@@ -79,6 +88,7 @@ expression-use-test:
 
 resolve-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-resolve-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-resolve-test tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-resolve-test || status=$$?; \
@@ -86,6 +96,7 @@ resolve-test:
 
 rtl-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-rtl-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-test tests/rtl_test.c src/rtl.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-rtl-test || status=$$?; \
@@ -93,6 +104,7 @@ rtl-test:
 
 rtl-name-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-rtl-name-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-name-test tests/rtl_name_test.c src/rtl_name.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-rtl-name-test || status=$$?; \
@@ -100,6 +112,7 @@ rtl-name-test:
 
 output-model-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-output-model-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-output-model-test tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-output-model-test $(T) || status=$$?; \
@@ -107,6 +120,7 @@ output-model-test:
 
 rtl-lower-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-rtl-lower-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-lower-test tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-rtl-lower-test $(T) || status=$$?; \
@@ -114,6 +128,7 @@ rtl-lower-test:
 
 sv-emit-test:
 	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-sv-emit-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-sv-emit-test $(T) || status=$$?; \
