@@ -131,7 +131,16 @@ sv-emit-test:
 	rm -f /tmp/pigen-sv-emit-test; \
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-sv-emit-test $(T) || status=$$?; \
+	if [ "$(T)" = "t10-no-search" ]; then \
+		if grep -nE 'strstr|strchr|pigen_symbol_lookup|pigen_data_type_|pigen_transfer_type_' src/sv_emit.c; then \
+			echo "t10-no-search: FAIL: src/sv_emit.c uses a source-text search or semantic-owner lookup"; \
+			status=1; \
+		else \
+			echo "t10-no-search: PASS: no source-text search or semantic-owner lookup in src/sv_emit.c"; \
+		fi; \
+	else \
+		$$dir/pigen-sv-emit-test $(T) || status=$$?; \
+	fi; \
 	rm -rf $$dir; exit $$status
 
 fabric-test: pigen

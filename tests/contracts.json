@@ -151,6 +151,10 @@
     "command": ["make", "sv-emit-test", "T=t10-no-partial-output"]
   },
   {
+    "covers": ["src/sv_emit.c"],
+    "command": ["make", "sv-emit-test", "T=t10-no-search"]
+  },
+  {
     "covers": ["src/output.c", "src/source.c", "src/util.c"],
     "command": ["make", "output-model-test", "T=t9-skeleton"]
   },
