@@ -61,15 +61,19 @@ int main(int argc, char **argv)
 		char *out = (char *)"sentinel";
 		int ret;
 
-		/* The stub is unimplemented: it returns -1 and leaves
-		 * *output_string NULL, no partial output. */
+		/* The whole-design emitter is now implemented: a zero-initialized
+		 * (empty, 0-item) model is a valid, complete design, so it succeeds
+		 * (returning 0) instead of the retired stub's -1 pin. The contract
+		 * leaves *output_string NULL and no partial output on any failure. */
 		ret = pigen_emit_systemverilog(&sources, &layout, &rtl, &out);
-		REQUIRE(ret == -1);
-		REQUIRE(out == NULL);
+		REQUIRE(ret == 0);
 
-		/* A NULL out pointer is tolerated (the stub touches nothing). */
+		/* A NULL out pointer is a tolerated no-op: the success commit is
+		 * guarded, so an empty model still succeeds (returning 0) with nothing
+		 * touched. This adversarial pin catches a future unguarded success
+		 * commit (a NULL deref). */
 		ret = pigen_emit_systemverilog(&sources, &layout, &rtl, NULL);
-		REQUIRE(ret == -1);
+		REQUIRE(ret == 0);
 
 		(void)out;
 	}
