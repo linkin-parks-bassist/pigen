@@ -61,17 +61,23 @@ int main(int argc, char **argv)
 		char *out = (char *)"sentinel";
 		int ret;
 
-		/* The stub is unimplemented: it returns -1 and leaves
-		 * *output_string NULL, no partial output. */
+		/* The empty (0-item) model is a valid, complete design: a success
+		 * verdict always commits a string, never NULL. The emitter must
+		 * commit a newly-allocated, NUL-terminated empty string ("") that
+		 * the caller frees. On main the whole-design emitter is still the
+		 * -1 stub (returns -1 and leaves *output_string NULL), so ret == 0
+		 * and the empty-string commit are the deliberate red this packet
+		 * pins; it turns green once the guarded emitter's success commit
+		 * commits the empty string instead of NULL. */
 		ret = pigen_emit_systemverilog(&sources, &layout, &rtl, &out);
-		REQUIRE(ret == -1);
-		REQUIRE(out == NULL);
+		REQUIRE(ret == 0);
+		REQUIRE(out != NULL && strcmp(out, "") == 0);
+		free(out);
 
-		/* A NULL out pointer is tolerated (the stub touches nothing). */
+		/* A NULL out pointer is a tolerated no-op: the call still succeeds
+		 * (returns 0), writing nothing through that pointer. */
 		ret = pigen_emit_systemverilog(&sources, &layout, &rtl, NULL);
-		REQUIRE(ret == -1);
-
-		(void)out;
+		REQUIRE(ret == 0);
 	}
 
 	SECTION("t10-expr-render") {
