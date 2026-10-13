@@ -71,7 +71,7 @@ rtl-lower-test:
 	/tmp/pigen-rtl-lower-test $(T)
 
 sv-emit-test:
-	$(CC) $(CFLAGS) -o /tmp/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c
+	$(CC) $(CFLAGS) -o /tmp/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/output.c src/util.c
 	/tmp/pigen-sv-emit-test $(T)
 
 fabric-test: pigen

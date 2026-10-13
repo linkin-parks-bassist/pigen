@@ -357,5 +357,103 @@ int main(int argc, char **argv)
 		pigen_free_sources(&sources);
 	}
 
+	SECTION("t10-no-partial-output-test") {
+		/* Verify that pigen_emit_systemverilog returns -1 with *out NULL for
+		 * malformed input cases, producing no partial output. */
+
+		pigen_source_manager sources = {0};
+		pigen_output_model layout = {0};
+		pigen_rtl_model rtl = {0};
+		char *out = (char *)"sentinel";
+		int ret;
+
+		/* 1. NULL inputs: all three pointers must be validated. */
+		ret = pigen_emit_systemverilog(NULL, &layout, &rtl, &out);
+		REQUIRE(ret == -1);
+		REQUIRE(out == NULL);
+
+		ret = pigen_emit_systemverilog(&sources, NULL, &rtl, &out);
+		REQUIRE(ret == -1);
+		REQUIRE(out == NULL);
+
+		ret = pigen_emit_systemverilog(&sources, &layout, NULL, &out);
+		REQUIRE(ret == -1);
+		REQUIRE(out == NULL);
+
+		/* 2. Unnamed object: create a module with an object that has no name.
+		 * module_name() returns NULL for an unnamed object, causing emit_module
+		 * to return -1. */
+		{
+			pigen_source_id src = pigen_source_add(&sources, "test.pigen",
+				"module m; endmodule\n", 20);
+			REQUIRE(src.index != PIGEN_INVALID_ID);
+
+			pigen_rtl_object_id obj = pigen_rtl_object_add(&rtl, (pigen_source_span){src, 10, 11});
+			REQUIRE(obj.index != PIGEN_INVALID_ID);
+
+			pigen_rtl_module_id mod = pigen_rtl_module_add(&rtl, (pigen_source_span){src, 0, 7});
+			REQUIRE(mod.index != PIGEN_INVALID_ID);
+
+			pigen_output_item item = {0};
+			item.kind = PIGEN_OUTPUT_MODULE;
+			item.as.module = mod;
+			pigen_output_item_add(&layout, item);
+
+			out = (char *)"sentinel";
+			ret = pigen_emit_systemverilog(&sources, &layout, &rtl, &out);
+			REQUIRE(ret == -1);
+			REQUIRE(out == NULL);
+
+			pigen_free_rtl_model(&rtl);
+			pigen_free_output_model(&layout);
+			pigen_free_sources(&sources);
+
+			rtl = (pigen_rtl_model){0};
+			layout = (pigen_output_model){0};
+			sources = (pigen_source_manager){0};
+		}
+
+		/* 3. Invalid child: use an invalid RTL identity in the output model. */
+		{
+			pigen_output_item item = {0};
+			item.kind = PIGEN_OUTPUT_RTL_OBJECT;
+			item.as.object = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+			pigen_output_item_add(&layout, item);
+
+			out = (char *)"sentinel";
+			ret = pigen_emit_systemverilog(&sources, &layout, &rtl, &out);
+			REQUIRE(ret == -1);
+			REQUIRE(out == NULL);
+
+			pigen_free_output_model(&layout);
+			pigen_free_sources(&sources);
+
+			layout = (pigen_output_model){0};
+			sources = (pigen_source_manager){0};
+		}
+
+		/* 4. Valid controls must render successfully. */
+		{
+			pigen_source_id src = pigen_source_add(&sources, "valid.pigen",
+				"module m; endmodule\n", 20);
+			REQUIRE(src.index != PIGEN_INVALID_ID);
+
+			pigen_output_item item = {0};
+			item.kind = PIGEN_OUTPUT_OPAQUE;
+			item.as.span = (pigen_source_span){.source = src, .start = 0, .end = 20};
+			pigen_output_item_add(&layout, item);
+
+			out = (char *)"sentinel";
+			ret = pigen_emit_systemverilog(&sources, &layout, &rtl, &out);
+			REQUIRE(ret == 0);
+			REQUIRE(out != NULL && out != (char *)"sentinel");
+			free(out);
+
+			pigen_free_output_model(&layout);
+			pigen_free_sources(&sources);
+			pigen_free_rtl_model(&rtl);
+		}
+	}
+
 	return check_finish();
 }
