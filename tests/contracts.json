@@ -148,6 +148,10 @@
   },
   {
     "covers": ["src/sv_emit.c", "src/rtl.c", "src/source.c", "src/rtl_name.c", "src/util.c"],
+    "command": ["make", "sv-emit-test", "T=t10-golden"]
+  },
+  {
+    "covers": ["src/sv_emit.c", "src/rtl.c", "src/source.c", "src/rtl_name.c", "src/util.c"],
     "command": ["make", "sv-emit-test", "T=t10-no-partial-output"]
   },
   {
