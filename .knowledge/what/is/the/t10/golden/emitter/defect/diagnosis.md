@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-13T06:36:32+11:00"
+revised_at: "2026-10-13T21:31:06+11:00"
 ---
 
 The whole-design emitter `pigen_emit_systemverilog` (src/sv_emit.c) renders OPAQUE/MODULE/INSTANCE/EQUATION/PROCESS from the ordered output model and the named RTL records. Its committed draft (e97d477) failed the corrected contract on three verified defects, all now fixed:
@@ -15,4 +15,6 @@ The canonical CONCATENATION join is `{a,b,...}` (","), as the contract leaf and 
 - CONCATENATION JOIN: the golden line `  assign d = {c, e};` (", ") contradicts the canonical `","`. One renderer cannot emit both, so the golden's `{c, e}` is re-scoped to `{c,e}`; the emitter uses `","`.
 - TRAILING OPAQUE SPAN: the design source is 75 bytes and its trailing OPAQUE span is [48:74] = `// trailing golden comment` (no newline), but the golden ends `// trailing golden comment\n` and the leading span [0:26] includes its `\n`. An opaque span is copied verbatim and no newline is invented, so [48:74] can never yield the trailing `\n`; the span end is corrected to 75.
 
-Resolution: with the three emitter defects fixed and the two witness defects corrected (join `{c,e}`, trailing span [48:75]), the golden renders byte-exact and `make sv-emit-test T=t10-golden` is green; the instance line stays re-scoped (path A, what/is/the/terminal/systemverilog/emitter/instance/primitive/ownership.md). The t10-skeleton empty-model `-1` pin is superseded: the whole-design emitter returns 0 for a 0-item model, so that pin retires in the change that lands the emitter.
+A FOURTH finding (success-ownership, not a golden witness): the guarded emitter (9739f07) commits `*output_string = b.data` on success, and for the empty (0-item) model `b.data` is NULL (no item appended), so it returns 0 with *output_string NULL — violating the contract (success must commit a newly-allocated NUL-terminated string; NULL is failure-only). The empty model's rendering is the empty string, so the fix commits a newly-allocated empty string (""): verified ret=0, out="" (strlen 0) with one guarded allocation before the commit. The t10-skeleton section must pin `ret == 0` AND `out != NULL && strcmp(out, "") == 0` (freeing it); a ret-only pin lets a success-with-NULL emitter pass.
+
+Resolution: with the three emitter defects fixed, the empty-model success commit corrected to the empty string, and the two witness defects corrected (join `{c,e}`, trailing span [48:75]), the golden renders byte-exact and `make sv-emit-test T=t10-golden` is green; the instance line stays re-scoped (path A, what/is/the/terminal/systemverilog/emitter/instance/primitive/ownership.md). The t10-skeleton empty-model `-1` pin is superseded: replaced by the empty-model success-commit pin when the whole-design emitter lands.

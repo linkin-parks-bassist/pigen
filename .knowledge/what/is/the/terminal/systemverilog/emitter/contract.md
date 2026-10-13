@@ -1,11 +1,11 @@
 ---
 status: green
-revised_at: "2026-10-13T10:42:51+11:00"
+revised_at: "2026-10-13T20:45:01+11:00"
 ---
 
 `pigen_emit_systemverilog` renders one finished, named RTL lowering to a single SystemVerilog text. It is the structured path's terminal emitter (what/is/elastic/rtl/task/order.md), consuming only already-resolved records; it never re-derives meaning.
 
-Signature and ownership: `int pigen_emit_systemverilog(const pigen_source_manager *sources, const pigen_output_model *layout, const pigen_rtl_model *rtl, char **output_string);`. `sources` owns the opaque span text; `layout` is the ordered output model from `pigen_build_output_model`; `rtl` is the finished RTL model whose `names` arena is populated by `pigen_rtl_assign_names`; `output_string` is an out-param. Returns 0 on success with `*output_string` a newly-allocated, NUL-terminated string the caller frees, or -1 on any failure leaving `*output_string` NULL and no partial output (how/should/compiler/builders/fail.md): it validates first, renders into a private buffer, and commits `*output_string` only on success. Both final commits are guarded, so a NULL `output_string` is a tolerated no-op: the call returns 0 on success or -1 on failure with nothing touched (an empty 0-item model is a valid, complete design, so it returns 0 with the out-param left at its initial value).
+Signature and ownership: `int pigen_emit_systemverilog(const pigen_source_manager *sources, const pigen_output_model *layout, const pigen_rtl_model *rtl, char **output_string);`. `sources` owns the opaque span text; `layout` is the ordered output model from `pigen_build_output_model`; `rtl` is the finished RTL model whose `names` arena is populated by `pigen_rtl_assign_names`; `output_string` is an out-param. Returns 0 on success with `*output_string` a newly-allocated, NUL-terminated string the caller frees, or -1 on any failure leaving `*output_string` NULL and no partial output (how/should/compiler/builders/fail.md): it validates first, renders into a private buffer, and commits `*output_string` only on success. A success verdict always commits a string, never NULL: the empty (0-item) model is a valid, complete design whose rendering is the empty string, so it commits a newly-allocated empty string (`""`). The guards protect only a NULL `output_string` argument, a tolerated no-op returning 0 on success or -1 on failure with nothing written.
 
 Emission rule: walk `layout` items in array order (a MODULE item's nested range is the owner-managed layout of its children, rendered inside the module) into one private growable buffer. Per item kind:
 - OPAQUE: copy its span's text verbatim from `sources` via `pigen_source_span_text` (no re-parse, no trim).
