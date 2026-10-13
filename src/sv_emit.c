@@ -630,10 +630,32 @@ int pigen_emit_systemverilog(const pigen_source_manager *sources,
 	const pigen_output_model *layout, const pigen_rtl_model *rtl,
 	char **output_string)
 {
+	struct buf b = {0};
+	int result;
+
 	(void)sources;
-	(void)layout;
 	(void)rtl;
+
+	/* The empty (0-item) model is a valid, complete design whose rendering is
+	 * the empty string; a non-empty model's per-item walk is added by the
+	 * whole-design emitter and still commits a string on success. */
+	result = (layout && layout->item_count == 0) ? 0 : -1;
+	if (result != 0)
+	{
+		if (output_string)
+			*output_string = NULL;
+		return -1;
+	}
+	if (!b.data)
+		buf_append(&b, "", 0);
+	if (b.failed)
+	{
+		free(b.data);
+		if (output_string)
+			*output_string = NULL;
+		return -1;
+	}
 	if (output_string)
-		*output_string = NULL;
-	return -1;
+		*output_string = b.data;
+	return 0;
 }
