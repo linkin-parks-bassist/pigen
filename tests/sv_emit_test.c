@@ -577,5 +577,307 @@ int main(int argc, char **argv)
 		pigen_free_sources(&sources);
 	}
 
+	SECTION("t10-golden") {
+
+		/* Whole-design golden emission (Task 10). Build one finished, named
+		 * witness by hand and pin the exact SystemVerilog the emitter must
+		 * render. The design mixes, in output order: a leading OPAQUE comment,
+		 * a MODULE header and its nested items (a signal declaration, a signed
+		 * conversion, a concatenation, a primitive/instance parameter, an
+		 * equation, and a guarded/clocked update), and a trailing OPAQUE comment.
+		 * OPAQUE spans are copied verbatim and byte-exact; the rest is rendered
+		 * from the RTL records and their final names. The golden string below is
+		 * the contract-faithful rendering; the test is red only because
+		 * pigen_emit_systemverilog is still the unimplemented stub (returns -1). */
+		pigen_source_manager sources = {0};
+		pigen_source_id design;
+		pigen_source_id namefile;
+		pigen_rtl_model rtl = {0};
+		pigen_rtl_type_id t8;
+		pigen_rtl_type_id t16;
+		pigen_rtl_type_id t1;
+		pigen_rtl_module_id module;
+		pigen_rtl_object_id in_a;
+		pigen_rtl_object_id out_b;
+		pigen_rtl_object_id clk;
+		pigen_rtl_object_id c_obj;
+		pigen_rtl_object_id d_obj;
+		pigen_rtl_object_id e_obj;
+		pigen_rtl_instance_id fifo;
+		pigen_rtl_equation_id eq_conv;
+		pigen_rtl_equation_id eq_concat;
+		pigen_rtl_update_id up;
+		pigen_rtl_process_id proc;
+		pigen_rtl_expr_id a_obj_expr;
+		pigen_rtl_expr_id conv_expr;
+		pigen_rtl_expr_id c_obj_expr;
+		pigen_rtl_expr_id e_obj_expr;
+		pigen_rtl_expr_id concat_expr;
+		pigen_rtl_expr_id param_expr;
+		pigen_rtl_expr_id clk_expr;
+		pigen_rtl_expr_id d_obj_expr;
+		pigen_output_item items[13];
+		pigen_rtl_record_range nested[1];
+		pigen_output_model layout;
+		pigen_rtl_name_request requests[8];
+		const char golden[] =
+			"// leading golden comment\n"
+			"module top (\n"
+			"  input  logic [7:0] a,\n"
+			"  output logic [7:0] b,\n"
+			"  input  logic clk\n"
+			");\n"
+			"  logic [7:0] c;\n"
+			"  logic [7:0] d;\n"
+			"  logic [7:0] e;\n"
+			"  instance #(8) (.clk(clk));\n"
+			"  assign b = signed'(16'(a));\n"
+			"  assign d = {c,e};\n"
+			"  always @(posedge clk)\n"
+			"    e <= d;\n"
+			"endmodule\n"
+			"// trailing golden comment\n";
+		char *out = (char *)"sentinel";
+		int ret;
+
+		design = pigen_source_add(&sources, "golden.pigen",
+			"// leading golden comment\nmodule top;\nendmodule\n"
+			"// trailing golden comment\n", 75);
+		namefile = pigen_source_add(&sources, "names.pigen",
+			"top a b c d e clk\n", 18);
+
+		/* The design source's four spans are the two opaque comments (byte-
+		 * exact), the module header and the endmodule keyword. The name source
+		 * carries each checked identifier spelling for the final names. */
+		REQUIRE(pigen_source_span_valid(&sources,
+			(pigen_source_span){design, 0, 26}));
+		REQUIRE(pigen_source_span_valid(&sources,
+			(pigen_source_span){design, 26, 37}));
+		REQUIRE(pigen_source_span_valid(&sources,
+			(pigen_source_span){design, 38, 48}));
+		REQUIRE(pigen_source_span_valid(&sources,
+			(pigen_source_span){design, 48, 75}));
+		REQUIRE(pigen_source_span_valid(&sources,
+			(pigen_source_span){namefile, 0, 3}));
+		REQUIRE(pigen_source_span_valid(&sources,
+			(pigen_source_span){namefile, 14, 17}));
+
+		/* Types: an unsigned 8-bit logic, a signed 16-bit logic (the conversion
+		 * target), and an unsigned 1-bit logic (the clock). */
+		{
+			pigen_rtl_type d8 = {PIGEN_SIGN_UNSIGNED,
+				PIGEN_DATA_TYPE_STATE_TWO, 8, (pigen_rtl_expr_id){PIGEN_INVALID_ID},
+				(pigen_source_span){namefile, 0, 1}, 0, 0};
+			pigen_rtl_type d16 = {PIGEN_SIGN_SIGNED,
+				PIGEN_DATA_TYPE_STATE_TWO, 16, (pigen_rtl_expr_id){PIGEN_INVALID_ID},
+				(pigen_source_span){namefile, 0, 1}, 0, 0};
+			pigen_rtl_type d1 = {PIGEN_SIGN_UNSIGNED,
+				PIGEN_DATA_TYPE_STATE_TWO, 1, (pigen_rtl_expr_id){PIGEN_INVALID_ID},
+				(pigen_source_span){namefile, 0, 1}, 0, 0};
+
+			t8 = pigen_rtl_type_intern(&rtl, &d8);
+			t16 = pigen_rtl_type_intern(&rtl, &d16);
+			t1 = pigen_rtl_type_intern(&rtl, &d1);
+			REQUIRE(t8.index != PIGEN_INVALID_ID);
+			REQUIRE(t16.index != PIGEN_INVALID_ID);
+			REQUIRE(t1.index != PIGEN_INVALID_ID);
+		}
+
+		/* The module and its objects, in owner order: the three ports, then the
+		 * three internal signals. Origins are checked spans; the final names come
+		 * from the name arena, not these spans' text. */
+		module = pigen_rtl_module_add_with_owner(&rtl, (pigen_module_id){700},
+			(pigen_source_span){design, 26, 37});
+		REQUIRE(module.index != PIGEN_INVALID_ID);
+		in_a = pigen_rtl_object_add_with_owner(&rtl, module,
+			PIGEN_RTL_OBJECT_VARIABLE, t8, PIGEN_SEMANTIC_INPUT,
+			(pigen_signal_id){701}, (pigen_source_span){namefile, 4, 5});
+		REQUIRE(in_a.index != PIGEN_INVALID_ID);
+		out_b = pigen_rtl_object_add_with_owner(&rtl, module,
+			PIGEN_RTL_OBJECT_VARIABLE, t8, PIGEN_SEMANTIC_OUTPUT,
+			(pigen_signal_id){702}, (pigen_source_span){namefile, 6, 7});
+		REQUIRE(out_b.index != PIGEN_INVALID_ID);
+		clk = pigen_rtl_object_add_with_owner(&rtl, module,
+			PIGEN_RTL_OBJECT_VARIABLE, t1, PIGEN_SEMANTIC_INPUT,
+			(pigen_signal_id){703}, (pigen_source_span){namefile, 14, 17});
+		REQUIRE(clk.index != PIGEN_INVALID_ID);
+		c_obj = pigen_rtl_object_add_with_owner(&rtl, module,
+			PIGEN_RTL_OBJECT_VARIABLE, t8, PIGEN_SEMANTIC_INTERNAL,
+			(pigen_signal_id){PIGEN_INVALID_ID},
+			(pigen_source_span){namefile, 8, 9});
+		REQUIRE(c_obj.index != PIGEN_INVALID_ID);
+		d_obj = pigen_rtl_object_add_with_owner(&rtl, module,
+			PIGEN_RTL_OBJECT_VARIABLE, t8, PIGEN_SEMANTIC_INTERNAL,
+			(pigen_signal_id){PIGEN_INVALID_ID},
+			(pigen_source_span){namefile, 10, 11});
+		REQUIRE(d_obj.index != PIGEN_INVALID_ID);
+		e_obj = pigen_rtl_object_add_with_owner(&rtl, module,
+			PIGEN_RTL_OBJECT_VARIABLE, t8, PIGEN_SEMANTIC_INTERNAL,
+			(pigen_signal_id){PIGEN_INVALID_ID},
+			(pigen_source_span){namefile, 12, 13});
+		REQUIRE(e_obj.index != PIGEN_INVALID_ID);
+
+		/* Object expressions reference the objects by identity; the emitter
+		 * renders each from its final name. */
+		a_obj_expr = pigen_rtl_expr_add_object(&rtl, t8, in_a,
+			(pigen_source_span){namefile, 4, 5});
+		REQUIRE(a_obj_expr.index != PIGEN_INVALID_ID);
+		c_obj_expr = pigen_rtl_expr_add_object(&rtl, t8, c_obj,
+			(pigen_source_span){namefile, 8, 9});
+		REQUIRE(c_obj_expr.index != PIGEN_INVALID_ID);
+		e_obj_expr = pigen_rtl_expr_add_object(&rtl, t8, e_obj,
+			(pigen_source_span){namefile, 12, 13});
+		REQUIRE(e_obj_expr.index != PIGEN_INVALID_ID);
+		clk_expr = pigen_rtl_expr_add_object(&rtl, t1, clk,
+			(pigen_source_span){namefile, 14, 17});
+		REQUIRE(clk_expr.index != PIGEN_INVALID_ID);
+		d_obj_expr = pigen_rtl_expr_add_object(&rtl, t8, d_obj,
+			(pigen_source_span){namefile, 10, 11});
+		REQUIRE(d_obj_expr.index != PIGEN_INVALID_ID);
+
+		/* A signed conversion of a (operand) to the 16-bit signed target type:
+		 * rendered from the operand and the conversion node's target type. */
+		{
+			pigen_conversion conv = {PIGEN_CONVERSION_INTEGER_REINTERPRET,
+				(pigen_data_type_id){PIGEN_INVALID_ID},
+				(pigen_data_type_id){PIGEN_INVALID_ID}};
+
+			conv_expr = pigen_rtl_expr_add_conversion(&rtl, t16, &conv,
+				a_obj_expr, (pigen_source_span){namefile, 4, 5});
+			REQUIRE(conv_expr.index != PIGEN_INVALID_ID);
+		}
+
+		/* A concatenation {c, e} over its two children. */
+		{
+			pigen_rtl_expr_id parts[2];
+
+			parts[0] = c_obj_expr;
+			parts[1] = e_obj_expr;
+			concat_expr = pigen_rtl_expr_add_concatenation(&rtl, t8, parts, 2,
+				(pigen_source_span){namefile, 8, 9});
+			REQUIRE(concat_expr.index != PIGEN_INVALID_ID);
+		}
+
+		/* A primitive/instance parameter: an integer literal the instance
+		 * carries in its ordered parameter range. */
+		param_expr = pigen_rtl_expr_add_integer(&rtl, t8, 8,
+			(pigen_source_span){namefile, 0, 1});
+		REQUIRE(param_expr.index != PIGEN_INVALID_ID);
+
+		/* The primitive instance: one parameter and a single connection to the
+		 * clock object. Its origin is invalid, so its final name is the derived
+		 * INSTANCE role name (the role stem), matching the golden's "instance". */
+		{
+			pigen_rtl_expr_id params[1];
+			pigen_rtl_object_id conns[1];
+
+			params[0] = param_expr;
+			conns[0] = clk;
+			fifo = pigen_rtl_instance_add_with_owner(&rtl, module,
+				(pigen_module_id){710}, params, 1, conns, 1,
+				(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+			REQUIRE(fifo.index != PIGEN_INVALID_ID);
+		}
+
+		/* The two continuous equations, in module order: the conversion and the
+		 * concatenation. */
+		eq_conv = pigen_rtl_equation_add_with_owner(&rtl, module, out_b,
+			conv_expr, (pigen_source_span){design, 26, 37});
+		REQUIRE(eq_conv.index != PIGEN_INVALID_ID);
+		eq_concat = pigen_rtl_equation_add_with_owner(&rtl, module, d_obj,
+			concat_expr, (pigen_source_span){design, 26, 37});
+		REQUIRE(eq_concat.index != PIGEN_INVALID_ID);
+
+		/* The guarded/clocked update, added immediately before its process so
+		 * the process's update range is the last update in the arena. */
+		up = pigen_rtl_update_add_with_owner(&rtl, module, e_obj, d_obj_expr,
+			(pigen_source_span){design, 38, 48});
+		REQUIRE(up.index != PIGEN_INVALID_ID);
+		{
+			pigen_rtl_update_id updates[1];
+
+			updates[0] = up;
+			proc = pigen_rtl_process_add_with_owner(&rtl, module, clk_expr,
+				PIGEN_SEMANTIC_POSEDGE, updates, 1,
+				(pigen_source_span){design, 38, 48});
+			REQUIRE(proc.index != PIGEN_INVALID_ID);
+		}
+
+		/* The final names: each SOURCE request copies the checked identifier
+		 * spelling of its span. The objects and module use checked spans; the
+		 * instance is a synthetic internal role (invalid span) whose name is the
+		 * derived role stem "instance". */
+		for (int r = 0; r < 7; r++)
+			requests[r].kind = PIGEN_RTL_NAME_SOURCE;
+		requests[7].kind = PIGEN_RTL_NAME_INSTANCE;
+		requests[0].origin = (pigen_source_span){namefile, 4, 5}; /* a */
+		requests[1].origin = (pigen_source_span){namefile, 6, 7}; /* b */
+		requests[2].origin = (pigen_source_span){namefile, 14, 17}; /* clk */
+		requests[3].origin = (pigen_source_span){namefile, 8, 9}; /* c */
+		requests[4].origin = (pigen_source_span){namefile, 10, 11}; /* d */
+		requests[5].origin = (pigen_source_span){namefile, 12, 13}; /* e */
+		requests[6].origin = (pigen_source_span){namefile, 0, 3}; /* top */
+		requests[7].origin =
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+		REQUIRE(pigen_rtl_assign_names(&rtl, &sources, requests, 8).index !=
+			PIGEN_INVALID_ID);
+
+		/* The ordered output model: a leading opaque comment, the module (with
+		 * its ten nested items in emission order: the six signal declarations,
+		 * the primitive, the two equations and the process), and a trailing
+		 * opaque comment. The owner-managed nested range is keyed by the module
+		 * identity; the module item's layout field mirrors it. */
+		items[0].kind = PIGEN_OUTPUT_OPAQUE;
+		items[0].as.span = (pigen_source_span){design, 0, 26};
+		items[1].kind = PIGEN_OUTPUT_MODULE;
+		items[1].as.module = module;
+		items[1].layout = (pigen_rtl_record_range){2, 10};
+		items[2].kind = PIGEN_OUTPUT_RTL_OBJECT;
+		items[2].as.object = in_a;
+		items[3].kind = PIGEN_OUTPUT_RTL_OBJECT;
+		items[3].as.object = out_b;
+		items[4].kind = PIGEN_OUTPUT_RTL_OBJECT;
+		items[4].as.object = clk;
+		items[5].kind = PIGEN_OUTPUT_RTL_OBJECT;
+		items[5].as.object = c_obj;
+		items[6].kind = PIGEN_OUTPUT_RTL_OBJECT;
+		items[6].as.object = d_obj;
+		items[7].kind = PIGEN_OUTPUT_RTL_OBJECT;
+		items[7].as.object = e_obj;
+		items[8].kind = PIGEN_OUTPUT_RTL_INSTANCE;
+		items[8].as.instance = fifo;
+		items[9].kind = PIGEN_OUTPUT_RTL_EQUATION;
+		items[9].as.equation = eq_conv;
+		items[10].kind = PIGEN_OUTPUT_RTL_EQUATION;
+		items[10].as.equation = eq_concat;
+		items[11].kind = PIGEN_OUTPUT_RTL_PROCESS;
+		items[11].as.process = proc;
+		items[12].kind = PIGEN_OUTPUT_OPAQUE;
+		items[12].as.span = (pigen_source_span){design, 48, 75};
+		nested[0] = (pigen_rtl_record_range){2, 10};
+		layout.items = items;
+		layout.item_count = 13;
+		layout.item_capacity = 13;
+		layout.nested_layouts = nested;
+		layout.nested_layout_count = 1;
+		layout.nested_layout_capacity = 1;
+
+		/* The whole-design emission must be exactly the golden string: leading
+		 * and trailing OPAQUE spans copied verbatim and byte-exact, the module
+		 * header and its nested items, the signal declarations, the signed
+		 * conversion, the concatenation, the primitive parameter, the equation,
+		 * and the guarded/clocked update. Red on main: the stub returns -1 and
+		 * leaves *output_string NULL. */
+		ret = pigen_emit_systemverilog(&sources, &layout, &rtl, &out);
+		REQUIRE(ret == 0);
+		REQUIRE(out != NULL);
+		REQUIRE(strcmp(out, golden) == 0);
+		if (out)
+			free(out);
+
+		pigen_free_rtl_model(&rtl);
+		pigen_free_sources(&sources);
+	}
+
 	return check_finish();
 }
