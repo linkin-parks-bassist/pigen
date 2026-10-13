@@ -50,6 +50,35 @@ static void render_is(const pigen_rtl_model *m, pigen_rtl_expr_id expr,
 	free(text);
 }
 
+/* Whole-design render for the no-partial-output packet. Pins the contract's
+ * failure idiom (how/should/compiler/builders/fail.md): the whole-design
+ * emitter validates before committing, so a malformed finished model returns
+ * -1 and leaves *output_string NULL even though a renderable prefix was
+ * produced. On main the emitter is the unimplemented -1 stub, so this holds;
+ * the sibling positive controls below are what fail there. */
+static void near_valid(const pigen_source_manager *sources,
+	const pigen_output_model *layout, const pigen_rtl_model *rtl)
+{
+	char *out = (char *)"sentinel";
+
+	REQUIRE(pigen_emit_systemverilog(sources, layout, rtl, &out) == -1);
+	REQUIRE(out == NULL);
+}
+
+/* Whole-design positive control: a valid, finished, named design must render.
+ * Pins the "a valid prefix was renderable" half of the packet -- on main the
+ * -1 stub cannot satisfy this, so it is the deliberate red. */
+static void renders(const pigen_source_manager *sources,
+	const pigen_output_model *layout, const pigen_rtl_model *rtl)
+{
+	char *out = (char *)"sentinel";
+
+	REQUIRE(pigen_emit_systemverilog(sources, layout, rtl, &out) == 0);
+	REQUIRE(out != NULL && out != (char *)"sentinel");
+	REQUIRE(out[0] != 0 && out[strlen(out)] == 0);
+	free(out);
+}
+
 int main(int argc, char **argv)
 {
 	check_init(argc, argv);
@@ -351,6 +380,191 @@ int main(int argc, char **argv)
 			REQUIRE(out == NULL);
 			REQUIRE(pigen_sv_render_expression(&rtl, NULL, &out) == -1);
 			REQUIRE(out == NULL);
+		}
+
+		pigen_free_rtl_model(&rtl);
+		pigen_free_sources(&sources);
+	}
+
+	SECTION("t10-no-partial-output") {
+		pigen_source_manager sources = {0};
+		pigen_rtl_model rtl = {0};
+		pigen_rtl_type_id t;
+		pigen_rtl_module_id mod;
+		pigen_source_id src;
+		pigen_rtl_name_id named;
+
+		/* One 15-byte source for the opaque span text and the object
+		 * identifier spans; a concrete 32-bit type and an owner module for
+		 * the structured witnesses. The layout is built by value: the output
+		 * model is a plain struct the emitter walks in array order, and its
+		 * constructor API lives in src/output.c, which the sv-emit build
+		 * does not link. */
+		src = pigen_source_add(&sources, "no.pigen", "abcdefghijklmno", 15);
+		REQUIRE(src.index != PIGEN_INVALID_ID);
+		t = vec_type(&rtl, PIGEN_SIGN_IMPLICIT);
+		REQUIRE(t.index != PIGEN_INVALID_ID);
+		mod = pigen_rtl_module_add(&rtl, (pigen_source_span){src, 0, 4});
+		REQUIRE(mod.index != PIGEN_INVALID_ID);
+		/* Name the single source identifier so the object and equation
+		 * witnesses can carry a resolvable final name; the unnamed witness
+		 * below deliberately points past it. */
+		named = pigen_rtl_assign_names(&rtl, &sources,
+			&(pigen_rtl_name_request){
+				(pigen_rtl_name_kind)PIGEN_RTL_NAME_SOURCE,
+				(pigen_source_span){src, 0, 1}},
+			1);
+		REQUIRE(named.index != PIGEN_INVALID_ID);
+
+		/* (a) Malformed coverage: the OPAQUE spans do not exactly/
+		 * contiguously cover their source -- [0,4) and [4,10) leave a 5-byte
+		 * gap before the 15-byte end. The monotonic-coverage gate would report
+		 * that, so the emitter must refuse the whole design before committing.
+		 * The exact-coverage sibling is the renderable control. */
+		{
+			pigen_output_item items[2];
+
+			items[0] = (pigen_output_item){
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 4} }, {0, 0}};
+			items[1] = (pigen_output_item){
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 4, 10} }, {0, 0}};
+			near_valid(&sources, &(pigen_output_model){
+				items, 2, 0, 0, 0, 0}, &rtl);
+
+			/* Control: the same source covered exactly [0,4),[4,10),[10,15)
+			 * renders. */
+			pigen_output_item ok[3];
+
+			ok[0] = (pigen_output_item){
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 4} }, {0, 0}};
+			ok[1] = (pigen_output_item){
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 4, 10} }, {0, 0}};
+			ok[2] = (pigen_output_item){
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 10, 15} }, {0, 0}};
+			renders(&sources, &(pigen_output_model){
+				ok, 3, 0, 0, 0, 0}, &rtl);
+		}
+
+		/* (b) Unnamed object: an RTL_OBJECT item whose record has no matching
+		 * final name in the names arena -- its origin span points past the
+		 * named identifier, so no (role, origin) identity matches. The emitter
+		 * must not render it and must commit no partial output. The named
+		 * sibling is the renderable control. */
+		{
+			pigen_rtl_object_id obj_named, obj_unnamed;
+			pigen_output_item item;
+
+			obj_named = pigen_rtl_object_add_with_owner(&rtl, mod,
+				PIGEN_RTL_OBJECT_VARIABLE, t, PIGEN_SEMANTIC_INPUT,
+				(pigen_signal_id){PIGEN_INVALID_ID},
+				(pigen_source_span){src, 0, 1});
+			obj_unnamed = pigen_rtl_object_add_with_owner(&rtl, mod,
+				PIGEN_RTL_OBJECT_VARIABLE, t, PIGEN_SEMANTIC_INPUT,
+				(pigen_signal_id){PIGEN_INVALID_ID},
+				(pigen_source_span){src, 1, 2});
+			REQUIRE(obj_named.index != PIGEN_INVALID_ID &&
+				obj_unnamed.index != PIGEN_INVALID_ID);
+
+			item = (pigen_output_item){
+				PIGEN_OUTPUT_RTL_OBJECT, { .object = obj_unnamed }, {0, 0}};
+			near_valid(&sources, &(pigen_output_model){
+				&item, 1, 0, 0, 0, 0}, &rtl);
+
+			/* Control: the object whose origin matches the assigned name
+			 * renders. */
+			item = (pigen_output_item){
+				PIGEN_OUTPUT_RTL_OBJECT, { .object = obj_named }, {0, 0}};
+			renders(&sources, &(pigen_output_model){
+				&item, 1, 0, 0, 0, 0}, &rtl);
+		}
+
+		/* (c) Invalid child: an expression whose first_child points past the
+		 * child arena (the record carries a child count but the arena holds no
+		 * child at that index). The emitter must validate the child indices
+		 * before rendering and commit no partial output. The in-range sibling
+		 * is the renderable control. */
+		{
+			pigen_rtl_object_id dest;
+			pigen_rtl_expr_id a, b, val_bad, val_good;
+			pigen_rtl_equation_id eq_bad, eq_good;
+			pigen_binary_resolution r = {0};
+			pigen_rtl_expr *bexpr;
+			pigen_output_item item;
+
+			a = pigen_rtl_expr_add_integer(&rtl, t, 1,
+				(pigen_source_span){src, 1, 2});
+			b = pigen_rtl_expr_add_integer(&rtl, t, 2,
+				(pigen_source_span){src, 2, 3});
+			REQUIRE(a.index != PIGEN_INVALID_ID &&
+				b.index != PIGEN_INVALID_ID);
+			dest = pigen_rtl_object_add_with_owner(&rtl, mod,
+				PIGEN_RTL_OBJECT_VARIABLE, t, PIGEN_SEMANTIC_INPUT,
+				(pigen_signal_id){PIGEN_INVALID_ID},
+				(pigen_source_span){src, 0, 1});
+			REQUIRE(dest.index != PIGEN_INVALID_ID);
+
+			r.operation.operator = PIGEN_BINARY_ADD;
+			val_good = pigen_rtl_expr_add_binary(&rtl, t, &r, a, b,
+				(pigen_source_span){src, 1, 3});
+			val_bad = pigen_rtl_expr_add_binary(&rtl, t, &r, a, b,
+				(pigen_source_span){src, 1, 3});
+			REQUIRE(val_good.index != PIGEN_INVALID_ID &&
+				val_bad.index != PIGEN_INVALID_ID &&
+				val_good.index != val_bad.index);
+			eq_good = pigen_rtl_equation_add_with_owner(&rtl, mod, dest,
+				val_good, (pigen_source_span){src, 1, 3});
+			eq_bad = pigen_rtl_equation_add_with_owner(&rtl, mod, dest,
+				val_bad, (pigen_source_span){src, 1, 3});
+			REQUIRE(eq_good.index != PIGEN_INVALID_ID &&
+				eq_bad.index != PIGEN_INVALID_ID);
+
+			/* val_bad is the second expression with children, so its
+			 * first_child is 2 (after a, b) and its count is 2, with 4
+			 * children in the arena. Point it past the arena: no child exists
+			 * at that index. */
+			bexpr = &rtl.expressions[val_bad.index];
+			REQUIRE(val_bad.index < rtl.expression_count &&
+				bexpr->first_child == 2 && bexpr->child_count == 2 &&
+				rtl.expression_child_count == 4);
+			bexpr->first_child = 999999;
+
+			/* The witness: the equation whose value expression carries the
+			 * corrupted child index. The emitter must refuse before rendering
+			 * the (unrenderable) equation and commit no partial output. */
+			item = (pigen_output_item){
+				PIGEN_OUTPUT_RTL_EQUATION, { .equation = eq_bad }, {0, 0}};
+			near_valid(&sources, &(pigen_output_model){
+				&item, 1, 0, 0, 0, 0}, &rtl);
+
+			/* Control: the in-range sibling equation renders. */
+			item = (pigen_output_item){
+				PIGEN_OUTPUT_RTL_EQUATION, { .equation = eq_good }, {0, 0}};
+			renders(&sources, &(pigen_output_model){
+				&item, 1, 0, 0, 0, 0}, &rtl);
+		}
+
+		/* (d) Out-of-bounds span: an OPAQUE span whose end lies past its
+		 * source file's length. The emitter must validate the span before
+		 * copying its text and commit no partial output. The in-bounds
+		 * sibling is the renderable control. */
+		{
+			pigen_output_item item;
+
+			item = (pigen_output_item){
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 10, 100} },
+					{0, 0}};
+			REQUIRE(pigen_source_span_valid(&sources,
+				(pigen_source_span){src, 10, 100}) == 0);
+			near_valid(&sources, &(pigen_output_model){
+				&item, 1, 0, 0, 0, 0}, &rtl);
+
+			/* Control: an in-bounds span on the same source renders. */
+			item = (pigen_output_item){
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 15} }, {0, 0}};
+			REQUIRE(pigen_source_span_valid(&sources,
+				(pigen_source_span){src, 0, 15}) == 1);
+			renders(&sources, &(pigen_output_model){
+				&item, 1, 0, 0, 0, 0}, &rtl);
 		}
 
 		pigen_free_rtl_model(&rtl);
