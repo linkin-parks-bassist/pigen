@@ -4,6 +4,10 @@
     "command": ["make", "source-test"]
   },
   {
+    "covers": ["tests/source_test.c", "src/source.c", "src/util.c"],
+    "command": ["sh", "tests/harness_artifact_ownership.sh"]
+  },
+  {
     "covers": ["src/preprocess.c", "src/lexer.c", "src/source.c", "src/util.c"],
     "command": ["make", "preprocess-test"]
   },
