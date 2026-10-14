@@ -1,0 +1,69 @@
+module vertical_slice
+	(
+		input logic clk,
+		input logic reset,
+
+		/* Data-first abstract inputs */
+		input buf [7:0] in_data,
+		input logic [7:0] in_guard,
+
+		output buf [7:0] out_data,
+		output buf [7:0] out_guard
+	);
+
+	/* buf, fifo[4], and skid primitives */
+	buf [7:0] buf_reg;
+	fifo[7:0][4] queue;
+	skid [7:0] skid_reg;
+
+	/* Guarded arithmetic: only compute when guard is high */
+	logic [7:0] guarded_result;
+	logic [7:0] projection;
+	logic [15:0] concat_result;
+
+	always_ff @(posedge clk)
+	begin
+		if (!reset)
+		begin
+			buf_reg <= '0;
+			queue <= '0;
+			skid_reg <= '0;
+			guarded_result <= '0;
+		end
+		else
+		begin
+			/* Store input in buf */
+			buf_reg <= in_data;
+
+			/* Feed fifo[4] */
+			queue <= in_data;
+
+			/* Feed skid */
+			skid_reg <= in_data;
+
+			/* Guarded arithmetic: multiply when guard is high */
+			if (in_guard)
+			begin
+				guarded_result <= in_data * in_guard;
+			end
+
+			/* Projection: take lower 4 bits */
+			projection <= in_data[3:0];
+
+			/* Concatenation: combine two 8-bit values */
+			concat_result <= {in_data, in_guard};
+		end
+	end
+
+	/* Output passes through buffered/skidded values */
+	/* out_data is driven directly from buf_reg */
+	assign out_data = buf_reg;
+	/* out_guard is registered from the guard input */
+	logic [7:0] out_guard_reg;
+	always_ff @(posedge clk)
+	begin
+		out_guard_reg <= in_guard;
+	end
+	assign out_guard = out_guard_reg;
+
+endmodule
