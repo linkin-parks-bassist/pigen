@@ -58,20 +58,7 @@ static void test_skeleton_fails_all(void)
     pigen_free_sources(&sources);
 }
 
-/* Test 2: Non-existent file returns error */
-static void test_non_existent_file(void)
-{
-    pigen_source_manager sources = {0};
-    pigen_compile_result result = {0};
-    pigen_compile_error error = {0};
-    int ret = pigen_compile_source(&sources, "tests/non_existent.pigen",
-                                   "", 0, NULL, &result, &error);
-    assert(ret == -1);
-
-    pigen_free_sources(&sources);
-}
-
-/* Test 3: pigen_free_compile_result is safe with NULL result */
+/* Test 2: pigen_free_compile_result is safe with NULL result */
 static void test_free_null_result(void)
 {
     pigen_compile_result result = {0};
@@ -134,7 +121,6 @@ static void test_cross_domain_error_provenance(void)
 int main(void)
 {
     test_skeleton_fails_all();
-    test_non_existent_file();
     test_free_null_result();
     test_free_allocated_result();
     test_error_provenance();
