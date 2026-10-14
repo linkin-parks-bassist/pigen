@@ -1,7 +1,7 @@
 ---
 status: green
 revised_at: "2026-10-10T18:16:46+11:00"
-checked_at: "2026-09-13T15:07:12+10:00"
+checked_at: '2026-10-15T09:22:25+11:00'
 ---
 
 A stage is `stage begin item; end` for one item, or `stage begin items end` for several; an optional name may precede `begin`. There is no colon form. Both forms have one private stage scope and elastic boundary. Lookup is stage-local then pipeline-local then module; shadowing warns. Stage-local wires use combinational = and wire <= is fatal.
