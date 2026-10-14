@@ -234,7 +234,7 @@ mac-waveform: pigen
 	./pigen examples/fixed_point_mac.pigen -o examples/fixed_point_mac.sv
 	verilator --binary --trace --top-module fixed_point_mac_tb --Mdir /tmp/pigen-mac-verilator rtl/pigen_primitives.sv examples/fixed_point_mac.sv examples/fixed_point_mac_tb.sv
 	/tmp/pigen-mac-verilator/Vfixed_point_mac_tb
-	verilator --lint-only -Wno-fatal --top-module fixed_point_mac_vanilla examples/fixed_point_mac_vanilla.sv
+	verilator --lint-only --top-module fixed_point_mac_vanilla examples/fixed_point_mac_vanilla.sv
 
 biquad-waveform: pigen
 	truncate -s 0 examples/df1_biquad_bandpass.vcd
