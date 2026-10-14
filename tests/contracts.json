@@ -668,5 +668,15 @@
       "make",
       "compile-test"
     ]
+  },
+  {
+    "covers": [
+      "examples/vertical_slice.pigen",
+      "tests/vertical_slice_tb.sv"
+    ],
+    "command": [
+      "make",
+      "vertical-slice-test"
+    ]
   }
 ]
