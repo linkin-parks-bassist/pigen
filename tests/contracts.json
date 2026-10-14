@@ -668,5 +668,15 @@
       "make",
       "compile-test"
     ]
+  },
+  {
+    "covers": [
+      "examples/buf_pipeline.pigen",
+      "examples/buf_pipeline_tb.sv"
+    ],
+    "command": [
+      "make",
+      "vertical-slice-test"
+    ]
   }
 ]
