@@ -294,7 +294,7 @@ compile-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-compile-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-compile-test tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-compile-test tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-compile-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
