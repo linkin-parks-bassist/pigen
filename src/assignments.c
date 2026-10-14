@@ -287,6 +287,12 @@ int pigen_extract_signal_transfer(const char *start, const char *end, pigen_prim
 		transfer->items = pigen_resize(NULL, left_count * sizeof(*transfer->items));
 		transfer->owned_expressions = calloc(left_count, sizeof(*transfer->owned_expressions));
 		if (!transfer->owned_expressions) pigen_fail("out of memory");
+		transfer->count = left_count;
+		transfer->prefix_end = left_start;
+		transfer->width_lhs = width_lhs.data;
+		transfer->width_rhs = expression;
+		transfer->width_rhs_length = (size_t)(end - expression);
+		transfer->requires_exact_width = 1;
 		/* Compute bit widths for each destination */
 		size_t *destination_bit_widths = calloc(left_count, sizeof(*destination_bit_widths));
 		if (!destination_bit_widths) pigen_fail("out of memory");
