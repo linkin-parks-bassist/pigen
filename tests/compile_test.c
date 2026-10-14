@@ -6,6 +6,9 @@
 #include "pigen/compile.h"
 #include "pigen/source.h"
 #include "pigen/ids.h"
+#include "pigen/syntax.h"
+#include "pigen/resolve.h"
+#include "pigen/semantic.h"
 
 /* Helper to read a file into memory */
 static char *read_file(const char *path, size_t *length)
@@ -34,27 +37,120 @@ static char *read_file(const char *path, size_t *length)
     return contents;
 }
 
-/* Test 1: Skeleton stub returns failure for all inputs */
-/* The compile-interface-skeleton stub intentionally fails all compilations.
- * This test verifies the skeleton behavior, not successful compilation. */
-static void test_skeleton_fails_all(void)
+/* Test 1: Independent validity check using structured syntax/semantic APIs */
+/* This establishes that the same source passed to pigen_compile_source
+ * is independently valid through pigen_parse_syntax and pigen_resolve_semantics.
+ * This is the "independence" requirement: the witness must pass actual
+ * syntax/semantic resolution, not just context initialization. */
+static void test_independent_validity(void)
 {
-    pigen_source_manager sources = {0};
-    size_t source_length = 0;
-    char *source_text = read_file("tests/basic.pigen", &source_length);
-    assert(source_text != NULL);
+    /* Minimal valid Pigen source - same as used in test_compile_valid_source */
+    const char *source_text =
+        "module compile_test_example;\n"
+        "  wire scalar_wire;\n"
+        "endmodule\n";
+    size_t source_length = strlen(source_text);
 
+    /* Set up source manager for syntax parsing */
+    pigen_source_manager sources = {0};
+    sources.files = NULL;
+    sources.count = 0;
+    sources.capacity = 0;
+
+    pigen_source_id source_id = pigen_source_add(&sources, "compile_test.pigen",
+                                                 source_text, source_length);
+    assert(source_id.index != PIGEN_INVALID_ID);
+
+    /* Preprocess (minimal, no include support) */
+    pigen_preprocess_result preprocess_result = {0};
+    pigen_preprocess_error preprocess_error = {0};
+    pigen_source_provider provider = {0, NULL};
+
+    int preprocess_ret = pigen_preprocess(&sources, source_id, &provider,
+                                          &preprocess_result, &preprocess_error);
+    assert(preprocess_ret == 1); /* preprocessing succeeds */
+
+    /* Parse syntax */
+    pigen_syntax_tree syntax_tree = {0};
+    pigen_syntax_error syntax_error = {0};
+
+    const pigen_expanded_source *expanded = &preprocess_result.expanded;
+    int parse_ret = pigen_parse_syntax(expanded, &syntax_tree, &syntax_error);
+    if (parse_ret != 1) {
+        fprintf(stderr, "syntax parsing failed: %s\n",
+                syntax_error.message ? syntax_error.message : "unknown error");
+    }
+    assert(parse_ret == 1); /* syntax parsing succeeds */
+
+    /* Semantic resolution */
+    pigen_semantic_model semantic_model = {0};
+    pigen_semantic_init(&semantic_model, &sources);
+
+    pigen_resolve_policy maximum_bits_policy = { .maximum_generated_bits = 256 };
+    pigen_semantic_error semantic_error = {0};
+
+    int resolve_ret = pigen_resolve_semantics(&syntax_tree, &semantic_model,
+                                              &maximum_bits_policy, &semantic_error);
+    if (resolve_ret != 1) {
+        fprintf(stderr, "semantic resolution failed: %s\n",
+                semantic_error.message ? semantic_error.message : "unknown error");
+    }
+    assert(resolve_ret == 1); /* semantic resolution succeeds */
+
+    /* Cleanup */
+    pigen_free_syntax_tree(&syntax_tree);
+    pigen_free_semantic_model(&semantic_model);
+    pigen_free_preprocess_result(&preprocess_result);
+    pigen_free_sources(&sources);
+}
+
+/* Test 2: pigen_compile_source returns 0 on successful compilation of valid Pigen source */
+/* This test verifies the PUBLIC contract: successful compilation returns 0,
+ * produces non-null/nonempty SystemVerilog containing the named module,
+ * with consistent length, and pigen_free_compile_result safely cleans up.
+ *
+ * NOTE: This test is expected to FAIL (red) against the current incomplete
+ * pigen_compile_source implementation, which skips resolution/lowering/
+ * naming/output-model construction. The independent validity check above
+ * confirms the source is legitimately valid. */
+static void test_compile_valid_source(void)
+{
+    /* Minimal valid Pigen source: a simple module declaration.
+     * Validated independently by test_independent_validity. */
+    const char *source_text =
+        "module compile_test_example;\n"
+        "  wire scalar_wire;\n"
+        "endmodule\n";
+    size_t source_length = strlen(source_text);
+
+    pigen_source_manager sources = {0};
     pigen_compile_result result = {0};
     pigen_compile_error error = {0};
-    int ret = pigen_compile_source(&sources, "tests/basic.pigen",
+
+    int ret = pigen_compile_source(&sources, "compile_test.pigen",
                                    source_text, source_length,
                                    NULL, &result, &error);
-    /* Skeleton stub always returns -1 (failure) */
-    assert(ret == -1);
+
+    /* Public contract: return 0 on success */
+    assert(ret == 0);
+
+    /* Public contract: non-null SystemVerilog output */
+    assert(result.systemverilog != NULL);
+
+    /* Public contract: non-empty output */
+    assert(result.length > 0);
+
+    /* Public contract: output contains the named module */
+    assert(strstr(result.systemverilog, "compile_test_example") != NULL);
+
+    /* Public contract: length is consistent with the output */
+    assert(result.length == strlen(result.systemverilog));
+
+    /* Public contract: safe result cleanup */
+    pigen_free_compile_result(&result);
     assert(result.systemverilog == NULL);
     assert(result.length == 0);
 
-    free(source_text);
     pigen_free_sources(&sources);
 }
 
@@ -120,7 +216,8 @@ static void test_cross_domain_error_provenance(void)
 
 int main(void)
 {
-    test_skeleton_fails_all();
+    test_independent_validity();
+    test_compile_valid_source();
     test_free_null_result();
     test_free_allocated_result();
     test_error_provenance();
