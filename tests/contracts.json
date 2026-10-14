@@ -671,8 +671,8 @@
   },
   {
     "covers": [
-      "examples/vertical_slice.pigen",
-      "tests/vertical_slice_tb.sv"
+      "examples/buf_pipeline.pigen",
+      "examples/buf_pipeline_tb.sv"
     ],
     "command": [
       "make",
