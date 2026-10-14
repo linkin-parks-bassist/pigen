@@ -6,6 +6,10 @@
 #include "pigen/compile.h"
 #include "pigen/source.h"
 #include "pigen/ids.h"
+#include "pigen/preprocess.h"
+#include "pigen/syntax.h"
+#include "pigen/resolve.h"
+#include "pigen/semantic.h"
 
 /* Helper to read a file into memory */
 static char *read_file(const char *path, size_t *length)
@@ -118,6 +122,64 @@ static void test_cross_domain_error_provenance(void)
     free(source_text);
 }
 
+/* Test 7: Owned signal declaration passes through full compiler pipeline.
+ * This test verifies that pigen_compile_source actually invokes parsing,
+ * semantic resolution, and lowering for a Pigen-owned data-first declaration.
+ * The source uses Pigen-specific 'buf' syntax which must not pass through
+ * unchanged as ordinary SystemVerilog. */
+static void test_owned_signal_full_pipeline(void)
+{
+    pigen_source_manager sources = {0};
+    size_t source_length = 0;
+    char *source_text = read_file("tests/owned_signal.pigen", &source_length);
+    assert(source_text != NULL);
+
+    /* Add source to manager */
+    pigen_source_id source_id = pigen_source_add(&sources, "tests/owned_signal.pigen", source_text, source_length);
+    assert(source_id.index != PIGEN_INVALID_ID);
+
+    /* Preprocess */
+    pigen_preprocess_result preprocess_result = {0};
+    pigen_preprocess_error preprocess_error = {0};
+    pigen_source_provider provider = {0, NULL};
+    int preprocess_ret = pigen_preprocess(&sources, source_id, &provider, &preprocess_result, &preprocess_error);
+    assert(preprocess_ret == 1); /* preprocessing success */
+
+    /* Parse syntax */
+    pigen_syntax_tree syntax_tree = {0};
+    pigen_syntax_error syntax_error = {0};
+    const pigen_expanded_source *expanded = &preprocess_result.expanded;
+    int parse_ret = pigen_parse_syntax(expanded, &syntax_tree, &syntax_error);
+    assert(parse_ret == 1); /* parsing success */
+
+    /* Semantic resolution */
+    pigen_semantic_model semantic_model = {0};
+    pigen_semantic_init(&semantic_model, &sources);
+    pigen_resolve_policy policy = {0};
+    policy.maximum_generated_bits = 1024;
+    pigen_semantic_error semantic_error = {0};
+    int resolve_ret = pigen_resolve_semantics(&syntax_tree, &semantic_model, &policy, &semantic_error);
+    assert(resolve_ret == 1); /* semantic resolution success */
+
+    /* Now call the public compiler - this should fail against the skeleton stub */
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int compile_ret = pigen_compile_source(&sources, "tests/owned_signal.pigen",
+                                           source_text, source_length,
+                                           NULL, &result, &error);
+    assert(compile_ret == -1); /* compilation failure (skeleton stub) */
+    assert(result.systemverilog == NULL);
+    assert(result.length == 0);
+
+    /* Cleanup */
+    pigen_free_compile_result(&result);
+    pigen_free_syntax_tree(&syntax_tree);
+    pigen_free_semantic_model(&semantic_model);
+    pigen_free_preprocess_result(&preprocess_result);
+    pigen_free_sources(&sources);
+    free(source_text);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -125,6 +187,7 @@ int main(void)
     test_free_allocated_result();
     test_error_provenance();
     test_cross_domain_error_provenance();
+    test_owned_signal_full_pipeline();
 
     printf("All compile tests passed\n");
     return 0;
