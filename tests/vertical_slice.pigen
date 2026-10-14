@@ -1,0 +1,27 @@
+module vertical_slice
+    (
+        input logic clk,
+        input logic reset,
+        input logic start,
+        output logic done
+    );
+
+    buf [7:0] input_data;
+    buf [7:0] output_data;
+
+    always_ff @(posedge clk or posedge reset)
+    begin
+        if (reset)
+        begin
+            done <= 0;
+        end
+        else if (start)
+        begin
+            done <= 1;
+        end
+    end
+
+    /* Opaque comment - must be preserved exactly */
+    /* @opaque:vertical_slice:testing:stalled_payload */
+
+endmodule

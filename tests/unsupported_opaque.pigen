@@ -1,0 +1,15 @@
+module unsupported_opaque
+    (
+        input logic clk
+    );
+
+    /* Unsupported opaque form: direct memory reference in Pigen context */
+    opaque_memory ref;
+
+    buf [7:0] source;
+
+    always_ff @(posedge clk)
+    begin
+        source <= ref;
+    end
+endmodule

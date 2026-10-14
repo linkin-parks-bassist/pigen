@@ -1,0 +1,17 @@
+module ready_cycle_error
+    (
+        input logic clk
+    );
+
+    buf [7:0] a;
+    buf [7:0] b;
+
+    always_ff @(posedge clk)
+    begin
+        a <= b;
+    end
+    always_ff @(posedge clk)
+    begin
+        b <= a;
+    end
+endmodule

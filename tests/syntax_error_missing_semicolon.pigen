@@ -1,0 +1,13 @@
+module syntax_error_missing_semicolon
+    (
+        input logic clk
+    );
+
+    buf [7:0] source
+    buf [7:0] destination;
+
+    always_ff @(posedge clk)
+    begin
+        destination <= source;
+    end
+endmodule
