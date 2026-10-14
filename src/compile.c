@@ -77,7 +77,7 @@ int pigen_compile_source(pigen_source_manager *sources,
     pigen_source_provider provider = {0, NULL};
     
     int preprocess_ret = pigen_preprocess(sources, source_id, &provider, &preprocess_result, &preprocess_error);
-    if (preprocess_ret != 0) {
+    if (preprocess_ret == 0) {
         if (error) {
             error->origin = (pigen_origin_id){0};
             error->span = preprocess_error.span;
