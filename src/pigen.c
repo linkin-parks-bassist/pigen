@@ -19,6 +19,7 @@
 #include "pigen/procedural.h"
 #include "pigen/transfer.h"
 #include "pigen/util.h"
+#include "pigen/compile.h"
 
 #define fail pigen_fail
 

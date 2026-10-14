@@ -130,7 +130,7 @@ sv-emit-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-sv-emit-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/output.c src/syntax.c src/util.c src/semantic.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c src/transfer_type.c src/integer.c src/data_type.c src/operation.c || { status=1; rm -rf $$dir; exit 1; }; \
 	if [ "$(T)" = "t10-no-search" ]; then \
 		if grep -nE 'strstr|strchr|pigen_symbol_lookup|pigen_data_type_|pigen_transfer_type_' src/sv_emit.c; then \
 			echo "t10-no-search: FAIL: src/sv_emit.c uses a source-text search or semantic-owner lookup"; \
