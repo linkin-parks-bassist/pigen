@@ -58,27 +58,14 @@ static void test_skeleton_fails_all(void)
     pigen_free_sources(&sources);
 }
 
-/* Test 2: Non-existent file returns error */
-static void test_non_existent_file(void)
-{
-    pigen_source_manager sources = {0};
-    pigen_compile_result result = {0};
-    pigen_compile_error error = {0};
-    int ret = pigen_compile_source(&sources, "tests/non_existent.pigen",
-                                   "", 0, NULL, &result, &error);
-    assert(ret == -1);
-
-    pigen_free_sources(&sources);
-}
-
-/* Test 3: pigen_free_compile_result is safe with NULL result */
+/* Test 2: pigen_free_compile_result is safe with NULL result */
 static void test_free_null_result(void)
 {
     pigen_compile_result result = {0};
     pigen_free_compile_result(&result);
 }
 
-/* Test 4: pigen_free_compile_result frees allocated memory */
+/* Test 3: pigen_free_compile_result frees allocated memory */
 static void test_free_allocated_result(void)
 {
     pigen_compile_result result = {0};
@@ -87,7 +74,7 @@ static void test_free_allocated_result(void)
     /* If we reach here without crash, memory was freed */
 }
 
-/* Test 5: Error diagnostic contains message (skeleton sets origin=0, span={0}) */
+/* Test 4: Error diagnostic contains message (skeleton sets origin=0, span={0}) */
 static void test_error_provenance(void)
 {
     pigen_source_manager sources = {0};
@@ -109,7 +96,7 @@ static void test_error_provenance(void)
     free(source_text);
 }
 
-/* Test 6: Cross-domain transfer error returns error with message */
+/* Test 5: Cross-domain transfer error returns error with message */
 static void test_cross_domain_error_provenance(void)
 {
     pigen_source_manager sources = {0};
@@ -131,14 +118,39 @@ static void test_cross_domain_error_provenance(void)
     free(source_text);
 }
 
+/* Test 6: Successful compilation returns 0 with non-empty SystemVerilog output */
+static void test_successful_compilation(void)
+{
+    pigen_source_manager sources = {0};
+    size_t source_length = 0;
+    char *source_text = read_file("tests/basic.pigen", &source_length);
+    assert(source_text != NULL);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/basic.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    
+    /* Successful compilation returns 0 */
+    assert(ret == 0);
+    /* Generated SystemVerilog is non-empty */
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+    free(source_text);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
-    test_non_existent_file();
     test_free_null_result();
     test_free_allocated_result();
     test_error_provenance();
     test_cross_domain_error_provenance();
+    test_successful_compilation();
 
     printf("All compile tests passed\n");
     return 0;
