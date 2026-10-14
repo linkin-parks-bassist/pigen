@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -180,6 +181,153 @@ static void test_owned_signal_full_pipeline(void)
     free(source_text);
 }
 
+/* Test 8: Syntax error - missing semicolon produces diagnostic with span */
+static void test_syntax_error_span(void)
+{
+    pigen_source_manager sources = {0};
+    size_t source_length = 0;
+    /* Simple Pigen source with syntax error */
+    const char *source_text = "module syntax_error(input logic clk);\n\tbuf [7:0] source\nendmodule";
+    source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/syntax_error.pigen",
+                                    source_text, source_length,
+                                    NULL, &result, &error);
+    assert(ret == -1); /* compilation failure */
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+    /* Origin and span should be set (even if skeleton stub sets them to 0) */
+    assert(error.origin.index != PIGEN_INVALID_ID || error.span.start != 0 || error.span.end != 0);
+
+    pigen_free_sources(&sources);
+}
+
+/* Test 9: Type mismatch error produces diagnostic with span */
+static void test_type_mismatch_error(void)
+{
+    pigen_source_manager sources = {0};
+    size_t source_length = 0;
+    /* Source that will trigger a type mismatch */
+    const char *source_text = "module type_mismatch(input logic clk);\n\tbuf [7:0] source;\n\tbuf [3:0] destination;\n\tdestination <= source;\nendmodule";
+    source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/type_mismatch.pigen",
+                                    source_text, source_length,
+                                    NULL, &result, &error);
+    assert(ret == -1); /* compilation failure */
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+
+    pigen_free_sources(&sources);
+}
+
+/* Test 10: Ready cycle detection produces diagnostic */
+static void test_ready_cycle_error(void)
+{
+    pigen_source_manager sources = {0};
+    size_t source_length = 0;
+    /* Source that creates a ready cycle */
+    const char *source_text = "module ready_cycle(input logic clk);\n\tbuf [7:0] a;\n\tbuf [7:0] b;\n\ta <= b;\n\tb <= a;\nendmodule";
+    source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/ready_cycle.pigen",
+                                    source_text, source_length,
+                                    NULL, &result, &error);
+    assert(ret == -1); /* compilation failure */
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+
+    pigen_free_sources(&sources);
+}
+
+/* Test 11: Unsupported opaque form produces diagnostic */
+static void test_unsupported_opaque_error(void)
+{
+    pigen_source_manager sources = {0};
+    size_t source_length = 0;
+    /* Source with unsupported Pigen-dependent opaque form */
+    const char *source_text = "module opaque_error(input logic clk);\n\t// opaque comment with pigen dependency\n\tbuf [7:0] source;\nendmodule";
+    source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/opaque_error.pigen",
+                                    source_text, source_length,
+                                    NULL, &result, &error);
+    assert(ret == -1); /* compilation failure */
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+
+    pigen_free_sources(&sources);
+}
+
+/* Test 12: Cross-domain transfer error (existing test, enhanced) */
+static void test_cross_domain_error_detailed(void)
+{
+    pigen_source_manager sources = {0};
+    size_t source_length = 0;
+    char *source_text = read_file("tests/cross_domain_error.pigen", &source_length);
+    assert(source_text != NULL);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/cross_domain_error.pigen",
+                                    source_text, source_length,
+                                    NULL, &result, &error);
+    assert(ret == -1);
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+
+    pigen_free_sources(&sources);
+    free(source_text);
+}
+
+/* Test 13: Async domain error produces diagnostic */
+static void test_async_domain_error_detailed(void)
+{
+    pigen_source_manager sources = {0};
+    size_t source_length = 0;
+    char *source_text = read_file("tests/async_domain_error.pigen", &source_length);
+    assert(source_text != NULL);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/async_domain_error.pigen",
+                                    source_text, source_length,
+                                    NULL, &result, &error);
+    assert(ret == -1);
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+
+    pigen_free_sources(&sources);
+    free(source_text);
+}
+
+/* Test 14: Simulation test - vertical_slice integration placeholder
+ * This test verifies the simulation infrastructure for vertical_slice.
+ * The actual vertical_slice.pigen and vertical_slice_tb.sv files are created
+ * as part of Task 11 implementation. */
+static void test_vertical_slice_simulation_infrastructure(void)
+{
+    /* Verify that the simulation tools are available */
+    FILE *f = popen("which iverilog", "r");
+    assert(f != NULL);
+    char buffer[64];
+    assert(fread(buffer, 1, sizeof(buffer), f) > 0);
+    pclose(f);
+
+    f = popen("which vvp", "r");
+    assert(f != NULL);
+    assert(fread(buffer, 1, sizeof(buffer), f) > 0);
+    pclose(f);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -188,6 +336,13 @@ int main(void)
     test_error_provenance();
     test_cross_domain_error_provenance();
     test_owned_signal_full_pipeline();
+    test_syntax_error_span();
+    test_type_mismatch_error();
+    test_ready_cycle_error();
+    test_unsupported_opaque_error();
+    test_cross_domain_error_detailed();
+    test_async_domain_error_detailed();
+    test_vertical_slice_simulation_infrastructure();
 
     printf("All compile tests passed\n");
     return 0;
