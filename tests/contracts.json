@@ -688,5 +688,27 @@
       "make",
       "coslice-test"
     ]
+  },
+  {
+    "covers": [
+      "tests/coslice_typedef.pigen",
+      "tests/coslice_typedef_tb.sv",
+      "src/assignments.c"
+    ],
+    "command": [
+      "make",
+      "coslice-typedef-test"
+    ]
+  },
+  {
+    "covers": [
+      "examples/biquad_bank.pigen",
+      "examples/biquad_bank_tb.sv",
+      "src/assignments.c"
+    ],
+    "command": [
+      "make",
+      "biquad-bank-test"
+    ]
   }
 ]

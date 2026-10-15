@@ -1,0 +1,20 @@
+typedef logic [7:0] low_t;
+typedef logic [7:0] high_t;
+
+module coslice_typedef
+	(
+		input logic clk,
+		input logic reset,
+		input buf [15:0] source,
+		output buf low_t low,
+		output buf high_t high
+	);
+
+	reg [15:0] state;
+	reg [15:0] state_delay;
+
+	always_ff @(posedge clk)
+	begin
+		{high, low, state, state_delay} <= {source[15:8], source[7:0], peek(source), state[15:0]};
+	end
+endmodule
