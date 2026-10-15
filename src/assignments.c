@@ -177,6 +177,10 @@ static char *repartition_expression(const char *expression, size_t expression_le
 	pigen_string result = {0};
 	size_t i;
 
+	/* A width cast to the destination's own bit width makes the per-slice
+	 * expression exactly as wide as its register, so no truncated aggregate is
+	 * ever assigned.  The last member has offset 0 and becomes `<width>'(aggregate)`. */
+	pigen_append_format(&result, "%zu'", destination_bit_widths[member]);
 	pigen_append(&result, "((");
 	pigen_append_range(&result, expression, expression_length);
 	pigen_append(&result, ")");
@@ -293,20 +297,21 @@ int pigen_extract_signal_transfer(const char *start, const char *end, pigen_prim
 		transfer->width_rhs = expression;
 		transfer->width_rhs_length = (size_t)(end - expression);
 		transfer->requires_exact_width = 1;
-		/* Compute bit widths for each destination */
+		/* Compute bit widths for each destination.  A member's repartition shift
+		 * depends on the widths of every member to its right, so all widths must
+		 * be known before any per-member expression is built.  The discard,
+		 * classification and validation passes run first. */
 		size_t *destination_bit_widths = calloc(left_count, sizeof(*destination_bit_widths));
 		if (!destination_bit_widths) pigen_fail("out of memory");
+		char *destination_codes = malloc(left_count * sizeof(*destination_codes));
+		if (!destination_codes) pigen_fail("out of memory");
 		for (i = 0; i < left_count; i++)
 		{
 			if (left_lengths[i] == 1 && left_parts[i][0] == '_')
 			{
 				/* Discard destination - use 1 bit width */
 				destination_bit_widths[i] = 1;
-				transfer->owned_expressions[i] = repartition_expression(expression,
-					(size_t)(end - expression), left_parts, left_lengths, left_count,
-					right_parts, right_lengths, i, destination_bit_widths);
-				transfer->items[i] = (pigen_transfer_item){ left_parts[i], left_lengths[i],
-					transfer->owned_expressions[i], strlen(transfer->owned_expressions[i]), 'd' };
+				destination_codes[i] = 'd';
 				continue;
 			}
 			char destination_code = classify_destination(left_parts[i], left_lengths[i], primitives);
@@ -320,18 +325,24 @@ int pigen_extract_signal_transfer(const char *start, const char *end, pigen_prim
 			if (pigen_transfer_type_has_storage(destination_code)) has_buffered_destination = 1;
 			for (size_t j = 0; j < i; j++)
 				if (left_lengths[j] == left_lengths[i] && !memcmp(left_parts[j], left_parts[i], left_lengths[i])) pigen_fail("co-sliced transfer repeats a destination");
+			destination_codes[i] = destination_code;
 			/* Get bit width from data type */
 			if (primitive && primitive->data_type)
 				destination_bit_widths[i] = extract_bit_width_from_data_type(primitive->data_type);
 			else
 				destination_bit_widths[i] = 1; /* default */
+		}
+		/* Now every width is known: build each member's width-clean slice. */
+		for (i = 0; i < left_count; i++)
+		{
 			transfer->owned_expressions[i] = repartition_expression(expression,
 				(size_t)(end - expression), left_parts, left_lengths, left_count,
 				right_parts, right_lengths, i, destination_bit_widths);
 			transfer->items[i] = (pigen_transfer_item){ left_parts[i], left_lengths[i],
-				transfer->owned_expressions[i], strlen(transfer->owned_expressions[i]), destination_code };
+				transfer->owned_expressions[i], strlen(transfer->owned_expressions[i]), destination_codes[i] };
 		}
 		free(destination_bit_widths);
+		free(destination_codes);
 		free(left_parts); free(right_parts); free(left_lengths); free(right_lengths);
 		if (!has_buffered_destination &&
 			!expression_uses_buffered_signal(expression, (size_t)(end - expression), primitives))
