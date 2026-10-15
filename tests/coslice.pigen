@@ -10,11 +10,11 @@ module coslice
 	);
 
 	reg [7:0] state;
-	reg [7:0] state_delay;
+	reg [3:0] state_delay;
 
 	always_ff @(posedge clk)
 	begin
-		if ({left, right, state, state_delay} <= {source + 8'd1, source + 8'd2, peek(source), state})
+		if ({left, right, state, state_delay} <= {source + 8'd1, source + 8'd2, peek(source), state[3:0]})
 			previous <= state;
 		history <= state;
 	end

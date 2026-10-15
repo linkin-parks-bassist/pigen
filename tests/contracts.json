@@ -677,5 +677,16 @@
       "make",
       "vertical-slice-test"
     ]
+  },
+  {
+    "covers": [
+      "tests/coslice.pigen",
+      "tests/coslice_tb.sv",
+      "src/assignments.c"
+    ],
+    "command": [
+      "make",
+      "coslice-test"
+    ]
   }
 ]
