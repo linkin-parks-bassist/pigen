@@ -166,8 +166,11 @@ static int is_signal_projection(const char *start, const char *end,
  * assignment semantics.  Each storage input still needs its own expression,
  * so select its portion by shifting away every destination to its right; the
  * destination's normal assignment conversion then keeps exactly its width.
- * `$bits(destination)` is a constant/type query and is deliberately ignored
- * by signal dependency discovery below.
+ * A destination whose data type is not a literal numeric range (typedef'd,
+ * macro-bounded, plain or sliced) has bit width 0 and is sized with the
+ * SystemVerilog `$bits' query, which the elaborator resolves from the type in
+ * scope.  `$bits(destination)' is a constant/type query and is deliberately
+ * ignored by signal dependency discovery below.
  */
 static char *repartition_expression(const char *expression, size_t expression_length,
 	const char **destinations, const size_t *destination_lengths, size_t count,
@@ -179,8 +182,15 @@ static char *repartition_expression(const char *expression, size_t expression_le
 
 	/* A width cast to the destination's own bit width makes the per-slice
 	 * expression exactly as wide as its register, so no truncated aggregate is
-	 * ever assigned.  The last member has offset 0 and becomes `<width>'(aggregate)`. */
-	pigen_append_format(&result, "%zu'", destination_bit_widths[member]);
+	 * ever assigned.  The last member has offset 0 and becomes `<width>'(aggregate). */
+	if (destination_bit_widths[member] > 0)
+		pigen_append_format(&result, "%zu'", destination_bit_widths[member]);
+	else
+	{
+		pigen_append(&result, "$bits(");
+		pigen_append_range(&result, destinations[member], destination_lengths[member]);
+		pigen_append(&result, ")'");
+	}
 	pigen_append(&result, "((");
 	pigen_append_range(&result, expression, expression_length);
 	pigen_append(&result, ")");
@@ -192,10 +202,16 @@ static char *repartition_expression(const char *expression, size_t expression_le
 			if (i != member + 1) pigen_append(&result, " + ");
 			if (destination_lengths[i] == 1 && destinations[i][0] == '_')
 				pigen_append_range(&result, rhs_parts[i], rhs_lengths[i]);
-			else
+			else if (destination_bit_widths[i] > 0)
 			{
 				/* Use constant bit width instead of $bits() to avoid Verilator WIDTHTRUNC warnings */
 				pigen_append_format(&result, "%zu", destination_bit_widths[i]);
+			}
+			else
+			{
+				pigen_append(&result, "$bits(");
+				pigen_append_range(&result, destinations[i], destination_lengths[i]);
+				pigen_append(&result, ")");
 			}
 		}
 		pigen_append(&result, ")");
@@ -204,35 +220,62 @@ static char *repartition_expression(const char *expression, size_t expression_le
 	return result.data;
 }
 
-/* Extract bit width from a data type string like "logic [7:0]" or "logic" */
+/* True when the range bound is whitespace and decimal digits only, so a
+ * macro-bounded range like `[`WIDTH - 1 : 0]' is not mistaken for a literal. */
+static int is_all_digits(const char *text)
+{
+	const char *cursor = text;
+	int digit = 0;
+	while (*cursor)
+	{
+		if (isspace((unsigned char)*cursor))
+		{
+			cursor++;
+			continue;
+		}
+		if (!isdigit((unsigned char)*cursor)) return 0;
+		digit = 1;
+		cursor++;
+	}
+	return digit;
+}
+
+/* Extract a literal bit width from a data type string.  Only an all-digit
+ * `[high:low]' range is literal; anything else (typedef names, macro-bounded
+ * ranges, plain types) is not resolvable from the declaration text because
+ * typedefs are not primitives in the arena.  A non-literal type returns 0 so
+ * the caller can fall back to the SystemVerilog `$bits' query, which the
+ * elaborator resolves from the typedef in scope. */
 static size_t extract_bit_width_from_data_type(const char *data_type)
 {
-	if (!data_type) return 1;
-	
+	if (!data_type) return 0;
+
 	/* Look for [high:low] pattern */
 	const char *start = strchr(data_type, '[');
-	if (start)
+	if (!start) return 0;
+	const char *end = strchr(start, ']');
+	if (!end) return 0;
+
+	/* Parse the range */
+	char *range = pigen_copy_range(start + 1, (size_t)(end - start - 1));
+	/* Simple parsing: look for ':' separator */
+	char *colon = strchr(range, ':');
+	if (colon)
 	{
-		const char *end = strchr(start, ']');
-		if (end)
+		*colon = '\0';
+		if (!is_all_digits(range) || !is_all_digits(colon + 1))
 		{
-			/* Parse the range */
-			char *range = pigen_copy_range(start + 1, (size_t)(end - start - 1));
-			/* Simple parsing: look for ':' separator */
-			char *colon = strchr(range, ':');
-			if (colon)
-			{
-				*colon = '\0';
-				size_t high = strtoul(range, NULL, 10);
-				size_t low = strtoul(colon + 1, NULL, 10);
-				free(range);
-				return high - low + 1;
-			}
 			free(range);
+			return 0;
 		}
+		size_t high = strtoul(range, NULL, 10);
+		size_t low = strtoul(colon + 1, NULL, 10);
+		free(range);
+		return high - low + 1;
 	}
-	/* Default to 1 bit if no width specified */
-	return 1;
+	free(range);
+	/* A `[n]' vector without a colon is not a literal resolvable width here */
+	return 0;
 }
 
 int pigen_extract_signal_transfer(const char *start, const char *end, pigen_primitives *primitives, pigen_transfer *transfer)
@@ -326,11 +369,13 @@ int pigen_extract_signal_transfer(const char *start, const char *end, pigen_prim
 			for (size_t j = 0; j < i; j++)
 				if (left_lengths[j] == left_lengths[i] && !memcmp(left_parts[j], left_parts[i], left_lengths[i])) pigen_fail("co-sliced transfer repeats a destination");
 			destination_codes[i] = destination_code;
-			/* Get bit width from data type */
+			/* Get bit width from data type.  0 marks a type the declaration
+			 * text cannot size (typedef, macro-bounded, plain, sliced), which
+			 * repartition_expression sizes with `$bits(destination)'. */
 			if (primitive && primitive->data_type)
 				destination_bit_widths[i] = extract_bit_width_from_data_type(primitive->data_type);
 			else
-				destination_bit_widths[i] = 1; /* default */
+				destination_bit_widths[i] = 0;
 		}
 		/* Now every width is known: build each member's width-clean slice. */
 		for (i = 0; i < left_count; i++)
