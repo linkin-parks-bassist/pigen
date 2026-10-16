@@ -22,6 +22,16 @@
   },
   {
     "covers": [
+      "tests/smoke.sh",
+      "Makefile"
+    ],
+    "command": [
+      "sh",
+      "tests/lint_fatal_pin.sh"
+    ]
+  },
+  {
+    "covers": [
       "src/preprocess.c",
       "src/lexer.c",
       "src/source.c",
