@@ -136,6 +136,53 @@ static int extract_manual_signal_write(const char *start, const char *end, pigen
 	return 1;
 }
 
+/* Return the expression that establishes a complete internal reg/logic
+ * register on the same firing edge, or NULL. A separate `previous <= state`-
+ * style manual write reads `state` in its own always_ff; the non-blocking read
+ * captures state's pre-edge value (X on the first firing edge) while state
+ * latches its source only on that same edge. Rewriting the read to the source
+ * the same-edge transfer establishes makes previous hold the same-fire value
+ * while leaving the stalled (multi-edge) case unchanged, because that source is
+ * exactly the value the register would hold. Only a complete internal
+ * reg/logic reference established by a same-block transfer matches; slices,
+ * projections, ports and non-matching signals return NULL. Conditional
+ * transfers are registered after procedural parsing, so the establishing
+ * member is located in the conditional transfer itself. */
+static char *resolve_same_fire_register(const char *name, size_t name_length,
+	pigen_procedural_ast *ast, pigen_primitives *primitives)
+{
+	pigen_primitive *primitive;
+	size_t conditional_index;
+
+	if (!name_length || !pigen_is_identifier_char((unsigned char)name[0])) return NULL;
+	for (size_t k = 1; k < name_length; k++)
+		if (!pigen_is_identifier_char((unsigned char)name[k])) return NULL;
+	primitive = pigen_find_primitive(primitives, name, name_length);
+	if (!primitive) return NULL;
+	if (primitive->transfer_type != 'r' && primitive->transfer_type != 'l') return NULL;
+	if (!primitive->is_internal) return NULL;
+	for (conditional_index = 0; conditional_index < ast->conditional_transfer_count; conditional_index++)
+	{
+		pigen_transfer conditional;
+		if (!pigen_extract_signal_transfer(ast->conditional_transfers[conditional_index].start,
+			ast->conditional_transfers[conditional_index].end, primitives, &conditional))
+			continue;
+		for (size_t member = 0; member < conditional.count; member++)
+		{
+			pigen_transfer_item *item = &conditional.items[member];
+			if (item->destination_length == name_length &&
+				!memcmp(item->destination, name, name_length))
+			{
+				char *establishing = pigen_copy_range(item->expression, item->expression_length);
+				pigen_free_transfer(&conditional);
+				return establishing;
+			}
+		}
+		pigen_free_transfer(&conditional);
+	}
+	return NULL;
+}
+
 int main(int argc, char **argv)
 {
 	const char *input_path = NULL;
@@ -436,7 +483,25 @@ int main(int argc, char **argv)
 				pigen_append(&output, ")\n\t\tbegin\n\t\t\t");
 				pigen_append_range(&output, destination, destination_length);
 				pigen_append(&output, " <= ");
-				pigen_append_range(&output, expression, expression_length);
+				{
+					/* Only a guarded same-fire read (e.g. `previous <= state` inside the
+					 * transfer's accept condition) suffers the X-prop: it fires on the
+					 * same edge the transfer establishes `state` and reads `state` before
+					 * it latches. An unconditional clause (`history <= state`, guard 1'b1)
+					 * is not part of that fire and keeps its raw pre-edge read. */
+					char *establishing =
+						(rewritten_guard.data && rewritten_guard.data[0]) ?
+						resolve_same_fire_register(expression, expression_length, &procedural_ast, &primitives) :
+						NULL;
+					if (establishing)
+					{
+						pigen_emit_rewritten_expression(&output, establishing,
+							establishing + strlen(establishing), &primitives);
+						free(establishing);
+					}
+					else
+						pigen_append_range(&output, expression, expression_length);
+				}
 				pigen_append(&output, ";\n\t\tend");
 				pigen_add_assignment(&assignments, destination, destination_length, expression, expression_length,
 					rewritten_guard.data ? rewritten_guard.data : "",
