@@ -1,11 +1,10 @@
 ---
 status: green
-revised_at: "2026-10-16T06:11:34+11:00"
+revised_at: "2026-10-16T15:40:00+11:00"
 ---
 
 The structured frontend and elastic RTL work remain incomplete. Passing focused tests do not establish full compiler acceptance.
 
-- **Co-slice `previous <= state` propagates X on the first firing edge.** In a co-sliced transfer where `state` is an uninitialized, never-reset register and `previous <= state` is a separate clause inside the guarded always_ff (e.g. the `tests/coslice_xprop.pigen` witness over the literal-width co-slice `{left, state} <= {source + 8'd1, peek(source)}`), the first edge latches `previous` from `state`'s pre-edge X, so a same-cycle check of the pre-edge value sees X. This is distinct from the typedef-width defect and is not fixed by the width-clean repartition: the co-sliced destinations there are literal `[7:0]` and already size correctly. It is tracked by its own red test-contract (`coslice-xprop-test`, witness `tests/coslice_xprop.pigen` + `tests/coslice_xprop_tb.sv`), accepted and hidden pending the matching implementation, which must make the witness green without editing the test, Makefile target, or manifest.
 - **The elastic RTL vertical slice is incomplete.** Tasks 6 (declaration lowering), 8 (atomic fire/identity), 9 (ordered output) and 10 (terminal SV emission) are complete; the terminal emitter renders a finished, named RTL lowering to SystemVerilog validate-first, committing no partial output. The remaining in-order steps are Task 11 (quarantined composition/simulation) and Task 12 (verification and accurate status); Task 7 (ready-cycle validation) is deferred to Pigen 1.0. The declaration-lowering contract and evidence are owned by `what/is/elastic/rtl/task/six.md`; the remaining vertical-slice steps, in order, by `what/is/the/plan.md`.
 - **Structured frontend is unlinked from production ./pigen.** The production Makefile target still compiles the textual prototype rather than the structured syntax, resolution, semantic and RTL path. See does/the/structured/frontend/run/in/production.md.
 - **Retained-subsystem build and frontend gaps.** Core, pipeline, FSM, child-instance and fabric are specified from the spec and built on the structured path, subject to what/are/the/remaining/architecture/migration/gates.md. Accepted parameter/type/aggregate/array/expression forms and macro concatenation/stringification/required arguments remain incomplete. Delete textual machinery only when the corresponding retained subsystem's structured path covers the spec.
