@@ -49,17 +49,6 @@ void pigen_route_free(pigen_route *route)
 	route->check_span = (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
 }
 
-/* The destination signal of a direct atomic transfer: the transfer's lvalue
- * is a projection onto a single signal. */
-static const pigen_semantic_signal *route_dest_signal(
-	pigen_semantic_model *sem, const pigen_semantic_transfer *tr)
-{
-	const pigen_semantic_lvalue *lvalue = pigen_lvalue_get(sem, tr->destination);
-	if (!lvalue || lvalue->kind != PIGEN_LVALUE_PROJECTION)
-		return NULL;
-	return pigen_signal_get(sem, lvalue->as.projection.signal);
-}
-
 /* The transfer's value expression and its data type. */
 static const pigen_semantic_expr *route_value_expr(
 	pigen_semantic_model *sem, const pigen_semantic_transfer *tr)
@@ -99,30 +88,169 @@ static int route_type_width(pigen_semantic_model *sem,
 	return 1;
 }
 
-/* The route's sizing, signedness and aggregate laws for one transfer: the
- * destination signal's payload and the value expression's payload must be
- * the same integral width, carry the same signedness and be the same
- * aggregate (a scalar-to-scalar, projection-to-projection) payload. */
+/* A value expression's flattened aggregate width and signedness, using the
+ * data-type owner algebra: a symbol or a select projects its data type's
+ * packed width; a concatenation sums its children's widths left to right
+ * (packed bit-stream order, leftmost most significant). Reports 0 when the
+ * expression cannot be sized. */
+static int route_value_width(pigen_semantic_model *sem,
+	const pigen_semantic_expr *expr, uint64_t *width, pigen_signedness *signedness)
+{
+	if (expr->kind == PIGEN_EXPR_CONCATENATION)
+	{
+		const pigen_expr_id *children =
+			pigen_expr_children(sem, expr->as.sequence.first_child,
+				expr->as.sequence.child_count);
+		uint64_t total = 0;
+		size_t i;
+		pigen_signedness sign = PIGEN_SIGN_IMPLICIT;
+		int first = 1;
+
+		if (!children || expr->as.sequence.child_count == 0)
+			return 0;
+		for (i = 0; i < expr->as.sequence.child_count; i++)
+		{
+			uint64_t w;
+			pigen_signedness s;
+
+			if (!route_value_width(sem, pigen_expr_get(sem, children[i]), &w, &s))
+				return 0;
+			if (first)
+			{
+				sign = s;
+				first = 0;
+			}
+			else if (s != sign)
+				return 0;
+			if (total > UINT64_MAX - w)
+				return 0;
+			total += w;
+		}
+		*width = total;
+		*signedness = sign;
+		return 1;
+	}
+	return route_type_width(sem, expr->data_type, width, signedness);
+}
+
+/* A destination lvalue's flattened aggregate width, signedness and the
+ * number of buffered signals it writes, using the owner algebra. A projection
+ * writes one whole buffered signal (the complete base token); a concatenation
+ * writes each child destination signal whole, summed left to right in packed
+ * bit-stream order. Reports 0 when the lvalue is not a supported destination. */
+static int route_dest_width(pigen_semantic_model *sem,
+	const pigen_semantic_lvalue *lvalue, uint64_t *width,
+	pigen_signedness *signedness, size_t *signal_count)
+{
+	if (lvalue->kind == PIGEN_LVALUE_PROJECTION)
+	{
+		const pigen_semantic_signal *sig =
+			pigen_signal_get(sem, lvalue->as.projection.signal);
+		if (!sig)
+			return 0;
+		*width = 0;
+		*signedness = PIGEN_SIGN_IMPLICIT;
+		*signal_count = 1;
+		return route_type_width(sem, sig->data_type, width, signedness);
+	}
+	if (lvalue->kind == PIGEN_LVALUE_CONCATENATION)
+	{
+		const pigen_lvalue_id *children =
+			pigen_lvalue_children(sem, lvalue->as.sequence.first_child,
+				lvalue->as.sequence.child_count);
+		uint64_t total = 0;
+		size_t count = 0, i;
+		pigen_signedness sign = PIGEN_SIGN_IMPLICIT;
+		int first = 1;
+
+		if (!children || lvalue->as.sequence.child_count == 0)
+			return 0;
+		for (i = 0; i < lvalue->as.sequence.child_count; i++)
+		{
+			const pigen_semantic_lvalue *child = pigen_lvalue_get(sem, children[i]);
+			uint64_t w;
+			pigen_signedness s;
+			size_t n;
+
+			if (!child || child->kind != PIGEN_LVALUE_PROJECTION)
+				return 0;
+			if (!route_dest_width(sem, child, &w, &s, &n))
+				return 0;
+			if (first)
+			{
+				sign = s;
+				first = 0;
+			}
+			else if (s != sign)
+				return 0;
+			if (total > UINT64_MAX - w)
+				return 0;
+			total += w;
+			count += n;
+		}
+		*width = total;
+		*signedness = sign;
+		*signal_count = count;
+		return 1;
+	}
+	return 0;
+}
+
+/* The first destination signal of a transfer: the single signal a projection
+ * lvalue writes, or the leftmost (most significant) child signal of a
+ * concatenation lvalue. The route's ready-graph node carries this signal's
+ * realization-ready dependency. */
+static const pigen_semantic_signal *route_dest_signal(
+	pigen_semantic_model *sem, const pigen_semantic_transfer *tr)
+{
+	const pigen_semantic_lvalue *lvalue = pigen_lvalue_get(sem, tr->destination);
+
+	if (!lvalue)
+		return NULL;
+	if (lvalue->kind == PIGEN_LVALUE_PROJECTION)
+		return pigen_signal_get(sem, lvalue->as.projection.signal);
+	if (lvalue->kind == PIGEN_LVALUE_CONCATENATION)
+	{
+		const pigen_lvalue_id *children =
+			pigen_lvalue_children(sem, lvalue->as.sequence.first_child,
+				lvalue->as.sequence.child_count);
+		const pigen_semantic_lvalue *first;
+
+		if (!children || lvalue->as.sequence.child_count == 0)
+			return NULL;
+		first = pigen_lvalue_get(sem, children[0]);
+		if (!first || first->kind != PIGEN_LVALUE_PROJECTION)
+			return NULL;
+		return pigen_signal_get(sem, first->as.projection.signal);
+	}
+	return NULL;
+}
+
+/* The route's sizing and aggregate laws for one transfer: the destination's
+ * flattened aggregate payload and the value expression's flattened aggregate
+ * payload must be the same integral width and carry the same signedness. The
+ * destination is whole (a projection writes its complete base token; a
+ * concatenation writes each child destination signal whole, packed bit-stream
+ * order left to right) and the value flattens the same way. Equal aggregate
+ * widths are required, not equal item counts or member widths. */
 static int route_transfer_laws(pigen_semantic_model *sem,
 	const pigen_semantic_transfer *tr)
 {
-	const pigen_semantic_signal *dest = route_dest_signal(sem, tr);
+	const pigen_semantic_lvalue *dest = pigen_lvalue_get(sem, tr->destination);
 	const pigen_semantic_expr *value = route_value_expr(sem, tr);
 	uint64_t dest_width, value_width;
 	pigen_signedness dest_sign, value_sign;
+	size_t dest_signals;
 
 	if (!dest || !value)
 		return 0;
-	if (!route_type_width(sem, dest->data_type, &dest_width, &dest_sign))
+	if (!route_dest_width(sem, dest, &dest_width, &dest_sign, &dest_signals))
 		return 0;
-	if (!route_type_width(sem, value->data_type, &value_width, &value_sign))
+	if (dest_signals == 0)
 		return 0;
-	/* Aggregate: both sides are scalar integral payloads (no packed
-	 * dimensions on either, a projection to a projection). */
-	if (pigen_data_type_dimension_count(sem, dest->data_type) ||
-		pigen_data_type_dimension_count(sem, value->data_type))
+	if (!route_value_width(sem, value, &value_width, &value_sign))
 		return 0;
-	/* Sizing and signedness agree. */
+	/* Sizing and signedness agree: the flattened aggregate payloads match. */
 	if (dest_width != value_width)
 		return 0;
 	if (dest_sign != value_sign)
