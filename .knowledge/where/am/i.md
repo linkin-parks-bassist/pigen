@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-16T06:16:54+11:00"
+revised_at: "2026-10-17T18:01:18+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -23,4 +23,4 @@ This local answer tree is the project's maintained knowledge source; use this or
 
 The structured frontend implements source/token provenance and preprocessing, shared type/declaration syntax, scopes and stable symbols, canonical data types/shapes/exact integers, intrinsic two-stage expressions and explicit conversions, lvalues/predicates/clock domains, one signal arena, direct transfers, deduplicated incidence and ownership. Data-first declarations, abstract inputs, omission policy and descriptor-owned FIFO depths resolve through owner APIs. Ordinary branches and worktrees may be used for isolation and concurrent work; pigen does not require direct-to-master or linear history.
 
-Current verification: all eleven structured C foundation targets pass. rtl-lower-test compiles clean under -Werror; the full Task 8 manifest and the Task 9 t9-skeleton, t9-nesting, t9-failed-append, t9-coverage and t9-build-walk sections pass, the manifest one entry per present section, every command green on master. rtl-test, rtl-name-test, transfer-type-test and resolve-test are green. Icarus Verilog 13.0 is installed at ~/.local/bin (the Ubuntu 12.0 package mis-elaborates `$bits(<signal>)` widths; why/does/pipeline/verification/currently/fail.md); Verilator 5.020 is installed and full `make verify` passes (exit 0), its lint does not yet fail on warnings, and the co-slice previous/state X-propagation defect remains in what/is/broken.md. The local tree is the sole project documentation authority; obsolete history is excluded. The immutable Kestrel reference remains applicable.
+Current verification: all eleven structured C foundation targets pass. rtl-lower-test compiles clean under -Werror; the full Task 8 manifest and the Task 9 t9-skeleton, t9-nesting, t9-failed-append, t9-coverage and t9-build-walk sections pass, the manifest one entry per present section, every command green on master. rtl-test, rtl-name-test, transfer-type-test and resolve-test are green. Icarus Verilog 13.0 is installed at ~/.local/bin (the Ubuntu 12.0 package mis-elaborates `$bits(<signal>)` widths; why/does/pipeline/verification/currently/fail.md); Verilator 5.020 is installed and full `make verify` passes (exit 0), its lint now fails on warnings (pinned by tests/lint_fatal_pin.sh), and the co-slice previous/state X-propagation defect is fixed (witness tests/coslice_xprop.pigen, target coslice-xprop-test, green). The local tree is the sole project documentation authority; obsolete history is excluded. The immutable Kestrel reference remains applicable.
