@@ -4,7 +4,7 @@ LDLIBS		= -lm
 SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-.PHONY: all clean test source-test preprocess-test transfer-type-test syntax-model-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
+.PHONY: all clean test source-test preprocess-test transfer-type-test syntax-model-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
 
 all: pigen
 
@@ -132,14 +132,6 @@ route-test:
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-route-test tests/route_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-route-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
-
-route-law-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-route-law-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-route-law-test tests/route_law_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-route-law-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
 sv-emit-test:

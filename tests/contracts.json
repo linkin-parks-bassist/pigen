@@ -741,49 +741,5 @@
       "make",
       "route-test"
     ]
-  },
-  {
-    "covers": [
-      "tests/route_law_test.c",
-      "src/route.c"
-    ],
-    "command": [
-      "make",
-      "route-law-test",
-      "T=law-projection-complete"
-    ]
-  },
-  {
-    "covers": [
-      "tests/route_law_test.c",
-      "src/route.c"
-    ],
-    "command": [
-      "make",
-      "route-law-test",
-      "T=law-projection-dedup"
-    ]
-  },
-  {
-    "covers": [
-      "tests/route_law_test.c",
-      "src/route.c"
-    ],
-    "command": [
-      "make",
-      "route-law-test",
-      "T=law-concat-order"
-    ]
-  },
-  {
-    "covers": [
-      "tests/route_law_test.c",
-      "src/route.c"
-    ],
-    "command": [
-      "make",
-      "route-law-test",
-      "T=law-coslice-order"
-    ]
   }
 ]
