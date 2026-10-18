@@ -392,6 +392,9 @@ int main(int argc, char **argv)
 			pigen_symbol_id xs, ys, as, bs;
 			pigen_expr_id xe, ye, ae, be, cat_e;
 			pigen_lvalue_id destc;
+			const pigen_semantic_lvalue *lval;
+			const pigen_expr_id *expr_children;
+			const pigen_lvalue_id *lvalue_children;
 			pigen_expr_id cat_children[2];
 			pigen_data_type_id cat_types[2];
 			pigen_transfer_id transfer;
@@ -432,9 +435,15 @@ int main(int argc, char **argv)
 				REQUIRE(pigen_symbol_declare(&model, scope,
 					PIGEN_SYMBOL_SIGNAL, t4, sp_b, sp_b, &bs, NULL)
 					== PIGEN_DECLARE_OK);
+				/* b is a LOGIC (procedural variable) destination, whose
+				 * realization-ready dependency is CONSTANT, while a is a BUF
+				 * (elastic slot, DOWNSTREAM): the two halves of the
+				 * destination carry different ready dependencies, so the
+				 * ready-graph node's ready dependency pins WHICH half the
+				 * route resolves as the destination signal. */
 				pb = pigen_signal_add(&model, (pigen_syntax_id){13},
 					unit.module, bs, t4, pigen_semantic_scalar_shape(&model),
-					(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
+					(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
 					PIGEN_SEMANTIC_INTERNAL, sp_b);
 				REQUIRE(!IS_INVALID_ID(pb));
 			}
@@ -488,6 +497,43 @@ int main(int argc, char **argv)
 			lw_run(&lowering, &route, unit.module);
 			/* One ready-graph node for the concatenation transfer. */
 			REQUIRE(route.node_count == 1);
+			/* Order-discriminating positive witness. The destination
+			 * concatenation lvalue's children are [a, b]: a (BUF) is the
+			 * most-significant (leftmost) child, b (LOGIC) the
+			 * least-significant. The source concatenation's children are in
+			 * the same left-to-right (MSB-to-LSB) order: [x, y]. And the
+			 * ready-graph node carries the LEFTMOST destination signal's
+			 * realization-ready dependency - a's (BUF: DOWNSTREAM), not b's
+			 * (LOGIC: CONSTANT). A route that reverses the member order (or
+			 * resolves the least-significant destination child) reports
+			 * CONSTANT and fails here. */
+			lval = pigen_lvalue_get(&model, destc);
+			REQUIRE(lval && lval->kind == PIGEN_LVALUE_CONCATENATION);
+			REQUIRE(lval->as.sequence.child_count == 2);
+			lvalue_children = pigen_lvalue_children(&model,
+				lval->as.sequence.first_child, lval->as.sequence.child_count);
+			REQUIRE(lvalue_children);
+			{
+				const pigen_semantic_lvalue *child_a, *child_b;
+
+				child_a = pigen_lvalue_get(&model, lvalue_children[0]);
+				child_b = pigen_lvalue_get(&model, lvalue_children[1]);
+				REQUIRE(child_a && child_a->kind == PIGEN_LVALUE_PROJECTION);
+				REQUIRE(child_b && child_b->kind == PIGEN_LVALUE_PROJECTION);
+				REQUIRE(child_a->as.projection.signal.index == pa.index);
+				REQUIRE(child_b->as.projection.signal.index == pb.index);
+			}
+			expr_children = pigen_expr_children(&model,
+				pigen_expr_get(&model, cat_e)->as.sequence.first_child,
+				pigen_expr_get(&model, cat_e)->as.sequence.child_count);
+			REQUIRE(expr_children);
+			REQUIRE(pigen_expr_get(&model, expr_children[0])->as.symbol.index
+				== as.index);
+			REQUIRE(pigen_expr_get(&model, expr_children[1])->as.symbol.index
+				== bs.index);
+			REQUIRE(route.nodes[0].transfer.index == transfer.index);
+			REQUIRE(route.nodes[0].ready_dependency ==
+				PIGEN_TRANSFER_READY_DOWNSTREAM);
 		}
 		pigen_route_free(&route);
 	}
@@ -514,6 +560,9 @@ int main(int argc, char **argv)
 			pigen_expr_id dest_children[2], src_children[2];
 			pigen_expr_id dest_e, src_e;
 			pigen_lvalue_id destc;
+			const pigen_semantic_lvalue *lval;
+			const pigen_expr_id *expr_children;
+			const pigen_lvalue_id *lvalue_children;
 			pigen_transfer_id transfer;
 
 			unit = lw_unit(&model, &sources, &rtl, &lowering, text);
@@ -552,9 +601,15 @@ int main(int argc, char **argv)
 				REQUIRE(pigen_symbol_declare(&model, scope,
 					PIGEN_SYMBOL_SIGNAL, t4, sp_b, sp_b, &bs, NULL)
 					== PIGEN_DECLARE_OK);
+				/* b is a LOGIC (procedural variable) destination, whose
+				 * realization-ready dependency is CONSTANT, while a is a BUF
+				 * (elastic slot, DOWNSTREAM): the two halves of the
+				 * destination carry different ready dependencies, so the
+				 * ready-graph node's ready dependency pins WHICH half the
+				 * route resolves as the destination signal. */
 				pb = pigen_signal_add(&model, (pigen_syntax_id){13},
 					unit.module, bs, t4, pigen_semantic_scalar_shape(&model),
-					(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_BUF,
+					(pigen_expr_id){PIGEN_INVALID_ID}, PIGEN_TRANSFER_TYPE_LOGIC,
 					PIGEN_SEMANTIC_INTERNAL, sp_b);
 				REQUIRE(!IS_INVALID_ID(pb));
 			}
@@ -594,6 +649,43 @@ int main(int argc, char **argv)
 			lw_run(&lowering, &route, unit.module);
 			/* One ready-graph node for the co-slice transfer. */
 			REQUIRE(route.node_count == 1);
+			/* Order-discriminating positive witness. The destination
+			 * co-slice lvalue's children are [a, b]: a (BUF) the
+			 * most-significant (leftmost) child, b (LOGIC) the
+			 * least-significant. The source co-slice expression's children
+			 * are in the same left-to-right (MSB-to-LSB) order: [c, d]. And
+			 * the ready-graph node carries the LEFTMOST destination
+			 * signal's realization-ready dependency - a's (BUF:
+			 * DOWNSTREAM), not b's (LOGIC: CONSTANT). A route that reverses
+			 * the member order (or resolves the least-significant
+			 * destination child) reports CONSTANT and fails here. */
+			lval = pigen_lvalue_get(&model, destc);
+			REQUIRE(lval && lval->kind == PIGEN_LVALUE_CONCATENATION);
+			REQUIRE(lval->as.sequence.child_count == 2);
+			lvalue_children = pigen_lvalue_children(&model,
+				lval->as.sequence.first_child, lval->as.sequence.child_count);
+			REQUIRE(lvalue_children);
+			{
+				const pigen_semantic_lvalue *child_a, *child_b;
+
+				child_a = pigen_lvalue_get(&model, lvalue_children[0]);
+				child_b = pigen_lvalue_get(&model, lvalue_children[1]);
+				REQUIRE(child_a && child_a->kind == PIGEN_LVALUE_PROJECTION);
+				REQUIRE(child_b && child_b->kind == PIGEN_LVALUE_PROJECTION);
+				REQUIRE(child_a->as.projection.signal.index == pa.index);
+				REQUIRE(child_b->as.projection.signal.index == pb.index);
+			}
+			expr_children = pigen_expr_children(&model,
+				pigen_expr_get(&model, src_e)->as.sequence.first_child,
+				pigen_expr_get(&model, src_e)->as.sequence.child_count);
+			REQUIRE(expr_children);
+			REQUIRE(pigen_expr_get(&model, expr_children[0])->as.symbol.index
+				== cs.index);
+			REQUIRE(pigen_expr_get(&model, expr_children[1])->as.symbol.index
+				== ds.index);
+			REQUIRE(route.nodes[0].transfer.index == transfer.index);
+			REQUIRE(route.nodes[0].ready_dependency ==
+				PIGEN_TRANSFER_READY_DOWNSTREAM);
 		}
 		pigen_route_free(&route);
 	}
