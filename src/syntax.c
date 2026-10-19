@@ -20,6 +20,30 @@ typedef struct {
 	typedef_name_fact_kind kind;
 } typedef_name_fact;
 
+typedef enum {
+	PIPELINE_SCOPE_PIPELINE,
+	PIPELINE_SCOPE_STAGE
+} pipeline_scope_kind;
+
+typedef struct {
+	pigen_token_id name;
+	pipeline_scope_kind kind;
+	size_t index;
+} pipeline_field;
+
+typedef struct {
+	pipeline_field *fields;
+	size_t count;
+	size_t capacity;
+} pipeline_scope;
+
+#define MAX_PIPELINE_SCOPES 16
+
+typedef struct {
+	pipeline_scope scopes[MAX_PIPELINE_SCOPES];
+	size_t depth;
+} pipeline_scope_stack;
+
 typedef struct {
 	const pigen_expanded_source *expanded;
 	pigen_syntax_tree *tree;
@@ -27,6 +51,8 @@ typedef struct {
 	typedef_name_fact *typedef_name_facts;
 	size_t typedef_name_fact_count;
 	size_t typedef_name_fact_capacity;
+	pipeline_scope_stack pipeline_scopes;
+	int pipeline_failed;
 } syntax_parser;
 
 typedef struct {
@@ -997,6 +1023,10 @@ static int parse_procedural_statement(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count);
 
+static int parse_pipeline(syntax_parser *parser, pigen_syntax_id parent,
+	size_t start, size_t limit, size_t *after_statement,
+	size_t *assignment_count);
+
 static int parse_procedural_block(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count)
@@ -1085,6 +1115,437 @@ static int parse_nonblocking_assignment(syntax_parser *parser,
 	return 1;
 }
 
+static int pipeline_scope_push(pipeline_scope_stack *stack)
+{
+	if (stack->depth >= MAX_PIPELINE_SCOPES) return 0;
+	stack->scopes[stack->depth] = (pipeline_scope){0};
+	stack->depth++;
+	return 1;
+}
+
+static void pipeline_scope_pop(pipeline_scope_stack *stack)
+{
+	pipeline_scope *top = &stack->scopes[--stack->depth];
+	free(top->fields);
+	*top = (pipeline_scope){0};
+}
+
+static int pipeline_scope_add(pipeline_scope *scope, pigen_token_id name,
+	pipeline_scope_kind kind)
+{
+	if (scope->count == scope->capacity)
+	{
+		scope->capacity = scope->capacity ? scope->capacity * 2 : 4;
+		scope->fields = pigen_resize(scope->fields,
+			scope->capacity * sizeof(*scope->fields));
+	}
+	scope->fields[scope->count].name = name;
+	scope->fields[scope->count].kind = kind;
+	scope->fields[scope->count].index = scope->count;
+	scope->count++;
+	return 1;
+}
+
+static int pipeline_scope_contains(const syntax_parser *parser,
+	const pipeline_scope *scope, pigen_token_id name)
+{
+	size_t i;
+	for (i = 0; i < scope->count; i++)
+		if (tokens_equal(parser, scope->fields[i].name, name)) return 1;
+	return 0;
+}
+
+static int parse_pipeline_field(syntax_parser *parser,
+	pigen_syntax_id scope_id, size_t start, size_t semicolon)
+{
+	pigen_syntax_type_id data_type;
+	pigen_transfer_type transfer_type;
+	pigen_syntax_direction direction;
+	pigen_syntax_type_ownership ownership;
+	pigen_syntax_node node = {0};
+	pigen_syntax_id declaration;
+	size_t at = start;
+	size_t name;
+	size_t transfer_at = 0;
+	int has_explicit_transfer = 0;
+	pigen_token_id name_token;
+
+	direction = parse_direction(parser, &at);
+	if (transfer_type_at(parser, at, &transfer_type))
+	{
+		if (transfer_type != PIGEN_TRANSFER_TYPE_BUF)
+		{
+			fail(parser, at, "pipeline field transfer type must be buf");
+			return 0;
+		}
+		transfer_at = at;
+		has_explicit_transfer = 1;
+		at++;
+	}
+	if (!pigen_parse_type_prefix(parser->expanded, at, semicolon,
+		&parser->tree->expressions, &parser->tree->types, &data_type, &name,
+		parser->error))
+	{
+		fail(parser, has_explicit_transfer ? at : start,
+			"pipeline field declaration requires a data type");
+		return 0;
+	}
+	if (!identifier(parser, name))
+	{
+		fail(parser, name, "pipeline field declaration requires a field name");
+		return 0;
+	}
+	if (name + 1 != semicolon)
+	{
+		fail(parser, name + 1,
+			"pipeline field declaration declares exactly one field");
+		return 0;
+	}
+	ownership = declaration_type_ownership(parser, scope_id, data_type);
+	if (ownership == PIGEN_SYNTAX_TYPE_UNOWNED)
+	{
+		fail(parser, at, "pipeline field declaration requires a data type");
+		return 0;
+	}
+	name_token = (pigen_token_id){(uint32_t)name};
+	if (parser->pipeline_scopes.depth)
+	{
+		const pipeline_scope *pipeline_scope =
+			&parser->pipeline_scopes.scopes[0];
+		size_t d;
+		if (pipeline_scope_contains(parser, pipeline_scope, name_token))
+		{
+			fail(parser, name, "duplicate pipeline field name");
+			return 0;
+		}
+		for (d = parser->pipeline_scopes.depth; d-- > 1;)
+		{
+			if (pipeline_scope_contains(parser, &parser->pipeline_scopes
+					.scopes[d], name_token))
+			{
+				fail(parser, name,
+					"pipeline field shadows a stage-local name");
+				return 0;
+			}
+		}
+	}
+	node.kind = PIGEN_SYNTAX_SIGNAL_DECLARATION;
+	node.location = range_location(parser, start, semicolon + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.signal_declaration.direction = direction;
+	node.as.signal_declaration.data_type = data_type;
+	node.as.signal_declaration.has_transfer_type = 1;
+	node.as.signal_declaration.transfer_type.transfer_type =
+		PIGEN_TRANSFER_TYPE_BUF;
+	node.as.signal_declaration.transfer_type.argument =
+		INVALID_ID(pigen_syntax_expr_id);
+	if (has_explicit_transfer)
+		node.as.signal_declaration.transfer_type.location =
+			range_location(parser, transfer_at, transfer_at + 1);
+	declaration = add_node(parser, node);
+	if (add_signal_declarator(parser, declaration, name, semicolon,
+		&at).index == PIGEN_INVALID_ID) return 0;
+	add_child(parser, scope_id, declaration);
+	if (parser->pipeline_scopes.depth)
+	{
+		pipeline_scope *top = &parser->pipeline_scopes
+			.scopes[parser->pipeline_scopes.depth - 1];
+		pipeline_scope_add(top, name_token, PIPELINE_SCOPE_PIPELINE);
+	}
+	return 1;
+}
+
+static int parse_pipeline_stage_item(syntax_parser *parser,
+	pigen_syntax_id stage, size_t start, size_t limit, size_t *after_item);
+
+static int parse_pipeline_stage(syntax_parser *parser, pigen_syntax_id pipeline,
+	size_t start, size_t limit, size_t *after_stage)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id stage;
+	size_t at = start + 1;
+	size_t item_after;
+	int saw_item = 0;
+	int has_name = 0;
+
+	if (!token_is(parser, start, "stage")) return 0;
+	if (at >= limit)
+		return fail(parser, start, "pipeline stage requires `begin`");
+	if (identifier(parser, at) && !token_is(parser, at, "begin"))
+	{
+		size_t begin = at + 1;
+		while (begin < limit && (token_is(parser, begin, " ") ||
+			token_is(parser, begin, "\t"))) begin++;
+		if (begin >= limit || !token_is(parser, begin, "begin"))
+			return fail(parser, at, "named pipeline stage requires `begin`");
+		node.as.stage.name = (pigen_token_id){(uint32_t)at};
+		has_name = 1;
+		at = begin;
+	}
+	if (!token_is(parser, at, "begin"))
+		return fail(parser, at, "pipeline stage requires `begin`");
+	node.kind = PIGEN_SYNTAX_STAGE;
+	node.as.stage.has_name = has_name;
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	stage = add_node(parser, node);
+	add_child(parser, pipeline, stage);
+	if (!pipeline_scope_push(&parser->pipeline_scopes))
+		return fail(parser, at, "too many pipeline scopes");
+	at++;
+	while (at < limit && !token_is(parser, at, "end"))
+	{
+		if (!parse_pipeline_stage_item(parser, stage, at, limit, &item_after))
+		{
+			pipeline_scope_pop(&parser->pipeline_scopes);
+			return 0;
+		}
+		saw_item = 1;
+		at = item_after;
+	}
+	if (!saw_item)
+	{
+		pipeline_scope_pop(&parser->pipeline_scopes);
+		return fail(parser, start, "pipeline stage requires at least one item");
+	}
+	pipeline_scope_pop(&parser->pipeline_scopes);
+	if (at == limit || !token_is(parser, at, "end"))
+		return fail(parser, at, "pipeline stage requires `end`");
+	node.location = range_location(parser, start, at + 1);
+	parser->tree->nodes[stage.index].location = node.location;
+	*after_stage = at + 1;
+	return 1;
+}
+
+static int parse_pipeline_stage_item(syntax_parser *parser,
+	pigen_syntax_id stage, size_t start, size_t limit, size_t *after_item)
+{
+	size_t semicolon = top_level_token(parser, start, limit, ";");
+	size_t separator;
+	pigen_syntax_type_id data_type;
+	pigen_syntax_direction direction;
+	pigen_syntax_type_ownership ownership;
+	pigen_syntax_node node = {0};
+	pigen_syntax_id declaration;
+	size_t at = start;
+	size_t name;
+	int is_declaration;
+
+	if (semicolon == limit)
+		return fail(parser, start, "unterminated pipeline stage item");
+	separator = top_level_token(parser, start, semicolon, "<=");
+	if (separator > start && separator < semicolon)
+	{
+		size_t value_start = separator + 1;
+		pigen_syntax_expr_id destination, value;
+
+		if (value_start == semicolon)
+			return fail(parser, separator,
+				"pipeline stage assignment requires a value");
+		if (!pigen_parse_expression(parser->expanded, start, separator,
+			&parser->tree->expressions, &parser->tree->types, &destination,
+			parser->error) ||
+			!pigen_parse_expression(parser->expanded, value_start, semicolon,
+				&parser->tree->expressions, &parser->tree->types, &value,
+				parser->error)) return 0;
+		node.kind = PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT;
+		node.location = range_location(parser, start, semicolon + 1);
+		node.parent = INVALID_SYNTAX;
+		node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+		node.as.nonblocking_assignment.destination = destination;
+		node.as.nonblocking_assignment.value = value;
+		add_child(parser, stage, add_node(parser, node));
+		*after_item = semicolon + 1;
+		return 1;
+	}
+	at = start;
+	direction = parse_direction(parser, &at);
+	if (!pigen_parse_type_prefix(parser->expanded, at, semicolon,
+		&parser->tree->expressions, &parser->tree->types, &data_type, &name,
+		parser->error))
+		return fail(parser, start, "unrecognized pipeline stage item");
+	if (!identifier(parser, name))
+		return fail(parser, start, "unrecognized pipeline stage item");
+	ownership = declaration_type_ownership(parser, stage, data_type);
+	is_declaration = (ownership == PIGEN_SYNTAX_TYPE_PIGEN ||
+		ownership == PIGEN_SYNTAX_TYPE_STRUCTURED);
+	if (!is_declaration)
+		return fail(parser, start, "unrecognized pipeline stage item");
+	node.kind = PIGEN_SYNTAX_SIGNAL_DECLARATION;
+	node.location = range_location(parser, start, semicolon + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.signal_declaration.direction = direction;
+	node.as.signal_declaration.data_type = data_type;
+	node.as.signal_declaration.transfer_type.argument =
+		INVALID_ID(pigen_syntax_expr_id);
+	declaration = add_node(parser, node);
+	if (add_signal_declarator(parser, declaration, name, semicolon,
+		&at).index == PIGEN_INVALID_ID) return 0;
+	add_child(parser, stage, declaration);
+	{
+		pigen_token_id name_token = (pigen_token_id){(uint32_t)name};
+		pipeline_scope *stage_scope = &parser->pipeline_scopes
+			.scopes[parser->pipeline_scopes.depth - 1];
+		size_t d;
+		if (pipeline_scope_contains(parser, stage_scope, name_token))
+		{
+			fail(parser, name, "duplicate stage-local name");
+			return 0;
+		}
+		for (d = parser->pipeline_scopes.depth - 1; d-- > 0;)
+		{
+			if (pipeline_scope_contains(parser, &parser->pipeline_scopes
+					.scopes[d], name_token))
+			{
+				fail(parser, name,
+					"stage-local name shadows a pipeline field");
+				return 0;
+			}
+		}
+		pipeline_scope_add(stage_scope, name_token, PIPELINE_SCOPE_STAGE);
+	}
+	*after_item = semicolon + 1;
+	return 1;
+}
+
+static int parse_pipeline(syntax_parser *parser, pigen_syntax_id parent,
+	size_t start, size_t limit, size_t *after_statement,
+	size_t *assignment_count)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id pipeline;
+	size_t endpipeline;
+	size_t name, at;
+	int saw_stage = 0;
+	int saw_yield = 0;
+
+	if (!token_is(parser, start, "pipeline")) return 0;
+	parser->pipeline_failed = 1;
+	name = start + 1;
+	if (name >= limit || !identifier(parser, name))
+		return fail(parser, start, "pipeline requires a name");
+	at = name + 1;
+	while (at < limit && (token_is(parser, at, " ") || token_is(parser, at, "\t")))
+		at++;
+	if (at >= limit || !token_is(parser, at, "begin"))
+		return fail(parser, at, "pipeline requires `begin`");
+	endpipeline = top_level_token(parser, at, limit, "endpipeline");
+	if (endpipeline == limit)
+		return fail(parser, at, "pipeline requires `endpipeline`");
+	if (pipeline_scope_push(&parser->pipeline_scopes))
+	{
+		syntax_checkpoint checkpoint = save_checkpoint(parser);
+		size_t body_start = at + 1;
+		size_t body_at = body_start;
+		int ok = 1;
+
+		node.kind = PIGEN_SYNTAX_PIPELINE;
+		node.location = range_location(parser, start, endpipeline + 1);
+		node.parent = INVALID_SYNTAX;
+		node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+		node.as.pipeline.name = (pigen_token_id){(uint32_t)name};
+		node.as.pipeline.yield = INVALID_ID(pigen_syntax_expr_id);
+		pipeline = add_node(parser, node);
+		add_child(parser, parent, pipeline);
+		while (body_at < endpipeline)
+		{
+			size_t item_end;
+			if (token_is(parser, body_at, "stage"))
+			{
+				if (!parse_pipeline_stage(parser, pipeline, body_at, endpipeline,
+					&item_end)) { ok = 0; break; }
+				saw_stage = 1;
+				body_at = item_end;
+				continue;
+			}
+			if (token_is(parser, body_at, "yield"))
+			{
+				size_t semicolon = top_level_token(parser, body_at, endpipeline, ";");
+				size_t value_start = body_at + 1;
+				pigen_syntax_expr_id value;
+
+				if (saw_yield)
+				{
+					fail(parser, body_at, "pipeline permits exactly one yield");
+					ok = 0; break;
+				}
+				if (!saw_stage)
+				{
+					fail(parser, body_at, "pipeline yield must follow the stages");
+					ok = 0; break;
+				}
+				if (semicolon == endpipeline || value_start == semicolon)
+				{
+					fail(parser, body_at, "pipeline yield requires an expression");
+					ok = 0; break;
+				}
+				if (!pigen_parse_expression(parser->expanded, value_start,
+					semicolon, &parser->tree->expressions,
+					&parser->tree->types, &value, parser->error))
+				{
+					ok = 0; break;
+				}
+				parser->tree->nodes[pipeline.index].as.pipeline.yield = value;
+				saw_yield = 1;
+				body_at = semicolon + 1;
+				continue;
+			}
+			{
+				size_t semicolon = top_level_token(parser, body_at, endpipeline, ";");
+
+				if (semicolon == endpipeline)
+				{
+					fail(parser, body_at, "unterminated pipeline declaration");
+					ok = 0; break;
+				}
+				if (top_level_token(parser, body_at, semicolon, "<=") > body_at &&
+					top_level_token(parser, body_at, semicolon, "<=") < semicolon)
+				{
+					fail(parser, body_at, "pipeline field declaration cannot assign");
+					ok = 0; break;
+				}
+				if (!parse_pipeline_field(parser, pipeline, body_at, semicolon))
+				{ ok = 0; break; }
+				body_at = semicolon + 1;
+				continue;
+			}
+		}
+		if (ok)
+		{
+			if (!saw_stage)
+			{
+				fail(parser, start, "pipeline requires at least one stage");
+				ok = 0;
+			}
+			else if (!saw_yield)
+			{
+				fail(parser, endpipeline, "pipeline requires a final yield");
+				ok = 0;
+			}
+		}
+		if (ok)
+		{
+			parser->pipeline_failed = 0;
+			*after_statement = endpipeline + 1;
+			*assignment_count += 1;
+			return 1;
+		}
+		{
+			pigen_syntax_error preserved = {0};
+			int has_error = parser->error && parser->error->message;
+			if (has_error) preserved = *parser->error;
+			restore_checkpoint(parser, checkpoint);
+			if (has_error && parser->error) *parser->error = preserved;
+			parser->pipeline_failed = 1;
+		}
+		pipeline_scope_pop(&parser->pipeline_scopes);
+		return 0;
+	}
+	return 0;
+}
+
 static int parse_procedural_statement(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count)
@@ -1094,6 +1555,9 @@ static int parse_procedural_statement(syntax_parser *parser,
 			after_statement, assignment_count);
 	if (token_is(parser, start, "if"))
 		return parse_if_statement(parser, parent, start, limit, after_statement,
+			assignment_count);
+	if (token_is(parser, start, "pipeline"))
+		return parse_pipeline(parser, parent, start, limit, after_statement,
 			assignment_count);
 	return parse_nonblocking_assignment(parser, parent, start, limit,
 		after_statement, assignment_count);
@@ -1136,7 +1600,11 @@ static int parse_clocked_process(syntax_parser *parser,
 	if (!parse_procedural_statement(parser, process, event_close + 1, limit,
 		&process_after, &assignment_count) || !assignment_count)
 	{
+		pigen_syntax_error preserved = {0};
+		int pipeline_failure = parser->pipeline_failed;
+		if (pipeline_failure) preserved = *parser->error;
 		restore_checkpoint(parser, checkpoint);
+		if (pipeline_failure && parser->error) *parser->error = preserved;
 		return 0;
 	}
 	parser->tree->nodes[process.index].location = range_location(parser, start,
@@ -1169,6 +1637,7 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 				item_start = 1;
 				continue;
 			}
+			if (parser->pipeline_failed) return 0;
 		}
 		if (item_start && (token_is(parser, at, "parameter") ||
 			token_is(parser, at, "localparam")))
@@ -1364,6 +1833,7 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 	parser.expanded = source;
 	parser.tree = tree;
 	parser.error = error;
+	parser.pipeline_failed = 0;
 	if (!source || !pigen_source_get(source->sources, source->root_source) ||
 		!source->token_count) return 0;
 	opaque_cursor = 0;

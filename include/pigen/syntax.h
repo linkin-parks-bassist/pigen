@@ -17,6 +17,8 @@ typedef enum {
 	PIGEN_SYNTAX_PROCEDURAL_BLOCK,
 	PIGEN_SYNTAX_IF_STATEMENT,
 	PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT,
+	PIGEN_SYNTAX_PIPELINE,
+	PIGEN_SYNTAX_STAGE,
 	PIGEN_SYNTAX_OPAQUE
 } pigen_syntax_kind;
 
@@ -98,6 +100,14 @@ typedef struct {
 			pigen_syntax_expr_id destination;
 			pigen_syntax_expr_id value;
 		} nonblocking_assignment;
+		struct {
+			pigen_token_id name;
+			pigen_syntax_expr_id yield;
+		} pipeline;
+		struct {
+			pigen_token_id name;
+			int has_name;
+		} stage;
 	} as;
 } pigen_syntax_node;
 
