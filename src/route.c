@@ -226,6 +226,38 @@ static const pigen_semantic_signal *route_dest_signal(
 	return NULL;
 }
 
+/* The destination signal id of a transfer: the single signal a projection
+ * lvalue writes, or the leftmost (most significant) child signal of a
+ * concatenation lvalue. The id is the arena identity the ready-edge law
+ * matches a consuming transfer's value against; the invalid id is returned
+ * when the transfer has no destination signal. */
+static pigen_signal_id route_dest_signal_id(
+	pigen_semantic_model *sem, const pigen_semantic_transfer *tr)
+{
+	const pigen_semantic_lvalue *lvalue = pigen_lvalue_get(sem, tr->destination);
+	pigen_signal_id none = (pigen_signal_id){PIGEN_INVALID_ID};
+
+	if (!lvalue)
+		return none;
+	if (lvalue->kind == PIGEN_LVALUE_PROJECTION)
+		return lvalue->as.projection.signal;
+	if (lvalue->kind == PIGEN_LVALUE_CONCATENATION)
+	{
+		const pigen_lvalue_id *children =
+			pigen_lvalue_children(sem, lvalue->as.sequence.first_child,
+				lvalue->as.sequence.child_count);
+		const pigen_semantic_lvalue *first;
+
+		if (!children || lvalue->as.sequence.child_count == 0)
+			return none;
+		first = pigen_lvalue_get(sem, children[0]);
+		if (!first || first->kind != PIGEN_LVALUE_PROJECTION)
+			return none;
+		return first->as.projection.signal;
+	}
+	return none;
+}
+
 /* The route's sizing and aggregate laws for one transfer: the destination's
  * flattened aggregate payload and the value expression's flattened aggregate
  * payload must be the same integral width and carry the same signedness. The
@@ -269,6 +301,69 @@ static pigen_transfer_id route_downstream(const pigen_route_ready_node *node)
 		node->downstream.index != PIGEN_INVALID_ID)
 		return node->downstream;
 	return (pigen_transfer_id){PIGEN_INVALID_ID};
+}
+
+/* The ready-edge law for the retained core's stall/backpressure structure.
+ *
+ * The whole-unit ready graph is a per-cycle ready-propagation chain: a
+ * transfer's readiness is gated on the readiness of the transfer that
+ * consumes its buffered destination, because the downstream must be ready to
+ * accept before the upstream can fire. The edge is named by the destination
+ * signal's owner-reported realization-ready dependency:
+ *
+ *   - a DOWNSTREAM destination (a buf / elastic-slot destination) names the
+ *     downstream edge for the transfer that consumes the buffered signal it
+ *     writes: the node's downstream field is set to that consuming transfer,
+ *     and the ready chain continues through it;
+ *   - an OCCUPANCY destination (a skid / queue destination) carries no
+ *     downstream edge and breaks the ready chain: the node's downstream field
+ *     is left the invalid id, and the ready chain stops there;
+ *   - any other dependency (EXTERNAL, CONSTANT, INVALID) also carries no
+ *     downstream edge.
+ *
+ * A downstream edge whose consumer is not present in the unit leaves the
+ * node's downstream at the invalid id: the ready chain is broken at that
+ * point (a stalled / unconsumed downstream blocks its upstream source). The
+ * consuming transfer is the one whose value expression names the buffered
+ * signal the node's destination writes. Returns the named consumer's
+ * transfer id, or the invalid id when there is no downstream edge or no
+ * consuming transfer is present. */
+static pigen_transfer_id route_downstream_consumer(
+	pigen_semantic_model *sem, pigen_module_id module, pigen_signal_id sig)
+{
+	pigen_process_id *procs = NULL;
+	size_t proc_count = 0, p;
+	pigen_transfer_id none = (pigen_transfer_id){PIGEN_INVALID_ID};
+
+	procs = pigen_module_processes(sem, module, &proc_count);
+	if (!procs)
+		return none;
+	for (p = 0; p < proc_count; p++)
+	{
+		pigen_transfer_id *xfers = NULL;
+		size_t xfer_count = 0, q;
+
+		xfers = pigen_process_transfers(sem, procs[p], &xfer_count);
+		if (!xfers)
+			continue;
+		for (q = 0; q < xfer_count; q++)
+		{
+			const pigen_semantic_transfer *tr = pigen_transfer_get(sem, xfers[q]);
+			const pigen_semantic_expr *value;
+			const pigen_symbol *sym;
+
+			if (!tr)
+				continue;
+			value = pigen_expr_get(sem, tr->value);
+			if (!value || value->kind != PIGEN_EXPR_SYMBOL)
+				continue;
+			sym = pigen_symbol_get(sem, value->as.symbol);
+			if (sym && sym->kind == PIGEN_SYMBOL_SIGNAL &&
+				sym->object.signal.index == sig.index)
+				return xfers[q];
+		}
+	}
+	return none;
 }
 
 /* The retained core's validity, domain and ownership laws for one transfer,
@@ -604,6 +699,7 @@ int pigen_route_build(pigen_route *route,
 	size_t proc_count = 0;
 	size_t total, p, q, xfer_count, node_index;
 	const pigen_transfer_id *xfers;
+	pigen_signal_id *dest_sig;
 
 	if (!route || !lowering || !lowering->semantics ||
 		module.index == PIGEN_INVALID_ID)
@@ -641,6 +737,12 @@ int pigen_route_build(pigen_route *route,
 	if (!route->nodes)
 		return -1;
 	route->node_capacity = total;
+	/* Per-node destination signal id: the signal a node's transfer writes,
+	 * the identity the ready-edge law matches a downstream consumer's value
+	 * against. */
+	dest_sig = calloc(total, sizeof(*dest_sig));
+	if (!dest_sig)
+		return -1;
 
 	/* Domain, one synchronous one-edge binding: a buffered (binds_domain)
 	 * signal used in transfers on two different clock edges of the same clock
@@ -715,10 +817,36 @@ int pigen_route_build(pigen_route *route,
 			node->transfer = xfers[q];
 			node->ready_dependency = ready;
 			node->downstream = (pigen_transfer_id){PIGEN_INVALID_ID};
+			dest_sig[node_index] = route_dest_signal_id(sem, tr);
 			node_index++;
 		}
 	}
 	route->node_count = node_index;
+
+	/* The ready-edge law: for each node whose destination realizes a
+	 * DOWNSTREAM ready dependency, name the downstream edge - the transfer
+	 * that consumes the buffered signal the node's destination writes - so
+	 * the per-cycle ready chain propagates through it. A node whose
+	 * destination is OCCUPANCY (a skid / queue), or any other dependency,
+	 * carries no downstream edge and breaks the ready chain there; a
+	 * DOWNSTREAM destination with no consuming transfer present in the unit
+	 * likewise leaves the edge absent (its stalled / unconsumed downstream
+	 * blocks its upstream source). */
+	{
+		size_t n;
+		for (n = 0; n < route->node_count; n++)
+		{
+			pigen_route_ready_node *node = &route->nodes[n];
+
+			if (node->ready_dependency != PIGEN_TRANSFER_READY_DOWNSTREAM)
+				continue;
+			if (dest_sig[n].index == PIGEN_INVALID_ID)
+				continue;
+			node->downstream = route_downstream_consumer(
+				(pigen_semantic_model *)sem, module, dest_sig[n]);
+		}
+	}
+	free(dest_sig);
 
 	/* The whole-unit ready graph must be cycle-free before the route is
 	 * published. */
