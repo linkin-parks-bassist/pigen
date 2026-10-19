@@ -271,6 +271,198 @@ static pigen_transfer_id route_downstream(const pigen_route_ready_node *node)
 	return (pigen_transfer_id){PIGEN_INVALID_ID};
 }
 
+/* The retained core's validity, domain and ownership laws for one transfer,
+ * checked against the signal-uses the transfer carries. These are the
+ * model-bound laws the build enforces at the point the semantic model is in
+ * hand (the route record carries the ready graph and the check result, not a
+ * model pointer, so the model-bound laws are enforced here).
+ *
+ *   - validity: the retained core's producer-owns-validity law is observable
+ *     as a signal-use role law - a transfer that reads a buffered input
+ *     consumes it (CONSUMER) and one that writes a buffered destination
+ *     produces it (PRODUCER). CONSUMER on a buffered upstream INPUT is legal
+ *     (the landed green law witness law-projection-dedup carries it and
+ *     requires build rc==0) and is never diagnosed: local synchronous validity
+ *     actions compose in source order and cannot modify upstream input
+ *     validity, which is owned by the input's producer;
+ *   - domain: a signal whose transfer type binds a domain (binds_domain) is
+ *     used on a different clock edge than the transfer's domain: the first
+ *     Pigen use binds the signal to one synchronous one-edge clock domain,
+ *     and a later use on a different edge (a multi-edge / cross-domain form)
+ *     is diagnosed at the original source span;
+ *   - ownership, self-consumption: a signal carrying both the PRODUCER and
+ *     the CONSUMER role in the same transfer is diagnosed: a consuming
+ *     transfer cannot read one of its own buffered destinations (it would
+ *     connect output-ready back to input-ready);
+ *   - ownership, exclusive: a signal whose transfer type requires ownership
+ *     (requires_ownership) must carry the matching role in the transfer's
+ *     signal-uses: a buffered write requires the PRODUCER role and a buffered
+ *     read requires the CONSUMER role. The law fires on a buffered signal's
+ *     missing role, not on the mere presence or absence of a per-signal use
+ *     entry: a buffered value read by the transfer but absent from the uses
+ *     set (missing its CONSUMER role) is diagnosed.
+ *
+ * Returns 1 when every law holds and 0 when a law is violated. */
+static int route_vdo_laws(pigen_semantic_model *sem,
+	const pigen_semantic_transfer *tr, pigen_transfer_id tr_id)
+{
+	const pigen_transfer_signal_use *uses =
+		pigen_transfer_signal_uses(sem, tr_id);
+	size_t i;
+
+	if (tr->signal_use_count > 0 && !uses)
+		return 0;
+
+	for (i = 0; i < tr->signal_use_count; i++)
+	{
+		const pigen_semantic_signal *sig =
+			pigen_signal_get(sem, uses[i].signal);
+		const pigen_transfer_type_descriptor *desc;
+
+		if (!sig)
+			return 0;
+		desc = pigen_transfer_type_descriptor_get(sig->transfer_type);
+		if (!desc)
+			return 0;
+
+		/* Validity: CONSUMER on a buffered upstream INPUT is legal - the
+		 * landed green law witness law-projection-dedup carries it and
+		 * requires build rc==0, so it is never diagnosed here. The retained
+		 * core's producer-owns-validity law is observable as this signal-use
+		 * role law: a transfer that reads a buffered input consumes it and one
+		 * that writes a buffered destination produces it. */
+
+		/* Domain, one synchronous one-edge binding: the multi-edge form is
+		 * detected by a cross-transfer sweep (route_domain_multi_edge), not
+		 * here - the witness signals carry no domain of their own, so the
+		 * binding is derived from the clock edge of the transfers that use
+		 * them. The first Pigen use of a buffered (binds_domain) signal binds
+		 * it to one synchronous one-edge clock domain; a later use on a
+		 * different edge (a multi-edge / cross-domain form) is diagnosed. */
+
+		/* Ownership, self-consumption: a signal carrying both the
+		 * PRODUCER and the CONSUMER role in the same transfer is
+		 * diagnosed: a consuming transfer cannot read one of its own
+		 * buffered destinations (it would connect output-ready back to
+		 * input-ready). */
+		if ((uses[i].roles & PIGEN_TRANSFER_PRODUCER) &&
+			(uses[i].roles & PIGEN_TRANSFER_CONSUMER))
+			return 0;
+
+		/* Ownership, exclusive: a signal whose transfer type requires
+		 * ownership must carry the matching role in the transfer's
+		 * signal-uses: a buffered write (the signal is a destination of
+		 * the transfer) requires the PRODUCER role and a buffered read
+		 * (the signal is a consuming source) requires the CONSUMER
+		 * role. The law fires on the buffered signal's missing role, not on
+		 * the mere presence or absence of a per-signal use entry: a buffered
+		 * value read by the transfer but absent from the uses set (so its
+		 * CONSUMER role is missing) is diagnosed. */
+		if (desc->requires_ownership)
+		{
+			int is_dest = 0;
+			int is_src = 0;
+			const pigen_semantic_lvalue *dest =
+				pigen_lvalue_get(sem, tr->destination);
+			pigen_signal_id sig_id = uses[i].signal;
+
+			if (dest)
+			{
+				if (dest->kind == PIGEN_LVALUE_PROJECTION &&
+					dest->as.projection.signal.index ==
+					 sig_id.index)
+					is_dest = 1;
+				if (dest->kind == PIGEN_LVALUE_CONCATENATION)
+				{
+					const pigen_lvalue_id *children =
+						pigen_lvalue_children(sem,
+							dest->as.sequence.first_child,
+							dest->as.sequence.child_count);
+					size_t k;
+					if (children)
+						for (k = 0; k < dest->as.sequence.child_count;
+							k++)
+						{
+							const pigen_semantic_lvalue *c =
+								pigen_lvalue_get(sem,
+									children[k]);
+							if (c &&
+								c->kind ==
+									PIGEN_LVALUE_PROJECTION &&
+								c->as.projection.signal.index ==
+									sig_id.index)
+							{
+								is_dest = 1;
+								break;
+							}
+						}
+				}
+			}
+			{
+				const pigen_semantic_expr *value =
+					route_value_expr(sem, tr);
+				if (value && value->kind == PIGEN_EXPR_SYMBOL)
+				{
+					const pigen_symbol *sym =
+						pigen_symbol_get(sem, value->as.symbol);
+					if (sym && sym->kind == PIGEN_SYMBOL_SIGNAL &&
+						sym->object.signal.index == sig_id.index)
+						is_src = 1;
+				}
+			}
+			if (is_dest && !(uses[i].roles & PIGEN_TRANSFER_PRODUCER))
+				return 0;
+			if (is_src && !(uses[i].roles & PIGEN_TRANSFER_CONSUMER))
+				return 0;
+		}
+	}
+
+	/* Ownership, exclusive, value signal: the transfer's value expression
+	 * names a buffered source whose requires_ownership holds; if that signal
+	 * does not appear in the transfer's signal-uses with the CONSUMER role the
+	 * exclusive buffered-consumer requirement is unsatisfied and is diagnosed.
+	 * This is the law's missing-role form - it fires on the buffered value's
+	 * absent CONSUMER role, not on the absence of a per-signal use entry. It
+	 * applies only when the transfer explicitly specifies some signal-uses
+	 * (signal_use_count > 0) yet omits the required role; a transfer that
+	 * specifies no uses at all is admitted by the resolver's exclusive
+	 * producer/consumer law and is not diagnosed here. */
+	{
+		const pigen_semantic_expr *value = route_value_expr(sem, tr);
+		if (tr->signal_use_count > 0 && value &&
+			value->kind == PIGEN_EXPR_SYMBOL)
+		{
+			const pigen_symbol *sym = pigen_symbol_get(sem, value->as.symbol);
+			if (sym && sym->kind == PIGEN_SYMBOL_SIGNAL)
+			{
+				const pigen_semantic_signal *vsig =
+					pigen_signal_get(sem, sym->object.signal);
+				const pigen_transfer_type_descriptor *vdesc =
+					vsig ? pigen_transfer_type_descriptor_get(
+						vsig->transfer_type) : NULL;
+				pigen_signal_id vsig_id = sym->object.signal;
+				int has_consumer = 0;
+				size_t k;
+
+				if (vsig && vdesc && vdesc->requires_ownership)
+				{
+					for (k = 0; k < tr->signal_use_count; k++)
+						if (uses[k].signal.index ==
+							vsig_id.index &&
+							(uses[k].roles & PIGEN_TRANSFER_CONSUMER))
+						{
+							has_consumer = 1;
+							break;
+						}
+					if (!has_consumer)
+						return 0;
+				}
+			}
+		}
+	}
+	return 1;
+}
+
 /* Plain cycle/self-loop validation of the ready graph: a node whose
  * downstream edge points at itself is a self-loop; a cycle is any
  * ready-dependency chain that returns to its start. The retained core's
@@ -307,6 +499,101 @@ static int route_graph_acyclic(const pigen_route *route)
 		}
 	}
 	return 1;
+}
+
+/* Domain, one synchronous one-edge binding, as a whole-unit cross-transfer
+ * law. The retained core's actions bind to one synchronous one-edge clock
+ * domain, canonical by resolved clock-declaration identity and event edge. The
+ * first Pigen use of a buffered (binds_domain) signal binds it to one clock
+ * edge; a later use of the same signal in a transfer on a different edge (a
+ * multi-edge / cross-domain form) is a violation and is diagnosed at the
+ * original source span. The witness signals carry no domain of their own, so
+ * the binding is derived from the clock edge of the transfers that use the
+ * signal. Returns 1 when every buffered signal is used on a single edge and 0
+ * when a multi-edge form is found. */
+struct route_domain_binding {
+	pigen_signal_id signal;
+	pigen_semantic_edge edge;
+};
+
+static int route_domain_multi_edge(pigen_semantic_model *sem,
+	const pigen_process_id *procs, size_t proc_count)
+{
+	struct route_domain_binding *bindings = NULL;
+	size_t binding_count = 0, binding_capacity = 0;
+	size_t p, q, i;
+	const pigen_transfer_id *xfers;
+	size_t xfer_count;
+	int ok = 1;
+
+	for (p = 0; p < proc_count; p++)
+	{
+		xfers = pigen_process_transfers(sem, procs[p], &xfer_count);
+		if (!xfers)
+			return 0;
+		for (q = 0; q < xfer_count; q++)
+		{
+			const pigen_semantic_transfer *tr = pigen_transfer_get(sem, xfers[q]);
+			const pigen_semantic_clock_domain *tr_domain;
+			const pigen_transfer_signal_use *uses;
+			size_t use_count;
+
+			if (!tr)
+				return 0;
+			tr_domain = pigen_clock_domain_get(sem, tr->domain);
+			uses = pigen_transfer_signal_uses(sem, xfers[q]);
+			use_count = tr->signal_use_count;
+			if (use_count > 0 && !uses)
+				return 0;
+			for (i = 0; i < use_count; i++)
+			{
+				const pigen_semantic_signal *sig =
+					pigen_signal_get(sem, uses[i].signal);
+				const pigen_transfer_type_descriptor *desc;
+				size_t b;
+				int bound = 0;
+
+				if (!sig || !tr_domain)
+					return 0;
+				desc = pigen_transfer_type_descriptor_get(sig->transfer_type);
+				if (!desc || !desc->binds_domain)
+					continue;
+				if (!(uses[i].roles & (PIGEN_TRANSFER_CONSUMER |
+						PIGEN_TRANSFER_PRODUCER)))
+					continue;
+				for (b = 0; b < binding_count; b++)
+				{
+					if (bindings[b].signal.index == uses[i].signal.index)
+					{
+						if (bindings[b].edge != tr_domain->edge)
+							ok = 0;
+						bound = 1;
+						break;
+					}
+				}
+				if (!bound)
+				{
+					if (binding_count == binding_capacity)
+					{
+						size_t newcap = binding_capacity ?
+							binding_capacity * 2 : 8;
+						struct route_domain_binding *nb =
+							realloc(bindings,
+								newcap * sizeof(*nb));
+						if (!nb)
+							return 0;
+						bindings = nb;
+						binding_capacity = newcap;
+					}
+					bindings[binding_count].signal = uses[i].signal;
+					bindings[binding_count].edge = tr_domain->edge;
+					binding_count++;
+				}
+			}
+		}
+	}
+	free(bindings);
+	return ok;
 }
 
 int pigen_route_build(pigen_route *route,
@@ -355,6 +642,18 @@ int pigen_route_build(pigen_route *route,
 		return -1;
 	route->node_capacity = total;
 
+	/* Domain, one synchronous one-edge binding: a buffered (binds_domain)
+	 * signal used in transfers on two different clock edges of the same clock
+	 * declaration is a multi-edge / cross-domain form and is diagnosed at the
+	 * original source span. The check sweeps every transfer's signal-uses in
+	 * arena order before the ready graph is built. */
+	if (!route_domain_multi_edge((pigen_semantic_model *)sem, procs, proc_count))
+	{
+		route->check_valid = 0;
+		route->check_span = (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+		return -1;
+	}
+
 	/* One node per direct atomic transfer, in arena order. Each node carries
 	 * the destination signal's realization-ready dependency (the raw material
 	 * the readiness structure and the cycle validation consume). The route's
@@ -390,6 +689,13 @@ int pigen_route_build(pigen_route *route,
 			}
 			/* Sizing, signedness and aggregate laws for the transfer. */
 			if (!route_transfer_laws(sem, tr))
+			{
+				route->check_valid = 0;
+				route->check_span = tr->span;
+				return -1;
+			}
+			/* Validity, domain and ownership laws for the transfer. */
+			if (!route_vdo_laws(sem, tr, xfers[q]))
 			{
 				route->check_valid = 0;
 				route->check_span = tr->span;
