@@ -785,5 +785,71 @@
       "route-law-test",
       "T=law-coslice-order"
     ]
+  },
+  {
+    "covers": [
+      "tests/route_validity_domain_ownership_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-vdo-test",
+      "T=signal-use-consumer-legal"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_validity_domain_ownership_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-vdo-test",
+      "T=validity-source-order"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_validity_domain_ownership_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-vdo-test",
+      "T=domain-one-edge-binding"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_validity_domain_ownership_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-vdo-test",
+      "T=domain-async-reset-diagnose"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_validity_domain_ownership_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-vdo-test",
+      "T=ownership-self-consumption"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_validity_domain_ownership_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-vdo-test",
+      "T=ownership-exclusive-required"
+    ]
   }
 ]
