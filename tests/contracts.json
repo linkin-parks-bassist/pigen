@@ -906,5 +906,49 @@
       "route-stall-test",
       "T=throughput-skid-ready"
     ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_identity_test.c",
+      "src/syntax.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-identity-test",
+      "T=shape"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_identity_test.c",
+      "src/syntax.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-identity-test",
+      "T=field-buf"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_identity_test.c",
+      "src/syntax.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-identity-test",
+      "T=scope"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_identity_test.c",
+      "src/syntax.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-identity-test",
+      "T=yield"
+    ]
   }
 ]
