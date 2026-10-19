@@ -851,5 +851,60 @@
       "route-vdo-test",
       "T=ownership-exclusive-required"
     ]
+  },
+  {
+    "covers": [
+      "tests/route_stall_throughput_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-stall-test",
+      "T=ready-propagation"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_stall_throughput_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-stall-test",
+      "T=stalled-downstream-blocks-upstream"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_stall_throughput_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-stall-test",
+      "T=buffered-ready-break"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_stall_throughput_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-stall-test",
+      "T=throughput-buffered-ready"
+    ]
+  },
+  {
+    "covers": [
+      "tests/route_stall_throughput_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-stall-test",
+      "T=throughput-skid-ready"
+    ]
   }
 ]
