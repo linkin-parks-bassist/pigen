@@ -442,6 +442,51 @@ int main(int argc, char **argv)
 			po_free_unit(&u);
 			po_free(&p);
 		}
+		/* Two fields {8-bit, 16-bit} but the final yield reads a PROPER SUBSET:
+		 * `yield x;` reads only the first (8-bit) field, so the outgoing packet
+		 * aggregate is the YIELD-SELECTED field set, 8 bits - not the 24-bit sum
+		 * of every declared field. The expected width is the literal spec value:
+		 * po_outgoing_width is deliberately NOT used here, because it sums every
+		 * pipeline field declaration and would return 24, which is exactly the
+		 * all-fields-sum behavior this witness exists to discriminate. A builder
+		 * that sums every pipeline field declaration regardless of the yield
+		 * establishes a 24-bit aggregate and fails the width pin; a builder that
+		 * selects only the fields the final yield reads establishes 8 bits and
+		 * passes. The 24-bit escape is asserted explicitly to document why the
+		 * width-only pin was previously blind: with `yield {x, y}` the two
+		 * notions coincide, so both witnesses above pass either way. */
+		{
+			parsed p = po_parse("subset.pigen",
+				"module subset(input logic clk);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline subset_out begin\n"
+				"\t\t\tbit [7:0] x;\n"
+				"\t\t\tbuf bit [15:0] y;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tx <= x;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield x;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			pigen_pipeline_identifier id;
+			const pigen_semantic_signal *sig;
+			uint64_t width;
+
+			REQUIRE(po_outgoing_width(&p) == 24);
+			po_unit(&p, &u);
+			REQUIRE(pigen_pipeline_identifier_establish(&u.model, p.pipeline_id,
+				u.module, p.pipeline, &p.pre.expanded, &id) == 0);
+			sig = pigen_signal_get(&u.model, id.signal);
+			REQUIRE(sig);
+			REQUIRE(pigen_data_type_exists(&u.model, sig->data_type));
+			REQUIRE(pigen_const_expr_evaluate_u64(&u.model,
+				pigen_data_type_packed_width(&u.model, sig->data_type), &width));
+			REQUIRE(width == 8);
+			po_free_unit(&u);
+			po_free(&p);
+		}
 	}
 
 	/* ------------------------------------------------------------------ */
