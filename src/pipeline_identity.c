@@ -17,12 +17,14 @@
 int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module,
 	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,
 	pigen_pipeline_identifier *identity)
 {
 	(void)model;
 	(void)syntax;
 	(void)module;
 	(void)pipeline;
+	(void)expanded;
 	*identity = (pigen_pipeline_identifier){
 		INVALID_ID(pigen_signal_id), INVALID_ID(pigen_symbol_id),
 		INVALID_ID(pigen_data_type_id), INVALID_SPAN,
@@ -34,12 +36,14 @@ int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 int pigen_pipeline_identifier_of(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module,
 	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,
 	pigen_pipeline_identifier *identity)
 {
 	(void)model;
 	(void)syntax;
 	(void)module;
 	(void)pipeline;
+	(void)expanded;
 	*identity = (pigen_pipeline_identifier){
 		INVALID_ID(pigen_signal_id), INVALID_ID(pigen_symbol_id),
 		INVALID_ID(pigen_data_type_id), INVALID_SPAN,

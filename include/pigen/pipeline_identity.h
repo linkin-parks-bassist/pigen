@@ -60,8 +60,11 @@ typedef struct {
 
 /* Establishes the pipeline identifier as a module-scope buf output signal in
  * the model. pipeline is the parsed pipeline node (PIGEN_SYNTAX_PIPELINE) and
- * its id; module is the resolved module the pipeline lives in; the identifier
- * token is pipeline->as.pipeline.name. On success it declares the
+ * its id; module is the resolved module the pipeline lives in; expanded is
+ * the parsed expanded source the pipeline node was parsed from (the source
+ * that resolves the identifier token's origin to its original spelling
+ * span, as the syntax tree itself does through its expanded source); the
+ * identifier token is pipeline->as.pipeline.name. On success it declares the
  * module-scope symbol for the identifier, builds the outgoing packet
  * aggregate data type (the concatenation of the outgoing field data types in
  * source order) and creates the buf output pigen_semantic_signal bound to
@@ -73,18 +76,22 @@ typedef struct {
 int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module,
 	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,
 	pigen_pipeline_identifier *identity);
 
 /* Recovers the established identity of a pipeline's outgoing buf output
- * packet from its parsed pipeline node (PIGEN_SYNTAX_PIPELINE) and the
- * resolved module. Fills *identity with the signal, symbol, outgoing packet
- * aggregate data type and identifier span. Returns 0 on success and -1 when
- * the identity has not been established or the arguments are invalid; a
- * failed call reports the error and the compile stops. SKELETON: returns -1
- * and leaves *identity invalid until the implementation stage. */
+ * packet from its parsed pipeline node (PIGEN_SYNTAX_PIPELINE), the
+ * resolved module and the parsed expanded source (used to anchor the
+ * identifier span at its original spelling span). Fills *identity with the
+ * signal, symbol, outgoing packet aggregate data type and identifier span.
+ * Returns 0 on success and -1 when the identity has not been established or
+ * the arguments are invalid; a failed call reports the error and the
+ * compile stops. SKELETON: returns -1 and leaves *identity invalid until
+ * the implementation stage. */
 int pigen_pipeline_identifier_of(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module,
 	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,
 	pigen_pipeline_identifier *identity);
 
 #endif
