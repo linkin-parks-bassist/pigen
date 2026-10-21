@@ -355,7 +355,7 @@ int main(int argc, char **argv)
 
 		po_unit(&p, &u);
 		REQUIRE(pigen_pipeline_identifier_establish(&u.model, p.pipeline_id,
-			u.module, p.pipeline, &id) == 0);
+			u.module, p.pipeline, &p.pre.expanded, &id) == 0);
 		sig = pigen_signal_get(&u.model, id.signal);
 		REQUIRE(sig && !IS_INVALID_ID(id.signal));
 		REQUIRE(sig->transfer_type == PIGEN_TRANSFER_TYPE_BUF);
@@ -397,7 +397,7 @@ int main(int argc, char **argv)
 			REQUIRE(po_outgoing_width(&p) == 8);
 			po_unit(&p, &u);
 			REQUIRE(pigen_pipeline_identifier_establish(&u.model, p.pipeline_id,
-				u.module, p.pipeline, &id) == 0);
+				u.module, p.pipeline, &p.pre.expanded, &id) == 0);
 			sig = pigen_signal_get(&u.model, id.signal);
 			REQUIRE(sig);
 			REQUIRE(pigen_data_type_exists(&u.model, sig->data_type));
@@ -432,7 +432,7 @@ int main(int argc, char **argv)
 			REQUIRE(po_outgoing_width(&p) == 24);
 			po_unit(&p, &u);
 			REQUIRE(pigen_pipeline_identifier_establish(&u.model, p.pipeline_id,
-				u.module, p.pipeline, &id) == 0);
+				u.module, p.pipeline, &p.pre.expanded, &id) == 0);
 			sig = pigen_signal_get(&u.model, id.signal);
 			REQUIRE(sig);
 			REQUIRE(pigen_data_type_exists(&u.model, sig->data_type));
@@ -477,14 +477,14 @@ int main(int argc, char **argv)
 
 		po_unit(&p, &u);
 		REQUIRE(pigen_pipeline_identifier_establish(&u.model, p.pipeline_id,
-			u.module, p.pipeline, &id) == 0);
+			u.module, p.pipeline, &p.pre.expanded, &id) == 0);
 		/* Recover the identity through the owner accessor and pin that it is
 		 * the same module-scope signal bound to the identifier symbol. */
 		{
 			pigen_pipeline_identifier again;
 
 			REQUIRE(pigen_pipeline_identifier_of(&u.model, p.pipeline_id,
-				u.module, p.pipeline, &again) == 0);
+				u.module, p.pipeline, &p.pre.expanded, &again) == 0);
 			REQUIRE(again.signal.index == id.signal.index);
 			REQUIRE(again.symbol.index == id.symbol.index);
 		}
@@ -555,7 +555,7 @@ int main(int argc, char **argv)
 				PIGEN_TRANSFER_TYPE_BUF);
 			po_unit(&p, &u);
 			REQUIRE(pigen_pipeline_identifier_establish(&u.model, p.pipeline_id,
-				u.module, p.pipeline, &id) == 0);
+				u.module, p.pipeline, &p.pre.expanded, &id) == 0);
 			sig = pigen_signal_get(&u.model, id.signal);
 			REQUIRE(sig);
 			REQUIRE(sig->transfer_type == PIGEN_TRANSFER_TYPE_BUF);
@@ -590,7 +590,7 @@ int main(int argc, char **argv)
 					PIGEN_TRANSFER_TYPE_BUF);
 			po_unit(&p, &u);
 			REQUIRE(pigen_pipeline_identifier_establish(&u.model, p.pipeline_id,
-				u.module, p.pipeline, &id) == 0);
+				u.module, p.pipeline, &p.pre.expanded, &id) == 0);
 			sig = pigen_signal_get(&u.model, id.signal);
 			REQUIRE(sig);
 			REQUIRE(sig->transfer_type == PIGEN_TRANSFER_TYPE_BUF);
