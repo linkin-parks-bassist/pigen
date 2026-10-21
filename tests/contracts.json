@@ -994,5 +994,53 @@
       "pipeline-output-test",
       "T=buf-field-consistency"
     ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_stage_test.c",
+      "src/pipeline_stage.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-stage-test",
+      "T=first-stage-external-reads"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_stage_test.c",
+      "src/pipeline_stage.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-stage-test",
+      "T=later-stage-incoming-immutable"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_stage_test.c",
+      "src/pipeline_stage.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-stage-test",
+      "T=outgoing-visibility"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_stage_test.c",
+      "src/pipeline_stage.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-stage-test",
+      "T=repartition-equal-bits"
+    ]
   }
 ]
