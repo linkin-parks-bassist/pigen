@@ -435,6 +435,48 @@ static void test_pipeline_field_buf(pigen_source_manager *sources)
 		"\tend\n"
 		"endmodule",
 		"pipeline field transfer type must be buf", "skid", 1});
+	assert_pipeline_failure(sources, (pipeline_failure){
+		"field_reg.pigen",
+		"module declared(input logic clk);\n"
+		"\talways @(posedge clk) begin\n"
+		"\t\tpipeline declared_pipe begin\n"
+		"\t\t\treg bit [7:0] value;\n"
+		"\t\t\tstage begin\n"
+		"\t\t\t\tvalue <= value;\n"
+		"\t\t\tend\n"
+		"\t\t\tyield value;\n"
+		"\t\tendpipeline\n"
+		"\tend\n"
+		"endmodule",
+		"pipeline field transfer type must be buf", "reg", 1});
+	assert_pipeline_failure(sources, (pipeline_failure){
+		"field_logic.pigen",
+		"module annotated(input logic clk);\n"
+		"\talways @(posedge clk) begin\n"
+		"\t\tpipeline annotated_pipe begin\n"
+		"\t\t\tlogic bit [7:0] value;\n"
+		"\t\t\tstage begin\n"
+		"\t\t\t\tvalue <= value;\n"
+		"\t\t\tend\n"
+		"\t\t\tyield value;\n"
+		"\t\tendpipeline\n"
+		"\tend\n"
+		"endmodule",
+		"pipeline field transfer type must be buf", "logic", 2});
+	assert_pipeline_failure(sources, (pipeline_failure){
+		"field_port.pigen",
+		"module buffered(input logic clk);\n"
+		"\talways @(posedge clk) begin\n"
+		"\t\tpipeline buffered_pipe begin\n"
+		"\t\t\tport bit [7:0] value;\n"
+		"\t\t\tstage begin\n"
+		"\t\t\t\tvalue <= value;\n"
+		"\t\t\tend\n"
+		"\t\t\tyield value;\n"
+		"\t\tendpipeline\n"
+		"\tend\n"
+		"endmodule",
+		"pipeline field transfer type must be buf", "port", 1});
 }
 
 /* (3) scope: stage-private scopes with the ordered lookup and diagnostics. */
