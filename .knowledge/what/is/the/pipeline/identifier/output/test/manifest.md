@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-22T06:41:45+11:00"
+revised_at: "2026-10-22T08:22:19+11:00"
 ---
 
 tests/pipeline_output_test.c is the discriminating test contract for pipeline step (a): the pipeline identifier as a module-scope buf output packet identity (plan: what/is/the/plan.md step (a); spec: what/is/the/spec.md, what/does/pipeline/yield/mean.md; gates: what/are/the/remaining/architecture/migration/gates.md). It pins the owner include/pigen/pipeline_identity.h + src/pipeline_identity.c (pigen_pipeline_identifier_establish / pigen_pipeline_identifier_of). It is a four-section manifest, one `make pipeline-output-test T=<section>` entry per section in tests/contracts.json (four entries); the Makefile target compiles with the exact CFLAGS (-std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude) against src/pipeline_identity.c plus the semantic and syntax owners.
@@ -15,4 +15,4 @@ Sections (all green on master):
 - module-scope-binding: the identifier is bound to a module-scope symbol (scope is the module scope whose parent is the compilation scope, not a stage-/pipeline-local child scope), recoverable via pigen_symbol_signal and present in the module's signal set, with symbol and signal spans anchored at the identifier's original span.
 - buf-field-consistency: every field is a buf and the output packet's transfer type is that same buf, pinned from an omitted-buf single field and an omitted+explicit-buf pair.
 
-Member ORDER of the aggregate is not pinned here (separately accepted, pinned by the emitted SV and golden witnesses); this contract pins field-set / aggregate membership. The prior pipeline-identity-test (shape/field-buf/scope/yield) stays green; the manifest carries the four entries. No production switch, second dialect, fallback or prototype-parity.
+Member ORDER of the aggregate is not pinned here: the aggregate is a width-keyed sized vector, so the field-to-bit member order is unobservable through this manifest and is owned by the step-(c) lowering's emitted-SV / golden witness (does/the/concatenation/data/type/keying/keep/member/order.md), not by this contract. This contract pins field-set / aggregate membership. The prior pipeline-identity-test (shape/field-buf/scope/yield) stays green; the manifest carries the four entries. No production switch, second dialect, fallback or prototype-parity.
