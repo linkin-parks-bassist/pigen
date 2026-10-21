@@ -950,5 +950,49 @@
       "pipeline-identity-test",
       "T=yield"
     ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_output_test.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-output-test",
+      "T=output-identity"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_output_test.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-output-test",
+      "T=outgoing-packet-type"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_output_test.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-output-test",
+      "T=module-scope-binding"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_output_test.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-output-test",
+      "T=buf-field-consistency"
+    ]
   }
 ]
