@@ -12,11 +12,15 @@
 #define INVALID_SPAN ((pigen_source_span){INVALID_ID(pigen_source_id), 0, 0})
 
 /* The outgoing packet aggregate is the concatenation, in source order, of the
- * data types of the pipeline's outgoing fields. This bounded step carries no
- * separate stage-execution or repartition law, so every pipeline field is an
- * outgoing field. The aggregate's packed width is the sum of the fields'
- * packed widths; that width, not a fragile data-type-id identity, is the
- * discriminator the contract pins. */
+ * data types of the pipeline's outgoing fields: the fields the final yield
+ * expression reads (what/is/the/spec.md "yield exposes final outgoing value";
+ * what/does/pipeline/yield/mean.md "evaluates its outgoing fields"). A
+ * pipeline may declare more fields than the yield reads; only the yielded
+ * fields make up the outgoing packet. The aggregate's packed width is the sum
+ * of the yielded fields' packed widths; that width, not a fragile data-type-id
+ * identity, is the discriminator the contract pins. Member order of the
+ * concatenation is a separate concern pinned by the emitted SV, so this step
+ * selects the field set by name and sums widths in source order. */
 
 /* The syntax node at CHILD within the tree that owns PIPELINE. The pipeline
  * node is an element of that tree's contiguous node array, at the position
@@ -30,6 +34,111 @@ static const pigen_syntax_node *pipeline_child(const pigen_syntax_node *pipeline
 	const pigen_syntax_node *base = pipeline - syntax.index;
 
 	return base + child.index;
+}
+
+/* A field's declarator name span: the single name each pipeline field
+ * declaration carries (the parser rejects a field declaring more than one
+ * name), recovered from the field's one signal-declarator child. The name
+ * token's original spelling span is resolved through the expanded source's
+ * token origins, which do not require the expanded source's (possibly
+ * reclaimed) source manager. */
+static pigen_source_span pipeline_field_name_span(const pigen_syntax_node *pipeline,
+	pigen_syntax_id syntax, const pigen_syntax_node *field,
+	const pigen_expanded_source *expanded)
+{
+	const pigen_syntax_node *declarator =
+		pipeline_child(pipeline, syntax, field->first_child);
+	const pigen_expanded_token *token;
+
+	if (!declarator ||
+		declarator->kind != PIGEN_SYNTAX_SIGNAL_DECLARATOR)
+		return INVALID_SPAN;
+	token = pigen_expanded_token_get(expanded,
+		declarator->as.signal_declarator.name);
+	return token ? pigen_origin_spelling_span(expanded, token->origin) :
+		INVALID_SPAN;
+}
+
+/* The byte span of the final yield's value expression. The yield is the
+ * pipeline's last item (the parser requires it to follow the stages), so its
+ * value runs from just after the `yield` keyword token to just before the
+ * `endpipeline` keyword token. Both are ordinary identifier tokens whose
+ * spelling spans are recovered through the expanded source's token origins and
+ * whose text is read from the model's source manager (the expanded source's
+ * own source manager may already have been reclaimed by the time this runs).
+ * A missing or misplaced keyword (which the parser would have rejected for a
+ * well-formed pipeline) leaves the span empty. */
+static pigen_source_span pipeline_yield_value_span(
+	pigen_semantic_model *model, const pigen_expanded_source *expanded,
+	const pigen_syntax_node *pipeline)
+{
+	pigen_source_span span;
+	pigen_source_span body;
+	size_t i;
+	int saw_yield = 0;
+
+	body = pipeline->location.source_span;
+	span = INVALID_SPAN;
+	for (i = 0; i < expanded->token_count; i++)
+	{
+		const pigen_expanded_token *token = &expanded->tokens[i];
+		pigen_source_span tok = pigen_origin_spelling_span(expanded,
+			token->origin);
+		size_t length;
+		const char *text;
+
+		if (token->kind != PIGEN_TOKEN_IDENTIFIER) continue;
+		if (tok.start < body.start || tok.end > body.end) continue;
+		text = pigen_source_span_text(model->sources, tok, &length);
+		if (!text) continue;
+		if (!saw_yield)
+		{
+			if (length == 5 && !memcmp(text, "yield", 5))
+			{
+				saw_yield = 1;
+				span = (pigen_source_span){body.source, tok.end,
+					body.end};
+			}
+		}
+		else if (length == 11 && !memcmp(text, "endpipeline", 11))
+		{
+			span.end = tok.start;
+			break;
+		}
+	}
+	return span;
+}
+
+/* True when the final yield value expression reads NAME: an identifier token
+ * of that exact spelling lies within the yield value span. The yield references
+ * the declared pipeline fields by name (each field is exactly one name), so
+ * spelling equality selects the yielded field set; the yield subspan excludes
+ * the field declarations and the stages, so only the yielded fields match. */
+static int pipeline_yield_reads(pigen_semantic_model *model,
+	const pigen_expanded_source *expanded, const pigen_source_span value,
+	const pigen_source_span name)
+{
+	size_t name_length, i;
+	const char *name_text;
+
+	name_text = pigen_source_span_text(model->sources, name, &name_length);
+	if (!name_text || name_length == 0) return 0;
+	for (i = 0; i < expanded->token_count; i++)
+	{
+		const pigen_expanded_token *tok = &expanded->tokens[i];
+		pigen_source_span span = pigen_origin_spelling_span(expanded,
+			tok->origin);
+		size_t length;
+		const char *text;
+
+		if (tok->kind != PIGEN_TOKEN_IDENTIFIER) continue;
+		if (span.start < value.start || span.end > value.end) continue;
+		text = pigen_source_span_text(model->sources, span, &length);
+		if (text && length == name_length &&
+			!memcmp(text, name_text, name_length))
+			return 1;
+	}
+	return 0;
 }
 
 /* The pipeline identifier token (pipeline->as.pipeline.name) resolved to its
@@ -99,6 +208,7 @@ int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 	const pigen_semantic_module *mod;
 	const pigen_scope *module_scope;
 	pigen_source_span name;
+	pigen_source_span value;
 	pigen_data_type_id aggregate;
 	pigen_symbol_id symbol;
 	pigen_declare_result declared;
@@ -121,14 +231,20 @@ int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 	name = pipeline_name_span(expanded, pipeline);
 	if (name.source.index == PIGEN_INVALID_ID || name.start == name.end)
 		return -1;
+	value = pipeline_yield_value_span(model, expanded, pipeline);
+	if (value.source.index == PIGEN_INVALID_ID || value.start >= value.end)
+		return -1;
 
-	/* Sum the outgoing fields' packed widths in source order; every pipeline
-	 * field is an outgoing field in this bounded step. */
+	/* Sum, in source order, the packed widths of only the fields the final
+	 * yield reads; a pipeline may declare more fields than the yield
+	 * exposes, and the outgoing packet carries just the yielded ones. */
 	for (child = pipeline->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pipeline_child(pipeline, syntax, child);
 
-		if (node && node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION)
+		if (node && node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION &&
+			pipeline_yield_reads(model, expanded, value,
+				pipeline_field_name_span(pipeline, syntax, node, expanded)))
 			total += pipeline_field_width(model, node);
 		child = node ? node->next_sibling : (pigen_syntax_id){PIGEN_INVALID_ID};
 	}
