@@ -105,8 +105,18 @@ int pigen_pipeline_stage_is_invalid(const pigen_pipeline_stage *stage);
  * guard; and at most one item per cycle. Returns 0 on success and -1 on
  * error; a failed call reports the error and the compile stops - it may
  * leave partial state behind, and no test asserts that a failure left the
- * model unchanged. SKELETON: returns -1 and leaves *out invalid until the
- * implementation stage. */
+ * model unchanged. The entry point validates the four source-level-
+ * discriminable stage laws on the structured path: the first stage may read
+ * only enclosing / module-scope signals plus stage-local combinational values
+ * (a pipeline-field read is diagnosed); a later stage reads only the immutable
+ * incoming fields the earlier stages wrote (a read of any other field is
+ * diagnosed); each <= destination must be a pipeline field (an outgoing
+ * field) - a module-input or stage-local-wire destination is diagnosed; and
+ * every later-stage boundary keeps an equal total $bits (in_bits == out_bits).
+ * The two named laws with no source-level red form - an external consuming
+ * read atomic under the full guard, and at most one item per cycle - are
+ * pinned by the parent-module lowering's emission / behavioral witnesses, not
+ * this seam. Returns 0 on success and -1 on error. */
 int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module,
 	const pigen_syntax_node *pipeline,
