@@ -483,14 +483,16 @@ int main(int argc, char **argv)
 	/* ------------------------------------------------------------------ */
 	/* (1) first-stage-external-reads: the first stage cannot read an        */
 	/*     uninitialized pipeline field - it may only read enclosing /       */
-	/*     module-scope signals, which are already live. The red form is a   */
+	/*     module-scope signals, which are already live. The red forms are a */
 	/*     first stage whose <= RHS names a pipeline field (b, not yet       */
-	/*     produced by any earlier stage): diagnosed (rc == -1). The anchor  */
-	/*     is a first stage reading only the module input x: accepted        */
-	/*     (rc == 0), and its view carries the one outgoing write, the       */
-	/*     external read and the 8-bit out packet. A builder that accepts a  */
-	/*     first-stage field read, or that refuses a first stage reading an   */
-	/*     enclosing signal, fails this section.                            */
+	/*     produced by any earlier stage) and the SELF-READ form, a <= whose */
+	/*     RHS names the SAME pipeline field it writes: each diagnosed       */
+	/*     (rc == -1). The anchor is a first stage reading only the module   */
+	/*     input x: accepted (rc == 0), and its view carries the one         */
+	/*     outgoing write, the external read and the 8-bit out packet. A     */
+	/*     builder that accepts a first-stage field read (self-read included)*/
+	/*     or that refuses a first stage reading an enclosing signal, fails  */
+	/*     this section.                                                    */
 	/* ------------------------------------------------------------------ */
 	SECTION("first-stage-external-reads") {
 		/* Red: the first stage reads pipeline field b, which no earlier
@@ -530,6 +532,48 @@ int main(int argc, char **argv)
 					items[0]->as.nonblocking_assignment.value);
 
 				REQUIRE(span_is(&p.sources, rhs, "b"));
+			}
+			ps_unit(&p, &u);
+			ps_port(&p, &u, "x", 8);
+			rc = ps_drives(&p, &u, stages[0], &view);
+			REQUIRE(rc == -1);
+			ps_free_unit(&u);
+			ps_free(&p);
+		}
+		/* Red (self-read form): the first stage's <= RHS names the SAME
+		 * pipeline field it writes - an uninitialized field read in its
+		 * self-read form: diagnosed (rc == -1). */
+		{
+			parsed p = ps_parse("fs_self_red.pigen",
+				"module fs_self_red(input logic clk, input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline fs_self_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= a;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield a;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			const pigen_syntax_node *items[8];
+			size_t item_count;
+			pigen_pipeline_stage view;
+			int rc;
+
+			REQUIRE(ps_stage_nodes(&p, stages) == 1);
+			item_count = ps_stage_items(&p, stages[0], items);
+			REQUIRE(item_count == 1);
+			REQUIRE(items[0]->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
+			/* The RHS name is the pipeline field a - the same field the
+			 * assignment writes: a self-read, located through the parse. */
+			{
+				pigen_source_span rhs = ps_name_span(&p,
+					items[0]->as.nonblocking_assignment.value);
+
+				REQUIRE(span_is(&p.sources, rhs, "a"));
 			}
 			ps_unit(&p, &u);
 			ps_port(&p, &u, "x", 8);
