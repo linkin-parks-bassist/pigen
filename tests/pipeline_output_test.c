@@ -487,6 +487,57 @@ int main(int argc, char **argv)
 			po_free_unit(&u);
 			po_free(&p);
 		}
+		/* Two fields {8-bit x, 16-bit y} but the final yield reads the SECOND
+		 * field: `yield y;` selects the field SET {y} by NAME, so the outgoing
+		 * packet aggregate is 16 bits - not the first field's 8 bits and not the
+		 * 24-bit sum of every declared field. This is the NON-PREFIX witness the
+		 * three witnesses above cannot supply: each of them selects a PREFIX of
+		 * declaration order (`yield a` -> {a}, `yield {x,y}` -> {x,y},
+		 * `yield x` -> {x}), so a POSITION-BASED "first-N" builder (N = number of
+		 * fields the yield expression references) produces IDENTICAL widths for
+		 * all of them and the section cannot tell the two selection strategies
+		 * apart. Here the yield references one field (N=1) but that field is the
+		 * SECOND one, y: name-based selection reads y and establishes a 16-bit
+		 * aggregate (passes this pin), while a position-based first-N builder
+		 * would select the FIRST field x and establish an 8-bit aggregate (fails
+		 * the 16-bit pin). The 16 != 8 is the discriminator. The expected width
+		 * is again the literal spec value: po_outgoing_width is deliberately NOT
+		 * used as the oracle, because it sums every declaration (24) and is the
+		 * wrong oracle for the yield-selected set; the 24-bit escape is asserted
+		 * to document, as in the subset witness, why a width-only pin that
+		 * compared against po_outgoing_width would have been blind. */
+		{
+			parsed p = po_parse("nonprefix.pigen",
+				"module nonprefix(input logic clk);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline nonprefix_out begin\n"
+				"\t\t\tbit [7:0] x;\n"
+				"\t\t\tbuf bit [15:0] y;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tx <= x;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield y;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			pigen_pipeline_identifier id;
+			const pigen_semantic_signal *sig;
+			uint64_t width;
+
+			REQUIRE(po_outgoing_width(&p) == 24);
+			po_unit(&p, &u);
+			REQUIRE(pigen_pipeline_identifier_establish(&u.model, p.pipeline_id,
+				u.module, p.pipeline, &p.pre.expanded, &id) == 0);
+			sig = pigen_signal_get(&u.model, id.signal);
+			REQUIRE(sig);
+			REQUIRE(pigen_data_type_exists(&u.model, sig->data_type));
+			REQUIRE(pigen_const_expr_evaluate_u64(&u.model,
+				pigen_data_type_packed_width(&u.model, sig->data_type), &width));
+			REQUIRE(width == 16);
+			po_free_unit(&u);
+			po_free(&p);
+		}
 	}
 
 	/* ------------------------------------------------------------------ */
