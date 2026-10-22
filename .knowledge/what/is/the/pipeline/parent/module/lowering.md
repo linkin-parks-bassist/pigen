@@ -1,0 +1,12 @@
+---
+status: green
+revised_at: "2026-10-22T20:32:13+11:00"
+---
+
+Step (c) of the pipeline frontier, parent-module lowering through common incidence/RTL, is the current bounded step (what/is/the/plan.md). It turns one PIGEN_SYNTAX_PIPELINE statement (inside a clocked process) into the common RTL model and emitted SV, consuming the step-(a) outgoing-packet identity (include/pigen/pipeline_identity.h) and the step-(b) stage-law views (include/pigen/pipeline_stage.h). It is decomposed in-order:
+
+- (c1) The lowering owner: a new structured owner, sibling of the step-(a)/(b) owners, that lowers one pipeline statement through the common RTL path — publishing the pipeline's one-entry buf stage storage (what/is/a/buf.md; the intended lowering uses a dedicated primitive instance), the per-stage combinational next-value equations over immutable incoming fields (how/do/pipeline/stage/reads/work.md), the guarded ready/valid handshake (the complete enclosing procedural guard enables the pipeline; false holds all storage and disables input/output handshakes — how/to/reset/and/enable/a/pipeline.md), and the final yield → outgoing-packet write (what/does/pipeline/yield/mean.md), all as common RTL objects/equations/processes in the parent module.
+- (c2) The discriminating green manifest: a pipeline-lower-test Makefile target and section-harness test pinning the lowering shape (one buf storage per stage boundary, per-stage next-value equations, the yield write) and the outgoing packet's member order (source order, first yielded field the MSB) in the emitted SV, plus the two step-(b) storage/temporal-law witnesses — the one-entry buf's one-item-per-cycle and the atomic-external-input guard — as emission/behavioral witnesses, because neither has a route-level negative witness.
+- (c3) Implementation to that manifest; (c4) integration/landing.
+
+The step-(c) owner owns the member-order pin and the two step-(b) witnesses because the established aggregate is a width-keyed sized vector (the field-to-bit mapping is unobservable through the data type or any owner/route-level check — does/the/concatenation/data/type/keying/keep/member/order.md). Lowering consumes validated identities and backend-neutral realization properties; a failed stage reports the diagnostic and stops, with no rollback (how/should/compiler/builders/fail.md). After step (c): FSM, child-instance and fabric, each in its own bounded stage with a discriminating green test manifest.
