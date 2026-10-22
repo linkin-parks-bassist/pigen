@@ -339,12 +339,20 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 			/* The value's identifier reads split into incoming pipeline
 			 * fields (counted into in_bits) and external / module-scope
 			 * reads (counted into read_count; the first-stage law checks
-			 * them). A read is the identifier tokens of the value, i.e.
-			 * every identifier in the item span other than the
-			 * destination's first. */
+			 * them). A read is an identifier token of the value, i.e. any
+			 * identifier in the item span after the destination's - the
+			 * destination itself is the first identifier of the item and
+			 * is the write, not a read. A later token textually equal to
+			 * the destination is a self-read - the stage reading the very
+			 * field it writes - so it is classified like any other field
+			 * read: the first stage cannot read it (the field is not
+			 * initialized when the stage runs), and a later stage may
+			 * read it only when an earlier stage produced it. */
 			{
 				size_t i;
+				int destination_seen;
 
+				destination_seen = 0;
 				for (i = 0; i < expanded->token_count; i++)
 				{
 					const pigen_expanded_token *token =
@@ -360,8 +368,13 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 					if (tok.start < item->location.source_span.start ||
 						tok.end > item->location.source_span.end)
 						continue;
-					if (spans_equal(sources, tok, destination))
-						continue; /* the destination itself */
+					if (!destination_seen)
+					{
+						/* the destination is the item's first
+						 * identifier: the write, not a read */
+						destination_seen = 1;
+						continue;
+					}
 					text = pigen_source_span_text(sources, tok,
 						&length);
 					if (!text) continue;
