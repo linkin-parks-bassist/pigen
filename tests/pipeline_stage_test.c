@@ -609,14 +609,22 @@ int main(int argc, char **argv)
 
 	/* ------------------------------------------------------------------ */
 	/* (2) later-stage-incoming-immutable: a later stage reads only the      */
-	/*     immutable incoming fields it is handed by the previous stage.     */
-	/*     The anchor is stage 2 reading field a, which stage 1 wrote (its   */
-	/*     incoming field): accepted (rc == 0), with in/out packet 8 bits    */
-	/*     and one outgoing write. The red form is stage 2 reading field b,  */
-	/*     a field the previous stage did not write (it has no incoming for  */
-	/*     b): diagnosed (rc == -1). A builder that lets a later stage read  */
-	/*     a field the chain never handed it, or that refuses the incoming   */
-	/*     field, fails this section.                                         */
+	/*     immutable incoming fields the EARLIER stages wrote - the rule is  */
+	/*     any-earlier, not immediately-preceding: the packet accumulates    */
+	/*     fields across boundaries (a stage's <= overwrites the named field */
+	/*     it carries; unoverwritten fields persist), so a later stage may   */
+	/*     read a field written by ANY earlier stage, including one not      */
+	/*     written by its immediately-preceding stage. A field NO earlier    */
+	/*     stage wrote is diagnosed. The 2-stage anchor is stage 2 reading   */
+	/*     field a, written by stage 1: accepted (rc == 0), in/out packet 8  */
+	/*     bits, one outgoing write. The red form is stage 2 reading field   */
+	/*     b, which NO earlier stage wrote: diagnosed (rc == -1). The        */
+	/*     3-stage skip-read anchor is stage 3 reading field a, written only */
+	/*     by stage 1 (skipping stage 2): accepted (rc == 0); an             */
+	/*     immediately-preceding-only builder rejects it (rc == -1). A       */
+	/*     builder that lets a later stage read a field no earlier stage     */
+	/*     wrote, or that refuses a field an earlier stage wrote, fails this */
+	/*     section.                                                          */
 	/* ------------------------------------------------------------------ */
 	SECTION("later-stage-incoming-immutable") {
 		/* Anchor: stage 2 reads a, the incoming field stage 1 wrote. */
@@ -671,8 +679,8 @@ int main(int argc, char **argv)
 			ps_free_unit(&u);
 			ps_free(&p);
 		}
-		/* Red: stage 2 reads field b - a field the previous stage did not
-		 * write (stage 1 wrote a, not b): no incoming for b. */
+		/* Red: stage 2 reads field b - a field NO earlier stage wrote
+		 * (stage 1 wrote a, not b): b is not an incoming field. */
 		{
 			parsed p = ps_parse("ls_red.pigen",
 				"module ls_red(input logic clk, input logic [7:0] x);\n"
@@ -710,6 +718,78 @@ int main(int argc, char **argv)
 			ps_port(&p, &u, "x", 8);
 			rc = ps_drives(&p, &u, stages[1], &view);
 			REQUIRE(rc == -1);
+			ps_free_unit(&u);
+			ps_free(&p);
+		}
+		/* Anchor (any-earlier pin): a 3-stage skip-read. Stage 3 reads field
+		 * a, which only stage 1 wrote (skipping stage 2, which wrote b): a
+		 * field written by an earlier stage, not the immediately-preceding
+		 * stage. Accepted (rc == 0) - the packet carries a across the two
+		 * boundaries. An immediately-preceding-only builder rejects it
+		 * (rc == -1 instead of 0), so this witness discriminates the two
+		 * candidate incoming-field rules. */
+		{
+			parsed p = ps_parse("ls_skip_ok.pigen",
+				"module ls_skip_ok(input logic clk, input logic [7:0] x, "
+				"input logic [7:0] y);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline ls_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tbit [7:0] c;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= x;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tb <= y;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tc <= a;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield c;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			const pigen_syntax_node *items[8];
+			const pigen_syntax_node *fields[8];
+			size_t field_count;
+			size_t item_count;
+			pigen_pipeline_stage view;
+			int rc;
+
+			REQUIRE(ps_stage_nodes(&p, stages) == 3);
+			field_count = ps_field_nodes(&p, fields);
+			REQUIRE(field_count == 3);
+			/* Stage 3 (the third stage) has one item: c <= a, whose RHS is
+			 * field a. */
+			item_count = ps_stage_items(&p, stages[2], items);
+			REQUIRE(item_count == 1);
+			{
+				pigen_source_span rhs = ps_name_span(&p,
+					items[0]->as.nonblocking_assignment.value);
+
+				REQUIRE(span_is(&p.sources, rhs, "a"));
+			}
+			ps_unit(&p, &u);
+			ps_port(&p, &u, "x", 8);
+			ps_port(&p, &u, "y", 8);
+			rc = ps_drives(&p, &u, stages[2], &view);
+			REQUIRE(rc == 0);
+			REQUIRE(!pigen_pipeline_stage_is_invalid(&view));
+			/* One outgoing write (c <= a); the incoming read is the
+			 * pipeline field a (not an external read), so read_count is 0.
+			 * in_bits is field a (the incoming), out_bits is field c (the
+			 * outgoing) - equal, so the boundary keeps its total $bits. */
+			REQUIRE(view.write_count == 1);
+			REQUIRE(view.read_count == 0);
+			REQUIRE(view.in_bits == ps_field_width(&p, fields[0]));
+			REQUIRE(view.out_bits == ps_field_width(&p, fields[2]));
+			/* The outgoing write is stage 3's nonblocking assignment,
+			 * located through the parse. */
+			REQUIRE(view.first_write.index ==
+				ps_node_id(&p, stages[2], items[0]).index);
 			ps_free_unit(&u);
 			ps_free(&p);
 		}
