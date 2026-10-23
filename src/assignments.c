@@ -1,5 +1,6 @@
 /* Signal assignment recognition, validation, and ready/valid lowering. */
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -873,6 +874,28 @@ void pigen_emit_width_checks(pigen_string *output, pigen_width_checks *checks,
 	}
 }
 
+static const char *resolve_same_fire_register(const char *name, size_t name_length,
+	pigen_assignments *assignments, pigen_primitives *primitives)
+{
+	fprintf(stderr, "DBG helper: name=%s len=%zu\n", name, name_length);
+	if (!is_identifier_range(name, name_length)) return NULL;
+	fprintf(stderr, "DBG helper: is_id=1\n");
+	pigen_primitive *primitive = pigen_find_primitive(primitives, name, name_length);
+	if (primitive && primitive->transfer_type != 'r' && primitive->transfer_type != 'l' &&
+		primitive->transfer_type != 'm' && primitive->transfer_type != 'w')
+		return NULL;
+	for (size_t i = 0; i < assignments->count; i++)
+	{
+		pigen_assignment *a = &assignments->items[i];
+		if (strlen(a->destination) != name_length) continue;
+		if (memcmp(a->destination, name, name_length)) continue;
+		if (a->destination_code == 'R' || a->destination_code == 'L' || a->destination_code == 'M' ||
+			a->destination_code == 'r' || a->destination_code == 'l' || a->destination_code == 'm')
+			return a->expression;
+	}
+	return NULL;
+}
+
 void pigen_emit_assignment_routes(pigen_string *output, pigen_assignments *assignments, pigen_primitives *primitives)
 {
 	size_t i;
@@ -1049,7 +1072,25 @@ void pigen_emit_assignment_routes(pigen_string *output, pigen_assignments *assig
 		emit_group_validity(output, assignments, assignment->group, primitives, NULL);
 		pigen_append(output, " && "); emit_group_ready(output, assignments, assignment->group, primitives);
 		pigen_append(output, ")\n\t\t\t"); pigen_append(output, assignment->destination); pigen_append(output, " <= ");
-		pigen_emit_rewritten_expression(output, assignment->expression, assignment->expression + strlen(assignment->expression), primitives);
+		{
+			pigen_string rhs = {0};
+			pigen_emit_rewritten_expression(&rhs, assignment->expression, assignment->expression + strlen(assignment->expression), primitives);
+			fprintf(stderr, "DBG emit: dest=%s expr=%s rhs=%s\n", assignment->destination, assignment->expression, rhs.data ? rhs.data : "(null)");
+			if (rhs.data)
+			{
+				const char *establishing = resolve_same_fire_register(rhs.data, strlen(rhs.data), assignments, primitives);
+				if (establishing)
+				{
+					pigen_string est = {0};
+					pigen_emit_rewritten_expression(&est, establishing, establishing + strlen(establishing), primitives);
+					pigen_append(output, est.data ? est.data : "");
+					free(est.data);
+				}
+				else
+					pigen_append(output, rhs.data);
+			}
+			free(rhs.data);
+		}
 		pigen_append(output, ";\n\tend\n\n");
 	}
 }
