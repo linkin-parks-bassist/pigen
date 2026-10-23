@@ -32,15 +32,19 @@
  *
  *   (1) buf-storage: one one-entry buf storage per stage boundary. The anchor
  *       is a legal 3-stage pipeline that lowers to rc == 0 and publishes
- *       exactly (N-1) = 2 stage-boundary buf storages; the red form drives
- *       the lowering on a real, non-pipeline syntax id (the module's clocked
- *       process node), which the seam itself must reject (rc == -1).
+ *       exactly (N-1) = 2 stage-boundary buf storages; the red is a
+ *       source-level stage-law violation the seam now reaches - the first
+ *       stage reads pipeline field b, which no earlier stage has written
+ *       (an uninitialized field read, the step-(b) first-stage law) - driven
+ *       through the seam on the real pipeline node (rc == -1).
  *   (2) next-value-equations: per-stage combinational next-value equations over
  *       the immutable incoming fields, the field value visible in the
  *       following stage. The anchor lowers a legal 2-stage pipeline to rc == 0
  *       and asserts the published per-stage next-value equations (one per
- *       stage); the red form drives a real, non-pipeline syntax id the seam
- *       must reject (rc == -1).
+ *       stage); the red is a source-level stage-law violation the seam now
+ *       reaches - an adjacent stage boundary that keeps UNEQUAL total $bits
+ *       (the step-(b) repartition law) - driven through the seam on the real
+ *       pipeline node (rc == -1).
  *   (3) yield-write: the final yield writes the outgoing packet (the step-(a)
  *       established aggregate of the YIELD-SELECTED field set). The anchor
  *       lowers a legal pipeline to rc == 0 and asserts some published RTL object
@@ -62,44 +66,42 @@
  *       ready/valid equations are published); the red form drives a real,
  *       non-pipeline syntax id the seam must reject (rc == -1).
  *
- * The red form of each red+anchor section is a SEAM red: the lowering's own
- * rejection of a syntax id that names a real node of the module that is not a
- * PIGEN_SYNTAX_PIPELINE statement (the module's clocked-process node). That
- * rejection is the full-contract node-kind obligation the (c3) implementation
- * adds (include/pigen/pipeline_lower.h) - a well-established identity with a
- * legal pipeline must lower, so the non-pipeline id must be the form the
- * lowering itself rejects. The SOURCE-level stage-law reds the earlier (c2)
- * draft used (a first stage reading a field no earlier stage wrote; an
- * adjacent boundary keeping unequal total $bits) are UNREACHABLE at this
- * seam: the facts exist only in the syntax tree, which the seam does not
- * carry (the lowering context holds only the semantic and RTL models), the
- * pipeline's fields are not semantic signals, the step-(a) owner accepts
- * every such source (pigen_pipeline_identifier_establish returns 0), and the
- * step-(b) law owner (src/pipeline_stage.c) is not linked into this target.
- * Those source-level laws are fully covered where they can be driven:
- * pipeline-stage-test (tests/pipeline_stage_test.c) is green and
- * discriminating on master - first-stage-external-reads pins the first-stage
- * uninitialized-field read (the bs_red / yw_red / sbw_red law) and
- * repartition-equal-bits pins the unequal-total-$bits boundary (the nve_red
- * law).
+ * The red form is, per section, the form the lowering must reject (rc == -1)
+ * that a legal pipeline does not hit:
+ *   - buf-storage and next-value-equations carry a SOURCE-LEVEL stage-law red.
+ *     The corrected seam carries the PIGEN_SYNTAX_PIPELINE node and the
+ *     expanded source (consistent with the step-(a)/(b) siblings,
+ *     pigen_pipeline_identifier_establish / pigen_pipeline_stage_laws), so the
+ *     stage facts - the first-stage field reads and the per-boundary total
+ *     $bits - are now reachable at this seam, and the step-(b) law owners the
+ *     lowering reaches (src/pipeline_stage.c, pigen_pipeline_stage_laws)
+ *     define the laws the reds pin. Each red is located through the parse
+ *     (the first stage's one nonblocking-assignment item whose RHS is the
+ *     unwritten field b; stage 2's one item whose 8-bit destination c follows
+ *     16 bits of incoming fields) and driven through the seam on the real
+ *     pipeline node: the lowering must reject it. A permissive builder that
+ *     accepts the violation lowers it (rc == 0), failing the red; the legal
+ *     pipeline still lowers in the anchor, so the red discriminates the law.
+ *   - yield-write and step-b-witnesses carry a SEAM red: the lowering is
+ *     driven with a real node of the module that is not a
+ *     PIGEN_SYNTAX_PIPELINE statement (the module's clocked-process node). The
+ *     seam carries the node pointer and validates its kind, so the node-kind
+ *     rejection is the seam's own full-contract obligation
+ *     (include/pigen/pipeline_lower.h: pipeline must name a
+ *     PIGEN_SYNTAX_PIPELINE node) - a well-established identity with a legal
+ *     pipeline must lower, so the non-pipeline node must be the form the
+ *     lowering itself rejects.
+ * emitted-member-order is an anchor-only section: the width-keyed aggregate's
+ * member order has no contract-level negative witness (the type is keyed only
+ * on summed packed width, the owner/route level is order-insensitive), so the
+ * order law is pinned structurally by the emitted SV (does/the/concatenation/
+ * data/type/keying/keep/member/order.md) and needs no red form.
  *
- * Witness construction: each section parses a legal pipeline through the
- * structured syntax path (pigen_parse_syntax) to obtain the PIGEN_SYNTAX_
- * PIPELINE node, its stage children, its field declarations and its yield
- * expression; builds the surrounding resolved module through the semantic
- * owners (the same module-scope skeleton the resolver builds for a clocked
- * process, since the structured lowerer does not yet carry a pipeline
- * statement through pigen_resolve_semantics); establishes the step-(a)
- * outgoing-packet identity (pigen_pipeline_identifier_establish) the lowering
- * consumes as a validated input; then drives the owner entry point
- * (pigen_pipeline_lower) and reads back ONLY through the owner accessors
- * (pigen_rtl_object_get / pigen_rtl_equation_get / pigen_rtl_process_get /
- * pigen_rtl_module_get / pigen_rtl_instance_get over the pigen_rtl_model, and
- * the step-(a)/(b) accessors). Every witness is located through the parse and
- * every expected width is computed from the parsed node (field widths from the
- * [hi:lo] span within the field's own declaration; the total $bits as their
- * sum) - never by a source-text search over the output. No prototype reuse, no
- * editing of any other test file or production source.
+ * Every witness is located through the parse and every expected width is
+ * computed from the parsed node (field widths from the [hi:lo] span within the
+ * field's own declaration; the total $bits as their sum) - never by a
+ * source-text search over the output. No prototype reuse, no editing of any
+ * other test file or production source beyond the seam this correction extends.
  *
  * The manifest compiles clean under -Werror via `make pipeline-lower-test`
  * (the Makefile target builds it in a fresh invocation-owned directory with the
@@ -107,11 +109,13 @@
  * state against the (c1) fail-loud stub: the anchors of buf-storage,
  * next-value-equations, yield-write, emitted-member-order and step-b-witnesses
  * fail at their REQUIRE(rc == 0) - the correct hidden-red state that goes
- * green when the (c3) implementation lands - while every seam red holds
- * (REQUIRE(rc == -1)). Each section independently discriminates its pinned
+ * green when the (c3) implementation lands - while every red holds
+ * (REQUIRE(rc == -1)): the two source-level stage-law reds (buf-storage,
+ * next-value-equations) and the two seam node-kind reds (yield-write,
+ * step-b-witnesses). Each section independently discriminates its pinned
  * behavior: a builder that drops the anchor's published records turns exactly
- * that section red, and a builder that accepts a non-pipeline syntax id fails
- * every section's seam red.
+ * that section red, and a builder that accepts a source-level stage-law
+ * violation or a non-pipeline node fails that section's red.
  */
 #include "check.h"
 #include <stdio.h>
@@ -122,7 +126,6 @@
 #include "pigen/expression.h"
 #include "pigen/pipeline_identity.h"
 #include "pigen/pipeline_lower.h"
-#include "pigen/pipeline_stage.h"
 #include "pigen/preprocess.h"
 #include "pigen/rtl.h"
 #include "pigen/rtl_lower.h"
@@ -396,6 +399,116 @@ static size_t pl_stage_nodes(const parsed *p, const pigen_syntax_node **stages)
 	return count;
 }
 
+/* The parsed pipeline's field (signal-declaration) nodes in source order. */
+static size_t pl_field_nodes(const parsed *p, const pigen_syntax_node **fields)
+{
+	const pigen_syntax_node *pipeline = p->pipeline;
+	size_t count = 0;
+	pigen_syntax_id child;
+
+	for (child = pipeline->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&p->tree, child);
+
+		if (node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION)
+			fields[count++] = node;
+		child = node->next_sibling;
+	}
+	return count;
+}
+
+/* The module's clocked-process node, located through the parse (the module's
+ * PIGEN_SYNTAX_CLOCKED_PROCESS child). */
+static const pigen_syntax_node *pl_process_node(const parsed *p)
+{
+	const pigen_syntax_node *module;
+
+	module = NULL;
+	for (pigen_syntax_id c = pigen_syntax_get(&p->tree, (pigen_syntax_id){0})->first_child;
+		c.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&p->tree, c);
+
+		REQUIRE(node);
+		if (node->kind == PIGEN_SYNTAX_MODULE) module = node;
+		c = node->next_sibling;
+	}
+	REQUIRE(module);
+	for (pigen_syntax_id c = module->first_child; c.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&p->tree, c);
+
+		REQUIRE(node);
+		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS) return node;
+		c = node->next_sibling;
+	}
+	REQUIRE(0);
+	return NULL;
+}
+
+/* One stage's item nodes (the nonblocking assignments and stage-local
+ * declarations) in source order. */
+static size_t pl_stage_items(const parsed *p, const pigen_syntax_node *stage,
+	const pigen_syntax_node **items)
+{
+	size_t count = 0;
+	pigen_syntax_id child;
+
+	for (child = stage->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&p->tree, child);
+
+		REQUIRE(node);
+		items[count++] = node;
+		child = node->next_sibling;
+	}
+	return count;
+}
+
+/* The packed width of one pipeline field, read from its own declaration text
+ * (the [hi:lo] range within the field's node span). The width, not a
+ * source-text search over the output, is the discriminator. */
+static size_t pl_field_width(const parsed *p, const pigen_syntax_node *field)
+{
+	const char *ftext = p->sources.files ? p->sources.files[0].text : NULL;
+	pigen_source_span span = field->location.source_span;
+	const char *open;
+	const char *close;
+	const char *hi;
+	const char *lo;
+	unsigned long hi_w;
+	unsigned long lo_w;
+
+	REQUIRE(field->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION);
+	REQUIRE(ftext);
+	open = ftext + span.start;
+	open = memchr(open, '[', span.end - span.start);
+	REQUIRE(open);
+	close = strchr(open, ']');
+	REQUIRE(close && (size_t)(close - ftext) < span.end);
+	hi = open + 1;
+	while (*hi == ' ' || *hi == '[') hi++;
+	lo = strchr(hi, ':');
+	REQUIRE(lo && (size_t)(lo - ftext) < (size_t)(close - ftext));
+	lo_w = strtoul(lo + 1, NULL, 10);
+	hi_w = strtoul(hi, (char **)NULL, 10);
+	return (size_t)(hi_w - lo_w + 1);
+}
+
+/* The NAME expression's original spelling span, resolved through the
+ * expanded-source token origins. */
+static pigen_source_span pl_name_span(const parsed *p, pigen_syntax_expr_id expr)
+{
+	const pigen_syntax_expr *e = pigen_syntax_expr_get(&p->tree.expressions,
+		expr);
+	const pigen_expanded_token *token;
+
+	REQUIRE(e && e->kind == PIGEN_SYNTAX_EXPR_NAME);
+	token = pigen_expanded_token_get(&p->pre.expanded, e->as.atom.token);
+	REQUIRE(token);
+	return pigen_origin_spelling_span(&p->pre.expanded, token->origin);
+}
+
 /* Establishes the step-(a) outgoing-packet identity the lowering consumes as a
  * validated input, fills *ident, and returns the establish status (0 accepted,
  * -1 diagnosed). */
@@ -421,33 +534,33 @@ static int pl_drive(const parsed *p, unit *u, pigen_rtl_lowering *lowering,
 		return -1;
 	pigen_rtl_lowering_init(lowering, &u->model, rtl);
 	{
-		int rc = pigen_pipeline_lower(lowering, u->module, p->pipeline_id);
+		int rc = pigen_pipeline_lower(lowering, u->module, p->pipeline_id,
+			p->pipeline, &p->pre.expanded);
 
 		pigen_rtl_lowering_free(lowering);
 		return rc;
 	}
 }
 
-/* Drives the owner under test with a SEAM red: a syntax id that names a real
- * node of the module that is not a PIGEN_SYNTAX_PIPELINE statement (the
- * enclosing clocked-process node, located through the semantic model's
- * process record). The lowering context carries no syntax tree, so the
- * node-kind rejection is the seam's own full-contract obligation
- * (include/pigen/pipeline_lower.h: syntax must name a PIGEN_SYNTAX_PIPELINE
- * node); a well-established identity with a legal pipeline must lower, so
- * the non-pipeline id must be rejected. Returns the lowering status (0
- * accepted, -1 diagnosed). */
-static int pl_seam_red(unit *u, pigen_rtl_lowering *lowering,
+/* Drives the owner under test with a SEAM red: a real node of the module that
+ * is not a PIGEN_SYNTAX_PIPELINE statement (the enclosing clocked-process node,
+ * located through the parse) is passed as the pipeline node to the seam. The
+ * seam carries the node pointer and validates its kind, so the node-kind
+ * rejection is now the seam's own full-contract obligation
+ * (include/pigen/pipeline_lower.h: pipeline must name a PIGEN_SYNTAX_PIPELINE
+ * node) - a well-established identity with a legal pipeline must lower, so the
+ * non-pipeline node must be rejected. Returns the lowering status (0 accepted,
+ * -1 diagnosed). */
+static int pl_seam_red(const parsed *p, unit *u, pigen_rtl_lowering *lowering,
 	pigen_rtl_model *rtl)
 {
-	const pigen_semantic_process *proc;
+	const pigen_syntax_node *proc = pl_process_node(p);
 
-	proc = pigen_process_get(&u->model, u->process);
-	REQUIRE(proc && !IS_INVALID_ID(proc->syntax));
 	memset(rtl, 0, sizeof *rtl);
 	pigen_rtl_lowering_init(lowering, &u->model, rtl);
 	{
-		int rc = pigen_pipeline_lower(lowering, u->module, proc->syntax);
+		int rc = pigen_pipeline_lower(lowering, u->module, p->pipeline_id,
+			proc, &p->pre.expanded);
 
 		pigen_rtl_lowering_free(lowering);
 		return rc;
@@ -463,19 +576,19 @@ int main(int argc, char **argv)
 	/*     published, one per stage boundary (what/is/a/buf.md; the          */
 	/*     intended lowering uses a dedicated primitive instance). The       */
 	/*     anchor is a legal 3-stage pipeline that lowers to rc == 0 and     */
-	/*     publishes exactly (N-1) = 2 stage-boundary buf storages; the      */
-	/*     red form drives the lowering with the module's clocked-process    */
-	/*     node id - a real, non-pipeline syntax id the seam must reject     */
-	/*     (rc == -1). The source-level law red this section once carried    */
-	/*     (a first stage reading an uninitialized field) is unreachable     */
-	/*     at this seam: the stage facts exist only in the syntax tree the   */
-	/*     seam does not carry, the pipeline fields are not semantic         */
-	/*     signals, the step-(a) owner accepts the red source (establish     */
-	/*     returns 0) and the step-(b) law owner is not linked into this     */
-	/*     target. The law is green and discriminating where it can be       */
-	/*     driven: pipeline-stage-test, section first-stage-external-reads.  */
-	/*     A builder that publishes the wrong number of stage storages, or   */
-	/*     that accepts a non-pipeline syntax id, fails this section.        */
+	/*     publishes exactly (N-1) = 2 stage-boundary buf storages. The red  */
+	/*     is a SOURCE-LEVEL stage-law violation the corrected seam reaches  */
+	/*     (it now carries the pipeline node + expanded source): the first   */
+	/*     stage reads pipeline field b, which no earlier stage has written  */
+	/*     (an uninitialized field read, the step-(b) first-stage law),      */
+	/*     located through the parse and driven through the seam on the     */
+	/*     real pipeline node (rc == -1). A permissive builder that accepts  */
+	/*     a first-stage field read lowers it (rc == 0), failing the red;    */
+	/*     a legal pipeline still lowers in the anchor, so the red           */
+	/*     discriminates the law. The same law is green and discriminating   */
+	/*     where it can be driven on its own owner: pipeline-stage-test,     */
+	/*     section first-stage-external-reads. A builder that publishes the  */
+	/*     wrong number of stage storages fails this section's anchor.       */
 	/* ------------------------------------------------------------------ */
 	SECTION("buf-storage") {
 		/* Anchor: a legal 3-stage pipeline lowers and publishes two
@@ -520,30 +633,55 @@ int main(int argc, char **argv)
 			pigen_free_rtl_model(&rtl);
 			pl_free(&p);
 		}
-		/* Red: the lowering driven with a real, non-pipeline syntax id (the
-		 * module's clocked-process node) must reject it - the node-kind
-		 * rejection is the seam's own full-contract obligation. */
+		/* Red: a SOURCE-LEVEL stage-law violation the seam now reaches - the
+		 * first stage reads pipeline field b, which no earlier stage has
+		 * written (an uninitialized field read, the step-(b) first-stage law).
+		 * The violation is located through the parse (the first stage's one
+		 * nonblocking-assignment item whose RHS name is b) and driven through
+		 * the seam on the real pipeline node: the lowering must reject it
+		 * (rc == -1). A permissive builder that accepts a first-stage field
+		 * read lowers it (rc == 0), failing this red; a legal pipeline still
+		 * lowers in the anchor above, so the red discriminates the law. */
 		{
 			parsed p = pl_parse("bs_red.pigen",
 				"module bs_red(input logic clk, input logic [7:0] x);\n"
 				"\talways @(posedge clk) begin\n"
 				"\t\tpipeline bs_pipe begin\n"
 				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
 				"\t\t\tstage begin\n"
-				"\t\t\t\ta <= x;\n"
+				"\t\t\t\ta <= b;\n"
 				"\t\t\tend\n"
-				"\t\t\tyield a;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tb <= x;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield b;\n"
 				"\t\tendpipeline\n"
 				"\tend\n"
 				"endmodule");
 			unit u;
+			const pigen_syntax_node *stages[4];
+			const pigen_syntax_node *items[8];
+			size_t item_count;
 			pigen_rtl_lowering lowering;
 			pigen_rtl_model rtl;
 			int rc;
 
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			item_count = pl_stage_items(&p, stages[0], items);
+			REQUIRE(item_count == 1);
+			REQUIRE(items[0]->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
+			/* The first stage's RHS is pipeline field b, located through the
+			 * parse - the field no earlier stage wrote. */
+			{
+				pigen_source_span rhs = pl_name_span(&p,
+					items[0]->as.nonblocking_assignment.value);
+
+				REQUIRE(span_is(&p.sources, rhs, "b"));
+			}
 			pl_unit(&p, &u);
 			pl_port(&p, &u, "x", 8);
-			rc = pl_seam_red(&u, &lowering, &rtl);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
 			REQUIRE(rc == -1);
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
@@ -558,20 +696,20 @@ int main(int argc, char **argv)
 	/*     pipeline/stage/reads/work.md), the field value visible in the     */
 	/*     following stage without an extra cycle. The anchor lowers a       */
 	/*     legal 2-stage pipeline to rc == 0 and asserts the per-stage       */
-	/*     next-value equations are published (at least one per stage); the  */
-	/*     red form drives the lowering with the module's clocked-process    */
-	/*     node id - a real, non-pipeline syntax id the seam must reject     */
-	/*     (rc == -1). The source-level law red this section once carried    */
-	/*     (an adjacent boundary keeping unequal total $bits) is             */
-	/*     unreachable at this seam: the boundary facts exist only in the    */
-	/*     syntax tree the seam does not carry, the pipeline fields are not  */
-	/*     semantic signals, the step-(a) owner accepts the red source       */
-	/*     (establish returns 0) and the step-(b) law owner is not linked    */
-	/*     into this target. The law is green and discriminating where it    */
-	/*     can be driven: pipeline-stage-test, section repartition-          */
-	/*     equal-bits. A builder that drops the per-stage next-value         */
-	/*     equations, or that accepts a non-pipeline syntax id, fails this   */
-	/*     section.                                                         */
+	/*     next-value equations are published (at least one per stage). The  */
+	/*     red is a SOURCE-LEVEL stage-law violation the corrected seam      */
+	/*     reaches: an adjacent stage boundary that keeps UNEQUAL total      */
+	/*     $bits (the step-(b) repartition law), located through the parse   */
+	/*     (stage 2's one item whose 8-bit destination c follows 16 bits of  */
+	/*     incoming fields) and driven through the seam on the real          */
+	/*     pipeline node (rc == -1). A builder that widens or narrows the    */
+	/*     carried packet across a boundary lowers it (rc == 0), failing the */
+	/*     red; a legal equal-$bits pipeline still lowers in the anchor, so  */
+	/*     the red discriminates the law. The same law is green and          */
+	/*     discriminating where it can be driven on its own owner:           */
+	/*     pipeline-stage-test, section repartition-equal-bits. A builder    */
+	/*     that drops the per-stage next-value equations fails this section's*/
+	/*     anchor.                                                          */
 	/* ------------------------------------------------------------------ */
 	SECTION("next-value-equations") {
 		/* Anchor: a legal 2-stage pipeline lowers and publishes the per-stage
@@ -614,30 +752,63 @@ int main(int argc, char **argv)
 			pigen_free_rtl_model(&rtl);
 			pl_free(&p);
 		}
-		/* Red: the lowering driven with a real, non-pipeline syntax id (the
-		 * module's clocked-process node) must reject it - the node-kind
-		 * rejection is the seam's own full-contract obligation. */
+		/* Red: a SOURCE-LEVEL stage-law violation the seam now reaches - an
+		 * adjacent stage boundary that keeps UNEQUAL total $bits (the step-(b)
+		 * repartition law). Stage 1 writes a (8) and b (8) - a 16-bit outgoing
+		 * packet; stage 2 reads {a, b} (16-bit incoming) but writes c (8-bit),
+		 * so the boundary carries 16 bits in and 8 bits out. The violation is
+		 * located through the parse (stage 2's one nonblocking-assignment item
+		 * whose destination c is 8 bits wide while its incoming fields sum to
+		 * 16) and driven through the seam on the real pipeline node: the
+		 * lowering must reject it (rc == -1). A builder that widens or narrows
+		 * the carried packet across a boundary lowers it (rc == 0), failing
+		 * this red; a legal equal-$bits pipeline still lowers in the anchor
+		 * above, so the red discriminates the law. */
 		{
 			parsed p = pl_parse("nve_red.pigen",
-				"module nve_red(input logic clk, input logic [7:0] x);\n"
+				"module nve_red(input logic clk, input logic [7:0] x, "
+				"input logic [7:0] y);\n"
 				"\talways @(posedge clk) begin\n"
 				"\t\tpipeline nve_pipe begin\n"
 				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tbit [7:0] c;\n"
 				"\t\t\tstage begin\n"
 				"\t\t\t\ta <= x;\n"
+				"\t\t\t\tb <= y;\n"
 				"\t\t\tend\n"
-				"\t\t\tyield a;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tc <= {a, b};\n"
+				"\t\t\tend\n"
+				"\t\t\tyield c;\n"
 				"\t\tendpipeline\n"
 				"\tend\n"
 				"endmodule");
 			unit u;
+			const pigen_syntax_node *stages[4];
+			const pigen_syntax_node *fields[8];
+			const pigen_syntax_node *items[8];
+			size_t field_count;
+			size_t item_count;
 			pigen_rtl_lowering lowering;
 			pigen_rtl_model rtl;
 			int rc;
 
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			field_count = pl_field_nodes(&p, fields);
+			REQUIRE(field_count == 3);
+			/* Field widths from the parsed declaration spans: a = 8, b = 8,
+			 * c = 8 - the boundary keeps 16 bits in but 8 bits out. */
+			REQUIRE(pl_field_width(&p, fields[0]) == 8);
+			REQUIRE(pl_field_width(&p, fields[1]) == 8);
+			REQUIRE(pl_field_width(&p, fields[2]) == 8);
+			item_count = pl_stage_items(&p, stages[1], items);
+			REQUIRE(item_count == 1);
+			REQUIRE(items[0]->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
 			pl_unit(&p, &u);
 			pl_port(&p, &u, "x", 8);
-			rc = pl_seam_red(&u, &lowering, &rtl);
+			pl_port(&p, &u, "y", 8);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
 			REQUIRE(rc == -1);
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
@@ -704,7 +875,8 @@ int main(int argc, char **argv)
 			 * symbol declaration rejects). */
 			memset(&rtl, 0, sizeof rtl);
 			pigen_rtl_lowering_init(&lowering, &u.model, &rtl);
-			rc = pigen_pipeline_lower(&lowering, u.module, p.pipeline_id);
+			rc = pigen_pipeline_lower(&lowering, u.module, p.pipeline_id,
+				p.pipeline, &p.pre.expanded);
 			pigen_rtl_lowering_free(&lowering);
 			REQUIRE(rc == 0);
 			/* The yield write's destination is the established outgoing-
@@ -759,7 +931,7 @@ int main(int argc, char **argv)
 
 			pl_unit(&p, &u);
 			pl_port(&p, &u, "x", 8);
-			rc = pl_seam_red(&u, &lowering, &rtl);
+			rc = pl_seam_red(&p, &u, &lowering, &rtl);
 			REQUIRE(rc == -1);
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
@@ -988,7 +1160,7 @@ int main(int argc, char **argv)
 
 			pl_unit(&p, &u);
 			pl_port(&p, &u, "x", 8);
-			rc = pl_seam_red(&u, &lowering, &rtl);
+			rc = pl_seam_red(&p, &u, &lowering, &rtl);
 			REQUIRE(rc == -1);
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);

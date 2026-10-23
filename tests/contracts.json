@@ -1047,7 +1047,8 @@
     "covers": [
       "tests/pipeline_lower_test.c",
       "src/pipeline_lower.c",
-      "src/pipeline_identity.c"
+      "src/pipeline_identity.c",
+      "src/pipeline_stage.c"
     ],
     "command": [
       "make",
@@ -1059,7 +1060,8 @@
     "covers": [
       "tests/pipeline_lower_test.c",
       "src/pipeline_lower.c",
-      "src/pipeline_identity.c"
+      "src/pipeline_identity.c",
+      "src/pipeline_stage.c"
     ],
     "command": [
       "make",
