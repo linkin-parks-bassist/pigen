@@ -710,5 +710,16 @@
       "make",
       "biquad-bank-test"
     ]
+  },
+  {
+    "covers": [
+      "tests/coslice_xprop.pigen",
+      "tests/coslice_xprop_tb.sv",
+      "src/assignments.c"
+    ],
+    "command": [
+      "make",
+      "coslice-xprop-test"
+    ]
   }
 ]
