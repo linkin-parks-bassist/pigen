@@ -1,7 +1,7 @@
 ---
 status: green
 revised_at: "2026-10-21T15:45:41+11:00"
-checked_at: "2026-10-19T17:24:35+11:00"
+checked_at: '2026-10-22T07:14:35+11:00'
 ---
 
 Run `make source-test preprocess-test transfer-type-test syntax-model-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test rtl-name-test output-model-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test sv-emit-test compile-test`. These twenty C17 warning-as-error targets each compile their artifact in a fresh `mktemp -d` invocation-owned directory, run it, then remove the directory, so a run observes only the binary it just built (the artifact-ownership contract owns the why); the legacy fixed `/tmp/pigen-<name>` path is `rm -f`'d first and no executable is left at it. They exercise the unlinked structured foundation; the prototype's SV, pipeline and waveform targets are separate. `pipeline-identity-test` is the twenty-first such target but is not in this no-argument run: it requires an explicit section, `make pipeline-identity-test T=<section>` for `<section>` in {shape, field-buf, scope, yield}, and with no argument it prints a usage line and exits 2.

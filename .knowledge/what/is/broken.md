@@ -1,12 +1,12 @@
 ---
 status: green
-revised_at: "2026-10-16T19:05:19+11:00"
+revised_at: "2026-10-24T10:38:50+11:00"
 ---
 
-The structured frontend and elastic RTL work remain incomplete. Passing focused tests do not establish full compiler acceptance.
+The structured frontend and elastic RTL migration remain incomplete. Passing focused tests does not establish full compiler acceptance.
 
-- **The elastic RTL vertical slice is complete.** Tasks 6 (declaration lowering), 8 (atomic fire/identity), 9 (ordered output), 10 (terminal SV emission), 11 (quarantined composition/simulation) and 12 (verification and accurate status) are all complete; the terminal emitter renders a finished, named RTL lowering to SystemVerilog validate-first, committing no partial output, and `make verify` exits 0 on master. No further in-order step remains; Task 7 (ready-cycle validation) is deferred to Pigen 1.0. The declaration-lowering contract and evidence are owned by `what/is/elastic/rtl/task/six.md`; the complete vertical-slice state is owned by `what/is/the/plan.md`.
-- **Structured frontend is unlinked from production ./pigen.** The production Makefile target still compiles the textual prototype rather than the structured syntax, resolution, semantic and RTL path. See does/the/structured/frontend/run/in/production.md.
-- **Retained-subsystem build and frontend gaps.** Core, pipeline, FSM, child-instance and fabric are specified from the spec and built on the structured path, subject to what/are/the/remaining/architecture/migration/gates.md. Accepted parameter/type/aggregate/array/expression forms and macro concatenation/stringification/required arguments remain incomplete. Delete textual machinery only when the corresponding retained subsystem's structured path covers the spec.
+- The production Makefile target builds the textual prototype, excluding the structured syntax/resolution/semantic/RTL path. See `does/the/structured/frontend/run/in/production.md`.
+- The inspected working checkout's composer treats semantic resolution's success return (1) as failure. Its compile tests still expect failure and its vertical-slice simulation target invokes the prototype CLI. Task 11 composition/simulation and Task 12 accurate integration status are therefore not established by those tests. The newer master commit has not been compared for this defect; do not generalize checkout evidence into verified master status.
+- Retained pipeline, FSM, child-instance and fabric migration and accepted parameter/type/aggregate/array/expression/macro forms remain subject to `what/are/the/remaining/architecture/migration/gates.md`. Focused owner seams are not evidence of their integration into the composed compiler.
 
-With Verilator 5.020 and Icarus 13.0 installed, `make verify` exits 0 on master.
+Terminal SV emission and other backend components exist separately. A green prototype verification run does not establish a successful structured compilation or complete retained-feature coverage. The remaining work and open decisions are owned by `what/is/the/plan.md`.

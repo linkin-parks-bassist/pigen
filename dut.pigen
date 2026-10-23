@@ -1,0 +1,18 @@
+modulde dut
+	(
+		input wire clk,
+		input wire reset,
+		
+		input   buf[8] i_data,
+		output port[8] o_data
+	);
+
+	buf[8] intermediate;
+	
+	always @(posedge clk) begin
+		intermediate <= i_data;
+		o_data <= intermediate;
+		o_data <= i_data;
+	end
+
+endmodule
