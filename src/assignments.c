@@ -193,6 +193,10 @@ static char *repartition_expression(const char *expression, size_t expression_le
 		}
 		pigen_append(&result, ")");
 	}
+	else
+	{
+		pigen_append(&result, " >> 0");
+	}
 	pigen_append(&result, ")");
 	return result.data;
 }
