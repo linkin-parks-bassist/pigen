@@ -170,8 +170,7 @@ int main(int argc, char **argv)
 
 	/* ------------------------------------------------------------------ */
 	/* (1) Route lifecycle: init zeroes the record and stores the module;  */
-	/*     free releases the node arena and zeroes the record. The build   */
-	/*     and check stubs report the -1 unimplemented sentinel.           */
+	/*     free releases the node arena and zeroes the record.             */
 	/* ------------------------------------------------------------------ */
 	SECTION("route-lifecycle") {
 		memset(&sources, 0, sizeof sources);
@@ -186,11 +185,6 @@ int main(int argc, char **argv)
 		REQUIRE(route.nodes == NULL);
 		REQUIRE(route.check_valid == 0);
 		REQUIRE(IS_INVALID_SPAN(route.check_span));
-		/* The unimplemented build and check report -1 (the sentinel). */
-		rc = pigen_route_build(&route, &lowering, unit.module);
-		REQUIRE(rc == -1);
-		rc = pigen_route_check(&route);
-		REQUIRE(rc == -1);
 		/* free releases the (empty) arena and zeroes the record. */
 		pigen_route_free(&route);
 		REQUIRE(route.module.index == PIGEN_INVALID_ID);
