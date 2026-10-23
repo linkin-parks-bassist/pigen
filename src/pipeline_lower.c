@@ -26,7 +26,9 @@
  * the model after a failed compile, so no caller or test asserts that a
  * failure left the model unchanged (how/should/compiler/builders/fail.md). */
 int pigen_pipeline_lower(pigen_rtl_lowering *lowering,
-	pigen_module_id module, pigen_syntax_id syntax)
+	pigen_module_id module, pigen_syntax_id syntax,
+	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded)
 {
 	/* Validate the lowering context, the parent module and the pipeline node
 	 * identity, exactly as the sibling lowerer seam validates its context
@@ -37,6 +39,15 @@ int pigen_pipeline_lower(pigen_rtl_lowering *lowering,
 		!pigen_module_get(lowering->semantics, module))
 		return -1;
 	if (syntax.index == PIGEN_INVALID_ID)
+		return -1;
+	/* The seam carries the syntax tree the lowering reads: the pipeline node
+	 * and the expanded source it was parsed from (consistent with the
+	 * step-(a)/(b) siblings, which both take const pigen_syntax_node
+	 * *pipeline). Validate them and reject a node that is not a
+	 * PIGEN_SYNTAX_PIPELINE statement (the seam's own full-contract obligation
+	 * - a well-established identity with a legal pipeline must lower, so a
+	 * non-pipeline node must be the form the lowering rejects). */
+	if (!pipeline || pipeline->kind != PIGEN_SYNTAX_PIPELINE || !expanded)
 		return -1;
 	/* SKELETON: the lowering of the PIGEN_SYNTAX_PIPELINE statement through
 	 * the common RTL model is unimplemented. Report the diagnostic and return
