@@ -186,7 +186,7 @@ pipeline-lower-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-pipeline-lower-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-lower-test tests/pipeline_lower_test.c src/pipeline_lower.c src/pipeline_identity.c src/rtl.c src/rtl_lower.c src/predicate.c src/sv_emit.c src/rtl_name.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-lower-test tests/pipeline_lower_test.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c src/rtl.c src/rtl_lower.c src/predicate.c src/sv_emit.c src/rtl_name.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-pipeline-lower-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
