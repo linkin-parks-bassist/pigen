@@ -339,8 +339,8 @@ int main(int argc, char **argv)
 				const char *domain = pigen_procedural_domain_for(&procedural_ast, prefix_end);
 				pigen_string rewritten_guard = {0};
 
-				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard, parsed_guard + strlen(parsed_guard), &primitives);
-				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives);
+				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard, parsed_guard + strlen(parsed_guard), &primitives, NULL);
+				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives, NULL);
 				pigen_append(&output, ";");
 				if (clear_action_code != 3)
 					pigen_add_clear(&clears, destination, destination_length,
@@ -367,10 +367,10 @@ int main(int argc, char **argv)
 				int has_immediate_member = 0;
 				int grouped_immediate = transfer.count > 1;
 
-				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard, parsed_guard + strlen(parsed_guard), &primitives);
+				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard, parsed_guard + strlen(parsed_guard), &primitives, NULL);
 				guard = rewritten_guard.data ? rewritten_guard.data : "";
 				guard_length = strlen(guard);
-				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives);
+				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives, NULL);
 
 				for (size_t transfer_index = 0; transfer_index < transfer.count; transfer_index++)
 				{
@@ -390,7 +390,7 @@ int main(int argc, char **argv)
 					pigen_append(&output, transfer.width_lhs);
 					pigen_append(&output, " <= ");
 					pigen_emit_rewritten_expression(&output, transfer.width_rhs,
-						transfer.width_rhs + transfer.width_rhs_length, &primitives);
+						transfer.width_rhs + transfer.width_rhs_length, &primitives, &assignments);
 					pigen_append(&output, ";\n\t\tend");
 					emitted_register_member = 1;
 				}
@@ -407,7 +407,7 @@ int main(int argc, char **argv)
 						pigen_append(&output, ")\n\t\tbegin\n\t\t\t");
 						pigen_append_range(&output, item->destination, item->destination_length);
 						pigen_append(&output, " <= ");
-						pigen_emit_rewritten_expression(&output, item->expression, item->expression + item->expression_length, &primitives);
+						pigen_emit_rewritten_expression(&output, item->expression, item->expression + item->expression_length, &primitives, &assignments);
 						pigen_append(&output, ";\n\t\tend");
 						emitted_register_member = 1;
 					}
@@ -429,8 +429,8 @@ int main(int argc, char **argv)
 				parsed_guard = pigen_procedural_guard_for(&procedural_ast, prefix_end);
 				domain = pigen_procedural_domain_for(&procedural_ast, prefix_end);
 				pigen_emit_rewritten_expression(&rewritten_guard, parsed_guard,
-					parsed_guard + strlen(parsed_guard), &primitives);
-				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives);
+					parsed_guard + strlen(parsed_guard), &primitives, NULL);
+				pigen_emit_rewritten_expression(&output, start, prefix_end, &primitives, NULL);
 				pigen_append(&output, "if (");
 				pigen_emit_expression_validity(&output, expression, &primitives);
 				pigen_append(&output, ")\n\t\tbegin\n\t\t\t");
@@ -464,7 +464,7 @@ int main(int argc, char **argv)
 							pigen_skip_spaces(transfer->start, transfer->end) != conditional.prefix_end)
 							fail("conditional transfer requires declared signals");
 						pigen_emit_rewritten_expression(&rewritten_transfer_guard, transfer->guard,
-							transfer->guard + strlen(transfer->guard), &primitives);
+							transfer->guard + strlen(transfer->guard), &primitives, NULL);
 						{
 							size_t group = assignments.next_group++;
 							if (conditional.requires_exact_width)
@@ -491,7 +491,7 @@ int main(int argc, char **argv)
 					pigen_append_range(&output, endmodule, (size_t)(end - endmodule));
 				}
 				else
-					pigen_emit_rewritten_expression(&output, start, end, &primitives);
+					pigen_emit_rewritten_expression(&output, start, end, &primitives, NULL);
 
 				if (cursor < source_length)
 					pigen_append(&output, ";");
