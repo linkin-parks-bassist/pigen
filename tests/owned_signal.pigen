@@ -1,0 +1,3 @@
+module owned_signal(input logic clk, input logic reset);
+    logic [7:0] buf stage;
+endmodule
