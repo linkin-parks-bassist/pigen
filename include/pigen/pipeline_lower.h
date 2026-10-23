@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "pigen/ids.h"
+#include "pigen/preprocess.h"
 #include "pigen/rtl.h"
 #include "pigen/rtl_lower.h"
 #include "pigen/semantic.h"
@@ -96,20 +97,24 @@
  * validated source model and the target RTL model the records are published
  * into); module is the parent module identity the pipeline statement lives
  * inside (the module the pipeline's enclosing clocked process belongs to);
- * syntax is the pipeline node identity (PIGEN_SYNTAX_PIPELINE). On success it
- * returns 0. On error it returns -1 and reports the diagnostic and the compile
- * stops - it may leave partial state behind, and no test asserts that a failure
- * left the RTL model or the lowering maps unchanged (how/should/compiler/
- * builders/fail.md). SKELETON: validates its arguments (lowering, module and
- * the pipeline node are required; syntax must name a PIGEN_SYNTAX_PIPELINE
- * node), returns -1 and reports the diagnostic without linking the step-(a)/(b)
- * owners or mutating the RTL model, until the implementation stage. SKELETON:
- * the lowering context holds no syntax tree, so the stub validates only the
- * present argument set - lowering, its semantics and RTL models, a valid
- * parent module, and a non-PIGEN_INVALID_ID pipeline node identity - and
- * returns -1 for any rejected argument; the PIGEN_SYNTAX_PIPELINE kind check is
- * part of the full contract the implementation stage adds. */
+ * syntax is the pipeline node identity (PIGEN_SYNTAX_PIPELINE); pipeline is the
+ * pipeline node itself, and expanded is the expanded source the node and its
+ * field declarations were parsed from - together they carry the syntax-tree
+ * facts the lowering reads (the stage count, the per-stage field set, the yield
+ * field set/order/spans), consistent with the step-(a)/(b) siblings
+ * (pigen_pipeline_identifier_establish / pigen_pipeline_stage_laws, which both
+ * take const pigen_syntax_node *pipeline). On success it returns 0. On error it
+ * returns -1 and reports the diagnostic and the compile stops - it may leave
+ * partial state behind, and no test asserts that a failure left the RTL model or
+ * the lowering maps unchanged (how/should/compiler/builders/fail.md).
+ * SKELETON: validates its arguments (lowering, module, syntax, the pipeline
+ * node and the expanded source are required; the node must name a
+ * PIGEN_SYNTAX_PIPELINE), returns -1 and reports the diagnostic without linking
+ * the step-(a)/(b) owners or mutating the RTL model, until the implementation
+ * stage. */
 int pigen_pipeline_lower(pigen_rtl_lowering *lowering,
-	pigen_module_id module, pigen_syntax_id syntax);
+	pigen_module_id module, pigen_syntax_id syntax,
+	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded);
 
 #endif
