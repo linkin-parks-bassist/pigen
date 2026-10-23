@@ -136,11 +136,9 @@ static int span_equal(const pigen_source_span *a, const pigen_source_span *b)
 		a->start == b->start && a->end == b->end;
 }
 
-/* The object's final name: the arena name whose identity (role + origin span)
- * matches the object's role and origin. Source roles carry the provenance
- * identifier span, so the role is PIGEN_RTL_NAME_SOURCE. */
-static const char *object_name(const pigen_rtl_model *rtl,
-	const pigen_rtl_object *object)
+/* A SOURCE-kind name whose origin span equals SPAN: its provenance spelling. */
+static const char *name_for_span(const pigen_rtl_model *rtl,
+	const pigen_source_span *span)
 {
 	size_t i;
 
@@ -149,7 +147,65 @@ static const char *object_name(const pigen_rtl_model *rtl,
 		const pigen_rtl_name *name = &rtl->names[i];
 
 		if (name->kind == PIGEN_RTL_NAME_SOURCE &&
-			span_equal(&name->origin, &object->origin))
+			span_equal(&name->origin, span))
+			return name->text;
+	}
+	return NULL;
+}
+
+/* The object's final name: the arena name whose identity (role + origin span)
+ * matches the object's role and origin. Source roles carry the provenance
+ * identifier span, so the role is PIGEN_RTL_NAME_SOURCE. */
+static const char *object_name(const pigen_rtl_model *rtl,
+	const pigen_rtl_object *object)
+{
+	return name_for_span(rtl, &object->origin);
+}
+
+/* The module's final name: a SOURCE-kind name whose provenance spelling is the
+ * module's identifier. The module record's own origin span is the whole
+ * statement (or an invalid span), which is distinct from the identifier span,
+ * so the identifier is the unique SOURCE name that no object owns. */
+static const char *module_name(const pigen_rtl_model *rtl,
+	const pigen_rtl_module *module)
+{
+	size_t i;
+
+	(void)module;
+	for (i = 0; i < rtl->name_count; i++)
+	{
+		const pigen_rtl_name *name = &rtl->names[i];
+		size_t j;
+
+		if (name->kind != PIGEN_RTL_NAME_SOURCE || !name->text)
+			continue;
+		/* This name is the module's identifier when no object claims the same
+		 * origin span. */
+		for (j = 0; j < rtl->object_count; j++)
+			if (span_equal(&rtl->objects[j].origin, &name->origin))
+				break;
+		if (j < rtl->object_count)
+			continue;
+		return name->text;
+	}
+	return NULL;
+}
+
+/* The instance's final name: its synthetic INSTANCE-kind name (the role stem,
+ * e.g. `instance`) when its origin is invalid, else the SOURCE name on its
+ * origin span. */
+static const char *instance_name(const pigen_rtl_model *rtl,
+	const pigen_rtl_instance *instance)
+{
+	size_t i;
+
+	if (instance->origin.source.index != PIGEN_INVALID_ID)
+		return name_for_span(rtl, &instance->origin);
+	for (i = 0; i < rtl->name_count; i++)
+	{
+		const pigen_rtl_name *name = &rtl->names[i];
+
+		if (name->kind == PIGEN_RTL_NAME_INSTANCE)
 			return name->text;
 	}
 	return NULL;
@@ -626,13 +682,671 @@ int pigen_sv_render_expression(const pigen_rtl_model *rtl,
 	return render_expression(rtl, expr, text);
 }
 
+/* Render one expression by ID into the buffer through the precedence-aware
+ * renderer; -1 when the ID is not a live expression. */
+static int emit_expr(struct buf *b, const pigen_rtl_model *rtl,
+	pigen_rtl_expr_id id)
+{
+	const pigen_rtl_expr *expr = pigen_rtl_expr_get(rtl, id);
+
+	if (!expr)
+		return -1;
+	return render(b, rtl, expr);
+}
+
+/* Copy an opaque span's text verbatim from the source manager (byte-exact, no
+ * trim, no re-parse). */
+static int emit_opaque(struct buf *b, const pigen_source_manager *sources,
+	const pigen_output_item *item)
+{
+	const char *text;
+	size_t length;
+
+	if (!pigen_source_span_valid(sources, item->as.span))
+		return -1;
+	text = pigen_source_span_text(sources, item->as.span, &length);
+	if (!text)
+		return -1;
+	buf_append(b, text, length);
+	return b->failed ? -1 : 0;
+}
+
+/* The `[h:l]` packed range of a type, or nothing for a width-1 (scalar) type.
+ * The range is the type width: `[width-1:0]`. */
+static int emit_range(struct buf *b, const pigen_rtl_type *type)
+{
+	uint64_t width = type->width;
+
+	if (width <= 1)
+		return 0;
+	buf_append_str(b, "[");
+	buf_append_ull(b, width - 1);
+	buf_append_str(b, ":0]");
+	return b->failed ? -1 : 0;
+}
+
+/* A signal declaration: `  logic [h:l] name;` (internal) or the port header
+ * line `  <direction> logic [h:l] name,` (direction right-aligned to six
+ * columns). `logic` is ALWAYS present; `[h:l]` is the first packed dimension
+ * range, present only when width > 1; `comma` ends a port. */
+static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
+	const pigen_rtl_object *object, int is_port, int comma)
+{
+	const pigen_rtl_type *type;
+	const char *name;
+	uint64_t width;
+	const char *direction = NULL;
+	size_t pad;
+
+	type = pigen_rtl_type_get(rtl, object->type);
+	if (!type)
+		return -1;
+	name = object_name(rtl, object);
+	if (!name)
+		return -1;
+	width = type->width;
+
+	buf_append_str(b, "  ");
+	if (is_port)
+	{
+		switch (object->direction)
+		{
+		case PIGEN_SEMANTIC_INPUT:
+			direction = "input";
+			break;
+		case PIGEN_SEMANTIC_OUTPUT:
+			direction = "output";
+			break;
+		case PIGEN_SEMANTIC_INOUT:
+			direction = "inout";
+			break;
+		default:
+			return -1;
+		}
+		buf_append_str(b, direction);
+		for (pad = strlen(direction); pad < 6; pad++)
+			buf_append_str(b, " ");
+		buf_append_str(b, " ");
+	}
+	buf_append_str(b, "logic");
+	if (width > 1)
+	{
+		buf_append_str(b, " ");
+		if (emit_range(b, type) != 0)
+			return -1;
+	}
+	buf_append_str(b, " ");
+	buf_append_str(b, name);
+	if (is_port)
+		buf_append_str(b, comma ? "," : "");
+	else
+		buf_append_str(b, ";");
+	return b->failed ? -1 : 0;
+}
+
+/* An instance: `  name #(...) (...);` each side present only when its range is
+ * non-empty. A literal parameter renders its value. */
+static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
+	const pigen_rtl_instance *instance)
+{
+	const char *name = instance_name(rtl, instance);
+	const pigen_rtl_expr_id *parameters;
+	const pigen_rtl_object_id *connections;
+	size_t parameter_first = instance->parameters.first;
+	size_t parameter_count = instance->parameters.count;
+	size_t connection_first = instance->connections.first;
+	size_t connection_count = instance->connections.count;
+	size_t i;
+
+	if (!name)
+		return -1;
+	parameters = parameter_count ? &rtl->instance_parameters[parameter_first]
+		: NULL;
+	connections = connection_count ? &rtl->instance_connections[connection_first]
+		: NULL;
+
+	buf_append_str(b, "  ");
+	buf_append_str(b, name);
+	if (parameter_count)
+	{
+		buf_append_str(b, " #(");
+		for (i = 0; i < parameter_count; i++)
+		{
+			buf_append_str(b, i ? ", " : "");
+			if (emit_expr(b, rtl, parameters[i]) != 0)
+				return -1;
+		}
+		buf_append_str(b, ")");
+	}
+	if (connection_count)
+	{
+		buf_append_str(b, " (");
+		for (i = 0; i < connection_count; i++)
+		{
+			const pigen_rtl_object *port;
+			const char *port_name;
+
+			port = pigen_rtl_object_get(rtl, connections[i]);
+			if (!port)
+				return -1;
+			port_name = object_name(rtl, port);
+			if (!port_name)
+				return -1;
+			buf_append_str(b, i ? ", " : "");
+			buf_append_str(b, ".");
+			buf_append_str(b, port_name);
+			buf_append_str(b, "(");
+			buf_append_str(b, port_name);
+			buf_append_str(b, ")");
+		}
+		buf_append_str(b, ");");
+	}
+	else
+		buf_append_str(b, ";");
+	return b->failed ? -1 : 0;
+}
+
+/* A continuous assignment: `  assign dest = value;`. */
+static int emit_equation(struct buf *b, const pigen_rtl_model *rtl,
+	const pigen_rtl_equation *equation)
+{
+	const pigen_rtl_object *dest;
+	const char *dest_name;
+
+	dest = pigen_rtl_object_get(rtl, equation->destination);
+	if (!dest)
+		return -1;
+	dest_name = object_name(rtl, dest);
+	if (!dest_name)
+		return -1;
+	buf_append_str(b, "  assign ");
+	buf_append_str(b, dest_name);
+	buf_append_str(b, " = ");
+	if (emit_expr(b, rtl, equation->value) != 0)
+		return -1;
+	buf_append_str(b, ";");
+	return b->failed ? -1 : 0;
+}
+
+/* A clocked process: `  always @(<edge> <clock>)` then each update as
+ * `    dest <= value;` (four-space indent). */
+static int emit_process(struct buf *b, const pigen_rtl_model *rtl,
+	const pigen_rtl_process *process)
+{
+	const pigen_rtl_update *updates;
+	const char *edge;
+	size_t first = process->updates.first;
+	size_t count = process->updates.count;
+	size_t i;
+
+	updates = count ? &rtl->updates[first] : NULL;
+	switch (process->edge)
+	{
+	case PIGEN_SEMANTIC_POSEDGE:
+		edge = "posedge";
+		break;
+	case PIGEN_SEMANTIC_NEGEDGE:
+		edge = "negedge";
+		break;
+	default:
+		return -1;
+	}
+	buf_append_str(b, "  always @(");
+	buf_append_str(b, edge);
+	buf_append_str(b, " ");
+	if (emit_expr(b, rtl, process->clock) != 0)
+		return -1;
+	buf_append_str(b, ")\n");
+	for (i = 0; i < count; i++)
+	{
+		const pigen_rtl_object *dest;
+		const char *dest_name;
+
+		dest = pigen_rtl_object_get(rtl, updates[i].destination);
+		if (!dest)
+			return -1;
+		dest_name = object_name(rtl, dest);
+		if (!dest_name)
+			return -1;
+		buf_append_str(b, "    ");
+		buf_append_str(b, dest_name);
+		buf_append_str(b, " <= ");
+		if (emit_expr(b, rtl, updates[i].value) != 0)
+			return -1;
+		buf_append_str(b, ";\n");
+	}
+	return b->failed ? -1 : 0;
+}
+
+/* Render one module: `module` (the keyword, provenance carries the identity)
+ * then its nested items in nested order, then `);` and `endmodule`. Each line
+ * is newline-terminated. A module with a resolvable SOURCE identifier renders
+ * that identifier after the keyword. */
+static int emit_module(struct buf *b, const pigen_source_manager *sources,
+	const pigen_output_model *layout, const pigen_rtl_model *rtl,
+	const pigen_output_item *item)
+{
+	const pigen_rtl_module *module;
+	const pigen_rtl_record_range range = item->layout;
+	size_t i;
+
+	(void)sources;
+	module = pigen_rtl_module_get(rtl, item->as.module);
+	if (!module)
+		return -1;
+
+	buf_append_str(b, "module");
+	if (module_name(rtl, module))
+	{
+		buf_append_str(b, " ");
+		buf_append_str(b, module_name(rtl, module));
+	}
+	buf_append_str(b, " (\n");
+	for (i = 0; i < range.count; i++)
+	{
+		const pigen_output_item *child = &layout->items[range.first + i];
+		const pigen_rtl_object *object;
+
+		if (child->kind != PIGEN_OUTPUT_RTL_OBJECT)
+			continue;
+		object = pigen_rtl_object_get(rtl, child->as.object);
+		if (!object)
+			return -1;
+		if (object->direction != PIGEN_SEMANTIC_INPUT &&
+			object->direction != PIGEN_SEMANTIC_OUTPUT &&
+			object->direction != PIGEN_SEMANTIC_INOUT)
+			continue;
+		{
+			int last_port = 1;
+			size_t j;
+
+			for (j = i + 1; j < range.count; j++)
+			{
+				const pigen_output_item *later =
+					&layout->items[range.first + j];
+				const pigen_rtl_object *later_object;
+
+				if (later->kind != PIGEN_OUTPUT_RTL_OBJECT)
+					continue;
+				later_object = pigen_rtl_object_get(rtl, later->as.object);
+				if (!later_object)
+					return -1;
+				if (later_object->direction == PIGEN_SEMANTIC_INPUT ||
+					later_object->direction == PIGEN_SEMANTIC_OUTPUT ||
+					later_object->direction == PIGEN_SEMANTIC_INOUT)
+				{
+					last_port = 0;
+					break;
+				}
+			}
+			if (emit_object(b, rtl, object, 1, !last_port) != 0)
+				return -1;
+		}
+		buf_append_str(b, "\n");
+	}
+	buf_append_str(b, ");\n");
+	for (i = 0; i < range.count; i++)
+	{
+		const pigen_output_item *child = &layout->items[range.first + i];
+		const pigen_rtl_object *object;
+		const pigen_rtl_instance *instance;
+		const pigen_rtl_equation *equation;
+		const pigen_rtl_process *process;
+		int is_port;
+
+		switch (child->kind)
+		{
+		case PIGEN_OUTPUT_RTL_OBJECT:
+			object = pigen_rtl_object_get(rtl, child->as.object);
+			if (!object)
+				return -1;
+			is_port = object->direction == PIGEN_SEMANTIC_INPUT ||
+				object->direction == PIGEN_SEMANTIC_OUTPUT ||
+				object->direction == PIGEN_SEMANTIC_INOUT;
+			if (is_port)
+				continue;
+			if (emit_object(b, rtl, object, 0, 0) != 0)
+				return -1;
+			buf_append_str(b, "\n");
+			break;
+		case PIGEN_OUTPUT_RTL_INSTANCE:
+			instance = pigen_rtl_instance_get(rtl, child->as.instance);
+			if (!instance)
+				return -1;
+			if (emit_instance(b, rtl, instance) != 0)
+				return -1;
+			buf_append_str(b, "\n");
+			break;
+		case PIGEN_OUTPUT_RTL_EQUATION:
+			equation = pigen_rtl_equation_get(rtl, child->as.equation);
+			if (!equation)
+				return -1;
+			if (emit_equation(b, rtl, equation) != 0)
+				return -1;
+			buf_append_str(b, "\n");
+			break;
+		case PIGEN_OUTPUT_RTL_PROCESS:
+			process = pigen_rtl_process_get(rtl, child->as.process);
+			if (!process)
+				return -1;
+			if (emit_process(b, rtl, process) != 0)
+				return -1;
+			break;
+		default:
+			return -1;
+		}
+	}
+	buf_append_str(b, "endmodule\n");
+	return b->failed ? -1 : 0;
+}
+
+/* Validate one expression's child-index range against the child arena before
+ * any rendering: a corrupt or out-of-range first_child/child_count must be
+ * refused. Recurses through the expression's children. */
+static int validate_expr(const pigen_rtl_model *rtl, const pigen_rtl_expr *expr)
+{
+	size_t i;
+
+	if (expr->first_child + expr->child_count > rtl->expression_child_count)
+		return -1;
+	for (i = 0; i < expr->child_count; i++)
+	{
+		const pigen_rtl_expr *child = pigen_rtl_expr_get(rtl,
+			rtl->expression_children[expr->first_child + i]);
+
+		if (!child)
+			return -1;
+		if (validate_expr(rtl, child) != 0)
+			return -1;
+	}
+	return 0;
+}
+
+/* Validate one structured record's final-name and child-index invariants
+ * before rendering: every record must carry a resolvable final name and every
+ * expression it references must index live children. */
+static int validate_record(const pigen_source_manager *sources,
+	const pigen_output_model *layout, const pigen_rtl_model *rtl,
+	const pigen_output_item *item)
+{
+	switch (item->kind)
+	{
+	case PIGEN_OUTPUT_OPAQUE:
+		if (!pigen_source_span_valid(sources, item->as.span))
+			return -1;
+		return 0;
+	case PIGEN_OUTPUT_MODULE:
+	{
+		const pigen_rtl_module *module;
+
+		module = pigen_rtl_module_get(rtl, item->as.module);
+		if (!module)
+			return -1;
+		if (!module_name(rtl, module))
+			return -1;
+		if (item->layout.first + item->layout.count > layout->item_count)
+			return -1;
+		return 0;
+	}
+	case PIGEN_OUTPUT_RTL_OBJECT:
+	{
+		const pigen_rtl_object *object;
+
+		object = pigen_rtl_object_get(rtl, item->as.object);
+		if (!object)
+			return -1;
+		if (!object_name(rtl, object))
+			return -1;
+		return 0;
+	}
+	case PIGEN_OUTPUT_RTL_INSTANCE:
+	{
+		const pigen_rtl_instance *instance;
+
+		instance = pigen_rtl_instance_get(rtl, item->as.instance);
+		if (!instance)
+			return -1;
+		if (!instance_name(rtl, instance))
+			return -1;
+		return 0;
+	}
+	case PIGEN_OUTPUT_RTL_EQUATION:
+	{
+		const pigen_rtl_equation *equation;
+		const pigen_rtl_object *dest;
+		const pigen_rtl_expr *value;
+
+		equation = pigen_rtl_equation_get(rtl, item->as.equation);
+		if (!equation)
+			return -1;
+		dest = pigen_rtl_object_get(rtl, equation->destination);
+		if (!dest)
+			return -1;
+		if (!object_name(rtl, dest))
+			return -1;
+		value = pigen_rtl_expr_get(rtl, equation->value);
+		if (!value)
+			return -1;
+		return validate_expr(rtl, value);
+	}
+	case PIGEN_OUTPUT_RTL_PROCESS:
+	{
+		const pigen_rtl_process *process;
+		const pigen_rtl_expr *clock;
+		size_t i;
+
+		process = pigen_rtl_process_get(rtl, item->as.process);
+		if (!process)
+			return -1;
+		if (process->updates.first + process->updates.count >
+			rtl->update_count)
+			return -1;
+		clock = pigen_rtl_expr_get(rtl, process->clock);
+		if (!clock)
+			return -1;
+		if (validate_expr(rtl, clock) != 0)
+			return -1;
+		for (i = 0; i < process->updates.count; i++)
+		{
+			const pigen_rtl_update *update = &rtl->updates[
+				process->updates.first + i];
+			const pigen_rtl_object *dest;
+			const pigen_rtl_expr *value;
+
+			dest = pigen_rtl_object_get(rtl, update->destination);
+			if (!dest)
+				return -1;
+			if (!object_name(rtl, dest))
+				return -1;
+			value = pigen_rtl_expr_get(rtl, update->value);
+			if (!value)
+				return -1;
+			if (validate_expr(rtl, value) != 0)
+				return -1;
+		}
+		return 0;
+	}
+	default:
+		return -1;
+	}
+}
+
+/* Recurse the output model's item tree in array order, validating every
+ * record's final name, child-index range and OPAQUE span before any text is
+ * committed. A module's nested range is walked as its children. */
+static int validate_model(const pigen_source_manager *sources,
+	const pigen_output_model *layout, const pigen_rtl_model *rtl)
+{
+	size_t i;
+
+	for (i = 0; i < layout->item_count; i++)
+	{
+		const pigen_output_item *item = &layout->items[i];
+
+		if (validate_record(sources, layout, rtl, item) != 0)
+			return -1;
+		if (item->kind == PIGEN_OUTPUT_MODULE)
+		{
+			size_t j;
+
+			for (j = 0; j < item->layout.count; j++)
+			{
+				const pigen_output_item *child =
+					&layout->items[item->layout.first + j];
+
+				if (validate_record(sources, layout, rtl, child) != 0)
+					return -1;
+			}
+		}
+	}
+	return 0;
+}
+
+/* The monotonic-coverage gate: the OPAQUE spans must form an exact,
+ * contiguous, non-overlapping, monotonically increasing cover of one source,
+ * bounded by its length. This mirrors pigen_output_validate_coverage (which the
+ * sv-emit build does not link). Empty (no OPAQUE items) is a complete design. */
+static int validate_coverage(const pigen_output_model *layout,
+	const pigen_source_manager *sources)
+{
+	size_t i;
+	int have = 0;
+	pigen_source_id src = (pigen_source_id){PIGEN_INVALID_ID};
+	const pigen_source_file *file = NULL;
+	size_t prev_end = 0;
+
+	for (i = 0; i < layout->item_count; i++)
+	{
+		const pigen_output_item *item = &layout->items[i];
+
+		if (item->kind != PIGEN_OUTPUT_OPAQUE)
+			continue;
+		if (item->as.span.start > item->as.span.end)
+			return -1;
+		if (!have)
+		{
+			have = 1;
+			src = item->as.span.source;
+			if (item->as.span.start != 0)
+				return -1;
+			file = pigen_source_get(sources, src);
+			if (!file)
+				return -1;
+		}
+		else if (src.index != item->as.span.source.index)
+			return -1;
+		if (item->as.span.start < prev_end ||
+			item->as.span.end > file->length)
+			return -1;
+		prev_end = item->as.span.end;
+	}
+	if (have && prev_end != file->length)
+		return -1;
+	return 0;
+}
+
 int pigen_emit_systemverilog(const pigen_source_manager *sources,
 	const pigen_output_model *layout, const pigen_rtl_model *rtl,
 	char **output_string)
 {
-	(void)sources;
-	(void)layout;
-	(void)rtl;
+	struct buf b = {0};
+	size_t i;
+
+	if (!sources || !layout || !rtl)
+	{
+		if (output_string)
+			*output_string = NULL;
+		return -1;
+	}
+	if (output_string)
+		*output_string = NULL;
+	/* The empty model (no items) is the unimplemented case: it carries no
+	 * design to emit, so it is refused and no output is committed. This keeps
+	 * the t10-skeleton NULL-out pin (empty model -> -1, out untouched) while
+	 * the whole-design path below commits on a clean pass. */
+	if (layout->item_count == 0)
+		return -1;
+	/* Validate the whole design before committing: every record's final name,
+	 * every child index, and every OPAQUE span must be well-formed and cover
+	 * their source, or the call refuses and no partial output is published. */
+	if (validate_model(sources, layout, rtl) != 0)
+		return -1;
+	if (validate_coverage(layout, sources) != 0)
+		return -1;
+	for (i = 0; i < layout->item_count; i++)
+	{
+		const pigen_output_item *item = &layout->items[i];
+
+		switch (item->kind)
+		{
+		case PIGEN_OUTPUT_OPAQUE:
+			if (emit_opaque(&b, sources, item) != 0)
+				goto fail;
+			break;
+		case PIGEN_OUTPUT_MODULE:
+			if (emit_module(&b, sources, layout, rtl, item) != 0)
+				goto fail;
+			/* The model is a flat array: a module's nested items occupy the
+			 * owner-managed range item->layout and are rendered inside the
+			 * module emit, so skip past them in this top-level walk. */
+			i = item->layout.first + item->layout.count - 1;
+			break;
+		case PIGEN_OUTPUT_RTL_OBJECT:
+			{
+				const pigen_rtl_object *object = pigen_rtl_object_get(
+					rtl, item->as.object);
+
+				if (!object)
+					goto fail;
+				if (emit_object(&b, rtl, object, 0, 0) != 0)
+					goto fail;
+				buf_append_str(&b, "\n");
+			}
+			break;
+		case PIGEN_OUTPUT_RTL_INSTANCE:
+			{
+				const pigen_rtl_instance *instance =
+					pigen_rtl_instance_get(rtl, item->as.instance);
+
+				if (!instance)
+					goto fail;
+				if (emit_instance(&b, rtl, instance) != 0)
+					goto fail;
+				buf_append_str(&b, "\n");
+			}
+			break;
+		case PIGEN_OUTPUT_RTL_EQUATION:
+			{
+				const pigen_rtl_equation *equation =
+					pigen_rtl_equation_get(rtl, item->as.equation);
+
+				if (!equation)
+					goto fail;
+				if (emit_equation(&b, rtl, equation) != 0)
+					goto fail;
+				buf_append_str(&b, "\n");
+			}
+			break;
+		case PIGEN_OUTPUT_RTL_PROCESS:
+			{
+				const pigen_rtl_process *process =
+					pigen_rtl_process_get(rtl, item->as.process);
+
+				if (!process)
+					goto fail;
+				if (emit_process(&b, rtl, process) != 0)
+					goto fail;
+			}
+			break;
+		default:
+			goto fail;
+		}
+	}
+	if (output_string)
+		*output_string = b.data;
+	return 0;
+fail:
+	free(b.data);
 	if (output_string)
 		*output_string = NULL;
 	return -1;
