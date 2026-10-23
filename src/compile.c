@@ -1,10 +1,12 @@
 #include "pigen/compile.h"
 #include "pigen/source.h"
 #include "pigen/preprocess.h"
-#include "pigen/lexer.h"
 #include "pigen/syntax.h"
 #include "pigen/semantic.h"
+#include "pigen/resolve.h"
 #include "pigen/rtl_lower.h"
+#include "pigen/rtl_name.h"
+#include "pigen/output.h"
 #include "pigen/sv_emit.h"
 #include <stdlib.h>
 #include <string.h>
@@ -122,18 +124,162 @@ int pigen_compile_source(pigen_source_manager *sources,
         return -1;
     }
 
-    /* Semantic analysis. */
+    /* Semantic analysis initialization. */
     pigen_semantic_model semantic_model = {0};
     pigen_semantic_init(&semantic_model, sources);
 
-    /* RTL lowering. */
+    /* Semantic resolution. */
+    pigen_resolve_policy resolve_policy = {0};
+    if (options) {
+        resolve_policy.maximum_generated_bits = options->maximum_generated_bits;
+    }
+    pigen_semantic_error semantic_error = {0};
+    
+    int resolve_ret = pigen_resolve_semantics(&syntax_tree, &semantic_model, &resolve_policy, &semantic_error);
+    if (resolve_ret != 0) {
+        if (error) {
+            error->origin = semantic_error.origin;
+            error->span = semantic_error.span;
+            error->message = semantic_error.message ? semantic_error.message : "semantic resolution failed";
+        }
+        pigen_free_preprocess_result(&preprocess_result);
+        pigen_free_syntax_tree(&syntax_tree);
+        pigen_free_semantic_model(&semantic_model);
+        pigen_free_tokens(&tokens);
+        if (own_sources) free(sources);
+        return -1;
+    }
+
+    /* RTL lowering initialization. */
     pigen_rtl_model rtl_model = {0};
     pigen_rtl_lowering lowering = {0};
     pigen_rtl_lowering_init(&lowering, &semantic_model, &rtl_model);
 
+    /* RTL module lowering. */
+    for (size_t i = 0; i < semantic_model.module_count; i++) {
+        pigen_semantic_module *sem_module = &semantic_model.modules[i];
+        pigen_module_id module = pigen_symbol_module(&semantic_model, sem_module->symbol);
+        
+        int decl_ret = pigen_lower_rtl_module_declarations(&lowering, module);
+        if (decl_ret != 0) {
+            if (error) {
+                error->origin = (pigen_origin_id){0};
+                error->span = (pigen_source_span){0};
+                error->message = "RTL module declaration lowering failed";
+            }
+            pigen_free_preprocess_result(&preprocess_result);
+            pigen_free_syntax_tree(&syntax_tree);
+            pigen_free_semantic_model(&semantic_model);
+            pigen_rtl_lowering_free(&lowering);
+            pigen_free_tokens(&tokens);
+            if (own_sources) free(sources);
+            return -1;
+        }
+        
+        int transfer_ret = pigen_lower_rtl_transfers(&lowering, module);
+        if (transfer_ret != 0) {
+            if (error) {
+                error->origin = (pigen_origin_id){0};
+                error->span = (pigen_source_span){0};
+                error->message = "RTL transfer lowering failed";
+            }
+            pigen_free_preprocess_result(&preprocess_result);
+            pigen_free_syntax_tree(&syntax_tree);
+            pigen_free_semantic_model(&semantic_model);
+            pigen_rtl_lowering_free(&lowering);
+            pigen_free_tokens(&tokens);
+            if (own_sources) free(sources);
+            return -1;
+        }
+        
+        pigen_rtl_module_id rtl_module = pigen_lower_rtl_module(&lowering, module);
+        if (rtl_module.index == PIGEN_INVALID_ID) {
+            if (error) {
+                error->origin = (pigen_origin_id){0};
+                error->span = (pigen_source_span){0};
+                error->message = "RTL module lowering failed";
+            }
+            pigen_free_preprocess_result(&preprocess_result);
+            pigen_free_syntax_tree(&syntax_tree);
+            pigen_free_semantic_model(&semantic_model);
+            pigen_rtl_lowering_free(&lowering);
+            pigen_free_tokens(&tokens);
+            if (own_sources) free(sources);
+            return -1;
+        }
+    }
+
+    /* RTL naming. */
+    pigen_rtl_name_request *name_requests = NULL;
+    size_t name_request_count = 0;
+    if (semantic_model.module_count > 0) {
+        name_requests = malloc(semantic_model.module_count * sizeof(pigen_rtl_name_request));
+        if (!name_requests) {
+            if (error) {
+                error->origin = (pigen_origin_id){0};
+                error->span = (pigen_source_span){0};
+                error->message = "memory allocation failed for name requests";
+            }
+            pigen_free_preprocess_result(&preprocess_result);
+            pigen_free_syntax_tree(&syntax_tree);
+            pigen_free_semantic_model(&semantic_model);
+            pigen_rtl_lowering_free(&lowering);
+            pigen_free_tokens(&tokens);
+            if (own_sources) free(sources);
+            return -1;
+        }
+        
+        for (size_t i = 0; i < semantic_model.module_count; i++) {
+            pigen_semantic_module *sem_module = &semantic_model.modules[i];
+            name_requests[i].kind = PIGEN_RTL_NAME_SOURCE;
+            name_requests[i].origin = sem_module->span;
+        }
+        name_request_count = semantic_model.module_count;
+    }
+    
+    pigen_rtl_name_id naming_result = pigen_rtl_assign_names(&rtl_model, sources, name_requests, name_request_count);
+    if (name_requests) free(name_requests);
+    
+    if (naming_result.index == PIGEN_INVALID_ID) {
+        if (error) {
+            error->origin = (pigen_origin_id){0};
+            error->span = (pigen_source_span){0};
+            error->message = "RTL naming failed";
+        }
+        pigen_free_preprocess_result(&preprocess_result);
+        pigen_free_syntax_tree(&syntax_tree);
+        pigen_free_semantic_model(&semantic_model);
+        pigen_rtl_lowering_free(&lowering);
+        pigen_free_tokens(&tokens);
+        if (own_sources) free(sources);
+        return -1;
+    }
+
+    /* Build the output model from the syntax tree and RTL lowering. */
+    pigen_output_model output_model = {0};
+    pigen_output_error output_error = {0};
+    
+    int build_ret = pigen_build_output_model(&output_model, &syntax_tree, &lowering, &output_error);
+    if (build_ret != 0) {
+        if (error) {
+            error->origin = (pigen_origin_id){0};
+            error->span = output_error.span;
+            error->message = output_error.message ? output_error.message : "output model build failed";
+        }
+        pigen_free_preprocess_result(&preprocess_result);
+        pigen_free_syntax_tree(&syntax_tree);
+        pigen_free_semantic_model(&semantic_model);
+        pigen_rtl_lowering_free(&lowering);
+        pigen_free_tokens(&tokens);
+        if (own_sources) free(sources);
+        return -1;
+    }
+
     /* SystemVerilog emission. */
     char *sv_output = NULL;
-    int emit_ret = pigen_emit_systemverilog(sources, NULL, &rtl_model, &sv_output);
+    int emit_ret = pigen_emit_systemverilog(sources, &output_model, &rtl_model, &sv_output);
+    
+    pigen_free_output_model(&output_model);
     
     if (emit_ret != 0) {
         if (error) {
