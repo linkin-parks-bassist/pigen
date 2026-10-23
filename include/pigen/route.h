@@ -17,12 +17,14 @@
  * requires of the route, exposing the whole-unit ready graph as the route's
  * readiness structure.
  *
- * This header fixes only the shape: the named route type, the ready-graph
- * node, the sizing/signedness/aggregate check, the ownership and error
- * contract, the entry-point signatures and the unimplemented/invalid
- * sentinel. The ready-graph construction, the sizing/signedness/aggregate
- * law dispatch, the cycle/self-loop validation and the original-span
- * diagnostic all arrive with the test-contract and implementation stages.
+ * The build establishes the ready graph (one node per direct atomic
+ * transfer, in arena order, each carrying the destination signal's
+ * realization-ready dependency), enforces the route's module isolation and
+ * sizing/signedness/aggregate laws, validates the ready graph
+ * cycle/self-loop-free and anchors check_span at the first failing
+ * transfer's original span on rejection. The check re-validates the ready
+ * graph and reports the route's check result; the model-bound laws are
+ * enforced by the build, which holds the lowering.
  *
  * A failed call reports -1 (or the invalid sentinel) and the compile stops;
  * it may leave partial state behind, and nothing uses the model after a
@@ -78,11 +80,7 @@ void pigen_route_free(pigen_route *route);
  * resolved module's semantic model and RTL model; module is the resolved
  * route module. Returns 0 on success and -1 on error; a failed call reports
  * the error and the compile stops - it may leave partial state behind, and
- * no test asserts that a failure left the model or the route unchanged. The
- * exact ready-graph construction, sizing/signedness/aggregate law dispatch
- * and cycle/self-loop validation arrive with the test-contract and
- * implementation stages; the stub returns -1 (the unimplemented sentinel)
- * without touching the ready graph. */
+ * no test asserts that a failure left the model or the route unchanged. */
 int pigen_route_build(pigen_route *route,
 	const pigen_rtl_lowering *lowering, pigen_module_id module);
 
@@ -92,10 +90,9 @@ int pigen_route_build(pigen_route *route,
  * route's check result to invalid and anchors check_span at the first
  * failing transfer's original span. Returns 0 when the route is valid and
  * -1 when a law is violated; a failed call reports the error and the
- * compile stops. The exact per-law dispatch and the deterministic
- * Tarjan-based cycle validation arrive with the test-contract and
- * implementation stages; the stub returns -1 (the unimplemented sentinel)
- * without touching the check result. */
+ * compile stops. The sizing, signedness and aggregate laws and the module
+ * isolation are enforced by the build, at the point the semantic model is
+ * in hand; the check re-affirms the readiness structure is cycle-free. */
 int pigen_route_check(pigen_route *route);
 
 #endif
