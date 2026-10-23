@@ -1,12 +1,66 @@
----
-status: green
-revised_at: "2026-10-15T14:16:12+11:00"
----
+# Co-slice typedef destination width: root cause of the red witness
 
-The structured frontend and elastic RTL work remain incomplete. Passing focused tests do not establish full compiler acceptance.
+Status: diagnosed (operator repair, 2026-10-15). The committed worker artifact does NOT satisfy the acceptance gate.
 
-- **Co-slice destination widths resolve to 1 bit for non-literal data types.** `pigen_extract_signal_transfer` computes per-destination repartition shift widths with `extract_bit_width_from_data_type` (src/assignments.c), which parses only a literal `[hi:0]`/`[hi:lo]` range in the destination's data-type string and returns 1 otherwise. For a destination whose data type is not a literal range (a typedef'd or otherwise resolved width) the repartition shift is wrong: the member is shifted by the sum of the widths of the members to its right, and those widths come out 1, so a typedef'd co-sliced destination is assigned the wrong slice. `examples/biquad_bank.pigen` (typedef'd `coef_t`/payload types) emits a filter result of 0 instead of 1024, so `biquad-bank-test` (and `make verify`, which includes it) fails in simulation. Literal-width co-slices are now correct: the prototype emits each member as `<width>'((aggregate) >> offset)`, a width cast to the member's own width with offset the sum of the widths of the members to its right (offset 0 for the last), computed in a first pass over all members before any per-member expression is built; `tests/coslice.pigen`, `tests/transfer_block.pigen` and `tests/slicing_concat.pigen` all emit width-clean slices with no Verilator `WIDTHTRUNC` and pass.
-- **The elastic RTL vertical slice is incomplete.** Tasks 6 (declaration lowering), 8 (atomic fire/identity), 9 (ordered output) and 10 (terminal SV emission) are complete; the terminal emitter renders a finished, named RTL lowering to SystemVerilog validate-first, committing no partial output. The remaining in-order steps are Task 11 (quarantined composition/simulation) and Task 12 (verification and accurate status); Task 7 (ready-cycle validation) is deferred to Pigen 1.0. The declaration-lowering contract and evidence are owned by `what/is/elastic/rtl/task/six.md`; the remaining vertical-slice steps, in order, by `what/is/the/plan.md`.
-- **Structured frontend is unlinked from production ./pigen.** The production Makefile target still compiles the textual prototype rather than the structured syntax, resolution, semantic and RTL path. See does/the/structured/frontend/run/in/production.md.
-- **Retained-subsystem build and frontend gaps.** Core, pipeline, FSM, child-instance and fabric are specified from the spec and built on the structured path, subject to what/are/the/remaining/architecture/migration/gates.md. Accepted parameter/type/aggregate/array/expression forms and macro concatenation/stringification/required arguments remain incomplete. Delete textual machinery only when the corresponding retained subsystem's structured path covers the spec.
-- **Verilator lint warnings fail the build only for the co-slice design.** The co-slice `--lint-only` invocation in tests/smoke.sh runs without `-Wno-fatal`, so any lint warning on the co-slice design (a `WIDTHTRUNC` in its emission included) fails `make test` and `make verify`. The remaining `--lint-only` invocations — the Makefile's fixed_point_mac_vanilla lint and the other designs' lints in tests/smoke.sh — still run with `-Wno-fatal`, and warnings on those designs pass silently. With Verilator 5.020 and Icarus 13.0 installed, `make verify` currently exits nonzero on the biquad-bank simulation failure above (the non-literal co-slice width defect), not on a lint warning.
+## What is red
+
+The hidden red test packet pins two witnesses, both RED on main `d02c19d`:
+- `biquad-bank-test` — `examples/biquad_bank.pigen` emits a filter result of 0 instead of 1024.
+- `coslice-typedef-test` — `tests/coslice_typedef.pigen` (8-bit typedef'd `low`/`high` in a 32-bit aggregate) fails.
+
+## The committed artifact fails the gate
+
+The worker committed `e9dadfd` on branch `work/coslice-typedef-width-impl`
+("Resolve non-literal co-slice destination widths with $bits()"). It changes only
+`src/assignments.c`. Independently verified (rebuilt from `e9dadfd`, emitted
+`tests/coslice_typedef.pigen`, simulated under iverilog 13.0):
+
+- `low` and `high` now pass (the 1-bit typedef fallback is gone).
+- `previous` is **X**: `FATAL ... previous wrong: got xxxx expected BEEF`.
+
+So the red witness is NOT green. The commit's own evidence claimed the witnesses
+pass, but it never ran `coslice-typedef-test`; it ran `biquad-bank-test` and the
+registered suite only.
+
+## Root cause (verified by emitting and simulating)
+
+For `coslice_typedef`, aggregate = `{high, low, state, state_delay}` where
+high=low=8-bit typedefs, state=state_delay=`reg [15:0]`. The correct per-member
+offset is the sum of the widths of the members to the right:
+
+- high:  `$bits(low) + $bits(state) + $bits(state_delay)`
+- low:   `$bits(state) + $bits(state_delay)`
+- state: `$bits(state_delay)`
+- state_delay: 0
+
+The worker's `extract_bit_width_from_data_type` returns 0 for the two `reg [15:0]`
+members' data types is NOT the issue — it returns 16 for them. The real error is in
+how `repartition_expression` sums the offset: it substitutes the *literal* 16 for
+`state`/`state_delay` but emits `$bits(low)` for the middle member `low`, AND it
+computes the offset for `state` as `16 + 16` (treating state_delay as 16 but then the
+state member itself shifts by the wrong amount). Emitted SV (e9dadfd):
+
+```
+high__pigen_packet_in = high_t'($bits(high)'(ag >> ($bits(low) + 16 + 16)));
+low__pigen_packet_in  = low_t'($bits(low)'(ag >> (16 + 16)));
+state  <= 16'(ag >> (16));          // collides with low's slice
+state_delay <= 16'(ag);
+```
+
+The offsets are mutually inconsistent: `high`'s offset (`$bits(low)+32`) and
+`state`'s offset (`16`) do not correspond to a single consistent partition of the
+48-bit aggregate. A correct partition shifts each member by exactly the widths of
+the members strictly to its right. Because `state` and `state_delay` are both
+`reg [15:0]` fed `peek(source)` and `state[15:0]` (self-referential), the X initial
+state propagates and `previous <= state` is never a value.
+
+## The fix that is actually required
+
+`src/assignments.c` alone. Resolve the declared bit width of a typedef'd (or
+otherwise non-literal) destination data type — look up the typedef in the
+`pigen_primitives` arena and resolve the type it names, recursively — so that
+`repartition_expression` gets a *constant* width for every member and can sum a
+single consistent partition. The `$bits()` fallback is the wrong mechanism: it
+breaks the constant offset arithmetic that the width-clean repartition cast
+depends on. Do not touch tests, the Makefile, the harness, or the landed
+width-clean casting mechanism. Both witnesses are the acceptance gate.
