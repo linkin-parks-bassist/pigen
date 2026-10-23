@@ -731,5 +731,15 @@
       "make",
       "coslice-xprop-test"
     ]
+  },
+  {
+    "covers": [
+      "tests/route_test.c",
+      "src/route.c"
+    ],
+    "command": [
+      "make",
+      "route-test"
+    ]
   }
 ]
