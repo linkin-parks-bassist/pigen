@@ -169,19 +169,20 @@ static int is_signal_projection(const char *start, const char *end,
  * `$bits(destination)` is a constant/type query and is deliberately ignored
  * by signal dependency discovery below.
  */
-static char *repartition_expression(const char *expression, size_t expression_length,
-	const char **destinations, const size_t *destination_lengths, size_t count,
-	const char **rhs_parts, const size_t *rhs_lengths, size_t member,
-	const size_t *destination_bit_widths)
-{
-	pigen_string result = {0};
-	size_t i;
+ static char *repartition_expression(const char *expression, size_t expression_length,
+ 	const char **destinations, const size_t *destination_lengths, size_t count,
+ 	const char **rhs_parts, const size_t *rhs_lengths, size_t member,
+ 	const size_t *destination_bit_widths)
+ {
+ 	pigen_string result = {0};
+ 	size_t i;
+ 	size_t member_width = (member < count) ? destination_bit_widths[member] : 1;
 
-	pigen_append(&result, "((");
-	pigen_append_range(&result, expression, expression_length);
-	pigen_append(&result, ")");
-	if (member + 1 < count)
-	{
+ 	pigen_append(&result, "(((");
+ 	pigen_append_range(&result, expression, expression_length);
+ 	pigen_append(&result, ")");
+ 	if (member + 1 < count)
+ 	{
 		pigen_append(&result, " >> (");
 		for (i = member + 1; i < count; i++)
 		{
@@ -196,9 +197,25 @@ static char *repartition_expression(const char *expression, size_t expression_le
 		}
 		pigen_append(&result, ")");
 	}
-	pigen_append(&result, ")");
-	return result.data;
-}
+ 	pigen_append(&result, ")");
+ 	/* Mask every destination to its own constant width so the emitted value is
+ 	 * exactly destination-width rather than relying on the assignment's implicit
+ 	 * truncation. Without this, the last destination (offset 0) receives the whole
+ 	 * packed aggregate, which Verilator reports as WIDTHTRUNC and is a wrong value
+ 	 * whenever the last destination is not the lowest slice. */
+ 	if (member_width > 0)
+ 	{
+		pigen_append(&result, " & ");
+		if (member_width >= 32)
+			pigen_append_format(&result, "32'h%zx", (1u << (member_width - 1)) - 1);
+		else if (member_width >= 8)
+			pigen_append_format(&result, "%zu'h%zx", member_width, (1u << member_width) - 1);
+		else
+			pigen_append_format(&result, "%zu'h%x", member_width, (unsigned)((1u << member_width) - 1));
+	}
+ 	pigen_append(&result, ")");
+ 	return result.data;
+ }
 
 /* Extract bit width from a data type string like "logic [7:0]" or "logic" */
 static size_t extract_bit_width_from_data_type(const char *data_type)
