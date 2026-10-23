@@ -1,0 +1,435 @@
+{
+  "timestamp": "20261023T234051Z",
+  "repository": "https://github.com/linkin-parks-bassist/pigen.git",
+  "worktrees": [
+    {
+      "path": "/home/david/Projects/pigen",
+      "original_head": "9ed5e7ae84cf1d55bce61c87af5b6f75866db680",
+      "original_branch": "refs/heads/work/draft-a6e2d099b062",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/00-pigen",
+      "snapshot_commit": "62bc6688974eaa74ae3fc2cb84fed64013c9682c"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/integrator-eb121c/scratch/route-checkout",
+      "original_head": "9372f9bb9db23b7b4c680ce6d7fbf5e4a75972cf",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/01-route-checkout",
+      "snapshot_commit": "71aadea5e7a5b3f52d693890af4d2c649b98fe9c"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/manager-1a72c7/scratch/tmp.9JaNuUiuv1/mw",
+      "original_head": "4ec6e1b6152cf48c3d65cdf51482485530e919fe",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/02-mw",
+      "snapshot_commit": "8d97eab87cc5beb01e931fb20554e1be79212dc3",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/02-mw",
+      "index_commit": "ec615f753c6e109e8186c684db78b9333794e290"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/operator-35c520/scratch/opencode/vdo/repro",
+      "original_head": "93fc45f824f1597ebc7e74b921b16648dce05207",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/03-repro",
+      "snapshot_commit": "3ec9318d317937a4c38ef4d6304d5255ea951812"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/operator-748c98/scratch/verify-bc814d6/checkout",
+      "original_head": "bc814d6984a212fde75cb63bba377837ca363ff2",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/04-checkout",
+      "snapshot_commit": "9cd3666dbbe80290745942b65aa395a154c86ae5"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/operator-ae11d9/scratch/tmp.2gpPKul9vY",
+      "original_head": "9ed5e7ae84cf1d55bce61c87af5b6f75866db680",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/05-tmp.2gpPKul9vY",
+      "snapshot_commit": "fb3d18e91015b45cc16c28bb2fedd8d3caf9d6a8"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/operator-c18a79/scratch/cand.7L0v",
+      "original_head": "27162a075c1094efb922a43a969978e438f57fc0",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/06-cand.7L0v",
+      "snapshot_commit": "f285826668ee4451cae08435b5d69f536a90958f",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/06-cand.7L0v",
+      "index_commit": "71c0e1f4a8d43f88fd112b8b53adde6c6de079e3"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/steward-a92107/scratch/opencode/pigen-verify",
+      "original_head": "3f95a088d08ec13d702505841a7559a31e1367dd",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/07-pigen-verify",
+      "snapshot_commit": "69ac0e5075ec031e0699458c5c51a37b553302be"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/test-auditor-0db30e/scratch/audit-mEWm/audit",
+      "original_head": "1a069c2f76c4b59a9239c079e937173bd967ece9",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/08-audit",
+      "snapshot_commit": "5461f2f622ff50a180d8f16f6c2d68da3a2d7b71"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/test-auditor-41a789/scratch/pigen-master-audit",
+      "original_head": "6315b69820d9d70d38674231d4d50a54ff7c4736",
+      "original_branch": "refs/heads/master",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/09-pigen-master-audit",
+      "snapshot_commit": "dcd9931251299efe70a37fc25baef04336124c61"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/test-auditor-871be0/scratch/audit78/wt1",
+      "original_head": "1a069c2f76c4b59a9239c079e937173bd967ece9",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/10-wt1",
+      "snapshot_commit": "0bf3eb39d63737d0064494c9ec4bd840b497baf6"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/test-auditor-871be0/scratch/audit78/wtmaster",
+      "original_head": "ae008f0c9ad45a0cd5e4c5083f9a88b606d1e23b",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/11-wtmaster",
+      "snapshot_commit": "a4d9524ab45509b7e3ccab9561f8d4850eaa4be6"
+    },
+    {
+      "path": "/home/david/.CointOS/state/agents/test-auditor-e4ee87/scratch/opencode/route-audit-RyDD",
+      "original_head": "2400cedf998125b6b14e556295e109ae251f9fc9",
+      "original_branch": null,
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/12-route-audit-RyDD",
+      "snapshot_commit": "5485ca345b2f1673f43ca8394be0a55e1d09a4dd"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/coslice-xprop-impl",
+      "original_head": "438529d892d864525f2670bfecb62a2e6ae82247",
+      "original_branch": "refs/heads/work/coslice-xprop-impl",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/13-coslice-xprop-impl",
+      "snapshot_commit": "03c96fff289b2066e05910c28fbf5370b505f78a"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/coslice-xprop-impl-2",
+      "original_head": "69854ce8b835a777f190c9e79227782554ce389c",
+      "original_branch": "refs/heads/work/coslice-xprop-impl-2",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/14-coslice-xprop-impl-2",
+      "snapshot_commit": "9d7bbf39e7c5cd7e58ac5922a34da1f3f17e7df2"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/decompose-t10-land-emitter-null-out",
+      "original_head": "b41157fcead9717c82df4af9bd1bb9c98425838a",
+      "original_branch": "refs/heads/work/decompose-t10-land-emitter-null-out",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/15-decompose-t10-land-emitter-null-out",
+      "snapshot_commit": "612b508f9e168bf3508a107b5073d84bf24d9209"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/elastic-rtl-task-5-implementation",
+      "original_head": "6b23a406cc765f35c8138989f8c03b0e072e5d6e",
+      "original_branch": "refs/heads/work/elastic-rtl-task-5-implementation",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/16-elastic-rtl-task-5-implementation",
+      "snapshot_commit": "14ede0af4444fd99d98a658c5a17b25d3d47d01c"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/elastic-rtl-task-8-fire-identity-test-contract",
+      "original_head": "34a3a3e8063eab4f123869451da9c9807dd5415f",
+      "original_branch": "refs/heads/work/elastic-rtl-task-8-fire-identity-test-contract",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/17-elastic-rtl-task-8-fire-identity-test-contract",
+      "snapshot_commit": "8c8e48253d1ecb99aaa9bd7046c2ff02c12e759d"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/fix-coslice-widthtrunc-mask",
+      "original_head": "0d3d4e087b1531f61414262ae6fce55c7a46f8f7",
+      "original_branch": "refs/heads/work/fix-coslice-widthtrunc-mask",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/18-fix-coslice-widthtrunc-mask",
+      "snapshot_commit": "4f77a5bba8ccb56911f48aa7f7e5e7582de99e13"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/impl-t8-fire-identity-entry",
+      "original_head": "13b81c2cad6a3892c745f21cbfa1e3fe6bc879dd",
+      "original_branch": "refs/heads/work/impl-t8-fire-identity-entry",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/19-impl-t8-fire-identity-entry",
+      "snapshot_commit": "a675cc7cad89c06b5fdf512d126930443915b705",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/19-impl-t8-fire-identity-entry",
+      "index_commit": "e22898f55e1e0db5adb95078e3a2ae20735c32c9"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/impl-t8-transfer-lowering",
+      "original_head": "01bc2dee85d8fc2c0583acb60718c418db363809",
+      "original_branch": "refs/heads/work/impl-t8-transfer-lowering",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/20-impl-t8-transfer-lowering",
+      "snapshot_commit": "2aa0ee4c787c3beeeff30f3cda54ab2bc3fb5306"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/impl-task-8-transfers-fire-identity",
+      "original_head": "0a72e4fe8f7cad4e8a6b1f2c38f130ccaaa886e9",
+      "original_branch": "refs/heads/work/impl-task-8-transfers-fire-identity",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/21-impl-task-8-transfers-fire-identity",
+      "snapshot_commit": "7afec83687aaaee2228ac77c914c64ffa13c9a15"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-compile-interface-skeleton-1",
+      "original_head": "e459d15d92c403abc81046ebc0631b4f1f79bac4",
+      "original_branch": "refs/heads/work/integrate-compile-interface-skeleton-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/22-integrate-compile-interface-skeleton-1",
+      "snapshot_commit": "6338e12f8bb814b5bf2b5c8f56d123edb2bccaf5",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/22-integrate-compile-interface-skeleton-1",
+      "index_commit": "a21571aff6eff5f013ecc87e18edbcfc89d015c5"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-compile-owned-signal-contract-1",
+      "original_head": "93dcd0b4ddb5bd8e9f42343b932e4a6a85dc13d9",
+      "original_branch": "refs/heads/work/integrate-compile-owned-signal-contract-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/23-integrate-compile-owned-signal-contract-1",
+      "snapshot_commit": "91ec6bb154d60f9aec155bd98ff2bd5c92cb3afc",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/23-integrate-compile-owned-signal-contract-1",
+      "index_commit": "5b8dc6bee89cffc59ff13b6931977a6bd5e62df9"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-compile-valid-source-implementation-1",
+      "original_head": "1ad61d7b3424113c782c9f5cce76bb137054c030",
+      "original_branch": "refs/heads/work/integrate-compile-valid-source-implementation-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/24-integrate-compile-valid-source-implementation-1",
+      "snapshot_commit": "784a1dca5a731bc6b854ae65a6f7fe969683400b",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/24-integrate-compile-valid-source-implementation-1",
+      "index_commit": "b2704a04222e8a7f49e484a06c264214615e4066"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-fix-coslice-bits-in-shift-1",
+      "original_head": "2b6ec203697dd7b0c2fdfba996fd222b8d6ba168",
+      "original_branch": "refs/heads/work/integrate-fix-coslice-bits-in-shift-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/25-integrate-fix-coslice-bits-in-shift-1",
+      "snapshot_commit": "f723fc732b909bec6b44f15854ab8496bdeba8fc"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-fix-coslice-defect-and-lint-warnings-1",
+      "original_head": "2b6ec203697dd7b0c2fdfba996fd222b8d6ba168",
+      "original_branch": "refs/heads/work/integrate-fix-coslice-defect-and-lint-warnings-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/26-integrate-fix-coslice-defect-and-lint-warnings-1",
+      "snapshot_commit": "92a7ce69f748d76cc7c2d9c9adf076e54e60668a",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/26-integrate-fix-coslice-defect-and-lint-warnings-1",
+      "index_commit": "162cb4013b4d899272711a5569187acaec1471d0"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-impl-t8-fire-identity-bits-fix-2",
+      "original_head": "de0f62fcc664c4dcc97dfe8bd503374eda56cc13",
+      "original_branch": "refs/heads/work/integrate-impl-t8-fire-identity-bits-fix-2",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/27-integrate-impl-t8-fire-identity-bits-fix-2",
+      "snapshot_commit": "e7cee8426c4ddcb7ce65faf07c8664bb00caa684",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/27-integrate-impl-t8-fire-identity-bits-fix-2",
+      "index_commit": "8b51e9833024cf645b64406568d49c0a9cd113bc"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-impl-task-8-transfer-lowering-module-2",
+      "original_head": "f9237c7f2549235c0fd9dba9df4980800fd05d02",
+      "original_branch": "refs/heads/work/integrate-impl-task-8-transfer-lowering-module-2",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/28-integrate-impl-task-8-transfer-lowering-module-2",
+      "snapshot_commit": "1389f7426f31a3b46c8c35d7e0f89b20ca6346ff",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/28-integrate-impl-task-8-transfer-lowering-module-2",
+      "index_commit": "1c8327b49ee92549936880c5272d3b6b2d1426e8"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-pipeline-lower-seam-carries-syntax-tree-1",
+      "original_head": "ae008f0c9ad45a0cd5e4c5083f9a88b606d1e23b",
+      "original_branch": "refs/heads/work/integrate-pipeline-lower-seam-carries-syntax-tree-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/29-integrate-pipeline-lower-seam-carries-syntax-tree-1",
+      "snapshot_commit": "2df86de57963d24ca02b9cca78d33303c408ff1b",
+      "unmerged_index": true,
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/29-integrate-pipeline-lower-seam-carries-syntax-tree-1",
+      "index_commit": "a15cd1d1775fe632cc948a1e9d9928aa9115bbf4"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-t10-coverage-gate-impl-1",
+      "original_head": "aae0a65acb84f9617558b093a4791d90d36179e2",
+      "original_branch": "refs/heads/work/integrate-t10-coverage-gate-impl-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/30-integrate-t10-coverage-gate-impl-1",
+      "snapshot_commit": "b2e59f189b1838498d59817b820bd34ee1e815e4",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/30-integrate-t10-coverage-gate-impl-1",
+      "index_commit": "ee337b682039715e9e52f520789316e42ddb278e"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-t10-coverage-gate-impl-2",
+      "original_head": "2f001e18c800d5776976c4fe11ae4d0b8f69a8c1",
+      "original_branch": "refs/heads/work/integrate-t10-coverage-gate-impl-2",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/31-integrate-t10-coverage-gate-impl-2",
+      "snapshot_commit": "3c28f82e7d02a250e299545112cd642ddb42cec9",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/31-integrate-t10-coverage-gate-impl-2",
+      "index_commit": "c16bfa6a12a540e16b67d42d120eedeb1a9e8c49"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-t10-coverage-gate-impl-4",
+      "original_head": "6201c1240b57b3fe29f251b702e7f3ceabca6ce7",
+      "original_branch": "refs/heads/work/integrate-t10-coverage-gate-impl-4",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/32-integrate-t10-coverage-gate-impl-4",
+      "snapshot_commit": "17760b48663c39c4676295f36896d52016cb7fd0",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/32-integrate-t10-coverage-gate-impl-4",
+      "index_commit": "cf4acc18366d2add8c84c99bb1fcb254c52e5047"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-t11-composition-test-contract-corrected-1",
+      "original_head": "3c3d54db1e52ce1dd51325d453b3374fb03d390f",
+      "original_branch": "refs/heads/work/integrate-t11-composition-test-contract-corrected-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/33-integrate-t11-composition-test-contract-corrected-1",
+      "snapshot_commit": "679fca280ad965684a1cff75dc2092f414338f05",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/33-integrate-t11-composition-test-contract-corrected-1",
+      "index_commit": "2a320a30fdd17d55faad87b38111bf0019000a2e"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/integrate-t11-makefile-vertical-slice-targets-1",
+      "original_head": "da352b0d3a79e1b9abddb0005289ab0a6d2a987d",
+      "original_branch": "refs/heads/work/integrate-t11-makefile-vertical-slice-targets-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/34-integrate-t11-makefile-vertical-slice-targets-1",
+      "snapshot_commit": "38a238921c340e403f2a9c216445351f60e8cd16",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/34-integrate-t11-makefile-vertical-slice-targets-1",
+      "index_commit": "92e207be7fc7c98a636bf192eeedfa965b0e3510"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/lint-fail-verify-test-contract",
+      "original_head": "e832b92ff0dae977202540f1e069de8ea3441ff0",
+      "original_branch": "refs/heads/work/lint-fail-verify-test-contract",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/35-lint-fail-verify-test-contract",
+      "snapshot_commit": "f6aaca6d0761f60fc72b11fc9923be870cd146bc"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/operator-repair-pigen-audit-coslice-typedef-width-witness-mismatch-1",
+      "original_head": "d02c19ded19b922acd5fade646506dd39572131b",
+      "original_branch": "refs/heads/work/operator-repair-pigen-audit-coslice-typedef-width-witness-mismatch-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/36-operator-repair-pigen-audit-coslice-typedef-width-witness-mismatch-1",
+      "snapshot_commit": "15f273e3e3dc8eff51d18383f695a202e770a120"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/operator-repair-pigen-audit-coslice-typedef-width-witness-mismatch-2",
+      "original_head": "d02c19ded19b922acd5fade646506dd39572131b",
+      "original_branch": "refs/heads/work/operator-repair-pigen-audit-coslice-typedef-width-witness-mismatch-2",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/37-operator-repair-pigen-audit-coslice-typedef-width-witness-mismatch-2",
+      "snapshot_commit": "88363138bf336dc4264afd28461965fb31ffafe8"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/operator-repair-pigen-coslice-xprop-impl-1",
+      "original_head": "438529d892d864525f2670bfecb62a2e6ae82247",
+      "original_branch": "refs/heads/work/operator-repair-pigen-coslice-xprop-impl-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/38-operator-repair-pigen-coslice-xprop-impl-1",
+      "snapshot_commit": "5c6692629994ad628cdec1875057201a7cb1be5d"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/operator-repair-pigen-decompose-coslice-typedef-width-impl-1",
+      "original_head": "d02c19ded19b922acd5fade646506dd39572131b",
+      "original_branch": "refs/heads/work/operator-repair-pigen-decompose-coslice-typedef-width-impl-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/39-operator-repair-pigen-decompose-coslice-typedef-width-impl-1",
+      "snapshot_commit": "557cd8346f0b1b2d018b0fca58ecd2dab40b97e8"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/operator-repair-pigen-decompose-coslice-typedef-width-impl-2",
+      "original_head": "d02c19ded19b922acd5fade646506dd39572131b",
+      "original_branch": "refs/heads/work/operator-repair-pigen-decompose-coslice-typedef-width-impl-2",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/40-operator-repair-pigen-decompose-coslice-typedef-width-impl-2",
+      "snapshot_commit": "04d4c281a71f809a046cff19803b9e875735533b"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/operator-repair-pigen-garden-19-1",
+      "original_head": "4ec6e1b6152cf48c3d65cdf51482485530e919fe",
+      "original_branch": "refs/heads/work/operator-repair-pigen-garden-19-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/41-operator-repair-pigen-garden-19-1",
+      "snapshot_commit": "d5925bdbca8daa14eed945d7074292e366c3b25d"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/operator-repair-pigen-restart-vdo-frontier-one-regression-1",
+      "original_head": "6b40e322fbe1d7d383ba8de9fa7216719712ed4f",
+      "original_branch": "refs/heads/work/operator-repair-pigen-restart-vdo-frontier-one-regression-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/42-operator-repair-pigen-restart-vdo-frontier-one-regression-1",
+      "snapshot_commit": "e4e8dfa23789f831a2d1f59a5648f9c74a09bcb5",
+      "index_ref": "refs/heads/backup/migration-20261023T234051Z/index/42-operator-repair-pigen-restart-vdo-frontier-one-regression-1",
+      "index_commit": "fc5e25d744c51090feb0551e910225bb6c5c59ca"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/operator-repair-pigen-retained-core-route-test-contract-1",
+      "original_head": "1f427b58a7bb6afb84a3c450d0633d61684480dc",
+      "original_branch": "refs/heads/work/operator-repair-pigen-retained-core-route-test-contract-1",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/43-operator-repair-pigen-retained-core-route-test-contract-1",
+      "snapshot_commit": "98d83857f9e430806049e2511c5472accacdeda6"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/pipeline-lowering-implementation",
+      "original_head": "6315b69820d9d70d38674231d4d50a54ff7c4736",
+      "original_branch": "refs/heads/work/pipeline-lowering-implementation",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/44-pipeline-lowering-implementation",
+      "snapshot_commit": "ab21b7efcd6ebd148a63bf9db0c015fb3afe0a7b"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/retained-core-projection-concat-coslice-implementation",
+      "original_head": "3b68013e44563cfc8d1e7a9dd3325030221b9216",
+      "original_branch": "refs/heads/work/retained-core-projection-concat-coslice-implementation",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/45-retained-core-projection-concat-coslice-implementation",
+      "snapshot_commit": "c751e1ac58c7bb04e2ff5d49f1540074e12ed3b1"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/retained-core-route-test-contract",
+      "original_head": "1f427b58a7bb6afb84a3c450d0633d61684480dc",
+      "original_branch": "refs/heads/work/retained-core-route-test-contract",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/46-retained-core-route-test-contract",
+      "snapshot_commit": "cd75301e64b5fc70e6981003d27e55c14c5dbd37"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/split-rtl-lower-tests-per-behavior",
+      "original_head": "6f0504b2b18acaa148b98b35f806f3f85e227ff1",
+      "original_branch": "refs/heads/work/split-rtl-lower-tests-per-behavior",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/47-split-rtl-lower-tests-per-behavior",
+      "snapshot_commit": "62135fc3aed1de12ea02694394f5b8387197ba13"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/t8-guard-atom-gate",
+      "original_head": "01bc2dee85d8fc2c0583acb60718c418db363809",
+      "original_branch": "refs/heads/work/t8-guard-atom-gate",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/48-t8-guard-atom-gate",
+      "snapshot_commit": "f2430888d116ccfe549423686a8a1b52971b336b"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/t9-build-walk-implementation",
+      "original_head": "d6e05fce8d4a1f57a957939714b1f72d2d0e5465",
+      "original_branch": "refs/heads/work/t9-build-walk-implementation",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/49-t9-build-walk-implementation",
+      "snapshot_commit": "e4224f8abb2b899fbd414f227d9fc765cfdd16f5"
+    },
+    {
+      "path": "/home/david/Projects/.worktrees/pigen/wire-structured-backend-to-cli",
+      "original_head": "3ef34b2da230e4f9050b36e65939c8687f1e28ad",
+      "original_branch": "refs/heads/work/wire-structured-backend-to-cli",
+      "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/50-wire-structured-backend-to-cli",
+      "snapshot_commit": "38540cb9ca1714c437aa253599c2f214b046d6da"
+    }
+  ],
+  "stashes": [
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/00",
+      "commit": "0dc1d235aada6634d0e3fbd412d26e9e680fbb3a"
+    },
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/01",
+      "commit": "7efb1f41b1f355a7a85b10211ac3ca151d38ac15"
+    },
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/02",
+      "commit": "1b9d5941e58a46d1ecb9ae2cb32ec2e4645d7796"
+    },
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/03",
+      "commit": "f3ba0fe2365e1ddffeb38a6e56e075e801baed40"
+    },
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/04",
+      "commit": "df7caac8e22d4e9cc73a16fc130c30da1d9e32a4"
+    },
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/05",
+      "commit": "2a41121445c0eb5f9f96f8098abba5c39a5ac914"
+    },
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/06",
+      "commit": "55923fb057d0b1a944dffc979c740b6334672180"
+    },
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/07",
+      "commit": "29d65693a15d03ae67eda2404c266b2a919ebc2b"
+    },
+    {
+      "ref": "refs/heads/backup/migration-20261023T234051Z/stash/08",
+      "commit": "55272efa43779b4cb350cc36b5a4e7751bf89597"
+    }
+  ],
+  "excluded": "Ignored build outputs; files outside registered Pigen worktrees"
+}
