@@ -3737,24 +3737,37 @@ int main(int argc, char **argv)
 		pigen_free_sources(&sources_k);
 	}
 
-	/* (16) Task 8 shape: the two new lowering entry points and the two
-	 * owner-level enumeration accessors exist with their contracted shapes.
-	 * This is a shape-only, green-on-purpose section: it builds ONE valid
-	 * owner witness (a module with one clock domain, one process and one
-	 * transfer, constructed through the owner APIs with the owner-span
-	 * constraints - the process span contains the clock expression's span and
-	 * the transfer span is contained in the process span), asserts the
-	 * witness is valid, and pins the STUB behavior: both entry points return
-	 * their unimplemented sentinels (-1 and the PIGEN_INVALID_ID module) for
-	 * a valid lowering/module and for a NULL lowering, leaving the lowering
-	 * memo maps and every RTL arena count unchanged after each call, and the
-	 * enumeration accessors enumerate exactly the owner's records in arena
-	 * (addition) order (NULL/0 for an invalid or empty owner). No fire
-	 * identity, no predicate-atom lowering, no record publication: the
-	 * behavior arrives with the test-contract and implementation stages. */
+	/* (16) Task 8 fire-identity test contract: pigen_lower_rtl_transfers
+	 * lowers every transfer of one module so that each transfer's canonical
+	 * guard atoms conjoined with its distinct consumer-valid and
+	 * producer-ready dependencies form ONE fire identity, shared as the SAME
+	 * lowered RTL expression identity (not a re-lowered copy) by every
+	 * destination update of the transfer and its source-ready equations,
+	 * with one RTL process per semantic process in arena order and no
+	 * cross-process equation sharing; pigen_lower_rtl_module composes the
+	 * module record whose object/instance/equation/process ranges cover the
+	 * published records. Staged RED against the current stub: the FIRST
+	 * deliberate red is (a), the valid witness lowering to 0 (the stub
+	 * returns -1); every later behavioral assert in this section is red
+	 * behind it. A failed call reports -1 and the compile stops - this
+	 * section makes NO assertion that a failure left the model or the maps
+	 * unchanged (how/should/compiler/builders/fail.md): the only -1 path
+	 * asserted is the exclusive-producer witness, where the lowering is the
+	 * owner that rejects the nonexclusive duplicate producer before
+	 * lowering. Gate families, each with a distinct witness: join (two
+	 * transfers sharing one destination fire on distinct shared identities),
+	 * repeated projection (two transfers projecting the same payload signal
+	 * share one lowered projection object), static-only assignment (a static
+	 * lvalue destination lowers with no clock-domain update beyond its fire
+	 * identity), exclusive producer (the lowering reports -1), and process
+	 * order (two processes each lower into their own RTL process, in arena
+	 * order, with no cross-process equation sharing). The owner-level
+	 * enumeration accessors keep their green shape asserts: they enumerate
+	 * exactly the owner's records in arena (addition) order (NULL/0 for an
+	 * invalid or empty owner). */
 	SECTION("t8-skeleton") {
 		const char *text =
-			"module top : input clk : logic ; input d : logic ;\n";
+			"module top : input clk : logic ; input d : logic ; input e : logic ; input f : logic ; input g : logic ; input h : logic ;\n";
 		pigen_source_manager sources_t = {0};
 		pigen_semantic_model sem_t;
 		pigen_rtl_model rtl_t = {0};
@@ -3765,27 +3778,79 @@ int main(int argc, char **argv)
 		pigen_source_span whole;
 		pigen_source_span name_clk;
 		pigen_source_span name_d;
+		pigen_source_span name_e;
+		pigen_source_span name_f;
+		pigen_source_span name_g;
+		pigen_source_span name_h;
 		pigen_source_span process_span;
 		pigen_source_span transfer_span;
+		pigen_source_span transfer_span_e;
+		pigen_source_span transfer_span_f;
+		pigen_source_span transfer_span_g;
+		pigen_source_span transfer_span_h;
 		pigen_scope_id module_scope;
 		pigen_symbol_id module_symbol;
 		pigen_symbol_id clk_symbol;
 		pigen_symbol_id d_symbol;
+		pigen_symbol_id e_symbol;
+		pigen_symbol_id f_symbol;
+		pigen_symbol_id g_symbol;
+		pigen_symbol_id h_symbol;
 		pigen_module_id module;
 		pigen_signal_id clk;
 		pigen_signal_id d;
+		pigen_signal_id e;
+		pigen_signal_id f;
+		pigen_signal_id g;
+		pigen_signal_id h;
 		pigen_clock_domain_id domain;
 		pigen_expr_id clk_expr;
+		pigen_expr_id g_cond;
+		pigen_expr_id h_cond;
+		pigen_expr_id guard_expr;
 		pigen_process_id process;
 		pigen_lvalue_id dest;
+		pigen_lvalue_id dest_e;
+		pigen_lvalue_id dest_f;
+		pigen_lvalue_id dest_g;
+		pigen_lvalue_id dest_h;
 		pigen_expr_id value;
 		pigen_transfer_id transfer;
+		pigen_transfer_id transfer_e;
+		pigen_transfer_id transfer_f;
+		pigen_transfer_id transfer_f2;
+		pigen_transfer_id transfer_g;
+		pigen_transfer_id transfer_h;
 		const pigen_semantic_process *owner_process;
 		const pigen_semantic_transfer *owner_transfer;
+		const pigen_transfer_signal_use *uses_h;
 		const pigen_process_id *module_processes;
 		const pigen_transfer_id *process_transfers;
 		size_t module_process_count;
 		size_t process_transfer_count;
+		int transfers_rc;
+		pigen_rtl_expr_id fire_id;
+		pigen_rtl_expr_id first_update_value;
+		const pigen_rtl_expr_id *update_values;
+		const pigen_rtl_expr *fire_expr;
+		const pigen_rtl_update *update;
+		const pigen_rtl_update *update_t;
+		const pigen_rtl_update *update_d;
+		const pigen_rtl_update *update_e1;
+		const pigen_rtl_update *update_e2;
+		const pigen_rtl_update *update_g;
+		const pigen_rtl_equation *ready_t1;
+		const pigen_rtl_equation *ready_e1;
+		const pigen_rtl_process *rtl_process1;
+		const pigen_rtl_process *rtl_process2;
+		const pigen_rtl_module *composed_m;
+		const pigen_rtl_equation *equation;
+		const pigen_rtl_object *payload_obj;
+		size_t equation_index;
+		size_t update_index;
+		size_t atom_index;
+		size_t guard_atom_count;
+		size_t descendant_count;
 		size_t object_before;
 		size_t expression_before;
 		size_t instance_before;
@@ -3793,8 +3858,69 @@ int main(int argc, char **argv)
 		size_t update_before;
 		size_t rtl_process_before;
 		size_t module_count_before;
-		int transfers_rc;
 		pigen_rtl_module_id composed;
+		const char *text2 =
+			"module sub : input clk : logic ; input d : logic ; input q : logic ;\n";
+		pigen_source_id source2;
+		pigen_source_span whole2;
+		pigen_source_span name_clk2;
+		pigen_source_span name_d2;
+		pigen_source_span name_q2;
+		pigen_source_span process_span2a;
+		pigen_source_span process_span2b;
+		pigen_source_span transfer_span2a;
+		pigen_source_span transfer_span2b;
+		pigen_scope_id module_scope2;
+		pigen_symbol_id module_symbol2;
+		pigen_symbol_id clk_symbol2;
+		pigen_symbol_id d_symbol2;
+		pigen_symbol_id q_symbol2;
+		pigen_module_id module2;
+		pigen_signal_id clk2;
+		pigen_signal_id d2;
+		pigen_signal_id q2;
+		pigen_clock_domain_id domain2;
+		pigen_expr_id clk_expr2;
+		pigen_process_id process2a;
+		pigen_process_id process2b;
+		pigen_lvalue_id dest2a;
+		pigen_lvalue_id dest2b;
+		pigen_expr_id value2a;
+		pigen_expr_id value2b;
+		pigen_transfer_id transfer2a;
+		pigen_transfer_id transfer2b;
+		const pigen_rtl_process *rtl_process2a;
+		const pigen_rtl_process *rtl_process2b;
+		const char *text3 =
+			"module excl : input clk : logic ; input d : logic ; input h : logic ;\n";
+		pigen_source_id source3;
+		pigen_source_span whole3;
+		pigen_source_span name_clk3;
+		pigen_source_span name_d3;
+		pigen_source_span name_h3;
+		pigen_source_span process_span3;
+		pigen_source_span transfer_span3a;
+		pigen_source_span transfer_span3b;
+		pigen_scope_id module_scope3;
+		pigen_symbol_id module_symbol3;
+		pigen_symbol_id clk_symbol3;
+		pigen_symbol_id d_symbol3;
+		pigen_symbol_id h_symbol3;
+		pigen_module_id module3;
+		pigen_signal_id clk3;
+		pigen_signal_id d3;
+		pigen_signal_id h3;
+		pigen_clock_domain_id domain3;
+		pigen_expr_id clk_expr3;
+		pigen_process_id process3;
+		pigen_lvalue_id dest3a;
+		pigen_lvalue_id dest3b;
+		pigen_expr_id value3a;
+		pigen_expr_id value3b;
+		pigen_transfer_id transfer3a;
+		pigen_transfer_id transfer3b;
+		pigen_transfer_signal_use uses3a;
+		pigen_transfer_signal_use uses3b;
 
 		/* Build the witness through the owner APIs (the section 8 pattern):
 		 * a 1-bit data type, a source file, the compilation scope, a module,
