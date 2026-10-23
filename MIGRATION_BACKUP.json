@@ -7,7 +7,7 @@
       "original_head": "9ed5e7ae84cf1d55bce61c87af5b6f75866db680",
       "original_branch": "refs/heads/work/draft-a6e2d099b062",
       "snapshot_ref": "refs/heads/backup/migration-20261023T234051Z/worktree/00-pigen",
-      "snapshot_commit": "62bc6688974eaa74ae3fc2cb84fed64013c9682c"
+      "snapshot_commit": "fd9af806edcc860427bf28cde545bca9c80556d1"
     },
     {
       "path": "/home/david/.CointOS/state/agents/integrator-eb121c/scratch/route-checkout",
