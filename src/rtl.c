@@ -585,6 +585,7 @@ pigen_rtl_module_id pigen_rtl_module_add(pigen_rtl_model *model,
 	}
 	result.index = (uint32_t)model->module_count;
 	record = &model->modules[model->module_count++];
+	*record = (pigen_rtl_module){0};
 	record->origin = origin;
 	return result;
 }
