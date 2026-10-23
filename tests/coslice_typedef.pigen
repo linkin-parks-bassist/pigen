@@ -1,0 +1,25 @@
+typedef logic [15:0] src16_t;
+typedef logic [7:0]  byte_t;
+
+module coslice_typedef
+	(
+		input logic clk,
+		input logic reset,
+		input port src16_t source,
+		output port byte_t high,
+		output port byte_t low
+	);
+
+	reg [15:0] state;
+	reg [15:0] previous;
+
+	always_ff @(posedge clk)
+	begin
+		if (!reset)
+		begin
+			{high, low} <= source;
+			state <= source;
+			previous <= state;
+		end
+	end
+endmodule
