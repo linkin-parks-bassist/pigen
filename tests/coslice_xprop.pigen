@@ -1,0 +1,17 @@
+module coslice_xprop
+	(
+		input logic clk,
+		input logic reset,
+		input buf [7:0] source,
+		output buf [7:0] left,
+		output logic [7:0] previous
+	);
+
+	reg [7:0] state;
+
+	always_ff @(posedge clk)
+	begin
+		if ({left, state} <= {source + 8'd1, peek(source)})
+			previous <= state;
+	end
+endmodule
