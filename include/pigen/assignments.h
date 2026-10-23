@@ -16,7 +16,7 @@ void pigen_emit_width_checks(pigen_string *output, pigen_width_checks *checks, p
 void pigen_validate_assignments(pigen_assignments *assignments, pigen_primitives *primitives);
 void pigen_validate_clears(pigen_clears *clears, pigen_assignments *assignments, pigen_primitives *primitives);
 void pigen_emit_clear_routes(pigen_string *output, pigen_clears *clears, pigen_assignments *assignments, pigen_primitives *primitives);
-void pigen_emit_rewritten_expression(pigen_string *output, const char *start, const char *end, pigen_primitives *primitives);
+void pigen_emit_rewritten_expression(pigen_string *output, const char *start, const char *end, pigen_primitives *primitives, pigen_assignments *assignments);
 int pigen_emit_conditional_transfer_condition(pigen_string *output, const char *start, const char *end, pigen_primitives *primitives);
 
 #endif

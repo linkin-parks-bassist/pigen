@@ -1,5 +1,6 @@
 /* Signal assignment recognition, validation, and ready/valid lowering. */
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -865,7 +866,7 @@ void pigen_emit_width_checks(pigen_string *output, pigen_width_checks *checks,
 		pigen_append(output, check->lhs);
 		pigen_append(output, ") != $bits(");
 		pigen_emit_rewritten_expression(output, check->rhs,
-			check->rhs + strlen(check->rhs), primitives);
+			check->rhs + strlen(check->rhs), primitives, NULL);
 		pigen_append(output, ")) begin : __pigen_transfer_width_mismatch_");
 		pigen_append_format(output, "%zu", check->group);
 		pigen_append(output, "\n\t\t\tinitial $fatal(1, \"Pigen transfer aggregate width mismatch\");\n");
@@ -933,7 +934,7 @@ void pigen_emit_assignment_routes(pigen_string *output, pigen_assignments *assig
 				pigen_append_control_name(output, assignment->destination,
 					strlen(assignment->destination), "payload_t");
 				pigen_append(output, "'(");
-				pigen_emit_rewritten_expression(output, alternative->expression, alternative->expression + strlen(alternative->expression), primitives);
+				pigen_emit_rewritten_expression(output, alternative->expression, alternative->expression + strlen(alternative->expression), primitives, NULL);
 				pigen_append(output, ")) : ");
 			}
 			else
@@ -941,7 +942,7 @@ void pigen_emit_assignment_routes(pigen_string *output, pigen_assignments *assig
 				pigen_append_control_name(output, assignment->destination,
 					strlen(assignment->destination), "payload_t");
 				pigen_append(output, "'(");
-				pigen_emit_rewritten_expression(output, alternative->expression, alternative->expression + strlen(alternative->expression), primitives);
+				pigen_emit_rewritten_expression(output, alternative->expression, alternative->expression + strlen(alternative->expression), primitives, NULL);
 				pigen_append(output, ")");
 				first = 0;
 				break;
@@ -1049,7 +1050,7 @@ void pigen_emit_assignment_routes(pigen_string *output, pigen_assignments *assig
 		emit_group_validity(output, assignments, assignment->group, primitives, NULL);
 		pigen_append(output, " && "); emit_group_ready(output, assignments, assignment->group, primitives);
 		pigen_append(output, ")\n\t\t\t"); pigen_append(output, assignment->destination); pigen_append(output, " <= ");
-		pigen_emit_rewritten_expression(output, assignment->expression, assignment->expression + strlen(assignment->expression), primitives);
+		pigen_emit_rewritten_expression(output, assignment->expression, assignment->expression + strlen(assignment->expression), primitives, assignments);
 		pigen_append(output, ";\n\tend\n\n");
 	}
 }
@@ -1362,7 +1363,39 @@ void pigen_emit_clear_routes(pigen_string *output, pigen_clears *clears, pigen_a
 		pigen_append(output, "\n");
 }
 
-void pigen_emit_rewritten_expression(pigen_string *output, const char *start, const char *end, pigen_primitives *primitives)
+/* A register/logic destination whose value is established by the same firing
+ * transfer must read the value the transfer writes, not the register's stale
+ * pre-edge contents.  When the whole expression is a complete reference to such
+ * a register, return the expression that establishes it so a separate `previous
+ * <= state` clause captures the transfer's value on the first firing edge
+ * instead of the register's initial X.  Slices and projections are left to the
+ * ordinary pre-edge read.  Returns a heap allocation the caller frees, or NULL. */
+static char *resolve_same_fire_register(const char *name, size_t length,
+	pigen_assignments *assignments, pigen_primitives *primitives)
+{
+	pigen_primitive *register_primitive = pigen_find_primitive(primitives, name, length);
+
+	if (!register_primitive || !pigen_transfer_type_has_storage(register_primitive->transfer_type))
+		return NULL;
+	if (register_primitive->transfer_type != 'r' && register_primitive->transfer_type != 'l')
+		return NULL;
+	if (!register_primitive->is_internal)
+		return NULL;
+	for (size_t i = 0; i < assignments->count; i++)
+	{
+		const pigen_assignment *establishing = &assignments->items[i];
+
+		if (strcmp(establishing->destination, register_primitive->name))
+			continue;
+		if (!pigen_transfer_type_has_storage(establishing->destination_code))
+			continue;
+		return pigen_copy_range(establishing->expression, strlen(establishing->expression));
+	}
+	return NULL;
+}
+
+void pigen_emit_rewritten_expression(pigen_string *output, const char *start, const char *end,
+	pigen_primitives *primitives, pigen_assignments *assignments)
 {
 	const char *cursor = start;
 	pigen_string whole_condition = {0};
@@ -1407,6 +1440,20 @@ void pigen_emit_rewritten_expression(pigen_string *output, const char *start, co
 				identifier_end++;
 			identifier_primitive = pigen_find_primitive(primitives, cursor,
 				(size_t)(identifier_end - cursor));
+			/* A separate `previous <= state` clause reads a register whose value the
+			 * same transfer establishes on this edge.  Capture the established value,
+			 * not the register's stale pre-edge contents (initial X). */
+			if (assignments)
+			{
+				char *same_fire = resolve_same_fire_register(cursor, (size_t)(identifier_end - cursor), assignments, primitives);
+				if (same_fire)
+				{
+					pigen_append(output, same_fire);
+					free(same_fire);
+					cursor = identifier_end;
+					continue;
+				}
+			}
 			/* Only storage-backed signals cross a primitive type parameter and
 			 * need their declaration signedness recovered here.  `logic`, `reg`,
 			 * and `wire` are ordinary SV declarations with static signal
