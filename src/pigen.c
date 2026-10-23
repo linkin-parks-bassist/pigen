@@ -418,12 +418,13 @@ int main(int argc, char **argv)
 				free(rewritten_guard.data);
 				previous_statement_was_generated = 0;
 			}
-			else if (extract_manual_signal_write(start, end, &primitives, &prefix_end, &destination,
+else if (extract_manual_signal_write(start, end, &primitives, &prefix_end, &destination,
 				&destination_length, &expression, &expression_length))
 			{
 				const char *parsed_guard;
 				const char *domain;
 				pigen_string rewritten_guard = {0};
+				fprintf(stderr,"[DBG] manual-write matched dest=%.*d\n",0,0);
 				if (!pigen_procedural_statement_for(&procedural_ast, prefix_end))
 					fail("manual signal writes are allowed only in clocked always blocks");
 				parsed_guard = pigen_procedural_guard_for(&procedural_ast, prefix_end);

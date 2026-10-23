@@ -310,3 +310,8 @@ compile-test:
 
 clean:
 	rm -f pigen
+
+coslice-xprop-test: pigen
+	./pigen tests/coslice_xprop.pigen -o /tmp/pigen-coslice-xprop.sv
+	iverilog -g2012 -o /tmp/pigen-coslice-xprop-vvp rtl/pigen_primitives.sv /tmp/pigen-coslice-xprop.sv tests/coslice_xprop_tb.sv
+	vvp /tmp/pigen-coslice-xprop-vvp
