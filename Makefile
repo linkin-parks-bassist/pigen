@@ -8,8 +8,8 @@ SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.
 
 all: pigen
 
-pigen: src/pigen.c src/blocks.c src/fabric_svg.inc src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/lexer.c src/util.c include/pigen/model.h include/pigen/blocks.h include/pigen/assignments.h include/pigen/declarations.h include/pigen/procedural.h include/pigen/transfer.h include/pigen/pipeline.h include/pigen/fsm.h include/pigen/lexer.h include/pigen/util.h
-	$(CC) $(CFLAGS) -o $@ src/pigen.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/lexer.c src/util.c $(LDLIBS)
+pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c
+	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS)
 
 test: pigen source-test preprocess-test transfer-type-test syntax-model-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen

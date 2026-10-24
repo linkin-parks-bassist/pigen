@@ -162,15 +162,19 @@ static void test_owned_signal_full_pipeline(void)
     int resolve_ret = pigen_resolve_semantics(&syntax_tree, &semantic_model, &policy, &semantic_error);
     assert(resolve_ret == 1); /* semantic resolution success */
 
-    /* Now call the public compiler - this should fail against the skeleton stub */
+    /* Now call the public compiler - the full pipeline should succeed and
+     * produce SystemVerilog output for the owned signal declaration. */
     pigen_compile_result result = {0};
     pigen_compile_error error = {0};
     int compile_ret = pigen_compile_source(&sources, "tests/owned_signal.pigen",
                                            source_text, source_length,
                                            NULL, &result, &error);
-    assert(compile_ret == -1); /* compilation failure (skeleton stub) */
-    assert(result.systemverilog == NULL);
-    assert(result.length == 0);
+    assert(compile_ret == 0); /* compilation success */
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+    /* The emitted SV must contain the module name and the signal name. */
+    assert(strstr(result.systemverilog, "owned_signal") != NULL);
+    assert(strstr(result.systemverilog, "stage") != NULL);
 
     /* Cleanup */
     pigen_free_compile_result(&result);

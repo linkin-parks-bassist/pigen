@@ -1032,6 +1032,14 @@ static int emit_module(struct buf *b, const pigen_source_manager *sources,
 			if (emit_process(b, rtl, process) != 0)
 				return -1;
 			break;
+		case PIGEN_OUTPUT_OPAQUE:
+			/* The output model nests the module's non-structured source
+			 * fragments (its original ANSI header, the inter-identifier
+			 * punctuation, the endmodule keyword) inside the module, in source
+			 * order. The emitter re-synthesizes a clean header, body and
+			 * endmodule from the RTL records, so these fragments are skipped
+			 * here exactly as the port loop above skips non-object children. */
+			break;
 		default:
 			return -1;
 		}

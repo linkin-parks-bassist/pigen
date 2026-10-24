@@ -544,8 +544,14 @@ static int boundary_endpoints(pigen_rtl_lowering *lowering,
 	pigen_rtl_expr_id payload_expr;
 	pigen_rtl_expr_id valid;
 	pigen_rtl_expr_id ready;
-	pigen_source_span origin =
-		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+	/* The payload's origin is the signal's identifier span: the emitter's
+	 * object_name resolves a SOURCE name whose origin equals the object's
+	 * origin, so the payload must carry the provenance identifier the entry
+	 * names for the signal. */
+	const pigen_symbol *owner_symbol =
+		pigen_symbol_get(sem, owner_signal->symbol);
+	pigen_source_span origin = owner_symbol ? owner_symbol->name
+		: (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
 
 	/* The payload's type must lower first: a signal whose data type does not
 	 * lower (the negative-exact-integer boundary) fails the whole call with
@@ -665,13 +671,19 @@ static int net_variable_endpoints(pigen_rtl_lowering *lowering,
 	pigen_rtl_module_id rtl_module, int valid_constant, int ready_constant,
 	pigen_rtl_signal_endpoints *out)
 {
+	pigen_semantic_model *sem = lowering->semantics;
 	pigen_rtl_model *rtl = lowering->rtl;
 	pigen_rtl_type_id data_type;
 	pigen_rtl_object_id payload;
 	pigen_rtl_expr_id valid;
 	pigen_rtl_expr_id ready;
-	pigen_source_span origin =
-		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+	/* The payload's origin is the signal's identifier span (see
+	 * boundary_endpoints): the emitter resolves the payload name from a SOURCE
+	 * name matching this origin. */
+	const pigen_symbol *owner_symbol =
+		pigen_symbol_get(sem, owner_signal->symbol);
+	pigen_source_span origin = owner_symbol ? owner_symbol->name
+		: (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
 
 	/* The payload's type must lower first: a signal whose data type does not
 	 * lower fails the whole call with no partial record. */
@@ -721,6 +733,7 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 	pigen_transfer_realization realization,
 	pigen_rtl_signal_endpoints *out)
 {
+	pigen_semantic_model *sem = lowering->semantics;
 	pigen_rtl_model *rtl = lowering->rtl;
 	pigen_rtl_type_id data_type;
 	pigen_rtl_object_id payload;
@@ -735,9 +748,18 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 	if (data_type.index == PIGEN_INVALID_ID)
 		return 0;
 
+	/* The payload's origin is the signal's identifier span (see
+	 * boundary_endpoints): the emitter resolves the payload name from a SOURCE
+	 * name matching this origin. The primitive instance keeps the whole-
+	 * declaration span: it is a distinct record (a separate instance, not the
+	 * payload) and its own naming is handled by the instance-name rule. */
+	const pigen_symbol *owner_symbol =
+		pigen_symbol_get(sem, owner_signal->symbol);
+	pigen_source_span origin = owner_symbol ? owner_symbol->name
+		: (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
 	payload = pigen_rtl_object_add_with_owner(rtl, rtl_module,
 		PIGEN_RTL_OBJECT_VARIABLE, data_type, owner_signal->direction,
-		(pigen_signal_id){(uint32_t)signal_index}, owner_signal->span);
+		(pigen_signal_id){(uint32_t)signal_index}, origin);
 	if (payload.index == PIGEN_INVALID_ID)
 		return 0;
 
