@@ -38,9 +38,6 @@ int pigen_compile_source(pigen_source_manager *sources,
         result->length = 0;
     }
 
-    /* Unused parameter. */
-    (void)options;
-
     /* If sources is NULL, create a local source manager. */
     int own_sources = 0;
     if (!sources) {
@@ -128,15 +125,18 @@ int pigen_compile_source(pigen_source_manager *sources,
     pigen_semantic_model semantic_model = {0};
     pigen_semantic_init(&semantic_model, sources);
 
-    /* Semantic resolution. */
+    /* The resolve policy must carry a positive maximum_generated_bits or the
+     * resolver treats the input as no-policy and returns with no model. A
+     * caller-provided option wins; otherwise the entry supplies a valid
+     * default so a composed compile never resolves under a no-policy stance. */
     pigen_resolve_policy resolve_policy = {0};
-    if (options) {
-        resolve_policy.maximum_generated_bits = options->maximum_generated_bits;
-    }
+    resolve_policy.maximum_generated_bits =
+        options && options->maximum_generated_bits ?
+        options->maximum_generated_bits : 1024;
     pigen_semantic_error semantic_error = {0};
     
     int resolve_ret = pigen_resolve_semantics(&syntax_tree, &semantic_model, &resolve_policy, &semantic_error);
-    if (resolve_ret != 0) {
+    if (resolve_ret != 1) {
         if (error) {
             error->origin = semantic_error.origin;
             error->span = semantic_error.span;
@@ -155,26 +155,14 @@ int pigen_compile_source(pigen_source_manager *sources,
     pigen_rtl_lowering lowering = {0};
     pigen_rtl_lowering_init(&lowering, &semantic_model, &rtl_model);
 
-    /* RTL module lowering. */
+    /* RTL module lowering. pigen_lower_rtl_transfers runs the declaration
+     * lowering internally (it owns the single module-memo reset and publishes
+     * exactly one module), so the entry must NOT call the declaration lowering
+     * separately: a second call would reset the memo and create a second,
+     * empty module the composition gate rejects. */
     for (size_t i = 0; i < semantic_model.module_count; i++) {
         pigen_semantic_module *sem_module = &semantic_model.modules[i];
         pigen_module_id module = pigen_symbol_module(&semantic_model, sem_module->symbol);
-        
-        int decl_ret = pigen_lower_rtl_module_declarations(&lowering, module);
-        if (decl_ret != 0) {
-            if (error) {
-                error->origin = (pigen_origin_id){0};
-                error->span = (pigen_source_span){0};
-                error->message = "RTL module declaration lowering failed";
-            }
-            pigen_free_preprocess_result(&preprocess_result);
-            pigen_free_syntax_tree(&syntax_tree);
-            pigen_free_semantic_model(&semantic_model);
-            pigen_rtl_lowering_free(&lowering);
-            pigen_free_tokens(&tokens);
-            if (own_sources) free(sources);
-            return -1;
-        }
         
         int transfer_ret = pigen_lower_rtl_transfers(&lowering, module);
         if (transfer_ret != 0) {
@@ -209,11 +197,18 @@ int pigen_compile_source(pigen_source_manager *sources,
         }
     }
 
-    /* RTL naming. */
+    /* RTL naming. The emitter resolves each object's final name as the
+     * SOURCE-kind name whose origin span equals the object's origin (the
+     * signal's identifier span, per the lowering), and the module's name as the
+     * SOURCE name no object claims. So the entry requests one SOURCE name per
+     * module identifier span and one per signal identifier span, taken from
+     * each record's symbol name (the identifier), not the whole statement. */
     pigen_rtl_name_request *name_requests = NULL;
     size_t name_request_count = 0;
-    if (semantic_model.module_count > 0) {
-        name_requests = malloc(semantic_model.module_count * sizeof(pigen_rtl_name_request));
+    size_t name_request_capacity = semantic_model.module_count +
+        semantic_model.signal_count;
+    if (name_request_capacity > 0) {
+        name_requests = malloc(name_request_capacity * sizeof(pigen_rtl_name_request));
         if (!name_requests) {
             if (error) {
                 error->origin = (pigen_origin_id){0};
@@ -230,11 +225,23 @@ int pigen_compile_source(pigen_source_manager *sources,
         }
         
         for (size_t i = 0; i < semantic_model.module_count; i++) {
-            pigen_semantic_module *sem_module = &semantic_model.modules[i];
-            name_requests[i].kind = PIGEN_RTL_NAME_SOURCE;
-            name_requests[i].origin = sem_module->span;
+            const pigen_semantic_module *sem_module = &semantic_model.modules[i];
+            const pigen_symbol *module_symbol = pigen_symbol_get(&semantic_model,
+                sem_module->symbol);
+            name_requests[name_request_count].kind = PIGEN_RTL_NAME_SOURCE;
+            name_requests[name_request_count].origin =
+                module_symbol ? module_symbol->name : sem_module->span;
+            name_request_count++;
         }
-        name_request_count = semantic_model.module_count;
+        for (size_t i = 0; i < semantic_model.signal_count; i++) {
+            const pigen_semantic_signal *sem_signal = &semantic_model.signals[i];
+            const pigen_symbol *signal_symbol = pigen_symbol_get(&semantic_model,
+                sem_signal->symbol);
+            name_requests[name_request_count].kind = PIGEN_RTL_NAME_SOURCE;
+            name_requests[name_request_count].origin =
+                signal_symbol ? signal_symbol->name : sem_signal->span;
+            name_request_count++;
+        }
     }
     
     pigen_rtl_name_id naming_result = pigen_rtl_assign_names(&rtl_model, sources, name_requests, name_request_count);

@@ -53,6 +53,8 @@ typedef struct {
 	size_t typedef_name_fact_capacity;
 	pipeline_scope_stack pipeline_scopes;
 	int pipeline_failed;
+	size_t source_length;
+	size_t opaque_byte_cursor;
 } syntax_parser;
 
 typedef struct {
@@ -261,6 +263,29 @@ static void add_opaque(syntax_parser *parser, pigen_syntax_id parent,
 	if (start == end) return;
 	node.kind = PIGEN_SYNTAX_OPAQUE;
 	node.location = range_location(parser, start, end);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	id = add_node(parser, node);
+	add_child(parser, parent, id);
+}
+
+/* Emit an OPAQUE node with a byte-extent span (start..end are byte offsets
+ * in the source). Used to make the OPAQUE spans byte-contiguous across the
+ * whole source, covering whitespace and trailing text that token-extent spans
+ * miss. The emitter's monotonic-coverage gate requires OPAQUE spans to be
+ * contiguous and reach the file length; token-extent spans cannot cover
+ * whitespace between tokens or text after the last token. */
+static void add_opaque_bytes(syntax_parser *parser, pigen_syntax_id parent,
+	size_t start, size_t end)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id id;
+
+	if (start >= end) return;
+	node.kind = PIGEN_SYNTAX_OPAQUE;
+	node.location.source_span = (pigen_source_span){
+		parser->expanded->root_source, start, end};
+	node.location.origin = parser->expanded->tokens[0].origin;
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
 	id = add_node(parser, node);
@@ -674,9 +699,27 @@ static void commit_declaration(syntax_parser *parser, pigen_syntax_id module,
 	size_t start, size_t declaration_after, syntax_cursor *opaque_cursor,
 	pigen_syntax_id declaration)
 {
+	const pigen_expanded_token *decl_tok;
+	const pigen_expanded_token *start_tok;
+	size_t opaque_start;
+	size_t opaque_end;
+
 	parser->tree->nodes[declaration.index].location = range_location(parser,
 		start, declaration_after);
-	add_opaque(parser, module, *opaque_cursor, start);
+	/* Emit the OPAQUE span between the previous item's end (byte cursor) and
+	 * this declaration's start, using byte-extent so whitespace is covered. */
+	decl_tok = pigen_expanded_token_get(parser->expanded,
+		(pigen_token_id){(uint32_t)(declaration_after - 1)});
+	start_tok = pigen_expanded_token_get(parser->expanded,
+		(pigen_token_id){(uint32_t)start});
+	opaque_start = parser->opaque_byte_cursor;
+	opaque_end = start_tok ?
+		pigen_origin_expansion_span(parser->expanded,
+			start_tok->origin).start : parser->opaque_byte_cursor;
+	if (start_tok && decl_tok)
+		parser->opaque_byte_cursor = pigen_origin_expansion_span(
+			parser->expanded, decl_tok->origin).end;
+	add_opaque_bytes(parser, module, opaque_start, opaque_end);
 	add_child(parser, module, declaration);
 	*opaque_cursor = declaration_after;
 }
@@ -1788,6 +1831,7 @@ static int parse_module(syntax_parser *parser, pigen_syntax_id root,
 	module = add_node(parser, node);
 	add_child(parser, root, module);
 	opaque_cursor = start;
+	parser->opaque_byte_cursor = 0;
 	header_at = name + 1;
 	if (token_is(parser, header_at, "#"))
 	{
@@ -1813,7 +1857,8 @@ static int parse_module(syntax_parser *parser, pigen_syntax_id root,
 	}
 	if (!parse_module_items(parser, module, header_end + 1, endmodule,
 		&opaque_cursor)) return 0;
-	add_opaque(parser, module, opaque_cursor, endmodule + 1);
+	add_opaque_bytes(parser, module, parser->opaque_byte_cursor,
+		parser->source_length);
 	*after_module = endmodule + 1;
 	return 1;
 }
@@ -1834,8 +1879,12 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 	parser.tree = tree;
 	parser.error = error;
 	parser.pipeline_failed = 0;
+	parser.source_length = 0;
+	parser.opaque_byte_cursor = 0;
 	if (!source || !pigen_source_get(source->sources, source->root_source) ||
 		!source->token_count) return 0;
+	parser.source_length = pigen_source_get(source->sources,
+		source->root_source)->length;
 	opaque_cursor = 0;
 	tree->expanded = source;
 	root_node.kind = PIGEN_SYNTAX_COMPILATION_UNIT;
