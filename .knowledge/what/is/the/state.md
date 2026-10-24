@@ -2,20 +2,22 @@
 status: "unverified"
 created_at: "2026-09-13T15:00:33+10:00"
 scope: "local"
-source: "David's current-only knowledge instruction 2026-09-14; audited current contracts and inspected owner interfaces; Codex /root"
+source: "David's explicit direct linear commit/push instruction, 2026-09-14; current Git history and previous workflow audited"
 ingested_by: "Codex /root"
 checked_at: "2026-09-14T17:13:16+10:00"
 review_when: "Review when cited source contracts, implementation status or test evidence change."
-updated_at: "2026-09-14T20:48:46+10:00"
+updated_at: "2026-09-14T23:16:10+10:00"
 updated_by: "opencode"
 ---
 
 The structured frontend implements source/token provenance and preprocessing, shared type/declaration syntax, scopes and stable symbols, canonical data types/shapes/exact integers, intrinsic two-stage expressions and explicit conversions, lvalues/predicates/clock domains, one signal arena, direct transfers, deduplicated incidence and ownership. Data-first declarations, abstract inputs, omission policy and descriptor-owned FIFO depths resolve through owner APIs.
 
-It remains unlinked from ./pigen; production is the quarantined textual prototype. Elastic RTL Task 1 is implemented: rtl.h/rtl.c provide origin-only records, eight distinct IDs, arena ownership and checked accessors. Task 2 types/expressions and subsequent ready/output/emitter/composer work are not implemented. PR 1 is open for Task 1 review; PR 2 covers the knowledge/document cutover. Implementation progress must come from actual code and acceptance evidence.
+Elastic RTL Task 1 is implemented. Task 2 is implemented on elastic-rtl-task-2-kt in a44a8b2 with review fixes in 7593604: interned types retain ordered concrete/symbolic packed bounds; typed expressions own ordered children and arbitrary-width signed integer/four-state literal records. The child arena alias use-after-free is corrected by copying inputs before growth. All eleven foundation targets pass, final RTL regression tests pass under AddressSanitizer/UndefinedBehaviorSanitizer, and git diff --check passes. David authorized publishing all current work directly to master in linear history on 2026-09-14; the PR review gate is removed. Subsequent ready/output/emitter/composer work remains unimplemented.
 
-The local tree is the sole project documentation authority; local docs, notes, root Markdown and AGENTS.md are absent. Obsolete history is excluded. Compiler sources, headers, tests, Makefile, primitives and examples have not changed during this cleanup. The immutable Kestrel reference and global AGENTS.md remain applicable.
+The local tree is the sole project documentation authority; local docs, notes, root Markdown and AGENTS.md are absent. Obsolete history is excluded. The immutable Kestrel reference and global AGENTS.md remain applicable.
 
 Current verification: all eleven structured C foundation targets pass. Full make verify fails when Icarus compiles the pipeline fixture with segmentation fault/exit 139, reproduced by make pipeline-test; the cause remains unresolved in why/does/pipeline/verification/currently/fail.md. No full-suite success is claimed.
 
-Qwen is stopped while Codex /root removes obsolete tree content. Resume only through a fresh focused kt Task 2 session after the cleanup is committed; state and next must be updated with its actual identity and status.
+The containing personal-project folder was renamed to `Projects`. Git identity and existing local work were preserved. Saved agent directories and snapshot dependencies were migrated; local proofs and Git whitespace checks pass. This rename did not modify compiler implementation or requalify the known pipeline crash.
+
+Reference projects now reside at `~/Projects/reference_projects`. The Kestrel snapshot remains unchanged (all file hashes/modes and Git identity/status checked); Pigen reference knowledge and source/installed CointOS workspace paths were updated. The old home-level path is absent; no compatibility symlink was created.
