@@ -1042,5 +1042,14 @@
       "pipeline-stage-test",
       "T=repartition-equal-bits"
     ]
+  },
+  {
+    "covers": [
+      "src/pigen.c"
+    ],
+    "command": [
+      "sh",
+      "tests/cli_diagnostics_test.sh"
+    ]
   }
 ]
