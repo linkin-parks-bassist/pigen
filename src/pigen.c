@@ -89,6 +89,33 @@ static int write_file(const char *path, const char *data, size_t length)
 	return 1;
 }
 
+static void report_error(const pigen_source_manager *sources,
+	const char *path, const pigen_compile_error *error)
+{
+	const pigen_source_file *file;
+	const char *line_start;
+	size_t line_length;
+	size_t pad;
+	pigen_source_location location;
+
+	if (error->message && error->span.start != error->span.end &&
+		pigen_source_span_valid(sources, error->span))
+	{
+		location = pigen_source_locate(sources, error->span);
+		file = pigen_source_get(sources, error->span.source);
+		line_start = file->text + file->line_starts[location.line - 1];
+		line_length = strcspn(line_start, "\n");
+		pad = location.column - 1;
+		fprintf(stderr, "%s:%zu:%zu: %s\n", path, location.line,
+			location.column, error->message);
+		fprintf(stderr, "    %.*s\n", (int)line_length, line_start);
+		fprintf(stderr, "    %*s^\n", (int)pad, "");
+		return;
+	}
+	fprintf(stderr, "pigen: %s\n",
+		error->message ? error->message : "compile failed");
+}
+
 int main(int argc, char **argv)
 {
 	const char *input_path = NULL;
@@ -120,9 +147,12 @@ int main(int argc, char **argv)
 
 	source = read_file(input_path, &source_length);
 
+	pigen_source_manager sources = {0};
+	pigen_source_add(&sources, input_path, source, source_length);
+
 	pigen_compile_result result = {0};
 	pigen_compile_error error = {0};
-	int ret = pigen_compile_source(NULL, input_path,
+	int ret = pigen_compile_source(&sources, input_path,
 		source, source_length, NULL, &result, &error);
 	free(source);
 
@@ -130,8 +160,8 @@ int main(int argc, char **argv)
 	{
 		/* Loud failure: diagnostic with native source span to stderr,
 		 * nonzero exit, no output file written. */
-		if (error.message)
-			fprintf(stderr, "pigen: %s\n", error.message);
+		report_error(&sources, input_path, &error);
+		pigen_free_sources(&sources);
 		pigen_free_compile_result(&result);
 		free(owned_output_path);
 		return 1;
@@ -141,11 +171,13 @@ int main(int argc, char **argv)
 	 * no "wrote" notice. */
 	if (!write_file(output_path, result.systemverilog, result.length))
 	{
+		pigen_free_sources(&sources);
 		pigen_free_compile_result(&result);
 		free(owned_output_path);
 		return 1;
 	}
 
+	pigen_free_sources(&sources);
 	pigen_free_compile_result(&result);
 	free(owned_output_path);
 	return 0;
