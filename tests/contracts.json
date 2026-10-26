@@ -1051,5 +1051,67 @@
       "sh",
       "tests/cli_diagnostics_test.sh"
     ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c",
+      "src/pipeline_stage.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=buf-storage"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c",
+      "src/pipeline_stage.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=next-value-equations"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=yield-write"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=emitted-member-order"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=step-b-witnesses"
+    ]
   }
 ]
