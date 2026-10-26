@@ -19,6 +19,9 @@ typedef enum {
 	PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT,
 	PIGEN_SYNTAX_PIPELINE,
 	PIGEN_SYNTAX_STAGE,
+	PIGEN_SYNTAX_FSM,
+	PIGEN_SYNTAX_FSM_STATE,
+	PIGEN_SYNTAX_GOTO,
 	PIGEN_SYNTAX_OPAQUE
 } pigen_syntax_kind;
 
@@ -108,6 +111,18 @@ typedef struct {
 			pigen_token_id name;
 			int has_name;
 		} stage;
+		struct {
+			pigen_token_id name;
+			pigen_syntax_expr_id clock;
+			pigen_syntax_expr_id reset;
+			pigen_token_id initial;
+		} fsm;
+		struct {
+			pigen_token_id name;
+		} fsm_state;
+		struct {
+			pigen_token_id target;
+		} goto_statement;
 	} as;
 } pigen_syntax_node;
 

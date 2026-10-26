@@ -45,6 +45,12 @@ typedef struct {
 } pipeline_scope_stack;
 
 typedef struct {
+	pigen_token_id *names;
+	size_t count;
+	size_t capacity;
+} fsm_state_names;
+
+typedef struct {
 	const pigen_expanded_source *expanded;
 	pigen_syntax_tree *tree;
 	pigen_syntax_error *error;
@@ -53,6 +59,7 @@ typedef struct {
 	size_t typedef_name_fact_capacity;
 	pipeline_scope_stack pipeline_scopes;
 	int pipeline_failed;
+	const fsm_state_names *fsm_states;
 	size_t source_length;
 	size_t opaque_byte_cursor;
 } syntax_parser;
@@ -836,6 +843,20 @@ static size_t matching_parenthesis(const syntax_parser *parser, size_t open,
 	return limit;
 }
 
+static size_t matching_begin_end(const syntax_parser *parser, size_t begin,
+	size_t limit)
+{
+	size_t at;
+	size_t depth = 0;
+
+	for (at = begin; at < limit; at++)
+	{
+		if (token_is(parser, at, "begin")) depth++;
+		else if (token_is(parser, at, "end") && !--depth) return at;
+	}
+	return limit;
+}
+
 static size_t ansi_item_end(const syntax_parser *parser, size_t start,
 	size_t after)
 {
@@ -1069,6 +1090,9 @@ static int parse_procedural_statement(syntax_parser *parser,
 static int parse_pipeline(syntax_parser *parser, pigen_syntax_id parent,
 	size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count);
+
+static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
+	size_t start, size_t limit, size_t *after_statement);
 
 static int parse_procedural_block(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
@@ -1589,6 +1613,254 @@ static int parse_pipeline(syntax_parser *parser, pigen_syntax_id parent,
 	return 0;
 }
 
+static int fsm_state_names_add(fsm_state_names *states, pigen_token_id name)
+{
+	if (states->count == states->capacity)
+	{
+		states->capacity = states->capacity ? states->capacity * 2 : 4;
+		states->names = pigen_resize(states->names,
+			states->capacity * sizeof(*states->names));
+	}
+	states->names[states->count++] = name;
+	return 1;
+}
+
+static int fsm_state_names_contains(const syntax_parser *parser,
+	const fsm_state_names *states, pigen_token_id name)
+{
+	size_t i;
+	for (i = 0; i < states->count; i++)
+		if (tokens_equal(parser, states->names[i], name)) return 1;
+	return 0;
+}
+
+static int parse_goto_statement(syntax_parser *parser, pigen_syntax_id parent,
+	const fsm_state_names *declared, size_t start, size_t limit,
+	size_t *after_statement)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id target;
+	size_t semicolon;
+
+	if (!token_is(parser, start, "goto")) return 0;
+	semicolon = top_level_token(parser, start + 1, limit, ";");
+	if (semicolon == limit)
+		return fail(parser, start, "goto requires a state name");
+	if (semicolon != start + 2 || !identifier(parser, start + 1))
+		return fail(parser, start + 1, "goto requires a state name");
+	if (!fsm_state_names_contains(parser, declared,
+		(pigen_token_id){(uint32_t)(start + 1)}))
+		return fail(parser, start + 1, "goto references an undeclared state");
+	node.kind = PIGEN_SYNTAX_GOTO;
+	node.location = range_location(parser, start, semicolon + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.goto_statement.target = (pigen_token_id){(uint32_t)(start + 1)};
+	target = add_node(parser, node);
+	add_child(parser, parent, target);
+	*after_statement = semicolon + 1;
+	return 1;
+}
+
+static size_t fsm_state_header(const syntax_parser *parser, size_t start,
+	size_t limit, size_t *name, size_t *body_start)
+{
+	if (!token_is(parser, start, "state")) return 0;
+	*name = start + 1;
+	if (*name >= limit || !identifier(parser, *name)) return 0;
+	if (*name + 1 >= limit || !token_is(parser, *name + 1, ":")) return 0;
+	*body_start = *name + 2;
+	return 1;
+}
+
+static size_t fsm_skip_statement(const syntax_parser *parser, size_t start,
+	size_t limit)
+{
+	if (token_is(parser, start, "begin"))
+		return matching_begin_end(parser, start, limit) + 1;
+	if (token_is(parser, start, "if"))
+	{
+		size_t close = matching_parenthesis(parser, start + 1, limit);
+		size_t at;
+		if (close == limit || close == start + 2) return limit;
+		at = fsm_skip_statement(parser, close + 1, limit);
+		if (at == limit) return limit;
+		if (token_is(parser, at, "else"))
+			at = fsm_skip_statement(parser, at + 1, limit);
+		return at;
+	}
+	{
+		size_t semicolon = top_level_token(parser, start, limit, ";");
+		return semicolon == limit ? limit : semicolon + 1;
+	}
+}
+
+static int parse_fsm_state(syntax_parser *parser, pigen_syntax_id fsm,
+	size_t start, size_t limit, size_t *after_state)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id state;
+	size_t name = start + 1;
+	size_t at;
+	size_t assignment_count = 0;
+
+	if (!fsm_state_header(parser, start, limit, &name, &at))
+		return fail(parser, start, "fsm state requires a name");
+	node.kind = PIGEN_SYNTAX_FSM_STATE;
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.fsm_state.name = (pigen_token_id){(uint32_t)name};
+	state = add_node(parser, node);
+	add_child(parser, fsm, state);
+	if (!parse_procedural_statement(parser, state, at, limit, &at,
+		&assignment_count))
+		return 0;
+	parser->tree->nodes[state.index].location = range_location(parser, start,
+		at);
+	*after_state = at;
+	return 1;
+}
+
+static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
+	size_t start, size_t limit, size_t *after_statement)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id fsm;
+	fsm_state_names declared = {0};
+	syntax_checkpoint checkpoint;
+	size_t name = start + 1;
+	size_t at;
+	size_t initial_at;
+	size_t body_end;
+	int saw_state = 0;
+	int ok = 0;
+
+	if (!token_is(parser, start, "fsm")) return 0;
+	if (name >= limit || !identifier(parser, name))
+		return fail(parser, start, "fsm requires a name");
+	at = name + 1;
+	if (at >= limit || !token_is(parser, at, "@"))
+		return fail(parser, at, "fsm requires an event control");
+	at++;
+	if (at >= limit || !token_is(parser, at, "("))
+		return fail(parser, at, "fsm event control must be one posedge");
+	{
+		size_t close = matching_parenthesis(parser, at, limit);
+		size_t scan;
+		if (close == limit)
+			return fail(parser, at, "fsm event control must be one posedge");
+		scan = at + 1;
+		if (!token_is(parser, scan, "posedge"))
+			return fail(parser, scan, "fsm event control must be one posedge");
+		scan++;
+		if (scan >= close || !identifier(parser, scan))
+			return fail(parser, scan < close ? scan : close,
+				"fsm event control must be one posedge");
+		scan++;
+		if (scan != close)
+			return fail(parser, scan < close ? scan : close,
+				"fsm event control must be one posedge");
+		at = close;
+	}
+	at++;
+	if (at >= limit || !token_is(parser, at, "reset"))
+		return fail(parser, at, "fsm requires `reset (name)`");
+	at++;
+	if (at >= limit || !token_is(parser, at, "(") ||
+		at + 2 >= limit || !identifier(parser, at + 1) ||
+		!token_is(parser, at + 2, ")"))
+		return fail(parser, at, "fsm requires `reset (name)`");
+	at += 3;
+	if (at >= limit || !token_is(parser, at, "initial"))
+		return fail(parser, at, "fsm requires an initial state");
+	at++;
+	if (at >= limit || !identifier(parser, at))
+		return fail(parser, at, "fsm requires an initial state");
+	initial_at = at;
+	at++;
+	if (at >= limit || !token_is(parser, at, "begin"))
+		return fail(parser, at, "fsm requires `begin`");
+	body_end = matching_begin_end(parser, at, limit);
+	if (body_end == limit)
+		return fail(parser, at, "fsm requires `end`");
+	checkpoint = save_checkpoint(parser);
+	node.kind = PIGEN_SYNTAX_FSM;
+	node.location = range_location(parser, start, body_end + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.fsm.name = (pigen_token_id){(uint32_t)name};
+	node.as.fsm.clock = INVALID_ID(pigen_syntax_expr_id);
+	node.as.fsm.reset = INVALID_ID(pigen_syntax_expr_id);
+	node.as.fsm.initial = (pigen_token_id){(uint32_t)initial_at};
+	fsm = add_node(parser, node);
+	add_child(parser, parent, fsm);
+	if (!pigen_parse_expression(parser->expanded, initial_at - 7, initial_at - 6,
+		&parser->tree->expressions, &parser->tree->types,
+		&node.as.fsm.clock, parser->error) ||
+		!pigen_parse_expression(parser->expanded, initial_at - 3, initial_at - 2,
+			&parser->tree->expressions, &parser->tree->types,
+			&node.as.fsm.reset, parser->error))
+		goto done;
+	at++;
+	parser->fsm_states = &declared;
+	{
+		size_t scan = at;
+		while (scan < body_end)
+		{
+			size_t sname, sbody;
+			if (!fsm_state_header(parser, scan, body_end, &sname, &sbody))
+				break;
+			if (fsm_state_names_contains(parser, &declared,
+				(pigen_token_id){(uint32_t)sname}))
+			{
+				fail(parser, sname, "fsm state declared more than once");
+				goto done;
+			}
+			fsm_state_names_add(&declared, (pigen_token_id){(uint32_t)sname});
+			scan = fsm_skip_statement(parser, sbody, body_end);
+			if (scan == body_end) break;
+		}
+	}
+	while (at < body_end)
+	{
+		size_t item_after;
+		if (!parse_fsm_state(parser, fsm, at, body_end, &item_after))
+			goto done;
+		saw_state = 1;
+		at = item_after;
+	}
+	if (!saw_state)
+	{
+		fail(parser, start, "fsm requires at least one state");
+		goto done;
+	}
+	if (!fsm_state_names_contains(parser, &declared,
+		(pigen_token_id){(uint32_t)initial_at}))
+	{
+		fail(parser, initial_at, "fsm initial state is not declared");
+		goto done;
+	}
+	ok = 1;
+done:
+	parser->fsm_states = NULL;
+	if (ok)
+	{
+		parser->tree->nodes[fsm.index].as.fsm.clock = node.as.fsm.clock;
+		parser->tree->nodes[fsm.index].as.fsm.reset = node.as.fsm.reset;
+		*after_statement = body_end + 1;
+	}
+	else
+	{
+		pigen_syntax_error preserved = {0};
+		int has_error = parser->error && parser->error->message;
+		if (has_error) preserved = *parser->error;
+		restore_checkpoint(parser, checkpoint);
+		if (has_error && parser->error) *parser->error = preserved;
+	}
+	free(declared.names);
+	return ok ? 1 : 0;
+}
+
 static int parse_procedural_statement(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count)
@@ -1602,6 +1874,9 @@ static int parse_procedural_statement(syntax_parser *parser,
 	if (token_is(parser, start, "pipeline"))
 		return parse_pipeline(parser, parent, start, limit, after_statement,
 			assignment_count);
+	if (parser->fsm_states && token_is(parser, start, "goto"))
+		return parse_goto_statement(parser, parent, parser->fsm_states, start,
+			limit, after_statement);
 	return parse_nonblocking_assignment(parser, parent, start, limit,
 		after_statement, assignment_count);
 }
@@ -1681,6 +1956,17 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 				continue;
 			}
 			if (parser->pipeline_failed) return 0;
+		}
+		if (item_start && token_is(parser, at, "fsm"))
+		{
+			size_t fsm_after;
+			if (parse_fsm(parser, module, at, after, &fsm_after))
+			{
+				at = fsm_after;
+				item_start = 1;
+				continue;
+			}
+			return 0;
 		}
 		if (item_start && (token_is(parser, at, "parameter") ||
 			token_is(parser, at, "localparam")))
@@ -1879,6 +2165,7 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 	parser.tree = tree;
 	parser.error = error;
 	parser.pipeline_failed = 0;
+	parser.fsm_states = NULL;
 	parser.source_length = 0;
 	parser.opaque_byte_cursor = 0;
 	if (!source || !pigen_source_get(source->sources, source->root_source) ||
