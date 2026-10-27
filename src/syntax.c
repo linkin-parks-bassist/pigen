@@ -59,6 +59,7 @@ typedef struct {
 	size_t typedef_name_fact_capacity;
 	pipeline_scope_stack pipeline_scopes;
 	int pipeline_failed;
+	int fsm_body_failed;
 	const fsm_state_names *fsm_states;
 	size_t source_length;
 	size_t opaque_byte_cursor;
@@ -1110,8 +1111,15 @@ static int parse_procedural_block(syntax_parser *parser,
 	block = add_node(parser, node);
 	add_child(parser, parent, block);
 	while (at < limit && !token_is(parser, at, "end"))
+	{
 		if (!parse_procedural_statement(parser, block, at, limit, &at,
-			assignment_count)) return 0;
+			assignment_count))
+		{
+			if (parser->fsm_states)
+				parser->fsm_body_failed = 1;
+			return 0;
+		}
+	}
 	if (at == limit || !token_is(parser, at, "end") ||
 		token_is(parser, at + 1, ":")) return 0;
 	*after_statement = at + 1;
@@ -1143,12 +1151,22 @@ static int parse_if_statement(syntax_parser *parser, pigen_syntax_id parent,
 	add_child(parser, parent, statement);
 	at = close + 1;
 	if (!parse_procedural_statement(parser, statement, at, limit, &at,
-		assignment_count)) return 0;
+		assignment_count))
+	{
+		if (parser->fsm_states)
+			parser->fsm_body_failed = 1;
+		return 0;
+	}
 	if (token_is(parser, at, "else"))
 	{
 		parser->tree->nodes[statement.index].as.if_statement.has_else = 1;
 		if (!parse_procedural_statement(parser, statement, at + 1, limit, &at,
-			assignment_count)) return 0;
+			assignment_count))
+		{
+			if (parser->fsm_states)
+				parser->fsm_body_failed = 1;
+			return 0;
+		}
 	}
 	*after_statement = at;
 	parser->tree->nodes[statement.index].location = range_location(parser, start,
@@ -1165,7 +1183,13 @@ static int parse_nonblocking_assignment(syntax_parser *parser,
 	pigen_syntax_node node = {0};
 
 	if (semicolon == limit || separator == start || separator == semicolon ||
-		separator + 1 == semicolon) return 0;
+		separator + 1 == semicolon)
+	{
+		if (parser->fsm_states)
+			return fail(parser, start,
+				"fsm state body statement must be an ordinary statement");
+		return 0;
+	}
 	node.kind = PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT;
 	node.location = range_location(parser, start, semicolon + 1);
 	node.parent = INVALID_SYNTAX;
@@ -1714,7 +1738,11 @@ static int parse_fsm_state(syntax_parser *parser, pigen_syntax_id fsm,
 	add_child(parser, fsm, state);
 	if (!parse_procedural_statement(parser, state, at, limit, &at,
 		&assignment_count))
+	{
+		if (!(parser->error && parser->error->message))
+			parser->fsm_body_failed = 1;
 		return 0;
+	}
 	parser->tree->nodes[state.index].location = range_location(parser, start,
 		at);
 	*after_state = at;
@@ -1803,6 +1831,7 @@ static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
 		goto done;
 	at++;
 	parser->fsm_states = &declared;
+	parser->fsm_body_failed = 0;
 	{
 		size_t scan = at;
 		while (scan < body_end)
@@ -1843,6 +1872,13 @@ static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
 	ok = 1;
 done:
 	parser->fsm_states = NULL;
+	if (!ok && !(parser->error && parser->error->message) &&
+		parser->fsm_body_failed)
+	{
+		fail(parser, start,
+			"fsm state body statement must be an ordinary statement");
+		parser->fsm_body_failed = 0;
+	}
 	if (ok)
 	{
 		parser->tree->nodes[fsm.index].as.fsm.clock = node.as.fsm.clock;
