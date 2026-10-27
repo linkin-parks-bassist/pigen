@@ -16,4 +16,3 @@ Owners: what/is/an/fsm.md; how/to/write/fsm/states.md; does/goto/wait/for/a/tran
 (s4) the discriminating green manifest (tests/fsm_lower_test.c, target fsm-lower-test): the binding (s5) contract, its sections red against the (s3) stub and green once (s5) lands; the seam red (a non-FSM node id the lowering must reject) holds throughout. The manifest owns the same file and target as the (s3) smoke witness and subsumes it: its seam-red section covers the non-FSM rejection, and the witness's stub-only valid-FSM-rejects section is replaced by the manifest's discriminating positive anchors.
 
 (s5) the implementation to that manifest, then integration/landing. After (s5): child-instance and fabric, in that order, each in its own bounded stage with a discriminating green test manifest.
-
