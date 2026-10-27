@@ -1,7 +1,7 @@
 ---
 status: green
 revised_at: "2026-09-14T20:38:51+10:00"
-checked_at: '2026-09-13T15:07:12+10:00'
+checked_at: '2026-10-27T23:16:00+11:00'
 ---
 
 The resolved data-type owner alone decides omission policy. Current Pigen primitive unqualified inputs are abstract. Internal int[n]/uint[n] require explicit realization; bit may use its owned static default. Unqualified integer outputs remain unresolved and require a transfer annotation. Syntax preserves omission and written occurrence separately; declaration resolution does not enumerate primitive families.
