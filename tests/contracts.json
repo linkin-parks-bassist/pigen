@@ -69,6 +69,23 @@
   },
   {
     "covers": [
+      "tests/fsm_syntax_test.c",
+      "src/transfer_type.c",
+      "src/syntax.c",
+      "src/type_syntax.c",
+      "src/expression.c",
+      "src/preprocess.c",
+      "src/lexer.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": [
+      "make",
+      "fsm-syntax-test"
+    ]
+  },
+  {
+    "covers": [
       "src/operation.c",
       "src/transfer_type.c",
       "src/integer.c",

@@ -4,14 +4,14 @@ LDLIBS		= -lm
 SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-.PHONY: all clean test source-test preprocess-test transfer-type-test syntax-model-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
+.PHONY: all clean test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
 
 all: pigen
 
 pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c
 	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS)
 
-test: pigen source-test preprocess-test transfer-type-test syntax-model-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
+test: pigen source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen
 
 source-test:
@@ -44,6 +44,14 @@ syntax-model-test:
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-syntax-model-test tests/syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-syntax-model-test || status=$$?; \
+	rm -rf $$dir; exit $$status
+
+fsm-syntax-test:
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-fsm-syntax-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-syntax-test tests/fsm_syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-fsm-syntax-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
 integer-test:
