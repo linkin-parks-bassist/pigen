@@ -17,4 +17,3 @@ Owners: what/is/an/fsm.md; how/to/write/fsm/states.md; does/goto/wait/for/a/tran
 
 (s5) the implementation to that manifest, then integration/landing. After (s5): child-instance and fabric, in that order, each in its own bounded stage with a discriminating green test manifest.
 
-Revision: 08ff87df0526506536a3bf321dbf9ea941bc515fdfa6af954973a494748e2611
