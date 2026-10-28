@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-28T23:23:42+11:00"
+revised_at: "2026-10-29T00:00:31+11:00"
 ---
 
 The (i2) child-instance identity owner seam turns one parsed ordinary SV child instantiation (a PIGEN_SYNTAX_INSTANCE node) into the instance's module-scope identity in the resolved semantic model: the child module the instance instantiates and one resolved connection per source-order connection, each bound to the child module's port with that port's direction, data type, shape and transfer type.
@@ -11,4 +11,4 @@ Resolution rules: the type name resolves to the module whose PIGEN_SYNTAX_MODULE
 
 Failure contract (pinned decision 4, how/should/compiler/builders/fail.md): report-and-stop, no rollback; every failure returns -1 with the diagnostic at the offending token's original span and leaves *identity in the all-sentinel invalid form (PIGEN_INVALID_ID sentinels, zero counts, empty spans); pigen_instance_identity_is_invalid is 1 for that form (and for a null pointer) and 0 for an established identity.
 
-Contract surface on master: include/pigen/instance_identity.h (the pigen_instance_connection / pigen_instance_identity types and pigen_instance_identity_establish / pigen_instance_identity_is_invalid). The implementation (src/instance_identity.c) is not on master; its discriminating test contract is the registered instance-identity-test manifest (tests/instance_identity_test.c: establish-valid-args, is-invalid-sentinel, unknown-type-name, unknown-port) - red until the implementation lands, green against the owner otherwise.
+Contract surface on master: include/pigen/instance_identity.h (the pigen_instance_connection / pigen_instance_identity types and pigen_instance_identity_establish / pigen_instance_identity_is_invalid) and its implementation src/instance_identity.c. The registered instance-identity-test manifest (tests/instance_identity_test.c: establish-valid-args, is-invalid-sentinel, unknown-type-name, unknown-port) is green against the owner; the (i3) parent-module lowering consumes the established identity.
