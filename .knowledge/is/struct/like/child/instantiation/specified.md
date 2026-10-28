@@ -1,7 +1,7 @@
 ---
 status: green
-revised_at: "2026-09-13T15:07:27+10:00"
-checked_at: '2026-10-02T12:03:24+10:00'
+revised_at: "2026-10-28T17:24:17+11:00"
+checked_at: "2026-10-02T12:03:24+10:00"
 ---
 
-No. Ordinary SV child instantiation remains accepted. A cleaner struct-like Pigen surface is planned but grammar is unsettled. Fabric semantics must depend only on resolved instance/port identities so future spelling cannot alter routing or force fabric-specific name parsing.
+No. Ordinary SV child instantiation remains accepted and the structured syntax level still parses it as an opaque module item; its structured parse is the next product step. The child-instance grammar is now settled: one module-level item is an instance when an identifier that is not a decisive Pigen count type or structured typedef is followed by an instance-name identifier (or `#( ... )`) and a `(`, and it parses to a PIGEN_SYNTAX_INSTANCE with the type-name and instance-name tokens plus half-open child ranges over its PIGEN_SYNTAX_PARAMETER (is_local 0) and PIGEN_SYNTAX_INSTANCE_CONNECTION children in source order, the whole-item span ending at the terminating `;`; a missing `;`, an unterminated connection list, or a connection that is neither `.port ( expression )` nor an expression fails loudly at the offending token's original span, and a decisive data-first declaration of the same identifier-identifier-`(` shape takes the declaration route (fail-loud at the `(`) and never publishes an instance node. This contract is pinned by the registered instance-syntax-test manifest (tests/instance_syntax_test.c: parameter-mixed-connections, empty-params-named-only, fail-loud-reds, data-first-not-instance) and two corrected syntax-model assertions (ordinary `buf gate_instance(a, b);` parses to an instance with two connections and zero parameters; the unterminated form fails with `instance requires `;`` at the endmodule span), red until the structured parse lands. Fabric semantics must depend only on resolved instance/port identities so future spelling cannot alter routing or force fabric-specific name parsing.

@@ -1212,5 +1212,53 @@
       "fsm-identity-test",
       "T=is-invalid-sentinel"
     ]
+  },
+  {
+    "covers": [
+      "tests/instance_syntax_test.c",
+      "src/syntax.c",
+      "include/pigen/syntax.h"
+    ],
+    "command": [
+      "make",
+      "instance-syntax-test",
+      "T=parameter-mixed-connections"
+    ]
+  },
+  {
+    "covers": [
+      "tests/instance_syntax_test.c",
+      "src/syntax.c",
+      "include/pigen/syntax.h"
+    ],
+    "command": [
+      "make",
+      "instance-syntax-test",
+      "T=empty-params-named-only"
+    ]
+  },
+  {
+    "covers": [
+      "tests/instance_syntax_test.c",
+      "src/syntax.c",
+      "include/pigen/syntax.h"
+    ],
+    "command": [
+      "make",
+      "instance-syntax-test",
+      "T=fail-loud-reds"
+    ]
+  },
+  {
+    "covers": [
+      "tests/instance_syntax_test.c",
+      "src/syntax.c",
+      "include/pigen/syntax.h"
+    ],
+    "command": [
+      "make",
+      "instance-syntax-test",
+      "T=data-first-not-instance"
+    ]
   }
 ]

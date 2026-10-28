@@ -607,9 +607,32 @@ static void test_contextual_leading_transfer_spelling(
 	const pigen_syntax_node *module;
 	const pigen_syntax_node *declaration;
 
-	assert_opaque_without_arena_leakage(sources, "ordinary_buf_gate.sv",
+	assert(parse_fixture(sources, "ordinary_buf_gate.sv",
 		"module ordinary_buf_gate; "
-		"buf gate_instance(output_signal, input_signal); endmodule");
+		"buf gate_instance(output_signal, input_signal); endmodule",
+		&fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	{
+		pigen_syntax_id child;
+		int saw_instance = 0;
+		for (child = module->first_child; child.index != PIGEN_INVALID_ID; )
+		{
+			const pigen_syntax_node *node = pigen_syntax_get(&fixture.tree,
+				child);
+			assert(node);
+			if (node->kind == PIGEN_SYNTAX_INSTANCE)
+			{
+				saw_instance = 1;
+				assert(node->as.instance.connection_count == 2);
+				assert(node->as.instance.parameter_count == 0);
+			}
+			child = node->next_sibling;
+		}
+		assert(saw_instance);
+	}
+	free_fixture(&fixture);
 	assert_syntax_failure(sources, (syntax_failure){
 		"transfer_first.pigen",
 		"module transfer_first; buf int[16] old_order; endmodule",
@@ -618,10 +641,11 @@ static void test_contextual_leading_transfer_spelling(
 		"unterminated_transfer_first.pigen",
 		"module unterminated_transfer_first; buf int[16] old_order endmodule",
 		"data type must precede the transfer type", "buf", 1});
-	assert_opaque_without_arena_leakage(sources, "unterminated_buf_gate.sv",
+	assert_syntax_failure(sources, (syntax_failure){
+		"unterminated_buf_gate.sv",
 		"module unterminated_buf_gate; "
-		"buf gate_instance(output_signal, input_signal) endmodule");
-	assert(parse_fixture(sources, "ambiguous_ports.sv", ansi_text, &fixture));
+		"buf gate_instance(output_signal, input_signal) endmodule",
+		"instance requires `;`", "endmodule", 1});	assert(parse_fixture(sources, "ambiguous_ports.sv", ansi_text, &fixture));
 	assert(!fixture.error.message);
 	module = fixture_module(&fixture);
 	assert(module);
