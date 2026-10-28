@@ -1130,5 +1130,87 @@
       "pipeline-lower-test",
       "T=step-b-witnesses"
     ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=state-register-reset"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=per-state-action-bodies"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=guard-gated-transitions"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=structural-exclusion"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=seam-red"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_identity_test.c",
+      "src/fsm_identity.c"
+    ],
+    "command": [
+      "make",
+      "fsm-identity-test",
+      "T=establish-valid-args"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_identity_test.c",
+      "src/fsm_identity.c"
+    ],
+    "command": [
+      "make",
+      "fsm-identity-test",
+      "T=is-invalid-sentinel"
+    ]
   }
 ]
