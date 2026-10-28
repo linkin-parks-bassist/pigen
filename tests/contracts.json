@@ -1215,6 +1215,50 @@
   },
   {
     "covers": [
+      "tests/instance_identity_test.c",
+      "src/instance_identity.c"
+    ],
+    "command": [
+      "make",
+      "instance-identity-test",
+      "T=establish-valid-args"
+    ]
+  },
+  {
+    "covers": [
+      "tests/instance_identity_test.c",
+      "src/instance_identity.c"
+    ],
+    "command": [
+      "make",
+      "instance-identity-test",
+      "T=is-invalid-sentinel"
+    ]
+  },
+  {
+    "covers": [
+      "tests/instance_identity_test.c",
+      "src/instance_identity.c"
+    ],
+    "command": [
+      "make",
+      "instance-identity-test",
+      "T=unknown-type-name"
+    ]
+  },
+  {
+    "covers": [
+      "tests/instance_identity_test.c",
+      "src/instance_identity.c"
+    ],
+    "command": [
+      "make",
+      "instance-identity-test",
+      "T=unknown-port"
+    ]
+  },
+  {
+    "covers": [
       "tests/instance_syntax_test.c",
       "src/syntax.c",
       "include/pigen/syntax.h"
