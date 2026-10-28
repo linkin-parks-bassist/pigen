@@ -22,6 +22,8 @@ typedef enum {
 	PIGEN_SYNTAX_FSM,
 	PIGEN_SYNTAX_FSM_STATE,
 	PIGEN_SYNTAX_GOTO,
+	PIGEN_SYNTAX_INSTANCE,
+	PIGEN_SYNTAX_INSTANCE_CONNECTION,
 	PIGEN_SYNTAX_OPAQUE
 } pigen_syntax_kind;
 
@@ -123,6 +125,18 @@ typedef struct {
 		struct {
 			pigen_token_id target;
 		} goto_statement;
+		struct {
+			pigen_token_id type_name;
+			pigen_token_id name;
+			size_t first_connection;
+			size_t connection_count;
+			size_t first_parameter;
+			size_t parameter_count;
+		} instance;
+		struct {
+			pigen_token_id port;
+			pigen_syntax_expr_id expression;
+		} instance_connection;
 	} as;
 } pigen_syntax_node;
 
