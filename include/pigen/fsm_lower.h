@@ -19,19 +19,25 @@
  * resolved transition targets (what/is/an/fsm.md); it lowers to one synchronous
  * controller reset to its header initial state. This owner lowers that whole
  * statement so the FSM participates in the parent module's RTL exactly like any
- * other declaration or transfer, publishing into the parent module's RTL model:
+ * other declaration or transfer, publishing into the parent module's RTL model
+ * the controller's three behavioral obligations, each carried structurally
+ * (a structurally-present gate expression per gate, the gate's exact
+ * expression deferred to the full lowering - the way the step-(c3) pipeline
+ * lowering carries its guarded ready/valid handshake):
  *
  *   - the state register: one synchronous register holding the FSM's state,
  *     reset to the header initial state (the state the `initial IDENTIFIER`
- *     names) on reset;
- *   - the per-state action bodies: the ordinary statements of each state,
- *     lowered through the shared signal/expression/guard/domain/ownership
- *     services (not private resolvers) and gated so that each state's actions
- *     run only while that state is active;
+ *     names) on reset (obligation a);
+ *   - the per-state action bodies: each state's ordinary statements, lowered
+ *     through the shared signal/expression/guard/domain/ownership services
+ *     (not private resolvers) and gated so that each state's actions run only
+ *     while that state is active (obligation b);
  *   - the guard-gated goto transitions: each goto changes the FSM's state only
  *     under its explicit enclosing guard and never implicitly waits for a
- *     transfer (does/goto/wait/for/a/transfer.md); overlapping transitions
- *     require structural exclusion (how/to/write/fsm/states.md).
+ *     transfer (does/goto/wait/for/a/transfer.md); the next-state value is
+ *     conditioned on the goto's guard so the state holds otherwise, and the
+ *     transitions share the one state register as their single destination
+ *     (obligation c, structural exclusion, how/to/write/fsm/states.md).
  *
  * The FSM's state/initial/transition identities arrive from the landed step-(s2)
  * FSM identity owner (include/pigen/fsm_identity.h + src/fsm_identity.c:
@@ -63,9 +69,13 @@
  * or test asserts that a failure left the model unchanged
  * (how/should/compiler/builders/fail.md).
  *
- * This header fixes only the seam's shape. SKELETON: the entry point returns -
- * 1 and reports the diagnostic without publishing any RTL record, until the
- * implementation stage (step (s5) of the FSM frontier). */
+ * This header fixes the seam's shape and the lowering's full-contract
+ * obligations: on success it publishes the controller's owned records; on a
+ * non-FSM node or an invalid argument it rejects (rc == -1) without publishing
+ * anything. The step-(s5) implementation lowers the three behavioral
+ * obligations structurally (a structurally-present gate expression per gate,
+ * the gate's exact expression deferred to the full lowering, as the step-(c3)
+ * pipeline lowering does). */
 
 /* Lowers one PIGEN_SYNTAX_FSM statement (a module-level fsm item) through the
  * common RTL model, publishing its state register (reset to the header initial
@@ -85,13 +95,18 @@
  * statements, the goto transitions and their guards, and the clock and reset
  * the header names), consistent with the step-(s2) sibling
  * (pigen_fsm_identity_establish, which takes the const pigen_syntax_node *fsm).
- * On success it returns 0. On error it returns -1 and reports the diagnostic and
- * the compile stops - it may leave partial state behind, and no test asserts
- * that a failure left the RTL model or the lowering maps unchanged
- * (how/should/compiler/builders/fail.md). SKELETON: validates its arguments
- * (lowering, module, syntax, the fsm node and the expanded source are required;
- * the node must name a PIGEN_SYNTAX_FSM), returns -1 and reports the diagnostic
- * without publishing any RTL record, until the implementation stage. */
+ * On success it returns 0 and publishes the controller's owned records: the
+ * state register reset to the header initial state (obligation a), the
+ * per-state action bodies gated so each runs only while its state is active
+ * (obligation b), and the guard-gated goto transitions whose next-state value
+ * is conditioned on the goto's guard so the state holds otherwise, all sharing
+ * the one state register as their single destination (obligation c, structural
+ * exclusion). On error it returns -1 and reports the diagnostic and the compile
+ * stops - it may leave partial state behind, and no test asserts that a failure
+ * left the RTL model or the lowering maps unchanged
+ * (how/should/compiler/builders/fail.md). A non-PIGEN_SYNTAX_FSM node or an
+ * invalid argument is rejected (rc == -1) without publishing any RTL record -
+ * the seam's own full-contract obligation. */
 int pigen_fsm_lower(pigen_rtl_lowering *lowering,
 	pigen_module_id module, pigen_syntax_id syntax,
 	const pigen_syntax_node *fsm,
