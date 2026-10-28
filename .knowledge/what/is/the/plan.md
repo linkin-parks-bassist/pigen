@@ -1,13 +1,13 @@
 ---
 status: green
-revised_at: "2026-10-29T07:48:02+11:00"
+revised_at: "2026-10-29T08:09:33+11:00"
 ---
 
 Completed on master (owners named in-line): the elastic RTL vertical slice Tasks 8-12 (Task 7 ready-cycle validation deferred to Pigen 1.0); CLI wiring (src/pigen.c main() calls pigen_compile_source; what/is/the/command/line/contract.md); the retained core (resolved module/declarations/clocked process/direct atomic transfer route with the whole-unit ready graph; projection/concat/co-slice, validity/domain/ownership and stall/throughput laws, each with a green discriminating manifest); the Verilator-lint scope (no -Wno-fatal, pinned by tests/lint_fatal_pin.sh); the co-slice X-propagation and typedef-width defect fixes; the FSM state-body fail-loud diagnostic; the FSM parent-module lowering (s2, s5; what/is/the/fsm/parent/module/lowering.md); the child-instance (i1) structured syntax node and (i2) identity owner (what/is/the/child/instance/identity/contract.md).
 
 Remaining approved work, in order:
 
-1. The pipeline stage computation contract: src/pipeline_lower.c publishes each stage's next-value equation as a constant-0 stand-in for the value computed over the immutable incoming fields, so the stage computation itself is unenforced (pipeline-lower-test pins equation count only). The scoped scenario list is at what/are/the/pipeline/stage/computation/test/scenarios.md (six single-scenario lines over the pipeline-lower-test seam); the tests, their independent review and the stand-in replacement implementation follow that list. Halting/stop-condition coverage and the FSM test-contract tightening are the remaining scoped obligations of the same contract frontier (separate mapping assignments).
+1. The pipeline stage computation contract: src/pipeline_lower.c publishes each stage's next-value equation as a constant-0 stand-in for the value computed over the immutable incoming fields, so the stage computation itself is unenforced (pipeline-lower-test pins equation count only). The scoped scenario list is at what/are/the/pipeline/stage/computation/test/scenarios.md and its independent review is accepted at what/is/the/review/of/the/pipeline/stage/computation/test/scenarios.md; next, the six single-scenario test-contract sections over the pipeline-lower-test seam, then the stand-in replacement implementation that makes the seam publish each stage's published expressions and turns all six red. Halting/stop-condition coverage and the FSM test-contract tightening are the remaining scoped obligations of the same contract frontier (separate mapping assignments).
 
 2. The remaining subsystem build gates at what/are/the/remaining/architecture/migration/gates.md. Each subsystem is specified from what/is/the/spec.md and built on the structured path; the prototype is a hint only about which features exist. No prototype-parity acceptance; no validator bridge, fallback, second dialect or per-file choice.
 
