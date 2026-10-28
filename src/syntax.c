@@ -982,6 +982,253 @@ static int parse_parameter_items(syntax_parser *parser,
 	return 1;
 }
 
+static int parse_instance_parameter(syntax_parser *parser,
+	pigen_syntax_id instance, size_t start, size_t after)
+{
+	pigen_syntax_expr_arena *expressions = &parser->tree->expressions;
+	pigen_syntax_node node = {0};
+	pigen_syntax_id id;
+	size_t value_start;
+	int named = identifier(parser, start) && start + 1 < after &&
+		token_is(parser, start + 1, "=");
+
+	if (named)
+	{
+		if (after - (start + 1) < 2)
+			return fail(parser, after, "parameter override requires an expression");
+		value_start = start + 2;
+		node.as.parameter.name = (pigen_token_id){(uint32_t)start};
+		node.location = range_location(parser, start, after);
+	}
+	else
+	{
+		value_start = start;
+		node.as.parameter.name = INVALID_ID(pigen_token_id);
+		node.location = range_location(parser, start, after);
+	}
+	if (!pigen_parse_expression(parser->expanded, value_start, after,
+		expressions, &parser->tree->types, &node.as.parameter.value,
+		parser->error)) return 0;
+	node.kind = PIGEN_SYNTAX_PARAMETER;
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.parameter.is_local = 0;
+	id = add_node(parser, node);
+	add_child(parser, instance, id);
+	return 1;
+}
+
+static int parse_instance_connection(syntax_parser *parser,
+	pigen_syntax_id instance, size_t start, size_t after, size_t *item_after)
+{
+	pigen_syntax_expr_arena *expressions = &parser->tree->expressions;
+	pigen_syntax_node node = {0};
+	pigen_syntax_id id;
+	pigen_syntax_expr_id expression;
+
+	if (token_is(parser, start, "."))
+	{
+		size_t port = start + 1;
+		size_t open = port + 1;
+		size_t close;
+
+		if (!identifier(parser, port) || open >= after ||
+			!token_is(parser, open, "("))
+			return fail(parser, start,
+				"named connection requires `.port ( expression )`");
+		close = matching_parenthesis(parser, open, after);
+		if (close == after)
+			return fail(parser, open, "unterminated connection list");
+		if (close == open + 1)
+			return fail(parser, open + 1,
+				"connection requires an expression");
+		if (!pigen_parse_expression(parser->expanded, open + 1, close,
+			expressions, &parser->tree->types, &expression, parser->error))
+			return 0;
+		node.kind = PIGEN_SYNTAX_INSTANCE_CONNECTION;
+		node.location = range_location(parser, start, close + 1);
+		node.parent = INVALID_SYNTAX;
+		node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+		node.as.instance_connection.port = (pigen_token_id){(uint32_t)port};
+		node.as.instance_connection.expression = expression;
+		id = add_node(parser, node);
+		add_child(parser, instance, id);
+		*item_after = close + 1;
+		return 1;
+	}
+	if (!identifier(parser, start))
+		return fail(parser, start,
+			"connection requires an expression or `.port ( expression )`");
+	if (!pigen_parse_expression(parser->expanded, start, after,
+		expressions, &parser->tree->types, &expression, parser->error))
+		return 0;
+	node.kind = PIGEN_SYNTAX_INSTANCE_CONNECTION;
+	node.location = range_location(parser, start, after);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.instance_connection.port = INVALID_ID(pigen_token_id);
+	node.as.instance_connection.expression = expression;
+	id = add_node(parser, node);
+	add_child(parser, instance, id);
+	*item_after = after;
+	return 1;
+}
+
+static int parse_instance_connections(syntax_parser *parser,
+	pigen_syntax_id instance, size_t first, size_t after)
+{
+	size_t at = first;
+
+	if (first == after)
+		return fail(parser, first, "instance requires a connection list");
+	while (at < after)
+	{
+		size_t item_extent = ansi_item_end(parser, at, after);
+		size_t item_end;
+
+		if (item_extent <= at)
+			return fail(parser, at,
+				"instance connection list requires a connection");
+		if (!parse_instance_connection(parser, instance, at, item_extent,
+			&item_end)) return 0;
+		if (item_end > item_extent) item_end = item_extent;
+		if (item_end == after) return 1;
+		if (!token_is(parser, item_extent, ","))
+			return fail(parser, item_extent,
+				"expected `,` between instance connections");
+		at = item_extent + 1;
+		if (at == after)
+			return fail(parser, at,
+				"instance connection list requires a connection");
+	}
+	return fail(parser, first, "instance requires a connection list");
+}
+
+static int instance_shape_at(syntax_parser *parser, pigen_syntax_id scope,
+	size_t at, size_t after)
+{
+	syntax_checkpoint checkpoint;
+	pigen_syntax_type_id data_type;
+	size_t type_end;
+	pigen_syntax_type_ownership ownership = PIGEN_SYNTAX_TYPE_UNOWNED;
+	int decisive = 0;
+
+	if (at + 1 >= after || !identifier(parser, at))
+		return 0;
+	if (token_is(parser, at + 1, "#"))
+	{
+		if (at + 2 >= after || !token_is(parser, at + 2, "("))
+			return 0;
+	}
+	else
+	{
+		if (at + 2 >= after || !identifier(parser, at + 1) ||
+			!token_is(parser, at + 2, "("))
+			return 0;
+	}
+	checkpoint = save_checkpoint(parser);
+	if (pigen_parse_type_prefix(parser->expanded, at, at + 1,
+		&parser->tree->expressions, &parser->tree->types, &data_type, &type_end,
+		parser->error))
+		ownership = declaration_type_ownership(parser, scope, data_type);
+	restore_checkpoint(parser, checkpoint);
+	decisive = ownership == PIGEN_SYNTAX_TYPE_PIGEN ||
+		ownership == PIGEN_SYNTAX_TYPE_STRUCTURED;
+	return !decisive;
+}
+
+static int parse_instance(syntax_parser *parser, pigen_syntax_id module,
+	size_t start, size_t after, syntax_cursor *opaque_cursor)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id instance;
+	size_t at = start + 1;
+	size_t name;
+	size_t connection_open;
+	size_t connection_close;
+	size_t semicolon;
+	size_t connection_first;
+	size_t parameter_first = 0;
+	size_t parameter_count = 0;
+	size_t connection_count = 0;
+
+	node.kind = PIGEN_SYNTAX_INSTANCE;
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.instance.type_name = (pigen_token_id){(uint32_t)start};
+	instance = add_node(parser, node);
+	if (token_is(parser, at, "#"))
+	{
+		size_t parameter_open = at + 1;
+		size_t parameter_close;
+
+		if (!token_is(parser, parameter_open, "("))
+			return fail(parser, at, "parameter override list requires `(`");
+		parameter_close = matching_parenthesis(parser, parameter_open, after);
+		if (parameter_close == after)
+			return fail(parser, parameter_open,
+				"unterminated parameter override list");
+		parameter_first = parser->tree->node_count;
+		at = parameter_open + 1;
+		if (at < parameter_close)
+		{
+			for (;;)
+			{
+				size_t item_end = ansi_item_end(parser, at, parameter_close);
+				if (item_end <= at)
+					return fail(parser, at,
+						"parameter override requires an entry");
+				if (!parse_instance_parameter(parser, instance, at, item_end))
+					return 0;
+				parameter_count++;
+				if (item_end == parameter_close) break;
+				if (!token_is(parser, item_end, ","))
+					return fail(parser, item_end,
+						"expected `,` between parameter overrides");
+				at = item_end + 1;
+				if (at == parameter_close)
+					return fail(parser, at,
+						"parameter override list requires an entry");
+			}
+		}
+		at = parameter_close + 1;
+	}
+	if (at >= after || !identifier(parser, at))
+		return fail(parser, at, "instance requires a name");
+	name = at;
+	at = name + 1;
+	if (!token_is(parser, at, "("))
+		return fail(parser, at, "instance requires a connection list");
+	connection_open = at;
+	connection_close = matching_parenthesis(parser, connection_open, after);
+	if (connection_close == after)
+		return fail(parser, connection_open, "unterminated connection list");
+	connection_first = parser->tree->node_count;
+	if (!parse_instance_connections(parser, instance, connection_open + 1,
+		connection_close)) return 0;
+	connection_count = parser->tree->node_count - connection_first;
+	at = connection_close + 1;
+	semicolon = top_level_token(parser, at, after, ";");
+	if (semicolon == after || semicolon != at)
+		return fail(parser, at, "instance requires `;`");
+	parser->tree->nodes[instance.index].as.instance.name =
+		(pigen_token_id){(uint32_t)name};
+	parser->tree->nodes[instance.index].as.instance.first_parameter =
+		parameter_first;
+	parser->tree->nodes[instance.index].as.instance.parameter_count =
+		parameter_count;
+	parser->tree->nodes[instance.index].as.instance.first_connection =
+		connection_first;
+	parser->tree->nodes[instance.index].as.instance.connection_count =
+		connection_count;
+	parser->tree->nodes[instance.index].location = range_location(parser, start,
+		at + 1);
+	add_opaque(parser, module, *opaque_cursor, start);
+	add_child(parser, module, instance);
+	*opaque_cursor = at + 1;
+	return 1;
+}
+
 static int parse_ansi_ports(syntax_parser *parser,
 	pigen_syntax_id module, size_t first, size_t after,
 	syntax_cursor *opaque_cursor)
@@ -2031,6 +2278,16 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			result = parse_typedef(parser, module, at, semicolon, opaque_cursor);
 			if (result == DECLARATION_INVALID) return 0;
 			at = semicolon + 1;
+			item_start = 1;
+			continue;
+		}
+		if (item_start && instance_shape_at(parser, module, at, after))
+		{
+			size_t instance_after;
+			if (!parse_instance(parser, module, at, after, opaque_cursor))
+				return 0;
+			instance_after = *opaque_cursor;
+			at = instance_after;
 			item_start = 1;
 			continue;
 		}
