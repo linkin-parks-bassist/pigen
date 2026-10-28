@@ -1,13 +1,13 @@
 ---
 status: green
-revised_at: "2026-10-29T09:11:54+11:00"
+revised_at: "2026-10-29T09:38:04+11:00"
 ---
 
 Completed on master (owners named in-line): the elastic RTL vertical slice Tasks 8-12 (Task 7 ready-cycle validation deferred to Pigen 1.0); CLI wiring (src/pigen.c main() calls pigen_compile_source; what/is/the/command/line/contract.md); the retained core (resolved module/declarations/clocked process/direct atomic transfer route with the whole-unit ready graph; projection/concat/co-slice, validity/domain/ownership and stall/throughput laws, each with a green discriminating manifest); the Verilator-lint scope (no -Wno-fatal, pinned by tests/lint_fatal_pin.sh); the co-slice X-propagation and typedef-width defect fixes; the FSM state-body fail-loud diagnostic; the FSM parent-module lowering (s2, s5; what/is/the/fsm/parent/module/lowering.md); the child-instance (i1) structured syntax node and (i2) identity owner (what/is/the/child/instance/identity/contract.md).
 
 Remaining approved work, in order:
 
-1. The pipeline stage computation contract: src/pipeline_lower.c publishes each stage's next-value equation as a constant-0 stand-in for the value computed over the immutable incoming fields, so the stage computation itself is unenforced (pipeline-lower-test pins equation count only). The scoped scenario list is at what/are/the/pipeline/stage/computation/test/scenarios.md and its independent review is accepted at what/is/the/review/of/the/pipeline/stage/computation/test/scenarios.md; next, the six single-scenario test-contract sections over the pipeline-lower-test seam, then the stand-in replacement implementation that makes the seam publish each stage's published expressions and turns all six red.
+1. The pipeline stage computation contract: src/pipeline_lower.c publishes each stage's next-value equation as a constant-0 stand-in for the value computed over the immutable incoming fields, so the stage computation itself is unenforced (pipeline-lower-test pins equation count only). The scoped scenario list is at what/are/the/pipeline/stage/computation/test/scenarios.md and its independent review is accepted (what/is/the/review/of/the/pipeline/stage/computation/test/scenarios.md); next, the six single-scenario sections over the pipeline-lower-test seam, then the stand-in replacement implementation that turns all six red.
 
 2. The remaining subsystem build gates at what/are/the/remaining/architecture/migration/gates.md. Each subsystem is specified from what/is/the/spec.md and built on the structured path; the prototype is a hint only about which features exist. No prototype-parity acceptance; no validator bridge, fallback, second dialect or per-file choice.
 
@@ -20,5 +20,9 @@ Remaining approved work, in order:
 6. Deferred to Pigen 1.0 with Task 7: the three route contract-level negative witnesses (cycle/self-loop rejection, sizing/signedness/aggregate-law violation, non-isolated foreign-module transfer rejection), none constructible through the public owner APIs. The concatenated/co-slice member-order law is pinned per path by emitted SV and golden witnesses (does/the/concatenation/data/type/keying/keep/member/order.md).
 
 7. Open questions where the spec is silent on something only the prototype does (David's to decide; not inherited): (a) pipeline "yield" - is exposing the final outgoing value the complete pipeline control surface; (b) fabric manifest and SVG output - keep or dropped; (c) prototype-only examples, tests and APIs - preserved or retired when the textual machinery is deleted.
+
+8. The pipeline halting/stop test contract: the guard in src/pipeline_lower.c is the constant 1, so the false enclosing procedural guard (which must hold all storage and disable both handshakes, how/to/reset/and/enable/a/pipeline.md) is unenforced - pipeline-lower-test section 5 pins only that the guarded ready/valid equations are published. Next, the scoped scenario mapping at the pipeline-lower-test seam named in what/are/the/owners/of/the/pipeline/fsm/behavioral/test/obligations, then independent review and one-scenario sections; the reset-binding (pipe_reset/pipeline_reset) coverage follows in its own scoped mapping.
+
+9. The FSM behavior/stop test contract: fsm-lower-test pins only the set-level record contract, not the reset value (the header initial state's encoding), state-active gating or per-goto guard gating (what/is/the/fsm/parent/module/lowering.md, step (s4)). Its own scoped scenario mapping at the fsm-lower-test seam, then independent review and one-scenario sections; the behavior/stop owners are what/is/an/fsm.md, does/goto/wait/for/a/transfer.md and how/to/write/fsm/states.md.
 
 Lowering consumes validated identities and backend-neutral realization properties. Compiler stages fail loudly: a stage reports the diagnostic and stops, with no rollback requirement. Ordinary branches and worktrees may isolate narrow checked work; neither linear history nor direct-to-master work is required.
