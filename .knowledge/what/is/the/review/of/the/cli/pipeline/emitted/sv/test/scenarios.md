@@ -1,0 +1,23 @@
+---
+status: green
+revised_at: "2026-10-30T09:21:04+11:00"
+---
+
+Verdict: ACCEPTED. The seven-line list at what/are/the/cli/pipeline/emitted/sv/test/scenarios.md (revision 42b2a14d98264386dd6afce9902d27bd3b41a1cd59141237080cabf352142303, on master) covers its scoped contract completely, and every line is RED against master as claimed.
+
+Accepted seam API: pigen_compile_source plus pigen_free_compile_result (include/pigen/compile.h); every scenario drives it with a literal data-first source string in the tests/pipeline_lower_test.c section-(1) witness shape (module with `input logic clk, input logic [7:0] x`, an `always @(posedge clk)` process holding the pipeline) and observes rc, result.systemverilog and the pigen_compile_error diagnostic (message + span). Witness home: tests/compile_test.c, target compile-test, registered in tests/contracts.json; the suite is green on master (`make compile-test` rc=0).
+
+Per-line findings (all pass):
+1. One parent module, (N-1) = 2 pigen_buf stage-boundary instances: one setup/action/observation; the instance count is cited to pipeline-lower-test section (1) buf-storage, which pins `rtl.instance_count == 2` on exactly this 3-stage source (verified at tests/pipeline_lower_test.c). The line witnesses it through the production emission.
+2. Per-stage next-value equations in the emission: cited to section (2) next-value-equations, which pins `equation_count >= stage_count`; the line correctly does not pin equation VALUES (owned by what/are/the/pipeline/stage/computation/test/scenarios.md at the pipeline-lower-test seam).
+3. Guard-gated ready/valid handshake equations present: cited to section (5) step-b-witnesses (one-entry buf + guard-gated handshake publication); the constant-1 guard of this step is stated; false-guard halt and pipe_reset/pipeline_reset bindings are correctly excluded to plan item 8.
+4. Yield write into the outgoing packet port, first-yielded field the MSB: cited to sections (3) yield-write (destination provenance to the step-(a) signal) and (4) emitted-member-order (source order, first field MSB); the packed 24-bit port width (8 + 16) and the reversed-order failure are stated.
+5. First-stage field read diagnosed at the original span: rc == -1, result.systemverilog == NULL, non-degenerate span over the offending statement, non-empty message, per how/should/compiler/builders/fail.md; cited to pipeline-stage-test section first-stage-external-reads and the section-(1) red (verified: the red source's first stage reads field b no earlier stage wrote). RED on master because the current diagnostic's span is the `pipeline` token, not the offending statement.
+6. Unequal-total-$bits boundary diagnosed at the original span: same fail-loud pins; cited to pipeline-stage-test section repartition-equal-bits and the section-(2) red (verified: stage 1 writes a (8) and b (8), stage 2 writes only c (8) from `{a, b}`). RED on master for the same span reason.
+7. Module-level pipeline diagnosed, not silently dropped: rc == -1, NULL SV, non-degenerate span over the `pipeline` keyword; verified on master that this source returns rc == 0 with an empty module body (checked: `./pigen` on the master build emits the declaration-only module), so the line discriminates the fail-loud obligation.
+
+Coverage of the in-scope contract: one parent module (line 1), (N-1) one-entry buf stage storages (line 1), per-stage next-value equations (line 2), guard-gated ready/valid handshake equations with the constant-1 guard (line 3), the yield write into the outgoing packet port in source member order with the first yielded field the MSB (line 4), and both fail-loud outcomes - a source-level stage-law violation (lines 5 and 6, the two pigen_pipeline_stage_laws the production path must reach) and a pipeline in an unsupported procedural position (line 7). No line duplicates the excluded owners: the per-stage computation VALUE (pipeline-stage-computation list at the pipeline-lower-test seam), false-guard halt / pipe_reset / pipeline_reset bindings (plan item 8, pipeline-lower-test seam), the FSM, or the per-subsystem corpus migration.
+
+Red state checked on master (0d3cb2a lineage, build current): a clocked-process pipeline source returns rc == -1, `invalid procedural statement` at the pipeline token with no output (lines 1-6 fail on their rc == 0 / original-statement-span / emission assertions); a module-level pipeline source returns rc == 0 with an empty module body (line 7 fails on rc). Every line goes green only when the production pipeline step (how/does/a/pipeline/statement/reach/the/production/rtl/path.md) lands.
+
+Next step: the one-scenario sections at the pigen_compile_source seam, one test-author per line.
