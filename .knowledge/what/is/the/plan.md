@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-29T14:15:10+11:00"
+revised_at: "2026-10-30T07:58:43+11:00"
 ---
 
 Completed on master (owners named in-line): the elastic RTL vertical slice Tasks 8-12 (Task 7 ready-cycle validation deferred to Pigen 1.0); CLI wiring (src/pigen.c main() calls pigen_compile_source; what/is/the/command/line/contract.md); the retained core (resolved module/declarations/clocked process/direct atomic transfer route with the whole-unit ready graph; projection/concat/co-slice, validity/domain/ownership and stall/throughput laws, each with a green discriminating manifest); the Verilator-lint scope (no -Wno-fatal, pinned by tests/lint_fatal_pin.sh); the co-slice X-propagation and typedef-width defect fixes; the FSM state-body fail-loud diagnostic; the FSM parent-module lowering (s2, s5; what/is/the/fsm/parent/module/lowering.md); the child-instance (i1) structured syntax node and (i2) identity owner (what/is/the/child/instance/identity/contract.md).
@@ -21,7 +21,7 @@ Remaining approved work, in order:
 
 7. Open questions where the spec is silent on something only the prototype does (David's to decide; not inherited): (a) pipeline "yield" - is exposing the final outgoing value the complete pipeline control surface; (b) fabric manifest and SVG output - keep or dropped; (c) prototype-only examples, tests and APIs - preserved or retired when the textual machinery is deleted.
 
-8. The pipeline halting/stop test contract: the guard in src/pipeline_lower.c is the constant 1, so the false enclosing procedural guard (which must hold all storage and disable both handshakes, how/to/reset/and/enable/a/pipeline.md) is unenforced - pipeline-lower-test section 5 pins only that the guarded ready/valid equations are published. Next, the scoped scenario mapping at the pipeline-lower-test seam named in what/are/the/owners/of/the/pipeline/fsm/behavioral/test/obligations, then independent review and one-scenario sections; the reset-binding (pipe_reset/pipeline_reset) coverage follows in its own scoped mapping.
+8. The pipeline halting/stop test contract: the guard in src/pipeline_lower.c is the constant 1, so the false enclosing procedural guard (which must hold all storage and disable both handshakes, how/to/reset/and/enable/a/pipeline.md) is unenforced - pipeline-lower-test section 5 pins only that the guarded ready/valid equations are published. The scoped scenario list is at what/are/the/pipeline/halt/stop/test/scenarios.md; next, independent review, then one-scenario sections and the guard-replacement implementation. The reset-binding (pipe_reset/pipeline_reset) coverage follows in its own scoped mapping.
 
 9. The FSM behavior/stop test contract: fsm-lower-test pins only the set-level record contract, not the reset value (the header initial state's encoding), state-active gating or per-goto guard gating (what/is/the/fsm/parent/module/lowering.md, step (s4)). Its own scoped scenario mapping at the fsm-lower-test seam, then independent review and one-scenario sections; the behavior/stop owners are what/is/an/fsm.md, does/goto/wait/for/a/transfer.md and how/to/write/fsm/states.md.
 
