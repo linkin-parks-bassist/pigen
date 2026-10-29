@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-29T09:38:04+11:00"
+revised_at: "2026-10-29T14:15:10+11:00"
 ---
 
 Completed on master (owners named in-line): the elastic RTL vertical slice Tasks 8-12 (Task 7 ready-cycle validation deferred to Pigen 1.0); CLI wiring (src/pigen.c main() calls pigen_compile_source; what/is/the/command/line/contract.md); the retained core (resolved module/declarations/clocked process/direct atomic transfer route with the whole-unit ready graph; projection/concat/co-slice, validity/domain/ownership and stall/throughput laws, each with a green discriminating manifest); the Verilator-lint scope (no -Wno-fatal, pinned by tests/lint_fatal_pin.sh); the co-slice X-propagation and typedef-width defect fixes; the FSM state-body fail-loud diagnostic; the FSM parent-module lowering (s2, s5; what/is/the/fsm/parent/module/lowering.md); the child-instance (i1) structured syntax node and (i2) identity owner (what/is/the/child/instance/identity/contract.md).
@@ -15,7 +15,7 @@ Remaining approved work, in order:
 
 4. The FSM subsystem's lowering is COMPLETE (what/is/the/fsm/parent/module/lowering.md); the FSM lowers to one synchronous controller per what/is/an/fsm.md. The child-instance stage then runs: (i1) and (i2) are COMPLETE; (i3) the parent-module lowering remains — its contract, the verified candidate and the three defects to correct are at what/is/the/instance/parent/module/lowering.md — in its own bounded step with a discriminating green test manifest, then fabric.
 
-5. CLI integration for pipelines and FSMs (first gap of item 2 for both): on master the CLI does not compile them - a pipeline statement fails loudly, a module-level FSM is silently dropped into an empty module (does/the/pipeline/and/fsm/reach/the/compiled/output.md). Next bounded step: production lowering of the pipeline statement through pigen_pipeline_lower, then the FSM through pigen_fsm_lower, then per-subsystem corpus migration and the tightened computation and halt/stop test contracts.
+5. CLI integration for pipelines and FSMs (first gap of item 2 for both): on master the CLI does not compile them - a pipeline statement fails loudly, a module-level FSM is silently dropped into an empty module (does/the/pipeline/and/fsm/reach/the/compiled/output.md). Next bounded step: production lowering of the pipeline statement through pigen_pipeline_lower - its seam is resolved (which stage calls it, validated inputs, the shared module-record law, fail-loud behavior) at how/does/a/pipeline/statement/reach/the/production/rtl/path.md, and its emitted-SV behavioral contract is mapped at what/are/the/cli/pipeline/emitted/sv/test/scenarios.md in independent review; then the FSM through pigen_fsm_lower, then per-subsystem corpus migration and the tightened computation and halt/stop test contracts.
 
 6. Deferred to Pigen 1.0 with Task 7: the three route contract-level negative witnesses (cycle/self-loop rejection, sizing/signedness/aggregate-law violation, non-isolated foreign-module transfer rejection), none constructible through the public owner APIs. The concatenated/co-slice member-order law is pinned per path by emitted SV and golden witnesses (does/the/concatenation/data/type/keying/keep/member/order.md).
 
