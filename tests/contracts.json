@@ -1304,5 +1304,38 @@
       "instance-syntax-test",
       "T=data-first-not-instance"
     ]
+  },
+  {
+    "covers": [
+      "tests/instance_lower_test.c",
+      "src/instance_lower.c"
+    ],
+    "command": [
+      "make",
+      "instance-lower-test",
+      "T=lower-valid-args"
+    ]
+  },
+  {
+    "covers": [
+      "tests/instance_lower_test.c",
+      "src/instance_lower.c"
+    ],
+    "command": [
+      "make",
+      "instance-lower-test",
+      "T=seam-red"
+    ]
+  },
+  {
+    "covers": [
+      "tests/instance_lower_test.c",
+      "src/instance_lower.c"
+    ],
+    "command": [
+      "make",
+      "instance-lower-test",
+      "T=connection-reds"
+    ]
   }
 ]

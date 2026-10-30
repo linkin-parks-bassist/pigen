@@ -230,6 +230,14 @@ fsm-lower-test:
 	$$dir/pigen-fsm-lower-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
+instance-lower-test:
+	@dir=$$(mktemp -d); \
+	rm -f /tmp/pigen-instance-lower-test; \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-instance-lower-test tests/instance_lower_test.c src/instance_lower.c src/rtl.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-instance-lower-test $(T) || status=$$?; \
+	rm -rf $$dir; exit $$status
+
 sv-emit-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-sv-emit-test; \
