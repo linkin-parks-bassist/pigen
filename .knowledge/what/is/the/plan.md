@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-30T16:19:54+11:00"
+revised_at: "2026-10-30T17:37:18+11:00"
 ---
 
 Completed on master (owners named in-line): the elastic RTL vertical slice Tasks 8-12 (Task 7 ready-cycle validation deferred to Pigen 1.0); CLI wiring (src/pigen.c main() calls pigen_compile_source; what/is/the/command/line/contract.md); the retained core (resolved module/declarations/clocked process/direct atomic transfer route with the whole-unit ready graph; projection/concat/co-slice, validity/domain/ownership and stall/throughput laws, each with a green discriminating manifest); the Verilator-lint scope (no -Wno-fatal, pinned by tests/lint_fatal_pin.sh); the co-slice X-propagation and typedef-width defect fixes; the FSM state-body fail-loud diagnostic; the FSM parent-module lowering (s2, s5; what/is/the/fsm/parent/module/lowering.md); the child-instance (i1) structured syntax node and (i2) identity owner (what/is/the/child/instance/identity/contract.md).
@@ -23,6 +23,6 @@ Remaining approved work, in order:
 
 8. The pipeline halting/stop test contract: the guard in src/pipeline_lower.c is the constant 1, so a false enclosing procedural guard (which must hold all storage and disable both handshakes, how/to/reset/and/enable/a/pipeline.md) is unenforced. The scoped scenario list is at what/are/the/pipeline/halt/stop/test/scenarios.md and its independent review is accepted (what/is/the/review/of/the/pipeline/halt/stop/test/scenarios.md); next, the six one-scenario sections over the pipeline-lower-test seam, then the guard-replacement implementation. The reset-binding (pipe_reset/pipeline_reset) coverage follows in its own scoped mapping.
 
-9. The FSM behavior/stop test contract: fsm-lower-test pins only the set-level record contract, not the reset value (the header initial state's encoding), state-active gating or per-goto guard gating (what/is/the/fsm/parent/module/lowering.md, step (s4)). Its own scoped scenario mapping at the fsm-lower-test seam is in flight; next, independent review, then one-scenario sections; the behavior/stop owners are what/is/an/fsm.md, does/goto/wait/for/a/transfer.md and how/to/write/fsm/states.md.
+9. The FSM behavior/stop test contract: fsm-lower-test pins only the set-level record contract, not the reset value (the header initial state's encoding), state-active gating or per-goto guard gating (what/is/the/fsm/parent/module/lowering.md, step (s4)). The scoped scenario list is at what/are/the/fsm/behavior/stop/test/scenarios.md; next, its independent review, then the one-scenario sections. The behavior/stop owners are what/is/an/fsm.md, does/goto/wait/for/a/transfer.md and how/to/write/fsm/states.md.
 
 Lowering consumes validated identities and backend-neutral realization properties. Compiler stages fail loudly: a stage reports the diagnostic and stops, with no rollback requirement.
