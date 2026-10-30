@@ -1,0 +1,18 @@
+---
+status: green
+revised_at: "2026-10-30T16:12:40+11:00"
+---
+
+A module-level `fsm ... begin ... end` item reaches the compiled output through the production RTL lowering step in src/compile.c's per-module loop (src/compile.c:163-183: `pigen_lower_rtl_transfers` at :167, then the FSM step, then `pigen_lower_rtl_module` at :183), replacing today's silent drop (does/the/pipeline/and/fsm/reach/the/compiled/output.md).
+
+Collection point: a `fsm` item is parsed from parse_module_items (src/syntax.c:2220, dispatched at :2243-2246 through parse_fsm) as a module item - SIBLING of declarations, parameters and clocked processes, not a clocked-process procedural statement, structurally different from the pipeline's procedural-statement collection. The production step, for each module, walks that module's syntax node's item children collecting PIGEN_SYNTAX_FSM nodes; for each, first pigen_fsm_identity_establish (include/pigen/fsm_identity.h, the s2 identity owner: model, syntax, module, fsm, expanded) establishes the state type, the header initial-state index and the transition set, then the FSM lowering publishes the one synchronous controller.
+
+Resolve-stage stance: src/resolve.c has no PIGEN_SYNTAX_FSM handler today (checked: grep -i fsm on master's src/resolve.c is empty), so the resolve stage accepts the FSM as a known module item validating nothing - the FSM's state/transition facts are validated at the lowering step through the s2 identity owner and the s5 lowering owner. A source-level FSM law violation is diagnosed at the lowering step, not at resolve; an FSM node in an unsupported position (outside a module's item walk) is rejected fail-loud at the lowering step with the diagnostic at the node's original span, and the compile stops.
+
+Shared module-record law: pigen_fsm_lower as landed creates its own RTL record (src/fsm_lower.c:316, pigen_rtl_module_add_with_owner), which is correct for its standalone seam but a SECOND record in production: the output model maps a PIGEN_SYNTAX_MODULE node to the first matching RTL record per semantic module (src/output.c, node_identity, :309-320), so a second record's children are silently absent from the emitted SV. The production step therefore publishes through the parent module's existing shared RTL module record, and pigen_fsm_lower gains a production form whose record argument is supplied by the caller; its standalone 5-arg form (include/pigen/fsm_lower.h) and the green fsm-lower-test manifest are unchanged, and a production-path test must distinguish a publish into the shared record from a second-record publish.
+
+Fail-loud: every step failure (an unestablished identity, a rejected node kind, a record publication failure) reports its diagnostic at the original span and the compile stops with a nonzero exit and no output file (how/should/compiler/builders/fail.md); no rollback is required - partial records may remain and nothing uses the model after a failed compile.
+
+Expanded source: the FSM node's state/goto facts (state names, bodies, guards, initial state) are read from the expanded source the lowering context does not carry; the production step passes preprocess_result.expanded (src/compile.c:109) into pigen_fsm_identity_establish and the FSM lowering, exactly as the standalone 5-arg form takes it.
+
+Excluded (their owning plan items): the FSM emitted-SV behavioral contract at the pigen_compile_source seam (a later test-mapping step); the FSM behavior/stop test contract at the fsm-lower-test seam (what/is/the/plan.md item 9); the production FSM implementation itself; the per-stage pipeline computation stand-in, the pipeline halting/stop contract and the per-subsystem corpus migration.
