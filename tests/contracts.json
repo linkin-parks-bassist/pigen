@@ -1133,6 +1133,54 @@
   },
   {
     "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=ready-guarded-by-en"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=unguarded-ready-constant-one"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=ready-guarded-by-en"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=compound-guard-published"
+    ]
+  },
+  {
+    "covers": [
       "tests/fsm_lower_test.c",
       "src/fsm_lower.c",
       "src/rtl.c"
@@ -1336,6 +1384,44 @@
       "make",
       "instance-lower-test",
       "T=connection-reds"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=ready-not-constant-one"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=guarded-storage-holds"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c",
+      "src/sv_emit.c",
+      "src/rtl_name.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=ready-renders-guard-sv"
     ]
   }
 ]

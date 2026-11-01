@@ -165,6 +165,8 @@ typedef struct {
 	pigen_syntax_error error;
 	const pigen_syntax_node *pipeline;
 	pigen_syntax_id pipeline_id;
+	const pigen_syntax_node *if_statement; /* enclosing if node; NULL if unguarded */
+	pigen_syntax_expr_id if_condition; /* its condition; INVALID if unguarded */
 	pigen_source_span module_span;
 	pigen_source_span process_span;
 	pigen_source_span clk_span;
@@ -251,6 +253,101 @@ static void pl_free(parsed *p)
 	pigen_free_preprocess_result(&p->pre);
 	pigen_free_sources(&p->sources);
 	*p = (parsed){0};
+}
+
+/* Parses NAME to a pipeline module whose single pipeline node is nested under
+ * an enclosing procedural guard, `if (guard-expr) begin ... end`, inside the
+ * clocked process's procedural block. The guard law (how/to/reset/and/enable/a/
+ * pipeline.md; include/pigen/pipeline_lower.h) is the complete enclosing
+ * procedural guard: the pipeline's ready/valid equations are all gated by it,
+ * and a false guard holds every stage's storage and disables both handshakes.
+ * The guarded fixture extension (what/are/the/pipeline/halt/stop/test/
+ * scenarios.md, line 1) locates the pipeline under its PIGEN_SYNTAX_IF_STATEMENT
+ * ancestor - the procedural block's single statement is the if node, whose
+ * `as.if_statement.condition` is the guard's pigen_syntax_expr and whose body
+ * is the procedural block holding the pipeline (process -> block -> if ->
+ * block -> pipeline) - and exposes the condition expression and the
+ * guard-signal name span (through the expanded-source token origins, exactly
+ * as pl_name_span resolves a PIGEN_SYNTAX_EXPR_NAME). File-local: it reuses the
+ * unguarded pl_parse's source/preprocess/parse path and the established
+ * pl_unit/pl_port/pl_drive/pl_name_span helpers unchanged; the step-(a) identity
+ * owner (pigen_pipeline_identifier_establish) and the step-(b) stage-law owner
+ * read only the pipeline node and its own body, never the parent chain, so a
+ * guarded pipeline drives the unchanged 5-arg seam. */
+static parsed pl_parse_guarded(const char *name, const char *text)
+{
+	parsed p;
+	const pigen_syntax_node *root;
+	const pigen_syntax_node *module = NULL;
+	const pigen_syntax_node *process = NULL;
+	const pigen_syntax_node *block;
+	const pigen_syntax_node *stmt;
+	const pigen_syntax_node *if_node;
+	const pigen_syntax_node *inner;
+	const pigen_syntax_node *pipeline;
+
+	memset(&p, 0, sizeof p);
+	p.source = pigen_source_add(&p.sources, name, text, strlen(text));
+	REQUIRE(!IS_INVALID_ID(p.source));
+	{
+		pigen_preprocess_error pre_error;
+
+		memset(&pre_error, 0, sizeof pre_error);
+		REQUIRE(pigen_preprocess(&p.sources, p.source, NULL, &p.pre, &pre_error));
+	}
+	REQUIRE(pigen_parse_syntax(&p.pre.expanded, &p.tree, &p.error));
+	REQUIRE(!p.error.message);
+	root = pigen_syntax_get(&p.tree, (pigen_syntax_id){0});
+	REQUIRE(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
+	for (pigen_syntax_id c = root->first_child; c.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&p.tree, c);
+
+		REQUIRE(node);
+		if (node->kind == PIGEN_SYNTAX_MODULE) module = node;
+		c = node->next_sibling;
+	}
+	REQUIRE(module);
+	p.module_span = module->location.source_span;
+	for (pigen_syntax_id c = module->first_child; c.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(&p.tree, c);
+
+		REQUIRE(node);
+		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS) process = node;
+		c = node->next_sibling;
+	}
+	REQUIRE(process);
+	p.process_span = process->location.source_span;
+	{
+		const pigen_syntax_expr *clock = pigen_syntax_expr_get(
+			&p.tree.expressions, process->as.clocked_process.clock);
+
+		REQUIRE(clock);
+		p.clk_span = clock->location.source_span;
+	}
+	block = pigen_syntax_get(&p.tree, process->first_child);
+	REQUIRE(block && block->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK);
+	/* The block's single statement is the enclosing guard's if node. */
+	stmt = pigen_syntax_get(&p.tree, block->first_child);
+	REQUIRE(stmt && stmt->kind == PIGEN_SYNTAX_IF_STATEMENT);
+	if_node = stmt;
+	p.if_statement = if_node;
+	p.if_condition = if_node->as.if_statement.condition;
+	REQUIRE(!IS_INVALID_ID(p.if_condition));
+	/* The if's body is the procedural block holding the single pipeline. */
+	inner = pigen_syntax_get(&p.tree, if_node->first_child);
+	REQUIRE(inner && inner->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK);
+	pipeline = pigen_syntax_get(&p.tree, inner->first_child);
+	REQUIRE(pipeline && pipeline->kind == PIGEN_SYNTAX_PIPELINE);
+	p.pipeline_id = (pigen_syntax_id){(uint32_t)(pipeline - p.tree.nodes)};
+	p.pipeline = pipeline;
+	/* The struct is returned by value; re-anchor the intra-struct pointers
+	 * (tree.expanded -> pre.expanded, and pre.expanded.sources -> sources)
+	 * to the RETURNED copy so they do not dangle into this frame. */
+	p.tree.expanded = &p.pre.expanded;
+	p.pre.expanded.sources = &p.sources;
+	return p;
 }
 
 /* Builds the resolved module skeleton (module, scope, clock signal/domain and
@@ -512,6 +609,72 @@ static pigen_source_span pl_name_span(const parsed *p, pigen_syntax_expr_id expr
 	token = pigen_expanded_token_get(&p->pre.expanded, e->as.atom.token);
 	REQUIRE(token);
 	return pigen_origin_spelling_span(&p->pre.expanded, token->origin);
+}
+
+/* True when the reachable RTL expression subtree rooted at ROOT carries a
+ * PIGEN_RTL_EXPR_OBJECT whose origin span spells exactly the guard signal `en`
+ * in the parsed source (an owner-text check against the span, never a search
+ * over the output). The guarded pipeline's ready equation must carry the guard
+ * this way - as the root itself, or as any reachable descendant object - so the
+ * assertion holds whether the guard is published directly on the ready or
+ * inside a compound guard expression (the complete enclosing procedural guard,
+ * how/to/reset/and/enable/a/pipeline.md). */
+static int pl_ready_subtree_guard(const pigen_rtl_model *rtl,
+	const pigen_rtl_expr *root, const parsed *p)
+{
+	pigen_rtl_expr_id id = (pigen_rtl_expr_id){(uint32_t)(root - rtl->expressions)};
+	const pigen_rtl_expr_id *children;
+	size_t child_count;
+	size_t i;
+
+	if (root->kind == PIGEN_RTL_EXPR_OBJECT)
+	{
+		const pigen_rtl_object *obj = pigen_rtl_object_get(rtl, root->object);
+
+		if (obj && span_is(&p->sources, obj->origin, "en"))
+			return 1;
+	}
+	children = pigen_rtl_expr_children(rtl, id, &child_count);
+	for (i = 0; i < child_count; i++)
+	{
+		const pigen_rtl_expr *c = pigen_rtl_expr_get(rtl, children[i]);
+
+		if (c && pl_ready_subtree_guard(rtl, c, p))
+			return 1;
+	}
+	return 0;
+}
+
+/* True when the reachable RTL expression subtree rooted at ROOT carries a
+ * PIGEN_RTL_EXPR_OBJECT whose origin span spells exactly WORD in the parsed
+ * source. The compound-guard section (7) walks the ready's subtree through it
+ * once per guard atom of `if (en && f)` to pin that the published guard is
+ * the COMPLETE compound expression: a subtree that carries only one atom (or
+ * the AND of one atom with the constant 1) fails one of the two walks. */
+static int pl_subtree_spells(const pigen_rtl_model *rtl,
+	const pigen_rtl_expr *root, const parsed *p, const char *word)
+{
+	pigen_rtl_expr_id id = (pigen_rtl_expr_id){(uint32_t)(root - rtl->expressions)};
+	const pigen_rtl_expr_id *children;
+	size_t child_count;
+	size_t i;
+
+	if (root->kind == PIGEN_RTL_EXPR_OBJECT)
+	{
+		const pigen_rtl_object *obj = pigen_rtl_object_get(rtl, root->object);
+
+		if (obj && span_is(&p->sources, obj->origin, word))
+			return 1;
+	}
+	children = pigen_rtl_expr_children(rtl, id, &child_count);
+	for (i = 0; i < child_count; i++)
+	{
+		const pigen_rtl_expr *c = pigen_rtl_expr_get(rtl, children[i]);
+
+		if (c && pl_subtree_spells(rtl, c, p, word))
+			return 1;
+	}
+	return 0;
 }
 
 /* Establishes the step-(a) outgoing-packet identity the lowering consumes as a
@@ -1174,6 +1337,1147 @@ int main(int argc, char **argv)
 			pl_port(&p, &u, "x", 8);
 			rc = pl_seam_red(&p, &u, &lowering, &rtl);
 			REQUIRE(rc == -1);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) ready-guarded-by-en: the pipeline's ready equation is gated by  */
+	/*     the complete enclosing procedural guard (how/to/reset/and/     */
+	/*     enable/a/pipeline.md; include/pigen/pipeline_lower.h guard law) */
+	/*     rather than by the constant-1 stand-in the current lowering     */
+	/*     publishes (src/pipeline_lower.c: guard = one, ready = guard).   */
+	/*     The anchor is the guarded fixture of the accepted pipeline      */
+	/*     halting/stop scenario list (what/are/the/pipeline/halt/stop/   */
+	/*     test/scenarios.md line 1, reviewed at what/is/the/review/of/   */
+	/*     the/pipeline/halt/stop/test/scenarios.md): a legal 2-stage      */
+	/*     pipeline nested under `if (en)` inside the clocked process      */
+	/*     (1-bit module input en, stage 1 a <= x, stage 2 b <= a, yield  */
+	/*     b). It lowers to rc == 0 and the pipeline's ready equation      */
+	/*     publishes a 1-bit value that is NOT an integer constant         */
+	/*     (PIGEN_RTL_EXPR_INTEGER) and that IS, or contains in its        */
+	/*     reachable expression subtree, a PIGEN_RTL_EXPR_OBJECT whose     */
+	/*     origin span spells exactly `en` in the parsed source.           */
+	/*     Against the current master lowering the ready equation's value  */
+	/*     is the integer constant 1, so no published 1-bit handshake      */
+	/*     equation carries the guard object and this section is the       */
+	/*     discriminating red: it FAILS here and turns green only when the */
+	/*     guard-replacement implementation (the later owner, plan item 8) */
+	/*     publishes the ready gated by the enclosing guard's expression.  */
+	/*     The guard-signal name span is pinned through the expanded-      */
+	/*     source token origins (exactly as pl_name_span resolves the if   */
+	/*     condition's name), so the assertion is against the parsed       */
+	/*     source, never a search over the output. The guarded-fixture     */
+	/*     extension (pl_parse_guarded) is the file-local seam the sibling */
+	/*     lines 2, 4, 5, 6 reuse; the step-(a) identity and step-(b)      */
+	/*     stage-law owners read only the pipeline node and its body, so   */
+	/*     the guarded pipeline drives the unchanged 5-arg seam.           */
+	/* ------------------------------------------------------------------ */
+	SECTION("ready-guarded-by-en") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers and its
+		 * ready equation is gated by the guard signal, not the constant-1
+		 * stand-in. */
+		{
+			parsed p = pl_parse_guarded("gre_ok.pigen",
+				"module gre_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline gre_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			int found = 0;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). This pins the
+			 * fixture and the guard span the ready assertion checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The pipeline's ready equation is a published RTL equation
+			 * whose value is a 1-bit expression. Locate the one that is NOT
+			 * an integer constant and whose reachable expression subtree
+			 * carries an object spelling exactly `en`: the ready gated by
+			 * the complete enclosing procedural guard. Against the current
+			 * master lowering the ready value is the integer constant 1, so
+			 * no such equation exists and found stays 0 (the red). */
+			for (i = 0; i < rtl.equation_count && !found; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_INTEGER)
+					continue;
+				found = pl_ready_subtree_guard(&rtl, v, &p);
+			}
+			REQUIRE(found);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (7) ready-not-constant-one: the guarded pipeline's ready/valid      */
+	/*     handshake is NOT the constant-1 stand-in. The anchor is the     */
+	/*     same guarded pipeline as the accepted pipeline halting/stop     */
+	/*     scenario list (what/are/the/pipeline/halt/stop/test/           */
+	/*     scenarios.md line 2, reviewed at what/is/the/review/of/the/    */
+	/*     pipeline/halt/stop/test/scenarios.md): a legal 2-stage          */
+	/*     pipeline nested under `if (en)` inside the clocked process      */
+	/*     (1-bit module input en, stage 1 a <= x, stage 2 b <= a, yield   */
+	/*     b). It lowers to rc == 0 and NO published 1-bit handshake       */
+	/*     equation (the pipeline's ready/valid equations) has an          */
+	/*     integer-constant value (PIGEN_RTL_EXPR_INTEGER) - the           */
+	/*     constant-1 stand-in the manifest must now discriminate. The     */
+	/*     handshake must still be published (at least one 1-bit equation) */
+	/*     so the exclusion is not vacuous: a lowering that drops the      */
+	/*     ready equation instead of gating it fails the presence pin, and */
+	/*     a lowering that keeps guard = constant 1 (the current           */
+	/*     src/pipeline_lower.c: guard = one, ready = guard, so the        */
+	/*     published ready equation is ready = 1) fails the exclusion.     */
+	/*     This section is the discriminating red: it FAILS against the    */
+	/*     current master lowering and passes if and only if no published  */
+	/*     1-bit handshake equation carries an integer-constant value,     */
+	/*     i.e. once the guard-replacement implementation publishes the    */
+	/*     ready gated by the enclosing guard's expression. The per-stage  */
+	/*     next-value stand-in constants are packet-width (not 1-bit) and  */
+	/*     are a separate scoped obligation (the stage-computation list),  */
+	/*     so they do not trip this 1-bit exclusion. The guarded-fixture   */
+	/*     extension (pl_parse_guarded) is the file-local seam the         */
+	/*     sibling lines 1, 4, 5, 6 share; the step-(a) identity and       */
+	/*     step-(b) stage-law owners read only the pipeline node and its   */
+	/*     body, so the guarded pipeline drives the unchanged 5-arg seam.  */
+	/* ------------------------------------------------------------------ */
+	SECTION("ready-not-constant-one") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers and none
+		 * of its published 1-bit handshake equations is an integer constant. */
+		{
+			parsed p = pl_parse_guarded("rnco_ok.pigen",
+				"module rnco_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline rnco_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			size_t bit1_count = 0;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* Inspect every published 1-bit handshake equation (the
+			 * pipeline's ready/valid equations): at least one must be
+			 * published (the handshake is present, so the exclusion below
+			 * is not vacuous) and none may carry an integer-constant value.
+			 * Against the current master lowering the ready equation's value
+			 * is the integer constant 1 (the constant-1 stand-in), so the
+			 * exclusion REQUIRE fails - the discriminating red. It passes if
+			 * and only if the guard-replacement implementation publishes the
+			 * ready gated by the enclosing guard's expression, never a
+			 * constant. The per-stage next-value stand-in constants are
+			 * packet-width (8-bit here), not 1-bit, and belong to the
+			 * separate stage-computation obligation. */
+			for (i = 0; i < rtl.equation_count; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				bit1_count++;
+				REQUIRE(v->kind != PIGEN_RTL_EXPR_INTEGER);
+			}
+			REQUIRE(bit1_count >= 1);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) unguarded-ready-constant-one: an UNGUARDED pipeline - a legal  */
+	/*     pipeline placed directly in the procedural block, with no      */
+	/*     enclosing procedural guard (no `if`) - is enabled, and its     */
+	/*     ready stays the constant 1. This is the boundary that keeps the */
+	/*     guard-replacement implementation from over-gating: an          */
+	/*     unguarded pipeline has no enclosing procedural guard to gate    */
+	/*     its ready by, so its ready must remain the constant 1 rather    */
+	/*     than being gated down to some other 1-bit constant (the         */
+	/*     false-guard hold value is 0, which over-gating would publish).  */
+	/*     The anchor lowers a legal 2-stage pipeline (stage 1 `a <= x`,  */
+	/*     stage 2 `b <= a`, `yield b`) to rc == 0 and locates the        */
+	/*     pipeline's ready equation through the owner accessors, pinning  */
+	/*     its value: a 1-bit PIGEN_RTL_EXPR_INTEGER with value 1. The     */
+	/*     ready value is the ONLY 1-bit integer-constant equation value   */
+	/*     the lowering may publish - every other 1-bit integer-constant   */
+	/*     equation value must also be 1, so a lowering that over-gates the */
+	/*     unguarded ready to the constant 0 (or any other 1-bit constant) */
+	/*     fails this section. The same fixture shape the other sections   */
+	/*     use, reached through the established unguarded seam helpers     */
+	/*     (pl_parse/pl_unit/pl_port/pl_drive) unchanged.                 */
+	/* ------------------------------------------------------------------ */
+	SECTION("unguarded-ready-constant-one") {
+		/* Anchor: a legal 2-stage pipeline directly in the procedural block
+		 * (no enclosing if statement) lowers to rc == 0 and its ready
+		 * equation publishes the constant-1 value (a 1-bit
+		 * PIGEN_RTL_EXPR_INTEGER, value 1) - an unguarded pipeline is
+		 * enabled, and its ready remains the constant 1. */
+		{
+			parsed p = pl_parse("ugc_ok.pigen",
+				"module ugc_ok(input logic clk, input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline ugc_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= x;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tb <= a;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield b;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The ready equation's value is a 1-bit PIGEN_RTL_EXPR_INTEGER
+			 * with value 1. The ready value is the only 1-bit
+			 * integer-constant equation value the lowering publishes, so
+			 * locate it by exactly that shape: a 1-bit integer-constant
+			 * value that IS the constant 1. A missing ready (no such
+			 * equation) or an over-gated ready (a 1-bit integer-constant
+			 * value that is not 1) fails. */
+			{
+				int found = 0;
+
+				for (i = 0; i < rtl.equation_count; i++)
+				{
+					const pigen_rtl_equation *eq = pigen_rtl_equation_get(
+						&rtl, (pigen_rtl_equation_id){(uint32_t)i});
+					const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+						eq->value) : NULL;
+					const pigen_rtl_type *t;
+
+					if (!v || v->kind != PIGEN_RTL_EXPR_INTEGER)
+						continue;
+					t = pigen_rtl_type_get(&rtl, v->type);
+					if (!t || t->width != 1)
+						continue;
+					/* Adversarial: no 1-bit integer-constant equation value
+					 * may be anything other than the constant 1. An
+					 * over-gating lowering that drives the unguarded ready to
+					 * the constant 0 (the false-guard hold value) or any other
+					 * 1-bit constant publishes such a value and fails here, so
+					 * the ready is pinned to the constant 1 and to nothing
+					 * else. */
+					REQUIRE(v->value == 1);
+					found = 1;
+				}
+				REQUIRE(found);
+			}
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) ready-guarded-by-en: the pipeline's ready equation is gated by  */
+	/*     the complete enclosing procedural guard (how/to/reset/and/     */
+	/*     enable/a/pipeline.md; include/pigen/pipeline_lower.h guard law) */
+	/*     rather than by the constant-1 stand-in the current lowering     */
+	/*     publishes (src/pipeline_lower.c: guard = one, ready = guard).   */
+	/*     The anchor is the guarded fixture of the accepted pipeline      */
+	/*     halting/stop scenario list (what/are/the/pipeline/halt/stop/   */
+	/*     test/scenarios.md line 1, reviewed at what/is/the/review/of/   */
+	/*     the/pipeline/halt/stop/test/scenarios.md): a legal 2-stage      */
+	/*     pipeline nested under `if (en)` inside the clocked process      */
+	/*     (1-bit module input en, stage 1 a <= x, stage 2 b <= a, yield  */
+	/*     b). It lowers to rc == 0 and the pipeline's ready equation      */
+	/*     publishes a 1-bit value that is NOT an integer constant         */
+	/*     (PIGEN_RTL_EXPR_INTEGER) and that IS, or contains in its        */
+	/*     reachable expression subtree, a PIGEN_RTL_EXPR_OBJECT whose     */
+	/*     origin span spells exactly `en` in the parsed source.           */
+	/*     Against the current master lowering the ready equation's value  */
+	/*     is the integer constant 1, so no published 1-bit handshake      */
+	/*     equation carries the guard object and this section is the       */
+	/*     discriminating red: it FAILS here and turns green only when the */
+	/*     guard-replacement implementation (the later owner, plan item 8) */
+	/*     publishes the ready gated by the enclosing guard's expression.  */
+	/*     The guard-signal name span is pinned through the expanded-      */
+	/*     source token origins (exactly as pl_name_span resolves the if   */
+	/*     condition's name), so the assertion is against the parsed       */
+	/*     source, never a search over the output. The guarded-fixture     */
+	/*     extension (pl_parse_guarded) is the file-local seam the sibling */
+	/*     lines 2, 4, 5, 6 reuse; the step-(a) identity and step-(b)      */
+	/*     stage-law owners read only the pipeline node and its body, so   */
+	/*     the guarded pipeline drives the unchanged 5-arg seam.           */
+	/* ------------------------------------------------------------------ */
+	SECTION("ready-guarded-by-en") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers and its
+		 * ready equation is gated by the guard signal, not the constant-1
+		 * stand-in. */
+		{
+			parsed p = pl_parse_guarded("gre_ok.pigen",
+				"module gre_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline gre_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			int found = 0;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). This pins the
+			 * fixture and the guard span the ready assertion checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The pipeline's ready equation is a published RTL equation
+			 * whose value is a 1-bit expression. Locate the one that is NOT
+			 * an integer constant and whose reachable expression subtree
+			 * carries an object spelling exactly `en`: the ready gated by
+			 * the complete enclosing procedural guard. Against the current
+			 * master lowering the ready value is the integer constant 1, so
+			 * no such equation exists and found stays 0 (the red). */
+			for (i = 0; i < rtl.equation_count && !found; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_INTEGER)
+					continue;
+				found = pl_ready_subtree_guard(&rtl, v, &p);
+			}
+			REQUIRE(found);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (7) compound-guard-published: the ready equation of a pipeline      */
+	/*     guarded by a COMPOUND guard must publish the COMPLETE enclosing  */
+	/*     procedural guard expression - not a single atom and not a        */
+	/*     constant (how/to/reset/and/enable/a/pipeline.md; the guard law   */
+	/*     in include/pigen/pipeline_lower.h). The anchor is the line-4     */
+	/*     scenario of the accepted pipeline halting/stop list (what/are/   */
+	/*     the/pipeline/halt/stop/test/scenarios.md, reviewed at what/is/   */
+	/*     the/review/of/the/pipeline/halt/stop/test/scenarios.md, list     */
+	/*     pinned fe0e0742): a legal 2-stage pipeline nested under          */
+	/*     `if (en && f)` inside the clocked process (1-bit module inputs   */
+	/*     en and f, stage 1 a <= x, stage 2 b <= a, yield b). It lowers    */
+	/*     to rc == 0 and the pipeline's ready equation value is a binary   */
+	/*     logical-AND expression (PIGEN_RTL_EXPR_BINARY,                  */
+	/*     PIGEN_BINARY_LOGICAL_AND) whose reachable object children        */
+	/*     include objects whose origin spans spell exactly `en` and `f`.   */
+	/*     Against the current master lowering the ready equation's value   */
+	/*     is the integer constant 1 (src/pipeline_lower.c: guard = one),   */
+	/*     so no 1-bit binary logical-AND ready exists and this section is */
+	/*     the discriminating red: it FAILS here and turns green only when */
+	/*     the guard-replacement implementation (the later owner, plan      */
+	/*     item 8) publishes the ready gated by the complete compound       */
+	/*     guard. A replacement that publishes only ONE atom of the guard   */
+	/*     (or the AND of one atom with the constant 1) fails the          */
+	/*     both-objects assertion; a replacement that publishes a single    */
+	/*     atom without the AND fails the binary-kind assertion. The guard  */
+	/*     spans are pinned through the parsed condition (its operator and */
+	/*     its two name children, resolved exactly as pl_name_span resolves*/
+	/*     a name), never a search over the output. This section reuses the*/
+	/*     file-local guarded-fixture extension pl_parse_guarded owned by   */
+	/*     section (6) and the established pl_unit/pl_port/pl_drive/       */
+	/*     pl_name_span helpers; the step-(a) identity and step-(b)        */
+	/*     stage-law owners read only the pipeline node and its body, so   */
+	/*     the guarded pipeline drives the unchanged 5-arg seam.           */
+	/* ------------------------------------------------------------------ */
+	SECTION("compound-guard-published") {
+		/* Anchor: a legal 2-stage pipeline under `if (en && f)` lowers and
+		 * its ready equation is the complete compound guard: a binary
+		 * logical-AND whose reachable objects spell both `en` and `f`. */
+		{
+			parsed p = pl_parse_guarded("cgp_ok.pigen",
+				"module cgp_ok(input logic clk, input logic en, "
+				"input logic f, input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en && f) begin\n"
+				"\t\t\tpipeline cgp_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			int ready_and = 0;
+			int has_en = 0;
+			int has_f = 0;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor. The if's condition is the
+			 * compound guard: a binary logical-AND expression whose two
+			 * name children resolve, through the expanded-source token
+			 * origins (exactly as pl_name_span resolves a name), to the
+			 * spans spelling exactly `en` and `f` in source order. This
+			 * pins the fixture and both guard spans the ready assertion
+			 * checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				const pigen_syntax_expr *left;
+				const pigen_syntax_expr *right;
+				pigen_source_span lspan;
+				pigen_source_span rspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_BINARY);
+				REQUIRE(cond->as.binary.operator == PIGEN_SYNTAX_OP_LOGICAL_AND);
+				left = pigen_syntax_expr_get(&p.tree.expressions,
+					cond->as.binary.left);
+				right = pigen_syntax_expr_get(&p.tree.expressions,
+					cond->as.binary.right);
+				REQUIRE(left && left->kind == PIGEN_SYNTAX_EXPR_NAME);
+				REQUIRE(right && right->kind == PIGEN_SYNTAX_EXPR_NAME);
+				lspan = pl_name_span(&p, cond->as.binary.left);
+				rspan = pl_name_span(&p, cond->as.binary.right);
+				REQUIRE(span_is(&p.sources, lspan, "en"));
+				REQUIRE(span_is(&p.sources, rspan, "f"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			pl_port(&p, &u, "f", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The pipeline's ready equation is a published RTL equation
+			 * whose value is a 1-bit expression. Locate the one that IS a
+			 * binary logical-AND: the ready gated by the complete
+			 * compound enclosing procedural guard. Against the current
+			 * master lowering the ready value is the integer constant 1,
+			 * so no such equation exists and ready_and stays 0 (the red). */
+			for (i = 0; i < rtl.equation_count && !ready_and; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				if (v->kind != PIGEN_RTL_EXPR_BINARY ||
+					v->as.binary.resolution.operation.operator !=
+						PIGEN_BINARY_LOGICAL_AND)
+					continue;
+				ready_and = 1;
+				/* The complete guard, not a single atom: the ready's
+				 * reachable object children must include objects whose
+				 * origin spans spell exactly `en` AND exactly `f` in the
+				 * parsed source (owner-text check against the span, never
+				 * a search over the output). A ready published as one
+				 * atom alone, or as the AND of one atom with the
+				 * constant 1, fails one of these two pins. */
+				has_en = pl_subtree_spells(&rtl, v, &p, "en");
+				has_f = pl_subtree_spells(&rtl, v, &p, "f");
+			}
+			REQUIRE(ready_and);
+			REQUIRE(has_en);
+			REQUIRE(has_f);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) ready-guarded-by-en: the pipeline's ready equation is gated by  */
+	/*     the complete enclosing procedural guard (how/to/reset/and/     */
+	/*     enable/a/pipeline.md; include/pigen/pipeline_lower.h guard law) */
+	/*     rather than by the constant-1 stand-in the current lowering     */
+	/*     publishes (src/pipeline_lower.c: guard = one, ready = guard).   */
+	/*     The anchor is the guarded fixture of the accepted pipeline      */
+	/*     halting/stop scenario list (what/are/the/pipeline/halt/stop/   */
+	/*     test/scenarios.md line 1, reviewed at what/is/the/review/of/   */
+	/*     the/pipeline/halt/stop/test/scenarios.md): a legal 2-stage      */
+	/*     pipeline nested under `if (en)` inside the clocked process      */
+	/*     (1-bit module input en, stage 1 a <= x, stage 2 b <= a, yield  */
+	/*     b). It lowers to rc == 0 and the pipeline's ready equation      */
+	/*     publishes a 1-bit value that is NOT an integer constant         */
+	/*     (PIGEN_RTL_EXPR_INTEGER) and that IS, or contains in its        */
+	/*     reachable expression subtree, a PIGEN_RTL_EXPR_OBJECT whose     */
+	/*     origin span spells exactly `en` in the parsed source.           */
+	/*     Against the current master lowering the ready equation's value  */
+	/*     is the integer constant 1, so no published 1-bit handshake      */
+	/*     equation carries the guard object and this section is the       */
+	/*     discriminating red: it FAILS here and turns green only when the */
+	/*     guard-replacement implementation (the later owner, plan item 8) */
+	/*     publishes the ready gated by the enclosing guard's expression.  */
+	/*     The guard-signal name span is pinned through the expanded-      */
+	/*     source token origins (exactly as pl_name_span resolves the if   */
+	/*     condition's name), so the assertion is against the parsed       */
+	/*     source, never a search over the output. The guarded-fixture     */
+	/*     extension (pl_parse_guarded) is the file-local seam the sibling */
+	/*     lines 2, 4, 5, 6 reuse; the step-(a) identity and step-(b)      */
+	/*     stage-law owners read only the pipeline node and its body, so   */
+	/*     the guarded pipeline drives the unchanged 5-arg seam.           */
+	/* ------------------------------------------------------------------ */
+	SECTION("ready-guarded-by-en") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers and its
+		 * ready equation is gated by the guard signal, not the constant-1
+		 * stand-in. */
+		{
+			parsed p = pl_parse_guarded("gre_ok.pigen",
+				"module gre_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline gre_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			int found = 0;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). This pins the
+			 * fixture and the guard span the ready assertion checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The pipeline's ready equation is a published RTL equation
+			 * whose value is a 1-bit expression. Locate the one that is NOT
+			 * an integer constant and whose reachable expression subtree
+			 * carries an object spelling exactly `en`: the ready gated by
+			 * the complete enclosing procedural guard. Against the current
+			 * master lowering the ready value is the integer constant 1, so
+			 * no such equation exists and found stays 0 (the red). */
+			for (i = 0; i < rtl.equation_count && !found; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_INTEGER)
+					continue;
+				found = pl_ready_subtree_guard(&rtl, v, &p);
+			}
+			REQUIRE(found);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) guarded-storage-holds: the complete enclosing procedural guard */
+	/*     enables the pipeline, and a FALSE guard holds ALL storage while */
+	/*     disabling both handshakes (how/to/reset/and/enable/a/          */
+	/*     pipeline.md; the guard law in include/pigen/pipeline_lower.h:  */
+	/*     "a false guard holds every stage's storage and disables both   */
+	/*     the input and the output handshake, so no item is accepted or  */
+	/*     emitted that cycle"). The anchor is the line-5 scenario of the */
+	/*     accepted pipeline halting/stop list (what/are/the/pipeline/    */
+	/*     halt/stop/test/scenarios.md, reviewed at what/is/the/review/   */
+	/*     of/the/pipeline/halt/stop/test/scenarios.md, list pinned       */
+	/*     fe0e0742): a legal 2-stage pipeline nested under `if (en)`     */
+	/*     inside the clocked process (1-bit module input en, stage 1     */
+	/*     a <= x, stage 2 b <= a, yield b). It lowers to rc == 0 AND     */
+	/*     publishes BOTH:                                                */
+	/*       - its stage-boundary buf storage: exactly (N-1) = 1 one-     */
+	/*         entry primitive instance (the same established count the   */
+	/*         step-b-witnesses section pins as >= 1 for this 2-stage     */
+	/*         pipeline, here tightened to the exact boundary count the   */
+	/*         guard must keep);                                          */
+	/*       - its ready equation gated by the guard signal: a published  */
+	/*         RTL equation whose 1-bit value is NOT an integer constant  */
+	/*         (PIGEN_RTL_EXPR_INTEGER) and whose reachable expression    */
+	/*         subtree carries a PIGEN_RTL_EXPR_OBJECT whose origin span  */
+	/*         spells exactly `en` (reusing the sibling's                 */
+	/*         pl_ready_subtree_guard).                                   */
+	/*     The conjunction is one result: the false guard holds all       */
+	/*     storage (the buf instance stays published) while disabling the */
+	/*     handshake (the ready is gated by the guard, not the stand-in). */
+	/*     Against the current master lowering the ready equation's       */
+	/*     value is the integer constant 1 (src/pipeline_lower.c: guard = */
+	/*     one, ready = guard), so no 1-bit non-integer equation carries  */
+	/*     the guard object and this section is the discriminating red:   */
+	/*     it FAILS here at the ready assertion and turns green only when */
+	/*     the guard-replacement implementation (the later owner, plan    */
+	/*     item 8) publishes the ready gated by the enclosing guard while */
+	/*     keeping the buf storage. A lowering that DROPS the stage        */
+	/*     storage (instance_count != 1) or that publishes an UNGUARDED   */
+	/*     ready (no 1-bit non-integer equation carrying the guard) fails */
+	/*     this section on the matching half. The guard-signal span is    */
+	/*     pinned through the parsed if condition (exactly as             */
+	/*     pl_name_span resolves a name), never a search over the         */
+	/*     output. This section reuses the file-local guarded-fixture     */
+	/*     extension pl_parse_guarded and the pl_ready_subtree_guard      */
+	/*     helper owned by section (5), and the established               */
+	/*     pl_unit/pl_port/pl_drive/pl_name_span/pl_stage_nodes helpers;  */
+	/*     the step-(a) identity and step-(b) stage-law owners read only  */
+	/*     the pipeline node and its body, so the guarded pipeline drives */
+	/*     the unchanged 5-arg seam. This section does not pin the        */
+	/*     storage payload width, backpressure, throughput or reset-      */
+	/*     binding; those are separate scoped obligations.                */
+	/* ------------------------------------------------------------------ */
+	SECTION("guarded-storage-holds") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers to rc == 0
+		 * and publishes BOTH the stage-boundary buf storage (exactly N-1 = 1
+		 * one-entry primitive instance) AND the ready equation gated by the
+		 * guard signal (not the constant-1 stand-in). */
+		{
+			parsed p = pl_parse_guarded("gsh_ok.pigen",
+				"module gsh_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline gsh_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			size_t stage_count;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			int storage_ok = 0;
+			int ready_ok = 0;
+
+			stage_count = pl_stage_nodes(&p, stages);
+			REQUIRE(stage_count == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a name
+			 * spelling exactly `en` (the guard signal). This pins the fixture
+			 * and the guard span the ready assertion checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* (storage half) the false guard holds all storage: the 2-stage
+			 * pipeline's stage-boundary buf storage is exactly (N-1) = 1 one-
+			 * entry primitive instance, published alongside the gated ready.
+			 * A lowering that drops the stage storage fails here (the same
+			 * count the step-b-witnesses section pins as >= 1, tightened to
+			 * the exact boundary count). */
+			storage_ok = (rtl.instance_count == 1);
+			/* (ready half) the handshake is disabled by the guard: the
+			 * pipeline's ready equation is a published RTL equation whose
+			 * value is a 1-bit expression that is NOT an integer constant and
+			 * whose reachable expression subtree carries an object spelling
+			 * exactly `en`. Against the current master lowering the ready
+			 * value is the integer constant 1, so no such equation exists and
+			 * ready_ok stays 0 (the discriminating red). */
+			for (i = 0; i < rtl.equation_count && !ready_ok; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_INTEGER)
+					continue;
+				ready_ok = pl_ready_subtree_guard(&rtl, v, &p);
+			}
+			/* The conjunction: storage held AND ready gated by the guard. */
+			REQUIRE(storage_ok);
+			REQUIRE(ready_ok);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) ready-guarded-by-en: the pipeline's ready equation is gated by  */
+	/*     the complete enclosing procedural guard (how/to/reset/and/     */
+	/*     enable/a/pipeline.md; include/pigen/pipeline_lower.h guard law) */
+	/*     rather than by the constant-1 stand-in the current lowering     */
+	/*     publishes (src/pipeline_lower.c: guard = one, ready = guard).   */
+	/*     The anchor is the guarded fixture of the accepted pipeline      */
+	/*     halting/stop scenario list (what/are/the/pipeline/halt/stop/   */
+	/*     test/scenarios.md line 1, reviewed at what/is/the/review/of/   */
+	/*     the/pipeline/halt/stop/test/scenarios.md): a legal 2-stage      */
+	/*     pipeline nested under `if (en)` inside the clocked process      */
+	/*     (1-bit module input en, stage 1 a <= x, stage 2 b <= a, yield  */
+	/*     b). It lowers to rc == 0 and the pipeline's ready equation      */
+	/*     publishes a 1-bit value that is NOT an integer constant         */
+	/*     (PIGEN_RTL_EXPR_INTEGER) and that IS, or contains in its        */
+	/*     reachable expression subtree, a PIGEN_RTL_EXPR_OBJECT whose     */
+	/*     origin span spells exactly `en` in the parsed source.           */
+	/*     Against the current master lowering the ready equation's value  */
+	/*     is the integer constant 1, so no published 1-bit handshake      */
+	/*     equation carries the guard object and this section is the       */
+	/*     discriminating red: it FAILS here and turns green only when the */
+	/*     guard-replacement implementation (the later owner, plan item 8) */
+	/*     publishes the ready gated by the enclosing guard's expression.  */
+	/*     The guard-signal name span is pinned through the expanded-      */
+	/*     source token origins (exactly as pl_name_span resolves the if   */
+	/*     condition's name), so the assertion is against the parsed       */
+	/*     source, never a search over the output. The guarded-fixture     */
+	/*     extension (pl_parse_guarded) is the file-local seam the sibling */
+	/*     lines 2, 4, 5, 6 reuse; the step-(a) identity and step-(b)      */
+	/*     stage-law owners read only the pipeline node and its body, so   */
+	/*     the guarded pipeline drives the unchanged 5-arg seam.           */
+	/* ------------------------------------------------------------------ */
+	SECTION("ready-guarded-by-en") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers and its
+		 * ready equation is gated by the guard signal, not the constant-1
+		 * stand-in. */
+		{
+			parsed p = pl_parse_guarded("gre_ok.pigen",
+				"module gre_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline gre_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			int found = 0;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). This pins the
+			 * fixture and the guard span the ready assertion checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The pipeline's ready equation is a published RTL equation
+			 * whose value is a 1-bit expression. Locate the one that is NOT
+			 * an integer constant and whose reachable expression subtree
+			 * carries an object spelling exactly `en`: the ready gated by
+			 * the complete enclosing procedural guard. Against the current
+			 * master lowering the ready value is the integer constant 1, so
+			 * no such equation exists and found stays 0 (the red). */
+			for (i = 0; i < rtl.equation_count && !found; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_INTEGER)
+					continue;
+				found = pl_ready_subtree_guard(&rtl, v, &p);
+			}
+			REQUIRE(found);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (7) ready-renders-guard-sv: the guarded ready renders the guard     */
+	/*     signal through the terminal SV (scenario line 6 of the          */
+	/*     accepted pipeline halting/stop list, what/are/the/pipeline/     */
+	/*     halt/stop/test/scenarios.md, independently reviewed and         */
+	/*     accepted at what/is/the/review/of/the/pipeline/halt/stop/      */
+	/*     test/scenarios.md, list pinned fe0e0742). The anchor is the     */
+	/*     guarded pipeline of scenario 1: a legal 2-stage pipeline        */
+	/*     nested under `if (en)` inside the clocked process (1-bit module */
+	/*     input en, stage 1 a <= x, stage 2 b <= a, yield b). It lowers   */
+	/*     to rc == 0 and the ready equation's value renders through       */
+	/*     pigen_sv_render_expression (after pigen_rtl_assign_names,       */
+	/*     PIGEN_RTL_NAME_SOURCE, for the reachable object origins) as     */
+	/*     text containing the spelled guard signal `en` and not the bare  */
+	/*     constant `1` - the emitted handshake is gated by the guard's    */
+	/*     spelling, not the stand-in (how/to/reset/and/enable/a/          */
+	/*     pipeline.md guard law; include/pigen/pipeline_lower.h). The     */
+	/*     ready equation is located among the published 1-bit RTL         */
+	/*     equations by its guard-gated value: against the current master  */
+	/*     lowering that value is the integer constant 1 (src/             */
+	/*     pipeline_lower.c: guard = one, ready = guard), so the rendered  */
+	/*     text is the bare constant `1` and this section is the           */
+	/*     discriminating red: it FAILS here at the rendered-text          */
+	/*     assertion and turns green only when the guard-replacement       */
+	/*     implementation (the later owner, plan item 8) publishes the     */
+	/*     ready gated by the enclosing guard's expression, whose object   */
+	/*     renders through its SOURCE name as `en`. The guard-signal name  */
+	/*     span is pinned through the expanded-source token origins        */
+	/*     (exactly as pl_name_span resolves the if condition's name), so  */
+	/*     the fixture pin is against the parsed source, never a search    */
+	/*     over the output. The name assignment and the render follow the  */
+	/*     established emitted-member-order pattern (the reachable         */
+	/*     OBJECT origins named PIGEN_RTL_NAME_SOURCE, then rendered).     */
+	/*     The guarded-fixture extension (pl_parse_guarded) is the         */
+	/*     file-local seam the sibling lines 1, 2, 4, 5 share; the         */
+	/*     step-(a) identity and step-(b) stage-law owners read only the   */
+	/*     pipeline node and its body, so the guarded pipeline drives the  */
+	/*     unchanged 5-arg seam.                                           */
+	/* ------------------------------------------------------------------ */
+	SECTION("ready-renders-guard-sv") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers to rc == 0
+		 * and the ready equation's value renders through the terminal SV as
+		 * text containing the spelled guard signal `en` and not the bare
+		 * constant `1`. */
+		{
+			parsed p = pl_parse_guarded("grgs_ok.pigen",
+				"module grgs_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline grgs_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			pigen_rtl_expr_id ready_value =
+				(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* Locate the ready equation among the published 1-bit RTL
+			 * equations: the guard-gated ready is the 1-bit equation whose
+			 * value is not the constant-0 stand-in the per-stage
+			 * next-value equations carry (the next-value equations are
+			 * width total_bits and constant 0; the ready is 1-bit). Its
+			 * value is the guard - against the current master lowering the
+			 * integer constant 1, so the rendered text below is the bare
+			 * constant `1` (the discriminating red); once the guard is
+			 * published as its expression the value renders as the guard's
+			 * spelled signal. */
+			for (i = 0; i < rtl.equation_count && IS_INVALID_ID(ready_value);
+				i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_INTEGER && v->value == 0)
+					continue;
+				ready_value = eq->value;
+			}
+			REQUIRE(!IS_INVALID_ID(ready_value));
+			/* Name the ready value's reachable OBJECT origins (SOURCE role)
+			 * so the terminal renderer can spell them, then render the ready
+			 * value through the terminal SV emission. */
+			{
+				pigen_rtl_name_request requests[8];
+				size_t request_count = 0;
+				char *rendered = (char *)"sentinel";
+
+				for (i = 0; i < rtl.expression_count; i++)
+				{
+					const pigen_rtl_expr *e = pigen_rtl_expr_get(&rtl,
+						(pigen_rtl_expr_id){(uint32_t)i});
+
+					if (!e || e->kind != PIGEN_RTL_EXPR_OBJECT)
+						continue;
+					requests[request_count].kind = PIGEN_RTL_NAME_SOURCE;
+					requests[request_count].origin =
+						pigen_rtl_object_get(&rtl, e->object)->origin;
+					request_count++;
+					REQUIRE(request_count <= 8);
+				}
+				if (request_count)
+					REQUIRE(pigen_rtl_assign_names(&rtl, &p.sources, requests,
+						request_count).index != PIGEN_INVALID_ID);
+				/* Render the ready value through the terminal SV emission and
+				 * pin the emitted handshake: the text contains the spelled
+				 * guard signal `en` and is not the bare constant `1`. Against
+				 * the current master lowering the ready value is the integer
+				 * constant 1, so the rendered text is "1" and this fails -
+				 * the emitted handshake is the stand-in, not the guard. */
+				REQUIRE(pigen_sv_render_expression(&rtl,
+					pigen_rtl_expr_get(&rtl, ready_value), &rendered) == 0);
+				REQUIRE(rendered != NULL && rendered != (char *)"sentinel");
+				REQUIRE(strstr(rendered, "en") != NULL);
+				REQUIRE(strstr(rendered, "1") == NULL);
+				free(rendered);
+			}
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
 			pl_free(&p);

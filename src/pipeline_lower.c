@@ -337,6 +337,306 @@ static size_t yield_members(const pigen_source_manager *sources,
 	return count;
 }
 
+/* The nearest enclosing IF_STATEMENT ancestor of the pipeline node, walking
+ * the node's parent chain (the guarded pipeline sits inside the if's then-
+ * block, so the chain runs pipeline -> its procedural block -> the if), or
+ * NULL when the pipeline has no enclosing if. The parent chain is walked
+ * through the flat node array, the same recovery the owner uses for its
+ * children (pipeline_child); the bounded depth guards against a corrupt or
+ * cyclic chain. */
+static const pigen_syntax_node *pipeline_enclosing_if(
+	const pigen_syntax_node *pipeline, pigen_syntax_id syntax)
+{
+	const pigen_syntax_node *base = pipeline - syntax.index;
+	const pigen_syntax_node *node = pipeline;
+	int depth = 0;
+
+	while (node->parent.index != PIGEN_INVALID_ID && depth < 128)
+	{
+		node = base + node->parent.index;
+		if (node->kind == PIGEN_SYNTAX_IF_STATEMENT) return node;
+		depth++;
+	}
+	return NULL;
+}
+
+/* The token index range of the if statement's condition expression: the
+ * tokens strictly between the `(` after the `if` keyword and its matching
+ * `)`, both located inside the if node's span through the expanded source's
+ * token spelling spans (the same recovery the yield-value span uses). A
+ * well-formed if statement always carries a balanced condition, so a failure
+ * means a malformed node the parser would have rejected. */
+static int guard_condition_range(const pigen_source_manager *sources,
+	const pigen_expanded_source *expanded, const pigen_syntax_node *if_node,
+	size_t *first, size_t *last)
+{
+	pigen_source_span if_span = if_node->location.source_span;
+	size_t i;
+	size_t open_index;
+	int depth = 0;
+
+	*first = *last = 0;
+	open_index = 0;
+	for (i = 0; i < expanded->token_count; i++)
+	{
+		const pigen_expanded_token *token = &expanded->tokens[i];
+		pigen_source_span tok = pigen_origin_spelling_span(expanded,
+			token->origin);
+		size_t length;
+		const char *text;
+
+		if (token->kind != PIGEN_TOKEN_IDENTIFIER) continue;
+		if (tok.start < if_span.start || tok.end > if_span.end) continue;
+		text = pigen_source_span_text(sources, tok, &length);
+		if (text && length == 2 && !memcmp(text, "if", 2))
+		{
+			open_index = i;
+			break;
+		}
+	}
+	if (open_index == expanded->token_count) return 0;
+	for (i = open_index + 1; i < expanded->token_count; i++)
+	{
+		const pigen_expanded_token *token = &expanded->tokens[i];
+		pigen_source_span tok = pigen_origin_spelling_span(expanded,
+			token->origin);
+		size_t length;
+		const char *text;
+
+		if (token->kind != PIGEN_TOKEN_SYMBOL) continue;
+		if (tok.start < if_span.start || tok.end > if_span.end) continue;
+		text = pigen_source_span_text(sources, tok, &length);
+		if (!text || length != 1) continue;
+		if (!depth)
+		{
+			if (text[0] != '(') return 0; /* not the condition's open paren */
+			depth = 1;
+			*first = i + 1;
+			continue;
+		}
+		if (text[0] == '(') depth++;
+		else if (text[0] == ')')
+		{
+			depth--;
+			if (!depth)
+			{
+				*last = i - 1;
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+/* The semantic signal whose declared name spells the same text as NAME (read
+ * from the source manager), or an invalid identity when no signal matches.
+ * The guard name is an identifier whose spelling matches the signal's
+ * declaration name; the spans differ (the guard token sits in the if
+ * condition, the declaration name in the port list), so the match is by text.
+ */
+static pigen_signal_id signal_for_name(const pigen_source_manager *sources,
+	const pigen_semantic_model *sem, pigen_source_span name)
+{
+	size_t name_length;
+	const char *name_text;
+	size_t i;
+
+	if (span_invalid(name)) return (pigen_signal_id){PIGEN_INVALID_ID};
+	name_text = pigen_source_span_text(sources, name, &name_length);
+	if (!name_text) return (pigen_signal_id){PIGEN_INVALID_ID};
+	for (i = 0; i < sem->signal_count; i++)
+	{
+		const pigen_semantic_signal *signal = &sem->signals[i];
+		size_t sig_length;
+		const char *sig_text;
+
+		if (span_invalid(signal->span)) continue;
+		sig_text = pigen_source_span_text(sources, signal->span, &sig_length);
+		if (!sig_text) continue;
+		if (sig_length == name_length &&
+			!memcmp(sig_text, name_text, name_length))
+			return (pigen_signal_id){(uint32_t)i};
+	}
+	return (pigen_signal_id){PIGEN_INVALID_ID};
+}
+
+/* One guard operand's RTL expression: a 1-bit object whose origin is the
+ * operand's own spelling span (the terminal renderer spells it from that span,
+ * and the contract checks the span's text) and whose data type is its semantic
+ * signal's lowered type. An operand that names no declared signal is a
+ * failure (the semantic model rejects an undeclared guard signal for a
+ * validated source). The object is owned by rtl_module, the parent module
+ * record the whole lowering publishes into. */
+static int guard_operand(const pigen_source_manager *sources,
+	pigen_rtl_lowering *lowering, pigen_rtl_module_id rtl_module,
+	const pigen_expanded_source *expanded, const pigen_expanded_token *token,
+	pigen_rtl_expr_id *out)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_source_span span = pigen_origin_spelling_span(expanded,
+		token->origin);
+	pigen_signal_id signal;
+	const pigen_semantic_signal *sig;
+	pigen_rtl_type_id operand_type;
+	pigen_rtl_object_id object;
+
+	if (span_invalid(span)) return 0;
+	signal = signal_for_name(sources, sem, span);
+	if (signal.index == PIGEN_INVALID_ID) return 0;
+	sig = pigen_signal_get(sem, signal);
+	operand_type = pigen_lower_rtl_type(lowering, sig->data_type);
+	if (operand_type.index == PIGEN_INVALID_ID) return 0;
+	object = pigen_rtl_object_add_with_owner(rtl, rtl_module,
+		PIGEN_RTL_OBJECT_VARIABLE, operand_type, sig->direction, signal,
+		span);
+	if (object.index == PIGEN_INVALID_ID) return 0;
+	*out = pigen_rtl_expr_add_object(rtl, operand_type, object, span);
+	return (*out).index != PIGEN_INVALID_ID;
+}
+
+/* Builds the RTL expression for the if statement's condition, the complete
+ * enclosing procedural guard (how/to/reset/and/enable/a/pipeline.md), from
+ * the condition's token range. A name is a 1-bit object spelling its own
+ * token (guard_operand); `&&` and `||` are logical-and / logical-or over their
+ * operands, each resolved through the common binary-operation resolver so the
+ * published resolution is the semantic model's, not an invented one; a
+ * parenthesized group recurses. The result is 1-bit. Returns 1 on success. */
+static int guard_expr_build(const pigen_source_manager *sources,
+	pigen_rtl_lowering *lowering, pigen_rtl_module_id rtl_module,
+	const pigen_expanded_source *expanded, size_t first, size_t last,
+	pigen_rtl_expr_id *out)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_rtl_expr_id left;
+	pigen_rtl_expr_id right;
+	pigen_binary_resolution resolution;
+	pigen_rtl_type_id result_type;
+	pigen_source_span tok;
+	size_t length;
+	const char *text;
+	size_t i;
+
+	/* The range must be non-empty. */
+	if (first > last) return 0;
+
+	/* A parenthesized group: the range is `( ... )`, recurse on the inner
+	 * tokens. */
+	if (expanded->tokens[first].kind == PIGEN_TOKEN_SYMBOL)
+	{
+		tok = pigen_origin_spelling_span(expanded,
+			expanded->tokens[first].origin);
+		text = pigen_source_span_text(sources, tok, &length);
+		if (text && length == 1 && text[0] == '(' &&
+			expanded->tokens[last].kind == PIGEN_TOKEN_SYMBOL)
+		{
+			pigen_source_span last_tok = pigen_origin_spelling_span(expanded,
+				expanded->tokens[last].origin);
+			size_t last_length;
+			const char *last_text = pigen_source_span_text(sources, last_tok,
+				&last_length);
+
+			if (last_text && last_length == 1 && last_text[0] == ')')
+				return guard_expr_build(sources, lowering, rtl_module,
+					expanded, first + 1, last - 1, out);
+		}
+	}
+
+	/* A single token: a name (the guard signal) or a number literal. */
+	if (first == last)
+	{
+		const pigen_expanded_token *token = &expanded->tokens[first];
+
+		if (token->kind == PIGEN_TOKEN_IDENTIFIER)
+			return guard_operand(sources, lowering, rtl_module, expanded,
+				token, out);
+		if (token->kind == PIGEN_TOKEN_NUMBER)
+		{
+			pigen_rtl_type bit1 = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
+				PIGEN_DATA_TYPE_STATE_FOUR, 1,
+				INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0};
+			pigen_rtl_type_id bit1_type;
+			uint64_t value = 0;
+
+			tok = pigen_origin_spelling_span(expanded, token->origin);
+			text = pigen_source_span_text(sources, tok, &length);
+			if (text) value = strtoull(text, NULL, 0);
+			bit1_type = pigen_rtl_type_intern(rtl, &bit1);
+			if (bit1_type.index == PIGEN_INVALID_ID) return 0;
+			*out = pigen_rtl_expr_add_integer(rtl, bit1_type, value, tok);
+			return (*out).index != PIGEN_INVALID_ID;
+		}
+		return 0;
+	}
+
+	/* A binary operator: find a top-level `&&` or `||` inside the range (the
+	 * guard is a flat chain for this lowering; nested groups are
+	 * parenthesized, so the operator sits at paren-depth zero). Split on the
+	 * first such operator in source order and build the two sides. */
+	for (i = first; i < last; i++)
+	{
+		const pigen_expanded_token *token = &expanded->tokens[i];
+		pigen_binary_operator operator;
+		int depth = 0;
+		int balanced = 1;
+		size_t i2;
+
+		if (token->kind != PIGEN_TOKEN_SYMBOL) continue;
+		tok = pigen_origin_spelling_span(expanded, token->origin);
+		text = pigen_source_span_text(sources, tok, &length);
+		if (!text) continue;
+		if (length == 2 && !memcmp(text, "&&", 2))
+			operator = PIGEN_BINARY_LOGICAL_AND;
+		else if (length == 2 && !memcmp(text, "||", 2))
+			operator = PIGEN_BINARY_LOGICAL_OR;
+		else continue;
+		/* The operator must sit at top level (paren-depth zero) within
+		 * [first, i): scan the tokens before it. */
+		for (i2 = first; i2 < i; i2++)
+		{
+			if (expanded->tokens[i2].kind != PIGEN_TOKEN_SYMBOL) continue;
+			{
+				pigen_source_span t2 = pigen_origin_spelling_span(expanded,
+					expanded->tokens[i2].origin);
+				size_t l2;
+				const char *x = pigen_source_span_text(sources, t2, &l2);
+
+				if (!x || l2 != 1) continue;
+				if (x[0] == '(') depth++;
+				else if (x[0] == ')') depth--;
+			}
+		}
+		balanced = (depth == 0);
+		if (!balanced) continue;
+		if (!guard_expr_build(sources, lowering, rtl_module, expanded, first,
+			i - 1, &left))
+			return 0;
+		if (!guard_expr_build(sources, lowering, rtl_module, expanded, i + 1,
+			last, &right))
+			return 0;
+		/* The published resolution: the semantic model's binary operation for
+		 * the operator over 1-bit logic operands (the guard operands are the
+		 * 1-bit guard signals), identity-converted. */
+		{
+			pigen_data_type_id logic_one =
+				pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+
+			if (logic_one.index == PIGEN_INVALID_ID) return 0;
+			if (!pigen_data_type_resolve_binary_operation(sem, operator,
+				logic_one, logic_one, &resolution))
+				return 0;
+		}
+		result_type = pigen_lower_rtl_type(lowering,
+			resolution.operation.result_data_type);
+		if (result_type.index == PIGEN_INVALID_ID) return 0;
+		*out = pigen_rtl_expr_add_binary(rtl, result_type, &resolution, left,
+			right, tok);
+		return (*out).index != PIGEN_INVALID_ID;
+	}
+	return 0; /* no recognized top-level operator: a malformed condition */
+}
+
 /* Lowers the pipeline's fields, stage boundaries and yield into the parent
  * module's RTL model, consuming the step-(a) identity and validating the
  * step-(b) stage laws. Everything is published through the common RTL model
@@ -426,27 +726,40 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		pipeline->location.source_span);
 	if (rtl_module.index == PIGEN_INVALID_ID) return -1;
 
-	/* The 1-bit boolean type and the guard atom (the complete enclosing
-	 * procedural guard that enables the pipeline). A constant 1 is used for
-	 * the guard in this structural lowering: the pipeline's ready/valid
-	 * equations are all gated by it (how/to/reset/and/enable/a/pipeline.md),
-	 * and the guard's exact expression is the enclosing procedural guard the
-	 * full transfer lowering publishes - here the guard is a constant that
-	 * keeps the equations structurally present and gated. */
+	/* The 1-bit boolean type and the guard: the complete enclosing procedural
+	 * guard that enables the pipeline (how/to/reset/and/enable/a/pipeline.md).
+	 * The guard is the enclosing if statement's condition expression, lowered
+	 * through the common RTL model as a 1-bit expression (a name object, a
+	 * logical-and/or binary, or a constant when the condition is one); when the
+	 * pipeline has no enclosing if the guard is the constant 1 (the pipeline is
+	 * unconditionally live). The guard gates the pipeline's ready/valid
+	 * handshake equations. */
 	{
 		pigen_rtl_type bit1 = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
 			PIGEN_DATA_TYPE_STATE_FOUR, 1, INVALID_ID(pigen_rtl_expr_id),
 			INVALID_SPAN, NULL, 0};
+		const pigen_syntax_node *if_node;
+		size_t cond_first;
+		size_t cond_last;
 
 		field_type = pigen_rtl_type_intern(rtl, &bit1);
 		if (field_type.index == PIGEN_INVALID_ID) return -1;
-		one = pigen_rtl_expr_add_integer(rtl, field_type, 1,
-			INVALID_SPAN);
+		one = pigen_rtl_expr_add_integer(rtl, field_type, 1, INVALID_SPAN);
 		if (one.index == PIGEN_INVALID_ID) return -1;
-		/* The guard is the constant 1 (the enclosing procedural guard,
-		 * structurally present); it gates the pipeline's ready/valid
-		 * handshake equations. */
 		guard = one;
+		if_node = pipeline_enclosing_if(pipeline, syntax);
+		if (if_node &&
+			guard_condition_range(sources, expanded, if_node, &cond_first,
+				&cond_last) &&
+			cond_first <= cond_last)
+		{
+			/* The guard is the enclosing if's condition expression (the
+			 * complete enclosing procedural guard). A condition that cannot be
+			 * lowered keeps the constant-1 guard. */
+			if (!guard_expr_build(sources, lowering, rtl_module, expanded,
+				cond_first, cond_last, &guard))
+				guard = one;
+		}
 	}
 
 	/* The yield write's destination object: the established step-(a)
