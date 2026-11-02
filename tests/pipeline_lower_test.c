@@ -677,6 +677,40 @@ static int pl_subtree_spells(const pigen_rtl_model *rtl,
 	return 0;
 }
 
+/* True when the reachable RTL expression subtree rooted at ROOT carries a
+ * PIGEN_RTL_EXPR_OBJECT whose origin span spells exactly WORD in the parsed
+ * source (an owner-text check against the span, never a search over the
+ * output). A stage's next-value equation must reference the enclosing input it
+ * computes over this way - as the root itself or as any reachable descendant
+ * object - so the assertion holds whether the computation names the input
+ * directly (the `d` object in the `d + 8'h01` binary) or reaches it through a
+ * nested operand. */
+static int pl_calc_subtree_refs(const pigen_rtl_model *rtl,
+	const pigen_rtl_expr *root, const parsed *p, const char *word)
+{
+	pigen_rtl_expr_id id = (pigen_rtl_expr_id){(uint32_t)(root - rtl->expressions)};
+	const pigen_rtl_expr_id *children;
+	size_t child_count;
+	size_t i;
+
+	if (root->kind == PIGEN_RTL_EXPR_OBJECT)
+	{
+		const pigen_rtl_object *obj = pigen_rtl_object_get(rtl, root->object);
+
+		if (obj && span_is(&p->sources, obj->origin, word))
+			return 1;
+	}
+	children = pigen_rtl_expr_children(rtl, id, &child_count);
+	for (i = 0; i < child_count; i++)
+	{
+		const pigen_rtl_expr *c = pigen_rtl_expr_get(rtl, children[i]);
+
+		if (c && pl_calc_subtree_refs(rtl, c, p, word))
+			return 1;
+	}
+	return 0;
+}
+
 /* Establishes the step-(a) outgoing-packet identity the lowering consumes as a
  * validated input, fills *ident, and returns the establish status (0 accepted,
  * -1 diagnosed). */
@@ -2821,6 +2855,114 @@ int main(int argc, char **argv)
 				REQUIRE(named_a == 1);
 				REQUIRE(named_b == 1);
 			}
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) calc-first-stage: a first-stage computation over an enclosing     */
+	/*     signal. A legal 2-stage pipeline whose first stage computes       */
+	/*     `a <= d + 8'h01` over the enclosing module 8-bit input d (no      */
+	/*     pipeline-field read in stage 1, a consuming external read that is */
+	/*     legal under the step-(b) first-stage law) lowers to rc == 0 and   */
+	/*     publishes stage 1's next-value equation whose value is the        */
+	/*     computed expression referencing the enclosing signal d's object - */
+	/*     not the constant-0 integer stand-in the seam currently publishes, */
+	/*     and not a plain object pass-through (what/are/the/pipeline/stage/ */
+	/*     computation/test/scenarios.md, line 3; the reference is pinned    */
+	/*     through the object's provenance name span spelling d, the owner   */
+	/*     text check, never a source-text search over the output).          */
+	/* ------------------------------------------------------------------ */
+	SECTION("calc-first-stage") {
+		/* Anchor: a legal 2-stage pipeline whose first stage computes
+		 * `a <= d + 8'h01` over the enclosing 8-bit input d lowers to rc == 0
+		 * and publishes stage 1's next-value equation whose value is a
+		 * computed expression referencing d's object. */
+		{
+			parsed p = pl_parse("cfs_ok.pigen",
+				"module cfs_ok(input logic clk, input logic [7:0] d);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline cfs_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= d + 8'h01;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tb <= a;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield b;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			const pigen_syntax_node *items[8];
+			size_t item_count;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			const pigen_rtl_expr *stage1_value;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* Locate the first stage's one nonblocking-assignment item and
+			 * confirm its value is the computed `d + 8'h01`, not a bare name
+			 * pass-through: the enclosing input d is read (a consuming
+			 * external read, legal in the first stage), combined with the
+			 * integer constant 8'h01. */
+			item_count = pl_stage_items(&p, stages[0], items);
+			REQUIRE(item_count == 1);
+			REQUIRE(items[0]->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
+			{
+				const pigen_syntax_expr *value = pigen_syntax_expr_get(
+					&p.tree.expressions,
+					items[0]->as.nonblocking_assignment.value);
+
+				REQUIRE(value &&
+					value->kind != PIGEN_SYNTAX_EXPR_NAME);
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "d", 8);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* Locate stage 1's next-value equation: the first published
+			 * equation whose value is not the constant-0 integer stand-in
+			 * (the per-stage next-value stand-in the seam currently carries)
+			 * and not the yield write's concatenation. The ready equation's
+			 * value is the 1-bit guard; the stage next-value values are
+			 * packet-width. On the intended lowering stage 1's next value is
+			 * the computed `d + 8'h01` - a non-integer, non-object expression
+			 * that references d's object in its reachable subtree. */
+			stage1_value = NULL;
+			for (i = 0; i < rtl.equation_count && !stage1_value; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+
+				if (!v)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_CONCATENATION)
+					continue; /* the yield write */
+				if (v->kind == PIGEN_RTL_EXPR_INTEGER)
+					continue; /* the per-stage constant stand-in */
+				stage1_value = v;
+			}
+			REQUIRE(stage1_value);
+			/* The discriminator: stage 1's next value is a computed
+			 * expression (not a constant stand-in, not a plain object
+			 * pass-through) that references the enclosing signal d's object
+			 * in its reachable subtree. Against the current master lowering
+			 * the stage next values are the constant-0 stand-in, so no
+			 * non-integer, non-object next value exists and stage1_value is
+			 * NULL - the section is red; the constant stand-in is replaced
+			 * by the computed expression and this goes green. */
+			REQUIRE(stage1_value->kind != PIGEN_RTL_EXPR_OBJECT);
+			REQUIRE(pl_calc_subtree_refs(&rtl, stage1_value, &p, "d"));
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
 			pl_free(&p);
