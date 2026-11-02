@@ -846,6 +846,72 @@ static pigen_rtl_expr_id pl_yield_write_value(const pigen_rtl_model *rtl)
 	return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 }
 
+/* Locates the stage-boundary buf storage instance (the dedicated one-entry
+ * primitive instance the lowering publishes per stage boundary,
+ * what/is/a/buf.md) among the model's instances and reports whether any of its
+ * ordered connection objects (the instance's `connections` record range, read
+ * from the model's instance_connections arena) carries an origin span spelling
+ * exactly WORD in the parsed source. The stage-boundary buf is the only
+ * instance the pipeline parent-module lowering publishes, so it is located by
+ * that fact, not by a source-text search over the output (a connection
+ * object's own span, not the rendered text, is the discriminator). A
+ * connectionless instance (count 0) carries no object at all, so the check
+ * holds vacuously. Scenario 7 uses it to pin that the unguarded pipeline's
+ * buf storage keeps no `en`-gated guard connection (the guard replacement does
+ * not over-gate the unguarded storage). */
+static int pl_buf_connections_spells(const pigen_rtl_model *rtl,
+	const parsed *p, const char *word)
+{
+	const pigen_rtl_instance *inst;
+	size_t c;
+
+	if (rtl->instance_count != 1)
+		return 0;
+	inst = pigen_rtl_instance_get(rtl, (pigen_rtl_instance_id){0});
+	if (!inst)
+		return 0;
+	for (c = 0; c < inst->connections.count; c++)
+	{
+		const pigen_rtl_object *obj = pigen_rtl_object_get(rtl,
+			rtl->instance_connections[inst->connections.first + c]);
+
+		if (obj && span_is(&p->sources, obj->origin, word))
+			return 1;
+	}
+	return 0;
+}
+
+/* Locates the yield write to the outgoing packet (the final yield's RTL
+ * equation whose value is the outgoing-packet aggregate concatenation, the
+ * step-(a) established write target, what/does/pipeline/yield/mean.md) and
+ * reports whether its published value's reachable expression subtree carries a
+ * PIGEN_RTL_EXPR_OBJECT whose origin span spells exactly WORD in the parsed
+ * source (the same reachable-subtree walk pl_subtree_spells performs). A
+ * plain, unguarded yield write is the bare concatenation of its yield-member
+ * objects, which spell only the yielded fields, so the check for a guard word
+ * such as `en` holds. Scenario 7 uses it to pin that the unguarded pipeline's
+ * yield write is NOT gated (the guard replacement does not over-gate the
+ * unguarded output handshake). Returns 0 when no yield write is located. */
+static int pl_yield_write_spells(const pigen_rtl_model *rtl, const parsed *p,
+	const char *word)
+{
+	const pigen_rtl_expr *value;
+	size_t i;
+
+	for (i = 0; i < rtl->equation_count; i++)
+	{
+		const pigen_rtl_equation *eq = pigen_rtl_equation_get(rtl,
+			(pigen_rtl_equation_id){(uint32_t)i});
+
+		if (!eq)
+			continue;
+		value = pigen_rtl_expr_get(rtl, eq->value);
+		if (value && value->kind == PIGEN_RTL_EXPR_CONCATENATION)
+			return pl_subtree_spells(rtl, value, p, word);
+	}
+	return 0;
+}
+
 /* Establishes the step-(a) outgoing-packet identity the lowering consumes as a
  * validated input, fills *ident, and returns the establish status (0 accepted,
  * -1 diagnosed). */
@@ -2124,6 +2190,105 @@ int main(int argc, char **argv)
 				}
 				REQUIRE(found);
 			}
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (7) unguarded-not-over-gated: the guard replacement does NOT over-  */
+	/*     gate an unguarded pipeline's storage or either I/O control      */
+	/*     (scenario 7 of the accepted pipeline guard-law storage-hold and */
+	/*     I/O-handshake list, what/are/the/pipeline/guard/storage/io/     */
+	/*     test/scenarios.md, independently reviewed and accepted at       */
+	/*     what/is/the/review/of/the/pipeline/guard/storage/io/test/       */
+	/*     scenarios.md). The anchor is a legal 2-stage pipeline placed    */
+	/*     DIRECTLY in the procedural block, with NO enclosing procedural  */
+	/*     guard (no `if`) - stage 1 `a <= x`, stage 2 `b <= a`, `yield    */
+	/*     b` (1-bit input x) - driven through the unchanged unguarded     */
+	/*     seam helpers (pl_parse/pl_unit/pl_port/pl_drive) exactly as the */
+	/*     sibling unguarded-ready-constant-one section. It lowers to      */
+	/*     rc == 0 and publishes BOTH:                                      */
+	/*       - its stage-boundary buf storage (the N-1 = 1 one-entry       */
+	/*         primitive pigen_rtl_instance) with NO `en`-gated guard      */
+	/*         connection: no object in its connections record range       */
+	/*         carries an origin span spelling `en`;                        */
+	/*       - its yield write to the outgoing packet (the RTL equation    */
+	/*         whose value is the outgoing-packet aggregate concatenation) */
+	/*         NOT gated: no `en`-spanning object in the published value's */
+	/*         reachable subtree, the unguarded yield staying a plain      */
+	/*         write.                                                       */
+	/*     This is the over-gate boundary that keeps the guard-wiring      */
+	/*     implementation (the later owner that depends on this packet)    */
+	/*     from gating the unguarded pipeline's storage or I/O: the        */
+	/*     unguarded pipeline has no enclosing procedural guard, so no     */
+	/*     `en` object may appear on the buf storage or the yield write.   */
+	/*     Against the current master lowering the buf instance is         */
+	/*     connectionless and the yield write is a plain concatenation of  */
+	/*     the yielded-field objects, so both absences hold and this       */
+	/*     section is green now AND keeps passing once the guard is wired  */
+	/*     into the guarded pipeline's storage and I/O. The file-local     */
+	/*     buf-instance/connections and yield-write locators (pl_buf_      */
+	/*     connections_spells, pl_yield_write_spells) are the established  */
+	/*     seam helpers the sibling guarded lines 3, 4, 6, 8 reuse; the    */
+	/*     step-(a) identity and step-(b) stage-law owners read only the   */
+	/*     pipeline node and its body, so the unguarded pipeline drives    */
+	/*     the unchanged 5-arg seam.                                        */
+	/* ------------------------------------------------------------------ */
+	SECTION("unguarded-not-over-gated") {
+		/* Anchor: a legal 2-stage pipeline directly in the procedural block
+		 * (no enclosing if statement) lowers to rc == 0 and its
+		 * stage-boundary buf storage has no `en`-gated guard connection and
+		 * its yield write is NOT gated - the guard replacement does not
+		 * over-gate the unguarded pipeline's storage or either I/O control. */
+		{
+			parsed p = pl_parse("ugn_ok.pigen",
+				"module ugn_ok(input logic clk, input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline ugn_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= x;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tb <= a;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield b;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			size_t stage_count;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+
+			stage_count = pl_stage_nodes(&p, stages);
+			REQUIRE(stage_count == 2);
+			/* The unguarded-fixture pin: the pipeline sits directly in the
+			 * procedural block with NO enclosing if statement, so it has no
+			 * enclosing procedural guard to gate by. */
+			REQUIRE(p.if_statement == NULL);
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The stage-boundary buf storage (the N-1 = 1 one-entry
+			 * primitive instance) keeps no `en`-gated guard connection: no
+			 * object in its connections record range carries an origin span
+			 * spelling `en`. A lowering that over-gates the unguarded buf
+			 * storage with an `en` connection publishes such an object and
+			 * fails here. */
+			REQUIRE(!pl_buf_connections_spells(&rtl, &p, "en"));
+			/* The yield write to the outgoing packet is NOT gated: no
+			 * `en`-spanning object in its published value's reachable
+			 * subtree, the unguarded yield staying a plain write. A
+			 * lowering that over-gates the unguarded yield write with an
+			 * `en` object publishes such an object and fails here. */
+			REQUIRE(!pl_yield_write_spells(&rtl, &p, "en"));
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
 			pl_free(&p);

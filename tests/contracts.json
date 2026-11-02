@@ -1121,6 +1121,18 @@
     "command": [
       "make",
       "pipeline-lower-test",
+      "T=unguarded-not-over-gated"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
       "T=ready-guarded-by-en"
     ]
   },
