@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-29T07:43:22+11:00"
+revised_at: "2026-11-03T00:04:03+11:00"
 ---
 
 ## Scope
@@ -13,11 +13,11 @@ One test obligation from the pipeline contract: **a pipeline stage performs its 
 - `how/do/pipeline/stage/reads/work.md`: each stage field read sees its immutable incoming packet; `<=` computes outgoing fields visible only in the following stage; the first stage takes enclosing signals plus stage-local combinational values.
 - `what/is/the/pipeline/parent/module/lowering.md`: step (c) lowering; per-stage combinational next-value equations over the immutable incoming fields.
 - `what/are/the/remaining/architecture/migration/gates.md`: acceptance — every accepted specified construct has behavioral coverage.
-- Seam: `tests/pipeline_lower_test.c` (target `pipeline-lower-test`, Makefile section entry per `SECTION` in `tests/contracts.json`); owner `include/pigen/pipeline_lower.h` / `src/pipeline_lower.c`; RTL record model `include/pigen/rtl.h` (`pigen_rtl_equation`: origin, destination, value; expression kinds `PIGEN_RTL_EXPR_OBJECT/INTEGER/BINARY/UNARY/CONCATENATION`); terminal rendering `pigen_sv_render_expression`.
+- Seam: `tests/pipeline_lower_test.c` (target `pipeline-lower-test`, Makefile section entry per `SECTION` in `tests/contracts.json`); owner `include/pigen/pipeline_lower.h` / `src/pipeline_lower.c`; RTL record model `include/pigen/rtl.h` (expression kinds `PIGEN_RTL_EXPR_OBJECT/INTEGER/BINARY/UNARY/CONCATENATION`); terminal rendering `pigen_sv_render_expression`.
 
 ## Current coverage
 
-`pipeline-lower-test` section (2) `next-value-equations` pins only equation COUNT (`equation_count >= stage_count`) on a pass-through pipeline (`a <= x`, `b <= a`); sections (1), (3), (4), (5) pin storage, yield write, member order and guard/handshake shape. No section pins the COMPUTATION: `src/pipeline_lower.c` today publishes each stage's next-value equation with a constant-0 value (a stand-in for the value computed over the incoming fields), so a lowering that computes nothing passes the manifest. This list fills that gap; after it, the implementation must replace the stand-in with the stage's published expressions.
+Landed on master and green. src/pipeline_lower.c lowers each stage's `<=` right-hand side to a structural RTL expression (a name to the read's object, a number to an integer of its own width, a parenthesized group to its body, a concatenation to its operands in source order, a binary chain to the lowest-precedence top-level operator resolved through the semantic model) and publishes it as the stage's next-value equation; a stage that writes no field publishes no equation. A yield member of a field whose last write passes a computed field through carries the computing stage's value span across the boundary, so the computed expression renders on the yield. The six sections (calc-arithmetic, calc-bitwise, calc-first-stage, calc-cross-boundary, calc-no-standin, calc-concat) are green over the seam (twenty sections total); section (2) `next-value-equations` still pins equation count.
 
 ## Test scenarios
 
@@ -29,12 +29,6 @@ One line = one later test-author scenario, registered as its own `SECTION` in `t
 4. Computation visible across a boundary: a legal 2-stage pipeline whose stage 1 computes `a <= x + 8'h10` and stage 2 computes `b <= a` (pass-through of the computed field) lowers to rc == 0 and the yield write's source chain renders through the terminal SV emission with the computed expression (the `+`) present for the carried field — the computed value, not an uncomputed placeholder, is what the following stage sees and the packet carries.
 5. Constant stand-in is no longer the published value: a legal 2-stage pipeline with nontrivial stage computations lowers to rc == 0 and NO published stage next-value equation has an integer-constant value (PIGEN_RTL_EXPR_INTEGER) — the stand-in the manifest must now discriminate.
 6. Concatenation next value over incoming fields: a legal 2-stage pipeline whose stage 2 computes `c <= {a, b}` over two 8-bit incoming fields lowers to rc == 0 and publishes stage 2's next-value equation whose value is a PIGEN_RTL_EXPR_CONCATENATION naming both incoming field objects in source order.
-
-## Minimal fixture prerequisites
-
-- `tests/pipeline_lower_test.c` seam helpers (`pl_parse`/`pl_unit`/`pl_port`/`pl_drive`) cover scenarios 1–6 as written (multi-`<=` items in one stage, external ports, stage-local field reads); no new fixture owner is required.
-- `pigen_sv_render_expression` + `pigen_rtl_assign_names` (SOURCE role) cover the rendered-expression check in scenario 4, exactly as section (4) emitted-member-order already uses them.
-- No production-source change is part of any scenario: the authors register the discriminating sections; the stand-in-replacement implementation is the later owner that depends on the accepted packet.
 
 ## Exclusions (other scoped assignments)
 

@@ -76,6 +76,15 @@ static int span_invalid(pigen_source_span span)
 	return span.source.index == PIGEN_INVALID_ID;
 }
 
+/* True when TOKEN span lies outside the enclosing ITEM span (a different
+ * source, or an offset that crosses the item's start or end). */
+static int span_outside(pigen_source_span token, pigen_source_span item)
+{
+	if (span_invalid(token) || span_invalid(item)) return 1;
+	if (token.source.index != item.source.index) return 1;
+	return token.start < item.start || token.end > item.end;
+}
+
 /* Text equality of two original-spelling spans, read from the model's source
  * manager. The span, not a source-text search over the output, is the
  * discriminator. */
@@ -637,6 +646,649 @@ static int guard_expr_build(const pigen_source_manager *sources,
 	return 0; /* no recognized top-level operator: a malformed condition */
 }
 
+/* Parses a SystemVerilog based literal `<width>'[s]<base><digits>` (for
+ * example `8'h3D`) into its packed width and its unsigned value. The width is
+ * the decimal run before the apostrophe; the base letter selects the digit
+ * base (b/o/d/h) and the digits are read in that base. A literal that is not a
+ * well-formed based literal (no apostrophe, no width, an unknown base, or
+ * empty digits) returns 0 and leaves its outputs untouched. */
+static int parse_based_literal(const char *text, size_t length, size_t *width,
+	uint64_t *value)
+{
+	const char *apostrophe;
+	size_t at;
+	unsigned base;
+	unsigned long long v;
+
+	apostrophe = text ? memchr(text, '\'', length) : NULL;
+	if (!apostrophe || apostrophe == text) return 0;
+	*width = strtoul(text, NULL, 10);
+	if (!*width) return 0;
+	at = (size_t)(apostrophe - text) + 1;
+	if (at < length && (text[at] == 's' || text[at] == 'S')) at++;
+	if (at == length) return 0;
+	switch (text[at++])
+	{
+		case 'b': case 'B': base = 2; break;
+		case 'o': case 'O': base = 8; break;
+		case 'd': case 'D': base = 10; break;
+		case 'h': case 'H': base = 16; break;
+		default: return 0;
+	}
+	v = 0;
+	for (; at < length; at++)
+	{
+		unsigned digit;
+		char c = text[at];
+
+		if (c >= '0' && c <= '9') digit = (unsigned)(c - '0');
+		else if (c >= 'a' && c <= 'f') digit = (unsigned)(c - 'a' + 10);
+		else if (c >= 'A' && c <= 'F') digit = (unsigned)(c - 'A' + 10);
+		else return 0;
+		if (digit >= base) return 0;
+		v = v * (unsigned long long)base + (unsigned long long)digit;
+	}
+	*value = (uint64_t)v;
+	return 1;
+}
+
+/* One operand of a stage next-value expression: an identifier token binds the
+ * object it reads - a pipeline field reads its immutable incoming field object
+ * (the object the earlier stage wrote, how/do/pipeline/stage/reads/work.md)
+ * whose origin is the field's provenance name span and whose type is the
+ * field's packed width; an enclosing module signal binds its own object, whose
+ * type is the signal's lowered data type and whose origin is the signal's
+ * declaration span (the terminal renderer spells it from that span). Returns 1
+ * on success and fills *out. A name that is neither a pipeline field nor a
+ * declared signal is a failure (the step-(b) stage law already validated the
+ * source, so this rejects only an unresolvable read). */
+static int stage_expr_name(const pigen_source_manager *sources,
+	pigen_rtl_lowering *lowering, pigen_rtl_module_id rtl_module,
+	const pigen_expanded_source *expanded, size_t at,
+	const field_ref *fields, size_t field_count, pigen_rtl_expr_id *out)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	const pigen_expanded_token *token = &expanded->tokens[at];
+	pigen_source_span span;
+	size_t i;
+
+	span = pigen_origin_spelling_span(expanded, token->origin);
+	if (span_invalid(span)) return 0;
+
+	/* A pipeline-field read: the immutable incoming field object, bound by
+	 * the field's provenance name span (the read's own span is a different
+	 * occurrence of the same field name, so the match is by text). */
+	for (i = 0; i < field_count; i++)
+	{
+		if (!spans_equal(sources, span, fields[i].name)) continue;
+		{
+			pigen_rtl_type descriptor = (pigen_rtl_type){
+				PIGEN_SIGN_UNSIGNED, PIGEN_DATA_TYPE_STATE_FOUR,
+				fields[i].width, INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN,
+				NULL, 0};
+			pigen_rtl_type_id field_type = pigen_rtl_type_intern(rtl,
+				&descriptor);
+			pigen_rtl_object_id object;
+
+			if (field_type.index == PIGEN_INVALID_ID) return 0;
+			object = pigen_rtl_object_add_with_owner(rtl, rtl_module,
+				PIGEN_RTL_OBJECT_VARIABLE, field_type,
+				PIGEN_SEMANTIC_INTERNAL, INVALID_ID(pigen_signal_id),
+				fields[i].name);
+			if (object.index == PIGEN_INVALID_ID) return 0;
+			*out = pigen_rtl_expr_add_object(rtl, field_type, object,
+				fields[i].name);
+			return (*out).index != PIGEN_INVALID_ID;
+		}
+	}
+
+	/* An enclosing module-signal read: the signal's own object. */
+	{
+		pigen_signal_id signal = signal_for_name(sources, sem, span);
+		const pigen_semantic_signal *sig;
+		pigen_rtl_type_id operand_type;
+		pigen_rtl_object_id object;
+
+		if (signal.index == PIGEN_INVALID_ID) return 0;
+		sig = pigen_signal_get(sem, signal);
+		if (!sig) return 0;
+		operand_type = pigen_lower_rtl_type(lowering, sig->data_type);
+		if (operand_type.index == PIGEN_INVALID_ID) return 0;
+		object = pigen_rtl_object_add_with_owner(rtl, rtl_module,
+			PIGEN_RTL_OBJECT_VARIABLE, operand_type, sig->direction, signal,
+			sig->span);
+		if (object.index == PIGEN_INVALID_ID) return 0;
+		*out = pigen_rtl_expr_add_object(rtl, operand_type, object, sig->span);
+		return (*out).index != PIGEN_INVALID_ID;
+	}
+}
+
+/* The precedence rank of a binary operator token's text (a higher rank binds
+ * tighter), or -1 when the token is not a binary operator. The rank order is
+ * the SystemVerilog operator precedence: power, then unary, then multiply,
+ * then add, then shift, then relational, then equality, then case equality,
+ * then bitwise-and, bitwise-xor, bitwise-or, then logical-and, logical-or. */
+static int stage_operator_rank(const char *text, size_t length,
+	pigen_binary_operator *op)
+{
+	if (!text || !length) return -1;
+#define OP(n, r) \
+	if (length == (sizeof n - 1) && !memcmp(text, n, length)) \
+		return r;
+	OP("||", 1); OP("&&", 2);
+	OP("|", 3); OP("^~", 4); OP("~^", 4); OP("^", 4); OP("&", 5);
+	OP("==?", 6); OP("!=?", 6); OP("===", 7); OP("!==", 7);
+	OP("==", 8); OP("!=", 8);
+	OP("<=", 9); OP(">=", 9); OP("<", 9); OP(">", 9);
+	OP("<<", 10); OP(">>", 10); OP("<<<", 10); OP(">>>", 10);
+	OP("+", 11); OP("-", 11);
+	OP("*", 12); OP("/", 12); OP("%", 12);
+	OP("**", 13);
+#undef OP
+	(void)op;
+	return -1;
+}
+
+/* The binary operator a binary-operator token's text lowers to (filled into
+ * *op), or -1 when the text is not a binary operator. */
+static int stage_operator_binary(const char *text, size_t length,
+	pigen_binary_operator *op)
+{
+	int rank = stage_operator_rank(text, length, op);
+	pigen_binary_operator b;
+
+	if (rank < 0) return -1;
+	switch (rank)
+	{
+	case 1: b = PIGEN_BINARY_LOGICAL_OR; break;
+	case 2: b = PIGEN_BINARY_LOGICAL_AND; break;
+	case 3: b = PIGEN_BINARY_BITWISE_OR; break;
+	case 4: b = (text[0] == '~') ? PIGEN_BINARY_BITWISE_XNOR :
+		PIGEN_BINARY_BITWISE_XOR; break;
+	case 5: b = PIGEN_BINARY_BITWISE_AND; break;
+	case 6: b = (text[0] == '!') ? PIGEN_BINARY_WILDCARD_NOT_EQUAL :
+		PIGEN_BINARY_WILDCARD_EQUAL; break;
+	case 7: b = (text[0] == '!') ? PIGEN_BINARY_CASE_NOT_EQUAL :
+		PIGEN_BINARY_CASE_EQUAL; break;
+	case 8: b = (text[0] == '!') ? PIGEN_BINARY_NOT_EQUAL :
+		PIGEN_BINARY_EQUAL; break;
+	case 9:
+		if (length == 1)
+			b = (text[0] == '<') ? PIGEN_BINARY_LESS : PIGEN_BINARY_GREATER;
+		else
+			b = (text[0] == '<') ? PIGEN_BINARY_LESS_EQUAL :
+				PIGEN_BINARY_GREATER_EQUAL;
+		break;
+	case 10:
+		if (length == 2)
+			b = (text[0] == '<') ? PIGEN_BINARY_SHIFT_LEFT :
+				PIGEN_BINARY_SHIFT_RIGHT;
+		else
+			b = (text[0] == '<') ? PIGEN_BINARY_ARITH_SHIFT_LEFT :
+				PIGEN_BINARY_ARITH_SHIFT_RIGHT;
+		break;
+	case 11: b = (text[0] == '+') ? PIGEN_BINARY_ADD : PIGEN_BINARY_SUBTRACT;
+		break;
+	case 12: b = (text[0] == '*') ? PIGEN_BINARY_MULTIPLY :
+		(text[0] == '/') ? PIGEN_BINARY_DIVIDE : PIGEN_BINARY_MODULO;
+		break;
+	case 13: b = PIGEN_BINARY_POWER; break;
+	default: return -1;
+	}
+	*op = b;
+	return rank;
+}
+
+/* The RTL expression of the tokens FIRST..LAST (inclusive) in the expanded
+ * source, the right-hand side of a stage `<=` lowered to a structural
+ * expression over the immutable incoming fields (never a constant stand-in).
+ * A single identifier lowers to the object it reads (stage_expr_name); a
+ * single number to an integer of its own width; a parenthesized group recurses
+ * on its body; a concatenation `{ a, b, ... }` recurses on its comma-separated
+ * operands in source order; a binary chain splits on its lowest-precedence
+ * top-level operator and resolves through the semantic model. Returns 1 on
+ * success and fills *out; an empty range or an unrecognised token is a
+ * failure, so a stage whose value cannot be lowered reports its diagnostic at
+ * the original source span and the compile stops
+ * (how/should/compiler/builders/fail.md). */
+static int stage_expr_build(const pigen_source_manager *sources,
+	pigen_rtl_lowering *lowering, pigen_rtl_module_id rtl_module,
+	const pigen_expanded_source *expanded, size_t first, size_t last,
+	const field_ref *fields, size_t field_count, pigen_rtl_expr_id *out)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	size_t i;
+
+	if (first > last) return 0;
+
+	/* A parenthesized group: `( ... )` recurses on the body. */
+	if (expanded->tokens[first].kind == PIGEN_TOKEN_SYMBOL)
+	{
+		const pigen_expanded_token *t = &expanded->tokens[first];
+		pigen_source_span tok = pigen_origin_spelling_span(expanded,
+			t->origin);
+		size_t length;
+		const char *text = pigen_source_span_text(sources, tok, &length);
+
+		if (text && length == 1 && text[0] == '(')
+		{
+			const pigen_expanded_token *tl = &expanded->tokens[last];
+			pigen_source_span tokl = pigen_origin_spelling_span(expanded,
+				tl->origin);
+			size_t ll;
+			const char *txtl = pigen_source_span_text(sources, tokl, &ll);
+
+			if (txtl && ll == 1 && txtl[0] == ')')
+				return stage_expr_build(sources, lowering, rtl_module,
+					expanded, first + 1, last - 1, fields, field_count,
+					out);
+		}
+	}
+
+	/* A single token: a name (a read) or a number (a literal). */
+	if (first == last)
+	{
+		const pigen_expanded_token *token = &expanded->tokens[first];
+
+		if (token->kind == PIGEN_TOKEN_IDENTIFIER)
+			return stage_expr_name(sources, lowering, rtl_module, expanded,
+				first, fields, field_count, out);
+		if (token->kind == PIGEN_TOKEN_NUMBER)
+		{
+			pigen_source_span tok = pigen_origin_spelling_span(expanded,
+				token->origin);
+			const char *text;
+			size_t length;
+			size_t width;
+			uint64_t value;
+			pigen_rtl_type descriptor;
+			pigen_rtl_type_id type;
+
+			text = pigen_source_span_text(sources, tok, &length);
+			if (!text) return 0;
+			/* A based literal W'base digits; a plain number is a decimal
+			 * literal of the width that holds its digits. */
+			if (!parse_based_literal(text, length, &width, &value))
+			{
+				width = 1;
+				value = strtoull(text, NULL, 0);
+				while (value > (1ull << (width * 8 - 1)))
+				{
+					if (width * 8 >= 64) break;
+					width = width * 2 < 16 ? width * 2 : 16;
+					width = width < 8 ? 8 : width;
+				}
+				if (width < 8) width = 8;
+			}
+			descriptor = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
+				PIGEN_DATA_TYPE_STATE_FOUR, width,
+				INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0};
+			type = pigen_rtl_type_intern(rtl, &descriptor);
+			if (type.index == PIGEN_INVALID_ID) return 0;
+			*out = pigen_rtl_expr_add_integer(rtl, type, value, tok);
+			return (*out).index != PIGEN_INVALID_ID;
+		}
+		return 0;
+	}
+
+	/* A concatenation `{ a, b, ... }`: split the body on top-level commas and
+	 * publish each operand in source order. */
+	if (expanded->tokens[first].kind == PIGEN_TOKEN_SYMBOL)
+	{
+		const pigen_expanded_token *t = &expanded->tokens[first];
+		pigen_source_span tok = pigen_origin_spelling_span(expanded,
+			t->origin);
+		size_t length;
+		const char *text = pigen_source_span_text(sources, tok, &length);
+
+		if (text && length == 1 && text[0] == '{')
+		{
+			const pigen_expanded_token *tl = &expanded->tokens[last];
+			pigen_source_span tokl = pigen_origin_spelling_span(expanded,
+				tl->origin);
+			size_t ll;
+			const char *txtl = pigen_source_span_text(sources, tokl, &ll);
+			pigen_rtl_expr_id child_ids[PIGEN_PIPELINE_MAX];
+			pigen_rtl_expr_id concat;
+			uint64_t total = 0;
+			size_t child_count = 0;
+			int depth = 0;
+			size_t part_first = first + 1;
+			size_t c;
+			pigen_rtl_type_id concat_type;
+
+			if (!(txtl && ll == 1 && txtl[0] == '}')) return 0;
+			for (i = first + 1; i < last; i++)
+			{
+				const pigen_expanded_token *ti = &expanded->tokens[i];
+				pigen_source_span tki = pigen_origin_spelling_span(expanded,
+					ti->origin);
+				size_t li;
+				const char *txti = pigen_source_span_text(sources, tki, &li);
+
+				if (ti->kind != PIGEN_TOKEN_SYMBOL || !txti) continue;
+				if (txti[0] == '{' || txti[0] == '(') depth++;
+				else if (txti[0] == '}' || txti[0] == ')') depth--;
+				else if (!depth && txti[0] == ',')
+				{
+					if (child_count >= PIGEN_PIPELINE_MAX) return 0;
+					if (!stage_expr_build(sources, lowering, rtl_module,
+						expanded, part_first, i - 1, fields, field_count,
+						&child_ids[child_count]))
+						return 0;
+					{
+						const pigen_rtl_expr *ce = pigen_rtl_expr_get(rtl,
+							child_ids[child_count]);
+						const pigen_rtl_type *ct;
+
+						if (!ce) return 0;
+						ct = pigen_rtl_type_get(rtl, ce->type);
+						if (!ct) return 0;
+						total += (uint64_t)ct->width;
+					}
+					child_count++;
+					part_first = i + 1;
+				}
+			}
+			if (!stage_expr_build(sources, lowering, rtl_module, expanded,
+				part_first, last - 1, fields, field_count,
+				&child_ids[child_count]))
+				return 0;
+			{
+				const pigen_rtl_expr *ce = pigen_rtl_expr_get(rtl,
+					child_ids[child_count]);
+				const pigen_rtl_type *ct;
+
+				if (!ce) return 0;
+				ct = pigen_rtl_type_get(rtl, ce->type);
+				if (!ct) return 0;
+				total += (uint64_t)ct->width;
+			}
+			child_count++;
+			if (!child_count) return 0;
+			{
+				pigen_rtl_type descriptor = (pigen_rtl_type){
+					PIGEN_SIGN_UNSIGNED, PIGEN_DATA_TYPE_STATE_FOUR,
+					(uint64_t)total, INVALID_ID(pigen_rtl_expr_id),
+					INVALID_SPAN, NULL, 0};
+
+				concat_type = pigen_rtl_type_intern(rtl, &descriptor);
+				if (concat_type.index == PIGEN_INVALID_ID) return 0;
+			}
+			concat = pigen_rtl_expr_add_concatenation(rtl, concat_type,
+				child_ids, child_count,
+				pigen_origin_spelling_span(expanded,
+					expanded->tokens[first].origin));
+			if (concat.index == PIGEN_INVALID_ID)
+				return 0;
+			*out = concat;
+			(void)c;
+			return 1;
+		}
+	}
+
+	/* A binary chain: split on the lowest-precedence top-level operator (the
+	 * one at paren/brace-depth zero with the smallest rank), recurse on the two
+	 * sides, resolve through the semantic model, and publish the binary. */
+	{
+		int best_rank = 999;
+		size_t best_at = last + 1;
+		int depth = 0;
+
+		for (i = first; i <= last; i++)
+		{
+			const pigen_expanded_token *ti = &expanded->tokens[i];
+			pigen_source_span tki;
+			size_t li;
+			const char *txti;
+			int rank;
+
+			if (ti->kind != PIGEN_TOKEN_SYMBOL) continue;
+			tki = pigen_origin_spelling_span(expanded, ti->origin);
+			txti = pigen_source_span_text(sources, tki, &li);
+			if (!txti) continue;
+			if (txti[0] == '{' || txti[0] == '(')
+			{
+				depth++;
+				continue;
+			}
+			if (txti[0] == '}' || txti[0] == ')')
+			{
+				depth--;
+				continue;
+			}
+			if (depth) continue;
+			rank = stage_operator_rank(txti, li, NULL);
+			if (rank < 0) continue;
+			if (rank < best_rank)
+			{
+				best_rank = rank;
+				best_at = i;
+			}
+		}
+		if (best_at > last) return 0; /* no top-level operator: malformed */
+		{
+			pigen_rtl_expr_id left;
+			pigen_rtl_expr_id right;
+			pigen_binary_operator op;
+			pigen_data_type_id left_data;
+			pigen_data_type_id right_data;
+			pigen_binary_resolution resolution;
+			pigen_rtl_type_id result_type;
+			size_t left_width;
+			size_t right_width;
+			const pigen_rtl_expr *left_rtl;
+			const pigen_rtl_expr *right_rtl;
+			const pigen_rtl_type *lt;
+			const pigen_rtl_type *rt;
+			pigen_source_span span;
+			pigen_source_span optok;
+			const char *optext;
+			size_t oplen;
+
+			optok = pigen_origin_spelling_span(expanded,
+				expanded->tokens[best_at].origin);
+			optext = pigen_source_span_text(sources, optok, &oplen);
+			if (stage_operator_binary(optext, oplen, &op) < 0)
+				return 0;
+			if (!stage_expr_build(sources, lowering, rtl_module, expanded,
+				first, best_at - 1, fields, field_count, &left))
+				return 0;
+			if (!stage_expr_build(sources, lowering, rtl_module, expanded,
+				best_at + 1, last, fields, field_count, &right))
+				return 0;
+			left_rtl = pigen_rtl_expr_get(rtl, left);
+			right_rtl = pigen_rtl_expr_get(rtl, right);
+			lt = left_rtl ? pigen_rtl_type_get(rtl, left_rtl->type) : NULL;
+			rt = right_rtl ? pigen_rtl_type_get(rtl, right_rtl->type) : NULL;
+			if (!lt || !rt) return 0;
+			left_width = (size_t)lt->width;
+			right_width = (size_t)rt->width;
+			left_data = pigen_data_type_sized_logic(sem, left_width,
+				PIGEN_SIGN_UNSIGNED);
+			right_data = pigen_data_type_sized_logic(sem, right_width,
+				PIGEN_SIGN_UNSIGNED);
+			if (left_data.index == PIGEN_INVALID_ID ||
+				right_data.index == PIGEN_INVALID_ID)
+				return 0;
+			if (!pigen_data_type_resolve_binary_operation(sem, op,
+				left_data, right_data, &resolution))
+				return 0;
+			result_type = pigen_lower_rtl_type(lowering,
+				resolution.operation.result_data_type);
+			if (result_type.index == PIGEN_INVALID_ID) return 0;
+			span = pigen_origin_spelling_span(expanded,
+				expanded->tokens[best_at].origin);
+			*out = pigen_rtl_expr_add_binary(rtl, result_type, &resolution,
+				left, right, span);
+			return (*out).index != PIGEN_INVALID_ID;
+		}
+	}
+}
+
+/* Splits a stage item (`field <= expression;`) into its destination field and
+ * the token range of its value expression. The destination is the first
+ * identifier token; the value is the tokens after the first top-level `<=`
+ * (through the last token before the terminating `;`/`end`). Fills *dest with
+ * the destination's field index (-1 when the destination names no pipeline
+ * field) and fills the value's inclusive token range. Returns 1 on success. */
+static int stage_item_tokens(const pigen_source_manager *sources,
+	const pigen_expanded_source *expanded, pigen_source_span item,
+	const field_ref *fields, size_t field_count, int *dest,
+	size_t *first, size_t *last)
+{
+	const pigen_expanded_token *tokens = expanded->tokens;
+	size_t count = expanded->token_count;
+	size_t i;
+	size_t dest_at = (size_t)-1;
+	size_t le_at = (size_t)-1;
+
+	*dest = -1;
+	for (i = 0; i < count; i++)
+	{
+		pigen_source_span span = pigen_origin_spelling_span(expanded,
+			tokens[i].origin);
+
+		if (span_outside(span, item)) continue;
+		if (tokens[i].kind == PIGEN_TOKEN_IDENTIFIER &&
+			dest_at == (size_t)-1)
+			dest_at = i;
+	}
+	if (dest_at == (size_t)-1) return 0;
+	{
+		pigen_source_span span = pigen_origin_spelling_span(expanded,
+			tokens[dest_at].origin);
+		const char *text;
+		size_t length;
+		size_t k;
+
+		text = pigen_source_span_text(sources, span, &length);
+		for (k = 0; k < field_count; k++)
+		{
+			pigen_source_span name = fields[k].name;
+			const char *ntext;
+			size_t nlen;
+
+			if (span_invalid(name)) continue;
+			ntext = pigen_source_span_text(sources, name, &nlen);
+			if (text && ntext && length == nlen &&
+				!memcmp(text, ntext, length))
+			{
+				*dest = (int)k;
+				break;
+			}
+		}
+	}
+	for (i = 0; i < count; i++)
+	{
+		pigen_source_span span = pigen_origin_spelling_span(expanded,
+			tokens[i].origin);
+		const char *text;
+		size_t length;
+
+		if (span_outside(span, item)) continue;
+		if (tokens[i].kind != PIGEN_TOKEN_SYMBOL) continue;
+		text = pigen_source_span_text(sources, span, &length);
+		if (text && length == 2 && !memcmp(text, "<=", 2))
+		{
+			le_at = i;
+			break;
+		}
+	}
+	if (le_at == (size_t)-1) return 0;
+	*first = le_at + 1;
+	/* The value runs from the token after `<=` to the last non-terminator
+	 * token in the item. */
+	*last = le_at;
+	for (i = le_at + 1; i < count; i++)
+	{
+		pigen_source_span span = pigen_origin_spelling_span(expanded,
+			tokens[i].origin);
+		const char *text;
+		size_t length;
+
+		if (span_outside(span, item)) break;
+		if (tokens[i].kind == PIGEN_TOKEN_SYMBOL)
+		{
+			text = pigen_source_span_text(sources, span, &length);
+			if (text && length == 1 && text[0] == ';') break;
+		}
+		*last = i;
+	}
+	if (*last < *first) return 0;
+	return 1;
+}
+
+/* The source span of the value a pipeline field carries across the boundary
+ * into the outgoing packet: the field's last stage write, with a pass-through
+ * (a write whose value is a single read of another pipeline field) resolved
+ * transitively to that field's own carried span, so a computed value that flows
+ * through a pass-through stage still renders on the yield (the cross-boundary
+ * contract). The carried span is the source span of the computing stage's value
+ * expression (its full token range), so a yield member that carries it publishes
+ * a member object whose provenance is that span - the terminal renderer spells
+ * the member from the verbatim computed text (the `+` and its operands present).
+ * A write that is not a pass-through (a computed expression) yields its own
+ * value span. A write that reads an external signal or the field itself yields
+ * INVALID_SPAN, and the yield member publishes its plain field object (the
+ * emitted-member-order contract: the member renders the field name). */
+static pigen_source_span carry_span_for_field(
+	const pigen_source_manager *sources, const pigen_rtl_model *rtl,
+	const field_ref *fields, size_t field_count,
+	const pigen_rtl_expr_id *stage_value, const size_t *stage_value_first,
+	const size_t *stage_value_last, const pigen_expanded_source *expanded,
+	const int *field_last_writer, int field, int depth)
+{
+	int writer;
+	pigen_rtl_expr_id e;
+	const pigen_rtl_expr *ex;
+
+	if (depth > (int)field_count)
+		return INVALID_SPAN;
+	writer = field_last_writer[field];
+	if (writer < 0)
+		return INVALID_SPAN;
+	e = stage_value[writer];
+	if (e.index == PIGEN_INVALID_ID)
+		return INVALID_SPAN;
+	ex = pigen_rtl_expr_get(rtl, e);
+	if (!ex)
+		return INVALID_SPAN;
+	if (ex->kind != PIGEN_RTL_EXPR_OBJECT)
+	{
+		/* A computed value: carry the computing stage's value span (its full
+		 * token range), the span the member object renders from. */
+		pigen_source_span first_span =
+			pigen_origin_spelling_span(expanded,
+				expanded->tokens[stage_value_first[writer]].origin);
+		pigen_source_span last_span =
+			pigen_origin_spelling_span(expanded,
+				expanded->tokens[stage_value_last[writer]].origin);
+
+		if (span_invalid(first_span) || span_invalid(last_span))
+			return INVALID_SPAN;
+		return (pigen_source_span){first_span.source, first_span.start,
+			last_span.end};
+	}
+	{
+		size_t i;
+
+		for (i = 0; i < field_count; i++)
+		{
+			if (!spans_equal(sources, ex->origin, fields[i].name)) continue;
+			if ((int)i == field)
+				return INVALID_SPAN;
+			return carry_span_for_field(sources, rtl, fields, field_count,
+				stage_value, stage_value_first, stage_value_last, expanded,
+				field_last_writer, (int)i, depth + 1);
+		}
+	}
+	/* A read of an external signal: the member renders the field name. */
+	return INVALID_SPAN;
+}
+
 /* Lowers the pipeline's fields, stage boundaries and yield into the parent
  * module's RTL model, consuming the step-(a) identity and validating the
  * step-(b) stage laws. Everything is published through the common RTL model
@@ -661,6 +1313,10 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 	size_t yield_count;
 	pigen_pipeline_identifier ident;
 	pigen_rtl_object_id packet_object;
+	pigen_rtl_expr_id stage_value[PIGEN_PIPELINE_MAX];
+	int field_last_writer[PIGEN_PIPELINE_MAX];
+	size_t stage_value_first[PIGEN_PIPELINE_MAX];
+	size_t stage_value_last[PIGEN_PIPELINE_MAX];
 	pigen_rtl_expr_id one;
 	pigen_rtl_expr_id guard;
 	pigen_rtl_expr_id ready;
@@ -785,55 +1441,147 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		ident.signal, ident.span);
 	if (packet_object.index == PIGEN_INVALID_ID) return -1;
 
-	/* The outgoing packet's value: the concatenation of the yield members'
-	 * objects, in source order (the first yielded field the MSB, the last the
-	 * LSB). Each member is an RTL object of its field width whose origin is
-	 * the member's provenance name span (the terminal renderer spells it from
-	 * that span, pinning the emitted member order). */
+	/* The per-stage computed next-value expressions, built before the yield
+	 * write and published as the per-stage next-value equations (each also
+	 * drives the outgoing-packet object). For each stage in source order, its
+	 * `<=` write lowers its right-hand side to a structural RTL expression over
+	 * the immutable incoming fields (the stage law already validated the
+	 * source, so a write that cannot be lowered is a builder failure at the
+	 * original source span). The yield write itself is the concatenation of the
+	 * members' field objects, spelled by each field's declaration span. */
 	{
-		pigen_rtl_expr_id children[PIGEN_PIPELINE_MAX];
-		pigen_rtl_expr_id concat;
+		size_t i, j;
 
-		for (i = 0; i < yield_count; i++)
+		for (j = 0; j < field_count; j++)
+			field_last_writer[j] = -1;
+		for (i = 0; i < stage_count; i++)
 		{
-			pigen_rtl_type descriptor = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
-				PIGEN_DATA_TYPE_STATE_FOUR, yield[i].width,
-				INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0};
-			pigen_rtl_object_id member;
+			const pigen_syntax_node *stage = stage_nodes[i].node;
+			pigen_syntax_id child;
 
-			field_type = pigen_rtl_type_intern(rtl, &descriptor);
-			if (field_type.index == PIGEN_INVALID_ID) return -1;
-			/* The member object is synthetic (a pipeline field, not a
-			 * semantic signal), so its semantic_signal is invalid and its
-			 * origin is the member's provenance name span. */
-			member = pigen_rtl_object_add_with_owner(rtl, rtl_module,
-				PIGEN_RTL_OBJECT_VARIABLE, field_type,
-				PIGEN_SEMANTIC_INTERNAL, INVALID_ID(pigen_signal_id),
-				yield[i].name);
-			if (member.index == PIGEN_INVALID_ID) return -1;
-			children[i] = pigen_rtl_expr_add_object(rtl, field_type, member,
-				yield[i].name);
-			if (children[i].index == PIGEN_INVALID_ID) return -1;
+			stage_value[i] = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			stage_value_first[i] = 0;
+			stage_value_last[i] = 0;
+			for (child = stage->first_child; child.index != PIGEN_INVALID_ID; )
+			{
+				const pigen_syntax_node *item = pipeline_child(pipeline, syntax,
+					child);
+
+				if (item && item->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT)
+				{
+					int dest_field;
+					size_t value_first;
+					size_t value_last;
+					pigen_rtl_expr_id value;
+
+					if (!stage_item_tokens(sources, expanded,
+						item->location.source_span, fields, field_count,
+						&dest_field, &value_first, &value_last))
+						return -1;
+					if (!stage_expr_build(sources, lowering, rtl_module,
+						expanded, value_first, value_last, fields,
+						field_count, &value))
+						return -1;
+					/* The stage's next value is the computation of its last
+					 * `<=` (a validated stage writes at most one field per
+					 * cycle); record the field it drives and the value's token
+					 * range so the yield member can carry the transitive
+					 * computation's source span across the boundary. */
+					stage_value[i] = value;
+					stage_value_first[i] = value_first;
+					stage_value_last[i] = value_last;
+					if (dest_field >= 0 && dest_field < (int)field_count)
+						field_last_writer[dest_field] = (int)i;
+				}
+				child = item ? item->next_sibling :
+					INVALID_ID(pigen_syntax_id);
+			}
 		}
-		concat = pigen_rtl_expr_add_concatenation(rtl, packet_type, children,
-			yield_count, INVALID_SPAN);
-		if (concat.index == PIGEN_INVALID_ID) return -1;
-		/* The yield write: the outgoing-packet object driven by the
-		 * concatenation of its yield members in source order. This is the
-		 * RTL equation whose value is the concatenation (the emitted-member-
-		 * order witness) and whose destination is the established
-		 * outgoing-packet signal (the yield-write witness). */
-		if (pigen_rtl_equation_add_with_owner(rtl, rtl_module, packet_object,
-			concat, pipeline->location.source_span).index ==
-			PIGEN_INVALID_ID)
-			return -1;
+
+		/* The outgoing packet's value: the concatenation of the yield members,
+		 * in source order (the first yielded field the MSB, the last the LSB).
+		 * A member whose field carries a computed value across the boundary
+		 * publishes that carried computation (a pass-through is resolved
+		 * transitively, so the computed expression still renders on the yield,
+		 * the cross-boundary contract); a member that carries nothing
+		 * (no stage write, an external read, or a self-read) publishes its
+		 * plain field object, named by the field's provenance declaration span
+		 * so the terminal renderer spells the member name (the emitted-member-
+		 * order contract). */
+		{
+			pigen_rtl_expr_id children[PIGEN_PIPELINE_MAX];
+			pigen_rtl_expr_id concat;
+
+			for (i = 0; i < yield_count; i++)
+			{
+				int member_field = -1;
+				pigen_source_span name_span = yield[i].name;
+				pigen_source_span carry = INVALID_SPAN;
+				pigen_source_span member_origin;
+				pigen_rtl_type descriptor = (pigen_rtl_type){
+					PIGEN_SIGN_UNSIGNED, PIGEN_DATA_TYPE_STATE_FOUR,
+					yield[i].width, INVALID_ID(pigen_rtl_expr_id),
+					INVALID_SPAN, NULL, 0};
+				pigen_rtl_object_id member;
+				pigen_rtl_type_id member_type;
+
+				for (j = 0; j < field_count; j++)
+					if (spans_equal(sources, yield[i].name, fields[j].name))
+					{
+						member_field = (int)j;
+						name_span = fields[j].name;
+						break;
+					}
+				if (member_field >= 0)
+					carry = carry_span_for_field(sources, rtl, fields,
+						field_count, stage_value, stage_value_first,
+						stage_value_last, expanded, field_last_writer,
+						member_field, 0);
+				/* A member that carries a computed value across the boundary
+				 * is proven from the carried value's source span (the
+				 * computing stage's full value expression), so the terminal
+				 * renderer spells the member from the verbatim computed text -
+				 * the `+` and its operands present (the cross-boundary
+				 * contract). A member that carries nothing (no stage write, an
+				 * external read, or a self-read) is proven from the field's
+				 * declaration span, so the renderer spells the member name
+				 * (the emitted-member-order contract). The member object is
+				 * synthetic (a pipeline field, not a semantic signal), so its
+				 * semantic_signal is invalid. */
+				member_origin = span_invalid(carry) ? name_span : carry;
+				member_type = pigen_rtl_type_intern(rtl, &descriptor);
+				if (member_type.index == PIGEN_INVALID_ID) return -1;
+				member = pigen_rtl_object_add_with_owner(rtl, rtl_module,
+					PIGEN_RTL_OBJECT_VARIABLE, member_type,
+					PIGEN_SEMANTIC_INTERNAL, INVALID_ID(pigen_signal_id),
+					member_origin);
+				if (member.index == PIGEN_INVALID_ID) return -1;
+				children[i] = pigen_rtl_expr_add_object(rtl, member_type,
+					member, member_origin);
+				if (children[i].index == PIGEN_INVALID_ID) return -1;
+			}
+			concat = pigen_rtl_expr_add_concatenation(rtl, packet_type, children,
+				yield_count, INVALID_SPAN);
+			if (concat.index == PIGEN_INVALID_ID) return -1;
+			/* The yield write: the outgoing-packet object driven by the
+			 * concatenation of its yield members in source order. This is the
+			 * RTL equation whose value is the concatenation (the emitted-member-
+			 * order witness) and whose destination is the established
+			 * outgoing-packet signal (the yield-write witness). */
+			if (pigen_rtl_equation_add_with_owner(rtl, rtl_module, packet_object,
+				concat, pipeline->location.source_span).index ==
+				PIGEN_INVALID_ID)
+				return -1;
+		}
 	}
 
 	/* The buf stage storage and the per-stage next-value equations. For each
 	 * stage boundary (there are stage_count - 1 of them) publish one
-	 * one-entry buf primitive instance; for each stage publish one
-	 * combinational next-value equation over the immutable incoming fields the
-	 * stage is handed. */
+	 * one-entry buf primitive instance; for each stage publish its
+	 * computed next-value equation over the immutable incoming fields the
+	 * stage is handed - the stage's `<=` right-hand side lowered to a
+	 * structural expression (how/do/pipeline/stage/reads/work.md), never a
+	 * constant stand-in. */
 	for (i = 0; i < stage_count; i++)
 	{
 		/* One one-entry buf stage storage per stage boundary (N-1): a
@@ -851,21 +1599,14 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		}
 
 		/* The per-stage combinational next-value equation: the stage's
-		 * outgoing value, a constant that stands in for the value computed
-		 * over the immutable incoming fields the stage is handed by the
-		 * earlier stages (how/do/pipeline/stage/reads/work.md). The
-		 * equation's destination is the established outgoing-packet object
-		 * (the stage feeds the packet it produces) and its value is the
-		 * guard-gated constant. */
+		 * outgoing value, the computation of its `<=` right-hand side over the
+		 * immutable incoming fields the stage is handed by the earlier stages
+		 * (how/do/pipeline/stage/reads/work.md). A stage that writes no field
+		 * (a storage-only stage) has no next value and publishes no equation. */
+		if (stage_value[i].index != PIGEN_INVALID_ID)
 		{
-			pigen_rtl_expr_id value;
-
-			value = pigen_rtl_expr_add_integer(rtl, packet_type, 0,
-				stage_nodes[i].node->location.source_span);
-			if (value.index == PIGEN_INVALID_ID) return -1;
-			(void)guard;
 			if (pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-				packet_object, value,
+				packet_object, stage_value[i],
 				stage_nodes[i].node->location.source_span).index ==
 				PIGEN_INVALID_ID)
 				return -1;

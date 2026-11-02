@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-29T14:12:27+11:00"
+revised_at: "2026-11-03T00:09:11+11:00"
 ---
 
 A `pipeline ... endpipeline` statement inside a clocked process reaches the compiled output through the production RTL lowering stage, driven per module after the declaration and transfer lowering of the same pass (src/compile.c: pigen_lower_rtl_transfers, then the pipeline step, then pigen_lower_rtl_module).
@@ -13,4 +13,4 @@ Module-record law: the pipeline's RTL records must live in the parent module's e
 
 Fail-loud behavior: every step failure (an unestablished identity, a violated stage law, a rejected node kind, a record publication failure) reports its diagnostic at the original span and the compile stops with a nonzero exit and no output file (how/should/compiler/builders/fail.md). No rollback is required: partial records may remain in the RTL model after a failure and nothing uses the model after a failed compile.
 
-Excluded from this step (they keep their owning plan items): the FSM statement (module-level parse node, no handler - a later production step through pigen_fsm_lower), the stage computation stand-in equations (the per-stage next value is a constant 0 until its stand-in replacement lands), the guard expression (the guard is the constant 1; the false-guard halt enforcement is the pipeline halting/stop contract at the pipeline-lower-test seam), and the per-subsystem corpus migration.
+Excluded from this step (they keep their owning plan items): the FSM statement (module-level parse node, no handler - a later production step through pigen_fsm_lower), the guard expression (the guard is the constant 1; the false-guard halt enforcement is the pipeline halting/stop contract at the pipeline-lower-test seam), and the per-subsystem corpus migration. The per-stage next-value equations are the computed stage expressions (what/are/the/pipeline/stage/computation/test/scenarios.md); the production step publishes them through the same entry.
