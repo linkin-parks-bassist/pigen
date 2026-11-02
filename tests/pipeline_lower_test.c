@@ -2679,5 +2679,153 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* ------------------------------------------------------------------ */
+	/* calc-bitwise: a pipeline stage performs its specified nontrivial    */
+	/* next-value computation on concrete input (what/are/the/pipeline/    */
+	/* stage/computation/test/scenarios.md line 2). The anchor is a legal   */
+	/* 2-stage pipeline whose stage 1 writes the two 8-bit incoming fields */
+	/* a and b from external inputs x and y, and whose stage 2 computes     */
+	/* `c <= a & b` over those two immutable incoming fields. The          */
+	/* repartition law (how/to/repartition/pipeline/boundaries.md) is the   */
+	/* seam's own full-contract obligation: a later stage's incoming and    */
+	/* outgoing total $bits must be equal, so stage 2's 16-bit incoming     */
+	/* packet (a + b) is written into the 16-bit field c (the 8-bit `a & b` */
+	/* expression zero-extends into it); an 8-bit c would be an unequal     */
+	/* boundary the seam rejects (rc == -1). The anchor lowers to rc == 0   */
+	/* and pins stage 2's published next-value equation: its value is a     */
+	/* binary bitwise-and (PIGEN_RTL_EXPR_BINARY, operator                 */
+	/* PIGEN_BINARY_BITWISE_AND) over TWO PIGEN_RTL_EXPR_OBJECT operands    */
+	/* whose provenance objects name BOTH incoming field objects - the      */
+	/* 8-bit field a and the 8-bit field b - not an object pass-through and */
+	/* not the integer-0 stand-in the current master publishes. The gate    */
+	/* the section discriminates is that the lowering publishes the stage's */
+	/* COMPUTED expression, not a placeholder: against the current master    */
+	/* (src/pipeline_lower.c's constant-0 stand-in) no published equation   */
+	/* carries a binary bitwise-and, so the search below finds none and the */
+	/* section is red; once the stand-in is replaced with the stage's       */
+	/* published expression the search locates stage 2's equation and the   */
+	/* operand checks pass. A permissive builder that keeps the stand-in,   */
+	/* or that publishes a non-and binary (or a single-operand, or an       */
+	/* integer) value for stage 2, fails the section.                       */
+	/* ------------------------------------------------------------------ */
+	SECTION("calc-bitwise") {
+		/* Anchor: a legal 2-stage pipeline whose stage 2 computes `c <= a &
+		 * b` over the two 8-bit incoming fields a and b (stage 1 writes
+		 * both from external inputs x and y) lowers to rc == 0 and publishes
+		 * stage 2's next-value equation as a binary bitwise-and over both
+		 * incoming field objects. The repartition law keeps the boundary
+		 * legal: stage 2's 16-bit incoming (a + b) is written into the 16-
+		 * bit field c, so the carried packet neither widens nor narrows. */
+		{
+			parsed p = pl_parse("cbw_ok.pigen",
+				"module cbw_ok(input logic clk, input logic [7:0] x, "
+				"input logic [7:0] y);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline cbw_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tbit [15:0] c;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= x;\n"
+				"\t\t\t\tb <= y;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tc <= a & b;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield c;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			const pigen_syntax_node *fields[8];
+			size_t stage_count;
+			size_t field_count;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			pigen_rtl_expr_id and_value =
+				(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+
+			stage_count = pl_stage_nodes(&p, stages);
+			REQUIRE(stage_count == 2);
+			field_count = pl_field_nodes(&p, fields);
+			REQUIRE(field_count == 3);
+			/* Field widths from the parsed declaration spans: a = 8, b = 8,
+			 * c = 16. The repartition law keeps the boundary equal (16 in,
+			 * 16 out); an 8-bit c would be the unequal boundary the seam
+			 * rejects, so the legal fixture writes the 16-bit field. */
+			REQUIRE(pl_field_width(&p, fields[0]) == 8);
+			REQUIRE(pl_field_width(&p, fields[1]) == 8);
+			REQUIRE(pl_field_width(&p, fields[2]) == 16);
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "y", 8);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* Locate stage 2's next-value equation: the published equation
+			 * whose value is a binary bitwise-and (PIGEN_RTL_EXPR_BINARY,
+			 * operator PIGEN_BINARY_BITWISE_AND). Against the current master
+			 * (the constant-0 stand-in) no such equation is published, so the
+			 * search finds none and the section is red. */
+			for (i = 0; i < rtl.equation_count && IS_INVALID_ID(and_value); i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+
+				if (v && v->kind == PIGEN_RTL_EXPR_BINARY &&
+					v->as.binary.resolution.operation.operator ==
+					PIGEN_BINARY_BITWISE_AND)
+					and_value = eq->value;
+			}
+			REQUIRE(!IS_INVALID_ID(and_value));
+			/* The bitwise-and's two operands are the two incoming field
+			 * objects: exactly two children, each a PIGEN_RTL_EXPR_OBJECT,
+			 * whose provenance objects name the field a and the field b (an
+			 * owner-text check against each object's origin span, never a
+			 * source-text search over the output). Both fields must be
+			 * named - one operand, or a third, fails. */
+			{
+				const pigen_rtl_expr *and_expr =
+					pigen_rtl_expr_get(&rtl, and_value);
+				const pigen_rtl_expr_id *children;
+				size_t child_count = 0;
+				int named_a = 0;
+				int named_b = 0;
+
+				REQUIRE(and_expr->kind == PIGEN_RTL_EXPR_BINARY);
+				children = pigen_rtl_expr_children(&rtl, and_value,
+					&child_count);
+				REQUIRE(children && child_count == 2);
+				for (i = 0; i < child_count; i++)
+				{
+					const pigen_rtl_expr *c = pigen_rtl_expr_get(&rtl,
+						children[i]);
+					const pigen_rtl_object *obj;
+
+					REQUIRE(c && c->kind == PIGEN_RTL_EXPR_OBJECT);
+					obj = pigen_rtl_object_get(&rtl, c->object);
+					REQUIRE(obj);
+					if (span_is(&p.sources, obj->origin, "a"))
+						named_a = 1;
+					else if (span_is(&p.sources, obj->origin, "b"))
+						named_b = 1;
+					else
+						REQUIRE(0); /* an operand that names neither
+							incoming field */
+				}
+				/* BOTH incoming field objects are named, exactly once each. */
+				REQUIRE(named_a == 1);
+				REQUIRE(named_b == 1);
+			}
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
 	return check_finish();
 }
