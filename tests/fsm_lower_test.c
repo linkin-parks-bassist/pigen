@@ -25,7 +25,7 @@
  * guard and never implicitly waits for a transfer; overlapping transitions
  * require structural exclusion).
  *
- * Five sections, one `make fsm-lower-test T=<section>` entry per section in
+ * Ten sections, one `make fsm-lower-test T=<section>` entry per section in
  * tests/contracts.json:
  *
  *   (1) state-register-reset: the synchronous controller's state register is
@@ -80,6 +80,59 @@
  *       rc == -1 and publishes nothing. This section is GREEN against the
  *       stub and under the (s5) implementation: the node-kind rejection is
  *       the seam's own full-contract obligation.
+
+ *   (6) reset-value-initial-state: the reset path's value is the header
+ *       initial state's ENCODING, not the first declared state's
+ *       (what/is/an/fsm.md: "one synchronous controller reset to its
+ *       header initial state"). The anchor is the non-first witness - the
+ *       same legal two-state FSM, but the header names `run`, the second
+ *       declared state (per-state index 1) - which lowers to rc == 0, and
+ *       the reset-path update (the one update whose origin span is the FSM
+ *       node's span) drives the state register to a CONDITIONAL whose
+ *       when-true child is an INTEGER of the state type with value 1. An
+ *       always-first reset (encoding 0) cannot pass.
+ *   (7) state-active-action-gate: a state's action body runs only while
+ *       that state is active (how/to/write/fsm/states.md: "actions run
+ *       only when state active"; the gate's exact expression is the
+ *       state-identity comparison over the state register). The anchor
+ *       lowers the legal two-state FSM whose run state (per-state index 1)
+ *       carries the multi-statement body to rc == 0, and pins that the
+ *       action's equation value is a PIGEN_RTL_EXPR_CONDITIONAL whose
+ *       condition is a PIGEN_RTL_EXPR_BINARY PIGEN_BINARY_EQUAL comparison
+ *       of the state register read and the run state's encoding (value 1):
+ *       the action runs only while the run state is active. A lowering that
+ *       publishes the action value ungated (a bare constant) or gates it on
+ *       a constant fails this section.
+ *   (8) goto-guard-gates-next-state: the per-goto guard gating of the next
+ *       state (does/goto/wait/for/a/transfer.md; the guard-gated transition
+ *       of what/is/an/fsm.md). The anchor lowers the legal two-state FSM
+ *       whose idle state carries `if (start) goto run;` (target index 1) to
+ *       rc == 0 and pins that the update for that goto - located through the
+ *       parse, its origin the goto node's span - carries a value that is a
+ *       guard-conditioned next state: a CONDITIONAL whose when-true child is
+ *       the target's encoding (value 1) and whose when-false child is the
+ *       state register read. A lowering that publishes the transition
+ *       ungated, as a bare target encoding, fails this section.
+ *   (9) goto-never-waits-for-transfer: no transition ever waits for a
+ *       transfer (does/goto/wait/for/a/transfer.md) - the negative half of
+ *       the goto law, pinned on the controller's second transition, the
+ *       mirror of the guard-gated line for the run state. The anchor lowers
+ *       a legal two-state FSM whose run state carries the guarded
+ *       `if (!start) goto idle;` (target index 0) to rc == 0 and pins that
+ *       the update for that goto is a CONDITIONAL whose when-true child is
+ *       an INTEGER of value 0 and whose when-false child is the state
+ *       register read - the transition is keyed on the explicit enclosing
+ *       guard alone, never on a handshake or transfer condition.
+ *   (10) one-synchronous-controller: the controller is one synchronous
+ *       process and one reset path (what/is/an/fsm.md: "one synchronous
+ *       controller reset to its header initial state"). The anchor lowers a
+ *       legal two-state FSM (two guarded gotos) to rc == 0 and pins that the
+ *       parent module record owns EXACTLY ONE PIGEN_RTL_PROCESS - clocked
+ *       posedge - whose update range holds exactly goto_count + 1 updates
+ *       (one per goto plus the single reset-path update), all driving the
+ *       single shared state register. A lowering that splits the controller
+ *       across two processes, publishes a second reset path, or drops the
+ *       reset update from the process fails this section.
  *
  * Every witness is located through the parse (the module's children, the FSM
  * node and its state/goto children, the port declarator name tokens) and
@@ -642,6 +695,39 @@ static int owned_object_bound_to(const owned_records *g,
 	"end\n" \
 	"endmodule\n"
 
+/* The discriminating non-first initial-state witness for
+ * reset-value-initial-state: the same module, ports and FSM body as
+ * FSM_WITNESS, but the header names `run`, the SECOND declared state, while
+ * `idle` is declared first (precedent FSM_WITNESS_NONFIRST in
+ * tests/fsm_identity_test.c). The header initial state is the second state
+ * (per-state index 1), so a reset that always publishes the first declared
+ * state's encoding (0) cannot pass the section: the reset value the owner
+ * must publish is the header-named state's encoding (1), not the first
+ * declared state's (0). */
+#define FSM_WITNESS_NONFIRST(NAME) \
+	"module " NAME "\n" \
+	"(\n" \
+	"\tinput logic clk,\n" \
+	"\tinput logic rst,\n" \
+	"\tinput logic start,\n" \
+	"\toutput logic done\n" \
+	");\n" \
+	"\nfsm " NAME " @(posedge clk) reset (rst) initial run\n" \
+	"begin\n" \
+	"\tstate idle:\n" \
+	"\tbegin\n" \
+	"\t\tif (start)\n" \
+	"\t\t\tgoto run;\n" \
+	"\tend\n" \
+	"\tstate run:\n" \
+	"\tbegin\n" \
+	"\t\tdone <= 1;\n" \
+	"\t\tif (!start)\n" \
+	"\t\t\tgoto idle;\n" \
+	"\tend\n" \
+	"end\n" \
+	"endmodule\n"
+
 int main(int argc, char **argv)
 {
 	check_init(argc, argv);
@@ -1185,6 +1271,820 @@ int main(int argc, char **argv)
 			rc = fl_drive(&p, &u, p.non_fsm, p.fsm_id, &rtl);
 			REQUIRE(rc == -1); /* a non-FSM node is rejected */
 			REQUIRE(rtl_empty(&rtl)); /* and nothing is published */
+			pigen_free_rtl_model(&rtl);
+			fl_free_unit(&u);
+			fl_free(&p);
+		}
+	}
+
+
+	/* ------------------------------------------------------------------ */
+	/* (6) reset-value-initial-state: the reset path's value is the       */
+	/*     header initial state's ENCODING, not the first declared        */
+	/*     state's (what/is/an/fsm.md - "one synchronous controller       */
+	/*     reset to its header initial state"). The anchor is the         */
+	/*     non-first witness: the same legal two-state FSM as the other   */
+	/*     anchors, but the header names `run`, the SECOND declared       */
+	/*     state (per-state index 1), so a reset that always publishes    */
+	/*     the first declared state's encoding (0) cannot pass. It        */
+	/*     lowers to rc == 0, and the reset-path update - the one update  */
+	/*     whose origin span is the FSM node's span (every goto update    */
+	/*     carries its goto node's span) - drives the state register to   */
+	/*     a CONDITIONAL whose when-true child is an INTEGER of the state */
+	/*     type with value 1, the header-named state's index. The value   */
+	/*     type is the state register's own type (the register object is  */
+	/*     the update's destination). The witness pins the resolution     */
+	/*     (how/to/write/a/discriminating/resolution/witness.md,          */
+	/*     precedent FSM_WITNESS_NONFIRST in tests/fsm_identity_test.c);  */
+	/*     the goto-to-run transition's when-true encoding is also 1, so  */
+	/*     the FSM-node-span origin is the standalone discriminator. A    */
+	/*     failed lowering call stops the compile and may leave partial   */
+	/*     state behind, so no anchor asserts what a failure left         */
+	/*     unchanged (how/should/compiler/builders/fail.md).              */
+	/* ------------------------------------------------------------------ */
+	SECTION("reset-value-initial-state") {
+		/* Anchor: the non-first witness lowers, and the reset-path update
+		 * (origin the FSM node's span) drives the state register to the
+		 * header-named state's encoding (1, the non-first index). */
+		{
+			parsed p;
+			fl_parse(&p, "rvi_ok.pigen", FSM_WITNESS_NONFIRST("rvi_ok"));
+			unit u;
+			const pigen_syntax_node *states[8];
+			size_t state_count;
+			pigen_rtl_model rtl;
+			owned_records groups[4];
+			size_t group_count;
+			pigen_source_span fsm_span;
+			int rc;
+			size_t i;
+			size_t j;
+			size_t span_updates = 0;
+			const pigen_rtl_update *the_reset = NULL;
+
+			REQUIRE(p.fsm && p.fsm->kind == PIGEN_SYNTAX_FSM);
+			/* The witness carries the states idle (first), run (second). */
+			state_count = fl_state_nodes(&p, states, 8);
+			REQUIRE(state_count == 2);
+			REQUIRE(span_is(&p.sources,
+				pigen_origin_spelling_span(&p.pre.expanded,
+					pigen_expanded_token_get(&p.pre.expanded,
+						states[0]->as.fsm_state.name)->origin),
+				"idle"));
+			REQUIRE(span_is(&p.sources,
+				pigen_origin_spelling_span(&p.pre.expanded,
+					pigen_expanded_token_get(&p.pre.expanded,
+						states[1]->as.fsm_state.name)->origin),
+				"run"));
+			/* The header names the NON-FIRST state as initial (the
+			 * discriminator: an always-first reset passes on an
+			 * `initial idle` witness and must fail on this one). */
+			REQUIRE(span_is(&p.sources,
+				pigen_origin_spelling_span(&p.pre.expanded,
+					pigen_expanded_token_get(&p.pre.expanded,
+						p.fsm->as.fsm.initial)->origin),
+				"run"));
+			fsm_span = p.fsm->location.source_span;
+			fl_unit(&p, &u);
+			rc = fl_drive(&p, &u, p.fsm, p.fsm_id, &rtl);
+			REQUIRE(rc == 0); /* the legal non-first FSM lowers */
+			group_count = fl_owned(&rtl, groups, 4);
+			REQUIRE(group_count >= 1);
+			/* Locate the reset-path update: the one update of the
+			 * controller's processes whose origin span is the FSM node's
+			 * span (every goto update carries its goto node's span, so no
+			 * transition update has it). */
+			for (i = 0; i < group_count; i++)
+			{
+				size_t pi;
+
+				for (pi = groups[i].first_process;
+					pi < groups[i].first_process + groups[i].process_count;
+					pi++)
+				{
+					const pigen_rtl_process *pr = pigen_rtl_process_get(
+						&rtl, (pigen_rtl_process_id){(uint32_t)pi});
+
+					if (!pr)
+						continue;
+					for (j = pr->updates.first;
+						j < pr->updates.first + pr->updates.count; j++)
+					{
+						const pigen_rtl_update *up =
+							pigen_rtl_update_get(&rtl,
+								(pigen_rtl_update_id){(uint32_t)j});
+
+						if (!up)
+							continue;
+						if (up->origin.source.index ==
+							fsm_span.source.index &&
+							up->origin.start == fsm_span.start &&
+							up->origin.end == fsm_span.end)
+						{
+							span_updates++;
+							the_reset = up;
+						}
+					}
+				}
+			}
+			REQUIRE(span_updates == 1); /* exactly one reset-path update */
+			/* The reset update drives the state register: its destination
+			 * is the synthetic variable (not a declared signal) of the
+			 * controller. */
+			{
+				const pigen_rtl_expr_id *children;
+				size_t child_count = 0;
+				const pigen_rtl_object *dest =
+					pigen_rtl_object_get(&rtl, the_reset->destination);
+				const pigen_rtl_expr *value =
+					pigen_rtl_expr_get(&rtl, the_reset->value);
+				const pigen_rtl_expr *when_true;
+				const pigen_rtl_type *state_type;
+
+				REQUIRE(dest);
+				REQUIRE(dest->kind == PIGEN_RTL_OBJECT_VARIABLE);
+				REQUIRE(IS_INVALID_ID(dest->semantic_signal)); /* synthetic */
+				/* The value: a CONDITIONAL (the reset is gated) whose
+				 * when-true child is the header-named state's encoding. */
+				REQUIRE(value);
+				REQUIRE(value->kind == PIGEN_RTL_EXPR_CONDITIONAL);
+				children = pigen_rtl_expr_children(&rtl, the_reset->value,
+					&child_count);
+				REQUIRE(children);
+				/* Children in order: [condition, when_true,
+				 * when_false]. */
+				REQUIRE(child_count == 3);
+				when_true = pigen_rtl_expr_get(&rtl, children[1]);
+				REQUIRE(when_true);
+				REQUIRE(when_true->kind == PIGEN_RTL_EXPR_INTEGER);
+				/* The encoding is the header-named state's index (1,
+				 * the non-first state) in the state type - the
+				 * register's own type, not the first state's (0). */
+				REQUIRE(when_true->value == 1);
+				REQUIRE(when_true->type.index == dest->type.index);
+				state_type = IS_INVALID_ID(dest->type) ? NULL :
+					pigen_rtl_type_get(&rtl, dest->type);
+				REQUIRE(state_type && state_type->width >= 1);
+			}
+			pigen_free_rtl_model(&rtl);
+			fl_free_unit(&u);
+			fl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) state-active-action-gate: a state's action body runs only while */
+	/*     that state is active (how/to/write/fsm/states.md - "actions run */
+	/*     only when state active"; the gate's exact expression is the     */
+	/*     state-identity comparison over the state register). The anchor  */
+	/*     lowers the legal two-state FSM whose run state (per-state index */
+	/*     1, located through the parse) carries the multi-statement body  */
+	/*     (`done <= 1;` then a guarded `goto idle;`) to rc == 0, and pins */
+	/*     that the action's equation - the owned record whose destination */
+	/*     is the owned object bound, by provenance, to the module's `done */
+	/*     ` output - has a value that is a PIGEN_RTL_EXPR_CONDITIONAL     */
+	/*     whose condition is a PIGEN_RTL_EXPR_BINARY PIGEN_BINARY_EQUAL   */
+	/*     comparison whose operands are the state register read (a        */
+	/*     PIGEN_RTL_EXPR_OBJECT naming the synthetic register) and a      */
+	/*     PIGEN_RTL_EXPR_INTEGER of the state type with value 1 (the run  */
+	/*     state's encoding): the action runs only while the run state is  */
+	/*     active. A lowering that publishes the action value ungated (a   */
+	/*     bare constant, not a CONDITIONAL) or gates it on a constant     */
+	/*     (a condition that is not the register-read/encoding comparison) */
+	/*     fails this section. The comparison's operand structure is the   */
+	/*     standalone pin: the gate's condition is located through the     */
+	/*     action equation's value expression, never by a source-text      */
+	/*     search, and its operand shape (a register read compared to the  */
+	/*     state's encoding) is what a constant gate or an ungated action  */
+	/*     cannot fake.                                                    */
+	/* ------------------------------------------------------------------ */
+	SECTION("state-active-action-gate") {
+		/* Anchor: the legal two-state FSM whose run state (per-state index
+		 * 1) carries the multi-statement body lowers to rc == 0, and the
+		 * action's equation value is the state-active conditional:
+		 * `state_read == 1 ? value : inactive`. */
+		{
+			parsed p;
+			fl_parse(&p, "sag_ok.pigen", FSM_WITNESS("sag_ok"));
+			unit u;
+			const pigen_syntax_node *states[8];
+			size_t state_count;
+			pigen_rtl_model rtl;
+			owned_records groups[4];
+			size_t group_count;
+			int rc;
+			size_t i;
+			int found_gate = 0;
+
+			REQUIRE(p.fsm && p.fsm->kind == PIGEN_SYNTAX_FSM);
+			/* The per-state order is the parse's: the witness declares idle
+			 * then run, so the run state is per-state index 1. */
+			state_count = fl_state_nodes(&p, states, 8);
+			REQUIRE(state_count == 2);
+			REQUIRE(span_is(&p.sources,
+				pigen_origin_spelling_span(&p.pre.expanded,
+					pigen_expanded_token_get(&p.pre.expanded,
+						states[1]->as.fsm_state.name)->origin),
+				"run"));
+			fl_unit(&p, &u);
+			rc = fl_drive(&p, &u, p.fsm, p.fsm_id, &rtl);
+			REQUIRE(rc == 0); /* the legal FSM lowers (red against the stub) */
+			group_count = fl_owned(&rtl, groups, 4);
+			REQUIRE(group_count >= 1);
+			/* The action's equation: some owned record whose destination is
+			 * an owned object bound, by provenance, to the module's done
+			 * output signal (the per-state-action-bodies binding). Its
+			 * value must carry the state-active gate. */
+			for (i = 0; i < group_count && !found_gate; i++)
+			{
+				size_t j;
+
+				for (j = groups[i].first_equation;
+					j < groups[i].first_equation +
+						groups[i].equation_count && !found_gate;
+					j++)
+				{
+					const pigen_rtl_equation *e =
+						pigen_rtl_equation_get(&rtl,
+							(pigen_rtl_equation_id){(uint32_t)j});
+					const pigen_rtl_object *dest;
+					const pigen_rtl_expr *value;
+					const pigen_rtl_expr *condition;
+					const pigen_rtl_expr *left;
+					const pigen_rtl_expr *right;
+					const pigen_rtl_type *left_type;
+					const pigen_rtl_type *right_type;
+					const pigen_rtl_expr_id *children;
+					size_t child_count;
+
+					if (!e)
+						continue;
+					dest = pigen_rtl_object_get(&rtl, e->destination);
+					if (!dest || IS_INVALID_ID(dest->semantic_signal) ||
+						dest->semantic_signal.index != u.done.index)
+						continue; /* not the action's equation */
+					/* The value is the state-active conditional. */
+					value = pigen_rtl_expr_get(&rtl, e->value);
+					REQUIRE(value);
+					REQUIRE(value->kind == PIGEN_RTL_EXPR_CONDITIONAL);
+					/* A conditional's children are [condition, when-true,
+					 * when-false] (pigen_rtl_expr_add_conditional). */
+					child_count = 0;
+					children = pigen_rtl_expr_children(&rtl, e->value,
+						&child_count);
+					REQUIRE(child_count == 3);
+					REQUIRE(children);
+					/* The condition is the equality comparison `state_read
+					 * == 1` (PIGEN_BINARY_EQUAL). */
+					condition = pigen_rtl_expr_get(&rtl, children[0]);
+					REQUIRE(condition);
+					REQUIRE(condition->kind == PIGEN_RTL_EXPR_BINARY);
+					REQUIRE(condition->as.binary.resolution.operation.operator ==
+						PIGEN_BINARY_EQUAL);
+					/* A binary's children are [left, right]
+					 * (pigen_rtl_expr_add_binary). */
+					child_count = 0;
+					children = pigen_rtl_expr_children(&rtl,
+						children[0], &child_count);
+					REQUIRE(child_count == 2);
+					REQUIRE(children);
+					/* The operands are the state register read (a
+					 * PIGEN_RTL_EXPR_OBJECT naming the synthetic
+					 * register - the register is synthetic, so its
+					 * provenance carries no semantic signal) and the
+					 * run state's encoding (a PIGEN_RTL_EXPR_INTEGER of
+					 * the state type with value 1). */
+					left = pigen_rtl_expr_get(&rtl, children[0]);
+					right = pigen_rtl_expr_get(&rtl, children[1]);
+					REQUIRE(left);
+					REQUIRE(right);
+					REQUIRE(left->kind == PIGEN_RTL_EXPR_OBJECT);
+					{
+						const pigen_rtl_object *reg =
+							pigen_rtl_object_get(&rtl, left->object);
+
+						REQUIRE(reg);
+						REQUIRE(reg->kind == PIGEN_RTL_OBJECT_VARIABLE);
+						REQUIRE(IS_INVALID_ID(reg->semantic_signal));
+						/* The operand is a read of the state register:
+						 * the equation's destination is the done
+						 * output object, so the register object is a
+						 * distinct object of the model. */
+						REQUIRE(left->object.index !=
+							e->destination.index);
+					}
+					/* The encoding operand is the run state's index (1),
+					 * a literal of the state type (the register's type:
+					 * a state type of width >= 1, not the 1-bit gate
+					 * type). */
+					REQUIRE(right->kind == PIGEN_RTL_EXPR_INTEGER);
+					REQUIRE(right->value == 1);
+					left_type = IS_INVALID_ID(left->type) ? NULL :
+						pigen_rtl_type_get(&rtl, left->type);
+					right_type = IS_INVALID_ID(right->type) ? NULL :
+						pigen_rtl_type_get(&rtl, right->type);
+					REQUIRE(left_type && left_type->width >= 1);
+					REQUIRE(right_type);
+					REQUIRE(right->type.index == left->type.index);
+					found_gate = 1;
+				}
+			}
+			/* The state-active gate is published (an ungated bare-constant
+			 * action value, or a gate on a constant, leaves no
+			 * register-read/encoding comparison under the action's
+			 * equation). */
+			REQUIRE(found_gate);
+			pigen_free_rtl_model(&rtl);
+			fl_free_unit(&u);
+			fl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) goto-guard-gates-next-state: the per-goto guard gating of the    */
+	/*     next state (does/goto/wait/for/a/transfer.md; the guard-gated    */
+	/*     transition of what/is/an/fsm.md): the goto changes the state     */
+	/*     only under its explicit enclosing guard, the state holds         */
+	/*     otherwise. The anchor lowers the legal two-state FSM whose idle  */
+	/*     state carries `if (start) goto run;` (target per-state index 1)  */
+	/*     to rc == 0 and pins that the update for that goto - located      */
+	/*     through the parse, its origin the goto node's span (each goto's  */
+	/*     update is located through its node's span, never a source-text   */
+	/*     search) - carries a value that is a guard-conditioned next       */
+	/*     state: a PIGEN_RTL_EXPR_CONDITIONAL whose when-true child is the */
+	/*     target's state encoding (a PIGEN_RTL_EXPR_INTEGER of the state   */
+	/*     type with value 1) and whose when-false child is the state       */
+	/*     register read (a PIGEN_RTL_EXPR_OBJECT naming the synthetic      */
+	/*     register) - the goto changes state only under its guard, the     */
+	/*     state holds otherwise. A lowering that publishes the transition  */
+	/*     ungated, as a bare target encoding, fails this section.          */
+	/* ------------------------------------------------------------------ */
+	SECTION("goto-guard-gates-next-state") {
+		/* Anchor: the legal two-state FSM lowers, and the update for the
+		 * idle state's `goto run;` (target index 1) carries the
+		 * guard-conditioned next state. */
+		{
+			parsed p;
+			fl_parse(&p, "ggg_ok.pigen", FSM_WITNESS("ggg_ok"));
+			unit u;
+			const pigen_syntax_node *gotos[8];
+			size_t goto_count;
+			pigen_rtl_model rtl;
+			owned_records groups[4];
+			size_t group_count;
+			pigen_source_span goto_span;
+			int rc;
+			size_t i;
+			int located_update = 0;
+			int guard_gated_next = 0;
+
+			REQUIRE(p.fsm && p.fsm->kind == PIGEN_SYNTAX_FSM);
+			/* Locate the idle state's goto through the parse: the witness's
+			 * first goto in source order, whose target token spells `run`
+			 * (the per-state index 1 target). */
+			goto_count = fl_goto_nodes(&p, gotos, 8);
+			REQUIRE(goto_count == 2);
+			{
+				const pigen_expanded_token *target =
+					pigen_expanded_token_get(&p.pre.expanded,
+						gotos[0]->as.goto_statement.target);
+
+				REQUIRE(target);
+				REQUIRE(span_is(&p.sources,
+					pigen_origin_spelling_span(&p.pre.expanded,
+						target->origin), "run"));
+			}
+			goto_span = gotos[0]->location.source_span;
+			fl_unit(&p, &u);
+			rc = fl_drive(&p, &u, p.fsm, p.fsm_id, &rtl);
+			REQUIRE(rc == 0); /* the legal FSM lowers (red against the stub) */
+			group_count = fl_owned(&rtl, groups, 4);
+			REQUIRE(group_count >= 1);
+			/* Locate the update for the goto: the one owned-process update
+			 * whose origin is the goto node's span (the per-goto origin is
+			 * the discriminator; the reset path's update carries the FSM
+			 * node's span, the other goto's update its own span). */
+			for (i = 0; i < group_count && !located_update; i++)
+			{
+				size_t pi;
+
+				for (pi = groups[i].first_process;
+					pi < groups[i].first_process +
+						groups[i].process_count && !located_update;
+					pi++)
+				{
+					const pigen_rtl_process *pr =
+						pigen_rtl_process_get(&rtl,
+							(pigen_rtl_process_id){(uint32_t)pi});
+					size_t ui;
+
+					if (!pr)
+						continue;
+					for (ui = pr->updates.first;
+						ui < pr->updates.first + pr->updates.count;
+						ui++)
+					{
+						const pigen_rtl_update *up =
+							pigen_rtl_update_get(&rtl,
+								(pigen_rtl_update_id){(uint32_t)ui});
+						const pigen_rtl_expr_id *children;
+						const pigen_rtl_expr *value;
+						const pigen_rtl_expr *when_true;
+						const pigen_rtl_expr *when_false;
+						const pigen_rtl_object *register_object;
+						const pigen_rtl_type *state_type;
+						size_t child_count = 0;
+
+						if (!up ||
+							up->origin.source.index !=
+								goto_span.source.index ||
+							up->origin.start != goto_span.start ||
+							up->origin.end != goto_span.end)
+							continue;
+						located_update = 1;
+						/* The guard-gated next state: the update's value
+						 * is a conditional; its when-true child is the
+						 * target's state encoding (an integer of the
+						 * state type, value 1) and its when-false child
+						 * is the state register read (an object naming
+						 * the synthetic register) - the goto changes
+						 * state only under its guard, the state holds
+						 * otherwise. */
+						value = pigen_rtl_expr_get(&rtl, up->value);
+						if (!value ||
+							value->kind != PIGEN_RTL_EXPR_CONDITIONAL)
+							continue;
+						children = pigen_rtl_expr_children(&rtl,
+							up->value, &child_count);
+						if (!children || child_count != 3)
+							continue;
+						when_true = pigen_rtl_expr_get(&rtl,
+							children[1]);
+						when_false = pigen_rtl_expr_get(&rtl,
+							children[2]);
+						if (!when_true ||
+							when_true->kind != PIGEN_RTL_EXPR_INTEGER ||
+							when_true->value != 1)
+							continue;
+						if (!when_false ||
+							when_false->kind != PIGEN_RTL_EXPR_OBJECT ||
+							IS_INVALID_ID(when_false->object))
+							continue;
+						register_object =
+							pigen_rtl_object_get(&rtl,
+								when_false->object);
+						if (!register_object ||
+							register_object->kind !=
+								PIGEN_RTL_OBJECT_VARIABLE ||
+							!IS_INVALID_ID(
+								register_object->semantic_signal))
+							continue;
+						/* The when-true integer is of the state type:
+						 * the type of the state register the when-false
+						 * child reads (an integer of a non-state type,
+						 * or a missing type, is not the target's state
+						 * encoding). */
+						state_type = IS_INVALID_ID(
+							register_object->type) ? NULL :
+							pigen_rtl_type_get(&rtl,
+								register_object->type);
+						if (!state_type ||
+							state_type->width < 1 ||
+							IS_INVALID_ID(when_true->type) ||
+							when_true->type.index !=
+								register_object->type.index)
+							continue;
+						/* The when-false register read is of the state
+						 * type (the hold fact: the state holds its
+						 * current value when the guard is false). */
+						if (IS_INVALID_ID(when_false->type) ||
+							when_false->type.index !=
+								register_object->type.index)
+							continue;
+						guard_gated_next = 1;
+					}
+				}
+			}
+			REQUIRE(located_update); /* the goto's update is published */
+			REQUIRE(guard_gated_next);
+			pigen_free_rtl_model(&rtl);
+			fl_free_unit(&u);
+			fl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) goto-never-waits-for-transfer: no transition ever waits for a  */
+	/*     transfer (does/goto/wait/for/a/transfer.md) - the negative     */
+	/*     half of the goto law, pinned on the controller's second        */
+	/*     transition, the mirror of the guard-gated-transitions line for */
+	/*     the run state. The anchor lowers a legal two-state FSM whose   */
+	/*     run state carries the guarded `if (!start) goto idle;` (target */
+	/*     per-state index 0) to rc == 0 and pins that the update for     */
+	/*     that goto (the one whose origin is the goto node's span,       */
+	/*     located through the parse - never a source-text search)        */
+	/*     carries a value that is a PIGEN_RTL_EXPR_CONDITIONAL whose     */
+	/*     when-true child is a PIGEN_RTL_EXPR_INTEGER of the state type  */
+	/*     with value 0 and whose when-false child is a                  */
+	/*     PIGEN_RTL_EXPR_OBJECT naming the state register - the          */
+	/*     transition is keyed on the explicit enclosing guard alone,     */
+	/*     never on a handshake or transfer condition. A lowering that    */
+	/*     substitutes an implicit transfer wait for the guard changes    */
+	/*     the conditional's condition child away from the guard and      */
+	/*     fails this section. The mirror target (0 vs the first          */
+	/*     transition's 1) keeps the pin independent of the first         */
+	/*     transition's fixture state.                                    */
+	/* ------------------------------------------------------------------ */
+	SECTION("goto-never-waits-for-transfer") {
+		/* Anchor: the second transition's update is the guard-keyed
+		 * (target-encoding, register-read) conditional, located through
+		 * the parse by the goto node's span. */
+		{
+			parsed p;
+			fl_parse(&p, "gnw_ok.pigen", FSM_WITNESS("gnw_ok"));
+			unit u;
+			const pigen_syntax_node *gotos[8];
+			size_t goto_count;
+			const pigen_syntax_node *second;
+			const pigen_expanded_token *target;
+			pigen_rtl_model rtl;
+			owned_records groups[4];
+			size_t group_count;
+			int rc;
+			size_t i, j;
+			pigen_rtl_object_id register_object =
+				(pigen_rtl_object_id){PIGEN_INVALID_ID};
+			size_t matched_updates = 0;
+			int conditional_shape = 0;
+
+			REQUIRE(p.fsm && p.fsm->kind == PIGEN_SYNTAX_FSM);
+			goto_count = fl_goto_nodes(&p, gotos, 8);
+			REQUIRE(goto_count == 2); /* the witness carries two guarded gotos */
+			/* The second transition of the controller (the run state's
+			 * `goto idle;`), located through the parse and pinned by its
+			 * target token's original span text: the mirror target (the
+			 * first state's index 0), distinct from the first transition's
+			 * target (the second state's index 1). */
+			second = gotos[1];
+			REQUIRE(second->kind == PIGEN_SYNTAX_GOTO);
+			target = pigen_expanded_token_get(&p.pre.expanded,
+				second->as.goto_statement.target);
+			REQUIRE(target);
+			REQUIRE(span_is(&p.sources,
+				pigen_origin_spelling_span(&p.pre.expanded, target->origin),
+				"idle"));
+			{
+				const pigen_expanded_token *first_target =
+					pigen_expanded_token_get(&p.pre.expanded,
+						gotos[0]->as.goto_statement.target);
+
+				REQUIRE(first_target);
+				REQUIRE(span_is(&p.sources,
+					pigen_origin_spelling_span(&p.pre.expanded,
+						first_target->origin),
+					"run"));
+			}
+			fl_unit(&p, &u);
+			rc = fl_drive(&p, &u, p.fsm, p.fsm_id, &rtl);
+			REQUIRE(rc == 0); /* the legal FSM lowers */
+			group_count = fl_owned(&rtl, groups, 4);
+			REQUIRE(group_count >= 1);
+			/* The state register: the synthetic owned variable of a valid
+			 * state type (the FSM state is not a declared signal, so its
+			 * provenance carries no semantic signal). */
+			for (i = 0; i < group_count && IS_INVALID_ID(register_object); i++)
+			{
+				for (j = groups[i].first_object;
+					j < groups[i].first_object + groups[i].object_count &&
+					IS_INVALID_ID(register_object);
+					j++)
+				{
+					const pigen_rtl_object *o =
+						pigen_rtl_object_get(&rtl,
+							(pigen_rtl_object_id){(uint32_t)j});
+					const pigen_rtl_type *t;
+
+					if (!o || o->kind != PIGEN_RTL_OBJECT_VARIABLE ||
+						!IS_INVALID_ID(o->semantic_signal))
+						continue;
+					t = IS_INVALID_ID(o->type) ? NULL :
+						pigen_rtl_type_get(&rtl, o->type);
+					if (!t || t->width < 1)
+						continue;
+					register_object = (pigen_rtl_object_id){(uint32_t)j};
+				}
+			}
+			REQUIRE(!IS_INVALID_ID(register_object));
+			/* The update for the located second goto: exactly one update of
+			 * an owned process whose origin is the goto node's span (the
+			 * per-goto origin span is the discriminator - each goto's update
+			 * is located through its node's span, never a source-text
+			 * search), and it drives the state register. */
+			for (i = 0; i < group_count; i++)
+			{
+				for (j = groups[i].first_process;
+					j < groups[i].first_process + groups[i].process_count;
+					j++)
+				{
+					const pigen_rtl_process *pr = pigen_rtl_process_get(&rtl,
+						(pigen_rtl_process_id){(uint32_t)j});
+					size_t ui;
+
+					if (!pr)
+						continue;
+					for (ui = pr->updates.first;
+						ui < pr->updates.first + pr->updates.count; ui++)
+					{
+						const pigen_rtl_update *up =
+							pigen_rtl_update_get(&rtl,
+								(pigen_rtl_update_id){(uint32_t)ui});
+						const pigen_rtl_expr *value;
+						const pigen_rtl_expr_id *children;
+						size_t child_count;
+						const pigen_rtl_expr *condition;
+						const pigen_rtl_expr *when_true;
+						const pigen_rtl_expr *when_false;
+						const pigen_rtl_type *cond_type;
+
+						if (!up)
+							continue;
+						if (up->origin.source.index != p.source.index ||
+							up->origin.start !=
+								second->location.source_span.start ||
+							up->origin.end !=
+								second->location.source_span.end)
+							continue;
+						matched_updates++;
+						REQUIRE(up->destination.index ==
+							register_object.index);
+						value = pigen_rtl_expr_get(&rtl, up->value);
+						REQUIRE(value &&
+							value->kind ==
+								PIGEN_RTL_EXPR_CONDITIONAL);
+						/* The conditional's children are [condition,
+						 * when_true, when_false]. The transition is keyed
+						 * on the explicit enclosing guard alone, never on
+						 * a handshake or transfer condition: the
+						 * condition child is the guard - a 1-bit boolean
+						 * gate that is a distinct expression from both the
+						 * target encoding (when-true) and the current-state
+						 * register read (when-false). A lowering that
+						 * substitutes an implicit transfer wait, the target
+						 * or the state itself for the guard changes the
+						 * condition child away from the guard and fails
+						 * this shape. The when-true child is the target
+						 * encoding - a PIGEN_RTL_EXPR_INTEGER of the state
+						 * type with value 0 (the first state's per-state
+						 * index, the mirror of the first transition's 1) -
+						 * and the when-false child is a
+						 * PIGEN_RTL_EXPR_OBJECT naming the state register
+						 * (the state holds otherwise). */
+						children = pigen_rtl_expr_children(&rtl, up->value,
+							&child_count);
+						REQUIRE(child_count == 3 && children);
+						condition = children ?
+							pigen_rtl_expr_get(&rtl, children[0]) : NULL;
+						when_true = children ?
+							pigen_rtl_expr_get(&rtl, children[1]) : NULL;
+						when_false = children ?
+							pigen_rtl_expr_get(&rtl, children[2]) : NULL;
+						cond_type = condition ?
+							(IS_INVALID_ID(condition->type) ? NULL :
+								pigen_rtl_type_get(&rtl,
+									condition->type)) : NULL;
+						conditional_shape =
+							value->type.index != PIGEN_INVALID_ID &&
+							condition &&
+							cond_type && cond_type->width == 1 &&
+							when_true &&
+							when_false &&
+							children[0].index != children[1].index &&
+							children[0].index != children[2].index &&
+							when_true->kind == PIGEN_RTL_EXPR_INTEGER &&
+							when_true->type.index == value->type.index &&
+							when_true->value == 0 &&
+							when_false &&
+							when_false->kind == PIGEN_RTL_EXPR_OBJECT &&
+							when_false->object.index ==
+								register_object.index;
+					}
+				}
+			}
+			REQUIRE(matched_updates == 1);
+			REQUIRE(conditional_shape);
+			pigen_free_rtl_model(&rtl);
+			fl_free_unit(&u);
+			fl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (6) one-synchronous-controller: the controller is one synchronous   */
+	/*     process and one reset path (what/is/an/fsm.md: "one             */
+	/*     synchronous controller reset to its header initial state").     */
+	/*     The anchor lowers a legal two-state FSM (the FSM_WITNESS: two   */
+	/*     guarded gotos) to rc == 0 and pins that the parent module       */
+	/*     record owns EXACTLY ONE PIGEN_RTL_PROCESS - clocked posedge,    */
+	/*     the synchronous controller - whose update range holds exactly   */
+	/*     goto_count + 1 updates: one per goto plus the single            */
+	/*     reset-path update, all driving the single shared state          */
+	/*     register (a synthetic variable; the reset update's origin is    */
+	/*     the FSM node's span, the gotos' origins their nodes' spans).    */
+	/*     The exact count is the seam's pin of the one-controller         */
+	/*     structure, and the reset path's presence in the process is what */
+	/*     makes the reset value part of the synchronous controller rather */
+	/*     than a loose record: a lowering that splits the controller      */
+	/*     across two processes, publishes a second reset path, or drops   */
+	/*     the reset update from the process fails this section. No failed */
+	/*     call is asserted to leave anything unchanged (how/should/       */
+	/*     compiler/builders/fail.md).                                     */
+	/* ------------------------------------------------------------------ */
+	SECTION("one-synchronous-controller") {
+		/* Anchor: a legal two-state FSM lowers, and the controller is
+		 * exactly one posedge process whose updates are the gotos plus the
+		 * single reset path, all driving the shared state register. */
+		{
+			parsed p;
+			fl_parse(&p, "osc_ok.pigen", FSM_WITNESS("osc_ok"));
+			unit u;
+			const pigen_syntax_node *gotos[8];
+			size_t goto_count;
+			pigen_rtl_model rtl;
+			owned_records groups[4];
+			size_t group_count;
+			size_t total_processes = 0;
+			const pigen_rtl_process *controller = NULL;
+			size_t i;
+			size_t j;
+			int rc;
+			size_t expected_updates;
+			size_t reset_updates = 0;
+			int all_drive_register = 1;
+
+			REQUIRE(p.fsm && p.fsm->kind == PIGEN_SYNTAX_FSM);
+			/* Count the FSM's gotos through the parse (the
+			 * PIGEN_SYNTAX_GOTO descendants of the state nodes): the
+			 * witness carries two, so the controller's update range
+			 * holds exactly 2 + 1 = 3 updates. */
+			goto_count = fl_goto_nodes(&p, gotos, 8);
+			REQUIRE(goto_count == 2);
+			fl_unit(&p, &u);
+			rc = fl_drive(&p, &u, p.fsm, p.fsm_id, &rtl);
+			REQUIRE(rc == 0); /* the legal FSM lowers */
+			group_count = fl_owned(&rtl, groups, 4);
+			REQUIRE(group_count >= 1);
+			/* EXACTLY ONE process across every parent module record: a
+			 * controller split across two processes fails here. */
+			for (i = 0; i < group_count; i++)
+				total_processes += groups[i].process_count;
+			REQUIRE(total_processes == 1);
+			for (i = 0; i < group_count; i++)
+				for (j = groups[i].first_process;
+					j < groups[i].first_process + groups[i].process_count;
+					j++)
+					controller = pigen_rtl_process_get(&rtl,
+						(pigen_rtl_process_id){(uint32_t)j});
+			REQUIRE(controller);
+			/* The synchronous controller: clocked posedge, the clock a
+			 * published expression (the controller runs on the module's
+			 * clock, not combinatorially). */
+			REQUIRE(controller->edge == PIGEN_SEMANTIC_POSEDGE);
+			REQUIRE(!IS_INVALID_ID(controller->clock));
+			/* Exactly goto_count + 1 updates: one per goto plus the
+			 * single reset-path update. A dropped reset update or a
+			 * second reset path changes the count and fails here. */
+			expected_updates = goto_count + 1;
+			REQUIRE(controller->updates.count == expected_updates);
+			/* All updates drive the single shared state register, and the
+			 * reset path is present in the process: the reset update's
+			 * origin is the FSM node's span (every goto update's origin
+			 * is its goto node's span). */
+			for (j = controller->updates.first;
+				j < controller->updates.first + controller->updates.count;
+				j++)
+			{
+				const pigen_rtl_update *up = pigen_rtl_update_get(&rtl,
+					(pigen_rtl_update_id){(uint32_t)j});
+				const pigen_rtl_object *dest = up ?
+					pigen_rtl_object_get(&rtl, up->destination) : NULL;
+
+				REQUIRE(up);
+				if (!dest || dest->kind != PIGEN_RTL_OBJECT_VARIABLE ||
+					!IS_INVALID_ID(dest->semantic_signal))
+					all_drive_register = 0;
+				if (up->origin.source.index ==
+						p.fsm->location.source_span.source.index &&
+					up->origin.start ==
+						p.fsm->location.source_span.start &&
+					up->origin.end == p.fsm->location.source_span.end)
+					reset_updates++;
+			}
+			/* One reset path (the second fails the count pin above; the
+			 * missing one fails here): the reset update is in the
+			 * process, so its value is part of the synchronous
+			 * controller rather than a loose record. */
+			REQUIRE(reset_updates == 1);
+			REQUIRE(all_drive_register);
 			pigen_free_rtl_model(&rtl);
 			fl_free_unit(&u);
 			fl_free(&p);
