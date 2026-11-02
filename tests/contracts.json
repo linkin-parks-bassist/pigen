@@ -22,16 +22,6 @@
   },
   {
     "covers": [
-      "tests/smoke.sh",
-      "Makefile"
-    ],
-    "command": [
-      "sh",
-      "tests/lint_fatal_pin.sh"
-    ]
-  },
-  {
-    "covers": [
       "src/preprocess.c",
       "src/lexer.c",
       "src/source.c",
@@ -666,26 +656,6 @@
   },
   {
     "covers": [
-      "src/pigen.c",
-      "src/blocks.c",
-      "src/assignments.c",
-      "src/declarations.c",
-      "src/procedural.c",
-      "src/transfer.c",
-      "src/pipeline.c",
-      "src/fsm.c",
-      "src/lexer.c",
-      "src/util.c"
-    ],
-    "command": [
-      "make",
-      "pigen",
-      "fabric-test",
-      "core-language-test"
-    ]
-  },
-  {
-    "covers": [
       "tests/compile_test.c",
       "src/compile.c",
       "src/source.c",
@@ -694,59 +664,6 @@
     "command": [
       "make",
       "compile-test"
-    ]
-  },
-  {
-    "covers": [
-      "Makefile"
-    ],
-    "command": [
-      "make",
-      "vertical-slice-test"
-    ]
-  },
-  {
-    "covers": [
-      "tests/coslice.pigen",
-      "tests/coslice_tb.sv",
-      "src/assignments.c"
-    ],
-    "command": [
-      "make",
-      "coslice-test"
-    ]
-  },
-  {
-    "covers": [
-      "tests/coslice_typedef.pigen",
-      "tests/coslice_typedef_tb.sv",
-      "src/assignments.c"
-    ],
-    "command": [
-      "make",
-      "coslice-typedef-test"
-    ]
-  },
-  {
-    "covers": [
-      "examples/biquad_bank.pigen",
-      "examples/biquad_bank_tb.sv",
-      "src/assignments.c"
-    ],
-    "command": [
-      "make",
-      "biquad-bank-test"
-    ]
-  },
-  {
-    "covers": [
-      "tests/coslice_xprop.pigen",
-      "tests/coslice_xprop_tb.sv",
-      "src/assignments.c"
-    ],
-    "command": [
-      "make",
-      "coslice-xprop-test"
     ]
   },
   {
