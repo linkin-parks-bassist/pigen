@@ -1,6 +1,10 @@
 CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
+
+# Each C test program is built once per source change; every case runs that one binary.
+TEST_BUILD	= build/tests
+TEST_HEADERS	= $(wildcard include/pigen/*.h tests/*.h)
 SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
@@ -14,235 +18,237 @@ pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preproc
 test: pigen source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test fsm-identity-test
 	./tests/smoke.sh ./pigen
 
-source-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-source-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-source-test tests/source_test.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-source-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-source-test: tests/source_test.c src/source.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/source_test.c src/source.c src/util.c
 
-preprocess-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-preprocess-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-preprocess-test tests/preprocess_test.c src/preprocess.c src/lexer.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-preprocess-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+source-test: $(TEST_BUILD)/pigen-source-test
+	@rm -f /tmp/pigen-source-test
+	@$(TEST_BUILD)/pigen-source-test
 
-transfer-type-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-transfer-type-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-transfer-type-test tests/transfer_type_test.c src/transfer_type.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-transfer-type-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-preprocess-test: tests/preprocess_test.c src/preprocess.c src/lexer.c src/source.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/preprocess_test.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-syntax-model-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-syntax-model-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-syntax-model-test tests/syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-syntax-model-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+preprocess-test: $(TEST_BUILD)/pigen-preprocess-test
+	@rm -f /tmp/pigen-preprocess-test
+	@$(TEST_BUILD)/pigen-preprocess-test
 
-fsm-syntax-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-fsm-syntax-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-syntax-test tests/fsm_syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-fsm-syntax-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-transfer-type-test: tests/transfer_type_test.c src/transfer_type.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/transfer_type_test.c src/transfer_type.c
 
-instance-syntax-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-instance-syntax-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-instance-syntax-test tests/instance_syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-instance-syntax-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+transfer-type-test: $(TEST_BUILD)/pigen-transfer-type-test
+	@rm -f /tmp/pigen-transfer-type-test
+	@$(TEST_BUILD)/pigen-transfer-type-test
 
-integer-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-integer-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-integer-test tests/integer_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-integer-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-syntax-model-test: tests/syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES)
 
-semantic-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-semantic-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-semantic-test tests/semantic_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-semantic-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+syntax-model-test: $(TEST_BUILD)/pigen-syntax-model-test
+	@rm -f /tmp/pigen-syntax-model-test
+	@$(TEST_BUILD)/pigen-syntax-model-test
 
-predicate-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-predicate-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-predicate-test tests/predicate_test.c src/predicate.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-predicate-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-fsm-syntax-test: tests/fsm_syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/fsm_syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES)
 
-expression-resolve-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-expression-resolve-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-expression-resolve-test tests/expression_resolve_test.c src/expression_analysis.c src/expression_resolve.c src/type_resolve.c $(SEMANTIC_SOURCES) src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-expression-resolve-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+fsm-syntax-test: $(TEST_BUILD)/pigen-fsm-syntax-test
+	@rm -f /tmp/pigen-fsm-syntax-test
+	@$(TEST_BUILD)/pigen-fsm-syntax-test
 
-expression-use-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-expression-use-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-expression-use-test tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-expression-use-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-instance-syntax-test: tests/instance_syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/instance_syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES)
 
-resolve-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-resolve-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-resolve-test tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-resolve-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+instance-syntax-test: $(TEST_BUILD)/pigen-instance-syntax-test
+	@rm -f /tmp/pigen-instance-syntax-test
+	@$(TEST_BUILD)/pigen-instance-syntax-test $(T)
 
-rtl-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-rtl-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-test tests/rtl_test.c src/rtl.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-rtl-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-integer-test: tests/integer_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/integer_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c
 
-rtl-name-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-rtl-name-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-name-test tests/rtl_name_test.c src/rtl_name.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-rtl-name-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+integer-test: $(TEST_BUILD)/pigen-integer-test
+	@rm -f /tmp/pigen-integer-test
+	@$(TEST_BUILD)/pigen-integer-test
 
-output-model-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-output-model-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-output-model-test tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-output-model-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-semantic-test: tests/semantic_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/semantic_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c
 
-rtl-lower-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-rtl-lower-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-lower-test tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-rtl-lower-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+semantic-test: $(TEST_BUILD)/pigen-semantic-test
+	@rm -f /tmp/pigen-semantic-test
+	@$(TEST_BUILD)/pigen-semantic-test
 
-route-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-route-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-route-test tests/route_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-route-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-predicate-test: tests/predicate_test.c src/predicate.c $(SEMANTIC_SOURCES) src/source.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/predicate_test.c src/predicate.c $(SEMANTIC_SOURCES) src/source.c src/util.c
 
-route-law-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-route-law-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-route-law-test tests/route_law_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-route-law-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+predicate-test: $(TEST_BUILD)/pigen-predicate-test
+	@rm -f /tmp/pigen-predicate-test
+	@$(TEST_BUILD)/pigen-predicate-test
 
-route-vdo-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-route-vdo-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-route-vdo-test tests/route_validity_domain_ownership_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-route-vdo-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-expression-resolve-test: tests/expression_resolve_test.c src/expression_analysis.c src/expression_resolve.c src/type_resolve.c $(SEMANTIC_SOURCES) src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/expression_resolve_test.c src/expression_analysis.c src/expression_resolve.c src/type_resolve.c $(SEMANTIC_SOURCES) src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-route-stall-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-route-stall-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-route-stall-test tests/route_stall_throughput_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-route-stall-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+expression-resolve-test: $(TEST_BUILD)/pigen-expression-resolve-test
+	@rm -f /tmp/pigen-expression-resolve-test
+	@$(TEST_BUILD)/pigen-expression-resolve-test
 
-pipeline-identity-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-pipeline-identity-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-identity-test tests/pipeline_identity_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-pipeline-identity-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-expression-use-test: tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/expression_use_test.c src/expression_use.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 
-pipeline-output-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-pipeline-output-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-output-test tests/pipeline_output_test.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-pipeline-output-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+expression-use-test: $(TEST_BUILD)/pigen-expression-use-test
+	@rm -f /tmp/pigen-expression-use-test
+	@$(TEST_BUILD)/pigen-expression-use-test
 
-pipeline-stage-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-pipeline-stage-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-stage-test tests/pipeline_stage_test.c src/pipeline_stage.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-pipeline-stage-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-resolve-test: tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 
-pipeline-lower-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-pipeline-lower-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-lower-test tests/pipeline_lower_test.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c src/rtl.c src/rtl_lower.c src/predicate.c src/sv_emit.c src/rtl_name.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-pipeline-lower-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+resolve-test: $(TEST_BUILD)/pigen-resolve-test
+	@rm -f /tmp/pigen-resolve-test
+	@$(TEST_BUILD)/pigen-resolve-test
 
-fsm-identity-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-fsm-identity-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-identity-test tests/fsm_identity_test.c src/fsm_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-fsm-identity-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-rtl-test: tests/rtl_test.c src/rtl.c src/source.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/rtl_test.c src/rtl.c src/source.c src/util.c
 
-instance-identity-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-instance-identity-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-instance-identity-test tests/instance_identity_test.c src/instance_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-instance-identity-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+rtl-test: $(TEST_BUILD)/pigen-rtl-test
+	@rm -f /tmp/pigen-rtl-test
+	@$(TEST_BUILD)/pigen-rtl-test
 
-fsm-lower-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-fsm-lower-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-lower-test tests/fsm_lower_test.c src/fsm_lower.c src/rtl.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-fsm-lower-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-rtl-name-test: tests/rtl_name_test.c src/rtl_name.c src/source.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/rtl_name_test.c src/rtl_name.c src/source.c src/util.c
 
-instance-lower-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-instance-lower-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-instance-lower-test tests/instance_lower_test.c src/instance_lower.c src/rtl.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-instance-lower-test $(T) || status=$$?; \
-	rm -rf $$dir; exit $$status
+rtl-name-test: $(TEST_BUILD)/pigen-rtl-name-test
+	@rm -f /tmp/pigen-rtl-name-test
+	@$(TEST_BUILD)/pigen-rtl-name-test
 
-sv-emit-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-sv-emit-test; \
+$(TEST_BUILD)/pigen-output-model-test: tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+
+output-model-test: $(TEST_BUILD)/pigen-output-model-test
+	@rm -f /tmp/pigen-output-model-test
+	@$(TEST_BUILD)/pigen-output-model-test $(T)
+
+$(TEST_BUILD)/pigen-rtl-lower-test: tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+
+rtl-lower-test: $(TEST_BUILD)/pigen-rtl-lower-test
+	@rm -f /tmp/pigen-rtl-lower-test
+	@$(TEST_BUILD)/pigen-rtl-lower-test $(T)
+
+$(TEST_BUILD)/pigen-route-test: tests/route_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/route_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+
+route-test: $(TEST_BUILD)/pigen-route-test
+	@rm -f /tmp/pigen-route-test
+	@$(TEST_BUILD)/pigen-route-test $(T)
+
+$(TEST_BUILD)/pigen-route-law-test: tests/route_law_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/route_law_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+
+route-law-test: $(TEST_BUILD)/pigen-route-law-test
+	@rm -f /tmp/pigen-route-law-test
+	@$(TEST_BUILD)/pigen-route-law-test $(T)
+
+$(TEST_BUILD)/pigen-route-vdo-test: tests/route_validity_domain_ownership_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/route_validity_domain_ownership_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+
+route-vdo-test: $(TEST_BUILD)/pigen-route-vdo-test
+	@rm -f /tmp/pigen-route-vdo-test
+	@$(TEST_BUILD)/pigen-route-vdo-test $(T)
+
+$(TEST_BUILD)/pigen-route-stall-test: tests/route_stall_throughput_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/route_stall_throughput_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+
+route-stall-test: $(TEST_BUILD)/pigen-route-stall-test
+	@rm -f /tmp/pigen-route-stall-test
+	@$(TEST_BUILD)/pigen-route-stall-test $(T)
+
+$(TEST_BUILD)/pigen-pipeline-identity-test: tests/pipeline_identity_test.c src/transfer_type.c $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/pipeline_identity_test.c src/transfer_type.c $(SYNTAX_SOURCES)
+
+pipeline-identity-test: $(TEST_BUILD)/pigen-pipeline-identity-test
+	@rm -f /tmp/pigen-pipeline-identity-test
+	@$(TEST_BUILD)/pigen-pipeline-identity-test $(T)
+
+$(TEST_BUILD)/pigen-pipeline-output-test: tests/pipeline_output_test.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/pipeline_output_test.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+
+pipeline-output-test: $(TEST_BUILD)/pigen-pipeline-output-test
+	@rm -f /tmp/pigen-pipeline-output-test
+	@$(TEST_BUILD)/pigen-pipeline-output-test $(T)
+
+$(TEST_BUILD)/pigen-pipeline-stage-test: tests/pipeline_stage_test.c src/pipeline_stage.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/pipeline_stage_test.c src/pipeline_stage.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+
+pipeline-stage-test: $(TEST_BUILD)/pigen-pipeline-stage-test
+	@rm -f /tmp/pigen-pipeline-stage-test
+	@$(TEST_BUILD)/pigen-pipeline-stage-test $(T)
+
+$(TEST_BUILD)/pigen-pipeline-lower-test: tests/pipeline_lower_test.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c src/rtl.c src/rtl_lower.c src/predicate.c src/sv_emit.c src/rtl_name.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/pipeline_lower_test.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c src/rtl.c src/rtl_lower.c src/predicate.c src/sv_emit.c src/rtl_name.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+
+pipeline-lower-test: $(TEST_BUILD)/pigen-pipeline-lower-test
+	@rm -f /tmp/pigen-pipeline-lower-test
+	@$(TEST_BUILD)/pigen-pipeline-lower-test $(T)
+
+$(TEST_BUILD)/pigen-fsm-identity-test: tests/fsm_identity_test.c src/fsm_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/fsm_identity_test.c src/fsm_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+
+fsm-identity-test: $(TEST_BUILD)/pigen-fsm-identity-test
+	@rm -f /tmp/pigen-fsm-identity-test
+	@$(TEST_BUILD)/pigen-fsm-identity-test $(T)
+
+$(TEST_BUILD)/pigen-instance-identity-test: tests/instance_identity_test.c src/instance_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/instance_identity_test.c src/instance_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+
+instance-identity-test: $(TEST_BUILD)/pigen-instance-identity-test
+	@rm -f /tmp/pigen-instance-identity-test
+	@$(TEST_BUILD)/pigen-instance-identity-test $(T)
+
+$(TEST_BUILD)/pigen-fsm-lower-test: tests/fsm_lower_test.c src/fsm_lower.c src/rtl.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/fsm_lower_test.c src/fsm_lower.c src/rtl.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+
+fsm-lower-test: $(TEST_BUILD)/pigen-fsm-lower-test
+	@rm -f /tmp/pigen-fsm-lower-test
+	@$(TEST_BUILD)/pigen-fsm-lower-test $(T)
+
+$(TEST_BUILD)/pigen-instance-lower-test: tests/instance_lower_test.c src/instance_lower.c src/rtl.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/instance_lower_test.c src/instance_lower.c src/rtl.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+
+instance-lower-test: $(TEST_BUILD)/pigen-instance-lower-test
+	@rm -f /tmp/pigen-instance-lower-test
+	@$(TEST_BUILD)/pigen-instance-lower-test $(T)
+
+$(TEST_BUILD)/pigen-sv-emit-test: tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c
+
+sv-emit-test: $(TEST_BUILD)/pigen-sv-emit-test
+	@rm -f /tmp/pigen-sv-emit-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-sv-emit-test tests/sv_emit_test.c src/sv_emit.c src/rtl.c src/source.c src/rtl_name.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	if [ "$(T)" = "t10-no-search" ]; then \
 		if grep -nE 'strstr|strchr|pigen_symbol_lookup|pigen_data_type_|pigen_transfer_type_' src/sv_emit.c; then \
 			echo "t10-no-search: FAIL: src/sv_emit.c uses a source-text search or semantic-owner lookup"; \
@@ -251,9 +257,9 @@ sv-emit-test:
 			echo "t10-no-search: PASS: no source-text search or semantic-owner lookup in src/sv_emit.c"; \
 		fi; \
 	else \
-		$$dir/pigen-sv-emit-test $(T) || status=$$?; \
+		$(TEST_BUILD)/pigen-sv-emit-test $(T) || status=$$?; \
 	fi; \
-	rm -rf $$dir; exit $$status
+	exit $$status
 
 fabric-test: pigen
 	./tests/fabric_smoke.sh ./pigen
@@ -417,13 +423,14 @@ output-waveform: pigen
 	verilator --binary --trace --top-module output_pipeline_tb --Mdir /tmp/pigen-output-verilator rtl/pigen_primitives.sv examples/output_pipeline.sv examples/output_pipeline_tb.sv
 	/tmp/pigen-output-verilator/Voutput_pipeline_tb
 
-compile-test:
-	@dir=$$(mktemp -d); \
-	rm -f /tmp/pigen-compile-test; \
-	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-compile-test tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS) || { status=1; rm -rf $$dir; exit 1; }; \
-	$$dir/pigen-compile-test || status=$$?; \
-	rm -rf $$dir; exit $$status
+$(TEST_BUILD)/pigen-compile-test: tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS) $(TEST_HEADERS) Makefile
+	@mkdir -p $(TEST_BUILD)
+	$(CC) $(CFLAGS) -o $@ tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS)
+
+compile-test: $(TEST_BUILD)/pigen-compile-test
+	@rm -f /tmp/pigen-compile-test
+	@$(TEST_BUILD)/pigen-compile-test
 
 clean:
+	rm -rf build
 	rm -f pigen
