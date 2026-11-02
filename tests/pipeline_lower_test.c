@@ -898,6 +898,83 @@ static int pl_buf_guard_port(const pigen_rtl_model *rtl, const parsed *p,
 	return 0;
 }
 
+/* The stage-boundary buf storage's guard-connection GATING (the storage-hold
+ * side of the guard law, distinct from line 3's guard-port-presence): among
+ * the published RTL instances (pigen_rtl_model.instances) locate the one-entry
+ * buf primitive whose `connections` record range is non-empty and whose
+ * connection objects (each a pigen_rtl_object_id resolved through the model's
+ * instance-connection arena) include a guard connection whose origin span
+ * spells exactly WORD (the guard signal `en`, an owner-text check against the
+ * span, never a search over the output); that connection's GATING is that the
+ * published per-stage storage next-value equation (the pigen_rtl_equation
+ * whose destination is the established outgoing-packet object) is a hold mux -
+ * a PIGEN_RTL_EXPR_CONDITIONAL whose condition is, or carries in its reachable
+ * subtree, a PIGEN_RTL_EXPR_OBJECT whose origin span spells WORD - so a false
+ * guard holds the stored value (keeps the previous value under !en) rather
+ * than the current constant-0 stand-in. Returns 1 only when the guard
+ * connection is published AND its storage-hold gating is enforced; 0
+ * otherwise (the connectionless instance the current master lowering adds -
+ * pigen_rtl_instance_add_with_owner(..., NULL, 0, NULL, 0, ...) leaves the
+ * connections range empty, so the count-zero gate and the empty-scan both
+ * return 0, and the next-value equation is the constant-0 integer stand-in
+ * with no reachable guard object, so the hold-mux gate also returns 0). */
+static int pl_buf_guard_gates(const pigen_rtl_model *rtl, const parsed *p,
+	const char *word)
+{
+	size_t i;
+	int guard_port = 0;
+	int hold_mux = 0;
+
+	/* (a) the guard connection: a non-empty connections range on the one-entry
+	 * buf instance carrying a connection object whose origin span spells WORD.
+	 */
+	for (i = 0; i < rtl->instance_count && !guard_port; i++)
+	{
+		const pigen_rtl_instance *inst = pigen_rtl_instance_get(rtl,
+			(pigen_rtl_instance_id){(uint32_t)i});
+		const pigen_rtl_object_id *connections;
+		size_t c;
+
+		if (!inst || inst->connections.count == 0)
+			continue;
+		connections = &rtl->instance_connections[inst->connections.first];
+		for (c = 0; c < inst->connections.count; c++)
+		{
+			const pigen_rtl_object *obj = pigen_rtl_object_get(rtl,
+				connections[c]);
+
+			if (obj && span_is(&p->sources, obj->origin, word))
+			{
+				guard_port = 1;
+				break;
+			}
+		}
+	}
+	if (!guard_port)
+		return 0;
+
+	/* (b) the storage-hold gating: the published per-stage next-value equation
+	 * (the equation whose destination is the established outgoing-packet
+	 * object) is a hold mux whose condition, or its reachable subtree, carries
+	 * an object spelling WORD - a false guard holds the stored value. Against
+	 * the current master lowering the next-value equation's value is the
+	 * constant-0 integer stand-in (no reachable guard object), so this stays 0.
+	 */
+	for (i = 0; i < rtl->equation_count && !hold_mux; i++)
+	{
+		const pigen_rtl_equation *eq = pigen_rtl_equation_get(rtl,
+			(pigen_rtl_equation_id){(uint32_t)i});
+		const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(rtl, eq->value)
+			: NULL;
+
+		if (!v || v->kind != PIGEN_RTL_EXPR_CONDITIONAL)
+			continue;
+		hold_mux = pl_subtree_spells(rtl, v, p, word);
+	}
+
+	return hold_mux;
+}
+
 int main(int argc, char **argv)
 {
 	check_init(argc, argv);
@@ -3876,6 +3953,114 @@ int main(int argc, char **argv)
 			 * connections range is empty, pl_buf_guard_port returns 0 and
 			 * this fails - the discriminating red. */
 			REQUIRE(pl_buf_guard_port(&rtl, &p, "en"));
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (8) storage-false-guard-hold: the stage-boundary buf storage's     */
+	/*     guard connection is gated by the complete enclosing procedural */
+	/*     guard (how/to/reset/and/enable/a/pipeline.md; the storage-hold */
+	/*     side of the law, what/are/the/pipeline/guard/storage/io/test/ */
+	/*     scenarios.md line 4, reviewed at what/is/the/review/of/the/   */
+	/*     pipeline/guard/storage/io/test/scenarios.md; the buf          */
+	/*     what/is/a/buf.md), independent of the ready value. The anchor */
+	/*     is the legal 2-stage pipeline nested under `if (en)` inside   */
+	/*     the clocked process (1-bit module input en, stage 1 a <= x,   */
+	/*     stage 2 b <= a, yield b), driven through the established      */
+	/*     guarded-fixture seam (pl_parse_guarded) and lowered through   */
+	/*     pl_drive to rc == 0. It publishes its one stage-boundary buf  */
+	/*     storage (the N-1 = 1 one-entry primitive pigen_rtl_instance)  */
+	/*     whose guard connection is gated by `en` such that a false     */
+	/*     guard holds the stored value: the connection objects include  */
+	/*     a guard connection whose origin span spells exactly `en`, AND */
+	/*     the published per-stage storage next-value equation is a hold */
+	/*     mux (PIGEN_RTL_EXPR_CONDITIONAL) whose condition, or its      */
+	/*     reachable subtree, carries an object spelling `en` - a false  */
+	/*     guard keeps the previous value under !en. This is the         */
+	/*     discriminating red: against the current master lowering the   */
+	/*     buf instance is added connectionless (src/pipeline_lower.c:   */
+	/*     pigen_rtl_instance_add_with_owner(..., NULL, 0, NULL, 0, ...))*/
+	/*     and the next-value equation is the constant-0 integer stand-in*/
+	/*     with the guard unused, so pl_buf_guard_gates returns 0 and    */
+	/*     the section fails. It asserts the storage-hold side of the    */
+	/*     law, NOT the ready equation's value (owned by the six         */
+	/*     halting/stop sections). The guard-signal name span is pinned  */
+	/*     through the expanded-source token origins (exactly as         */
+	/*     pl_name_span resolves the if condition's name), so the        */
+	/*     assertion is against the parsed source, never a search over   */
+	/*     the output.                                                  */
+	/* ------------------------------------------------------------------ */
+	SECTION("storage-false-guard-hold") {
+		/* Anchor: the guarded 2-stage pipeline lowers to rc == 0 and its
+		 * one stage-boundary buf storage's guard connection is gated by
+		 * `en` so a false guard holds the stored value. */
+		{
+			parsed p = pl_parse_guarded("sfgh_ok.pigen",
+				"module sfgh_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline sfgh_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). This pins the
+			 * guard span the guard-connection-gating assertion checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The 2-stage pipeline publishes exactly N-1 = 1 stage-boundary
+			 * buf storage (the one-entry primitive instance). */
+			REQUIRE(rtl.instance_count == 1);
+			/* The one stage-boundary buf storage's guard connection is gated
+			 * by `en` such that a false guard holds the stored value: the
+			 * connections range includes a guard connection whose origin span
+			 * spells exactly `en`, AND the published per-stage storage
+			 * next-value equation is a hold mux whose condition (or reachable
+			 * subtree) carries an object spelling `en`. Against the current
+			 * master lowering the instance is added connectionless
+			 * (connections == NULL, count 0) and the next-value equation is
+			 * the constant-0 integer stand-in with the guard unused, so
+			 * pl_buf_guard_gates returns 0 and this fails - the discriminating
+			 * red, the storage-hold side of the law left unenforced. */
+			REQUIRE(pl_buf_guard_gates(&rtl, &p, "en"));
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
 			pl_free(&p);
