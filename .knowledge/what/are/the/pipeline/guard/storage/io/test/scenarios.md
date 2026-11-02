@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-02T09:05:30+11:00"
+revised_at: "2026-11-03T02:01:01+11:00"
 ---
 
 ## Scope
@@ -19,7 +19,7 @@ It does NOT re-map the ready equation's *value* — already mapped and green in 
 
 ## Current coverage
 
-`pipeline-lower-test` already pins the ready *value* — the six accepted sections `ready-guarded-by-en`, `ready-not-constant-one`, `unguarded-ready-constant-one`, `compound-guard-published`, `guarded-storage-holds` and `ready-renders-guard-sv` — and, for the unguarded pipeline, the storage/yield/member-order shape (`buf-storage` pins only `instance_count`; `yield-write` pins only the yield destination's provenance; neither pins a guard port or a guarded yield). Not yet pinned: the per-stage next-value equation is a constant-0 stand-in (`pigen_rtl_expr_add_integer(..., 0, ...)` at src/pipeline_lower.c) with the guard unused; the stage-boundary buf instance is added with a `connections` count of 0 (no guard/valid port); the yield write is unconditional; the ready equation is gated but its guard expression is a dangling internal 1-bit object (its *value* is asserted by the ready-value sections). This list fills the storage-hold and I/O-handshake side; after it, the implementation must wire the guard into the storage update and I/O handshake (the disposition owner's change), the later owner that depends on this packet.
+`pipeline-lower-test` already pins the ready *value* — the six accepted sections `ready-guarded-by-en`, `ready-not-constant-one`, `unguarded-ready-constant-one`, `compound-guard-published`, `guarded-storage-holds` and `ready-renders-guard-sv` — and, for the unguarded pipeline, the storage/yield/member-order shape (`buf-storage` pins only `instance_count`; `yield-write` pins only the yield destination's provenance; neither pins a guard port or a guarded yield) and the per-stage next-value computation value (the six stage-computation sections pin the structural expression; the constant-0 stand-in is replaced). Not yet pinned: no per-stage next-value equation is a guard-gated hold mux (scenario line 1 `guard-io-1-next-value-holds` is authored and accepted as its discriminating red section); the stage-boundary buf instance is added with a `connections` count of 0 (no guard/valid port); the yield write is unconditional; the ready equation is gated but its guard expression is a dangling internal 1-bit object (its *value* is asserted by the ready-value sections). This list fills the storage-hold and I/O-handshake side; after it, the implementation must wire the guard into the storage update and I/O handshake (the disposition owner's change), the later owner that depends on this packet.
 
 ## Test scenarios
 
@@ -43,9 +43,9 @@ One line = one later test-author scenario, its own `SECTION` in `tests/pipeline_
 - `pigen_sv_render_expression` + `pigen_rtl_assign_names` (PIGEN_RTL_NAME_SOURCE) cover scenario 8's rendered-mux and rendered-yield checks.
 - No production-source change is part of any scenario: the authors register the discriminating sections; the guard-wiring implementation is the later owner that depends on this packet.
 
-## Dependency on plan item 1 (the stand-in replacement)
+## Stand-in replacement (plan item 1) dependency
 
-Scenario 2's when-true child is the stage's computed next value, published by the accepted stand-in-replacement packet (plan item 1) that replaces the constant-0 stand-in with each stage's published expressions (`what/are/the/pipeline/stage/computation/test/scenarios.md`, review `what/is/the/review/of/the/pipeline/stage/computation/test/scenarios.md`). Until the stand-in is replaced, the when-true child is still the constant-0 stand-in, so scenario 2 asserts only the mux shape and the when-false stored-value object; the when-true child becomes the computed value once plan item 1 has landed. The guard-wiring implementation lands after plan item 1.
+Scenario 2's when-true child is the stage's computed next value, published by the landed stand-in replacement (the per-stage next value is now the stage's structural expression over the immutable incoming fields, `what/are/the/pipeline/stage/computation/test/scenarios.md`). The accepted scenario-2 assertion pins the mux shape and the when-false stored-value object; the when-true child is the computed value that replacement publishes. The guard-wiring implementation lands after plan item 1, which is done.
 
 ## Exclusions (other scoped assignments)
 

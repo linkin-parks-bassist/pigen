@@ -711,6 +711,65 @@ static int pl_calc_subtree_refs(const pigen_rtl_model *rtl,
 	return 0;
 }
 
+/* The established step-(a) outgoing-packet object: the parent module's RTL
+ * object bound, by provenance, to the pipeline's module-scope buf output packet
+ * signal - the direction-OUTPUT object with a valid semantic_signal identity.
+ * The per-stage next-value equations and the final yield write all drive this
+ * same object (src/pipeline_lower.c publishes the packet once and drives it from
+ * each stage's next-value equation and the yield concatenation). Returns INVALID
+ * when no such object is published. */
+static pigen_rtl_object_id pl_outgoing_packet_object(const pigen_rtl_model *rtl)
+{
+	size_t i;
+
+	for (i = 0; i < rtl->object_count; i++)
+	{
+		const pigen_rtl_object *obj = pigen_rtl_object_get(rtl,
+			(pigen_rtl_object_id){(uint32_t)i});
+
+		if (obj && obj->direction == PIGEN_SEMANTIC_OUTPUT &&
+			!IS_INVALID_ID(obj->semantic_signal))
+			return (pigen_rtl_object_id){(uint32_t)i};
+	}
+	return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+}
+
+/* Locates the per-stage next-value equations: the stage-boundary
+ * pigen_rtl_equations whose destination is the stage's outgoing-packet object
+ * and whose value is a PIGEN_RTL_EXPR_CONDITIONAL (the guard-gated hold mux).
+ * Fills out (capacity capacity) with the value expressions, in publication
+ * order, one per stage; returns the count. The per-stage next-value equation is
+ * distinguished from the final yield write (which also drives the outgoing-
+ * packet object but whose value is the concatenation of the yield members, not
+ * a conditional) by the value's kind: the hold-mux value is a
+ * PIGEN_RTL_EXPR_CONDITIONAL. Against the current stand-in lowering
+ * (src/pipeline_lower.c: the next-value value is the integer constant 0) no
+ * equation carries a conditional value, so this returns 0 and the section is
+ * the discriminating red. */
+static size_t pl_next_value_equations(const pigen_rtl_model *rtl,
+	const pigen_rtl_object_id *packet, pigen_rtl_expr_id *out, size_t capacity)
+{
+	size_t count = 0;
+	size_t i;
+
+	for (i = 0; i < rtl->equation_count; i++)
+	{
+		const pigen_rtl_equation *eq = pigen_rtl_equation_get(rtl,
+			(pigen_rtl_equation_id){(uint32_t)i});
+		const pigen_rtl_expr *v;
+
+		if (!eq || eq->destination.index != packet->index)
+			continue;
+		v = pigen_rtl_expr_get(rtl, eq->value);
+		if (!v || v->kind != PIGEN_RTL_EXPR_CONDITIONAL)
+			continue;
+		if (count < capacity)
+			out[count] = eq->value;
+		count++;
+	}
+	return count;
+}
+
 /* Establishes the step-(a) outgoing-packet identity the lowering consumes as a
  * validated input, fills *ident, and returns the establish status (0 accepted,
  * -1 diagnosed). */
@@ -3400,6 +3459,139 @@ int main(int argc, char **argv)
 			 * dropped them (publishing only the yield) would leave the count
 			 * below stage_count and pass the exclusion vacuously. */
 			REQUIRE(stage_eq_count >= stage_count);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (8) guard-io-1-next-value-holds: the per-stage next value holds on a */
+	/*     false guard (scenario line 1 of the accepted pipeline guard-law  */
+	/*     storage-hold and I/O-handshake test map, what/are/the/pipeline/  */
+	/*     guard/storage/io/test/scenarios.md, independently reviewed and   */
+	/*     accepted at what/is/the/review/of/the/pipeline/guard/storage/    */
+	/*     io/test/scenarios.md). The anchor is the scenario's legal        */
+	/*     2-stage pipeline nested under `if (en)` inside the clocked       */
+	/*     process (1-bit module input en, stage 1 a <= x, stage 2 b <= a,  */
+	/*     yield b). It lowers to rc == 0 and publishes each stage's        */
+	/*     next-value equation with a value that is a mux (PIGEN_RTL_EXPR_  */
+	/*     CONDITIONAL) whose condition is, or contains in its reachable    */
+	/*     subtree, a PIGEN_RTL_EXPR_OBJECT whose origin span spells        */
+	/*     exactly `en` in the parsed source: the storage holds (keeps its  */
+	/*     previous value) while the guard is false, rather than the        */
+	/*     current constant-0 stand-in (src/pipeline_lower.c: the per-stage */
+	/*     next-value value is pigen_rtl_expr_add_integer(..., 0, ...) with */
+	/*     the guard unused, so no per-stage next-value equation carries a  */
+	/*     conditional value). The per-stage next-value equation is located */
+	/*     by its destination (the established outgoing-packet object, the  */
+	/*     direction-OUTPUT object with provenance to the established       */
+	/*     signal) and its value's kind (PIGEN_RTL_EXPR_CONDITIONAL, which  */
+	/*     distinguishes it from the final yield write whose value is the   */
+	/*     yield concatenation); the mux's condition is its first child and */
+	/*     is walked for the guard object through pl_subtree_spells (an     */
+	/*     owner-text check against the span, never a search over the       */
+	/*     output). Against the current master lowering no per-stage next-  */
+	/*     value equation carries a conditional value, so this section is   */
+	/*     the discriminating red: it FAILS here and turns green only when  */
+	/*     the guard-wiring implementation (the later owner that depends on */
+	/*     this packet) publishes each stage's next value as the guard-     */
+	/*     gated hold mux. The ready equation's value is NOT re-asserted    */
+	/*     (owned by the six accepted ready-value sections). The guarded-   */
+	/*     fixture extension (pl_parse_guarded) is the file-local seam the  */
+	/*     sibling ready-value sections own; the step-(a) identity and      */
+	/*     step-(b) stage-law owners read only the pipeline node and its    */
+	/*     body, so the guarded pipeline drives the unchanged 5-arg seam.   */
+	/* ------------------------------------------------------------------ */
+	SECTION("guard-io-1-next-value-holds") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers and each
+		 * per-stage next-value equation is a guard-gated hold mux. */
+		{
+			parsed p = pl_parse_guarded("gio1_ok.pigen",
+				"module gio1_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline gio1_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			size_t stage_count;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			pigen_rtl_object_id packet;
+			pigen_rtl_expr_id values[8];
+			size_t value_count;
+			size_t i;
+
+			stage_count = pl_stage_nodes(&p, stages);
+			REQUIRE(stage_count == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). This pins the
+			 * fixture and the guard span the hold-mux assertion checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The established outgoing-packet object: the destination the
+			 * per-stage next-value equations drive (distinguishing them from
+			 * every other published equation). */
+			packet = pl_outgoing_packet_object(&rtl);
+			REQUIRE(!IS_INVALID_ID(packet));
+			/* One per-stage next-value equation per stage: a 2-stage pipeline
+			 * publishes exactly 2. Against the current stand-in lowering each
+			 * next-value value is the integer constant 0 (not a conditional),
+			 * so value_count is 0 and this REQUIRE is the discriminating red. */
+			value_count = pl_next_value_equations(&rtl, &packet, values, 8);
+			REQUIRE(value_count == stage_count);
+			/* Each per-stage next-value equation's value is the guard-gated
+			 * hold mux: its condition (the first child) is, or contains in
+			 * its reachable subtree, a PIGEN_RTL_EXPR_OBJECT whose origin
+			 * span spells exactly `en` - the storage holds under the guard. */
+			for (i = 0; i < value_count; i++)
+			{
+				const pigen_rtl_expr *mux = pigen_rtl_expr_get(&rtl, values[i]);
+				pigen_rtl_expr_id cond_id;
+				const pigen_rtl_expr_id *children;
+				size_t child_count;
+
+				REQUIRE(mux && mux->kind == PIGEN_RTL_EXPR_CONDITIONAL);
+				children = pigen_rtl_expr_children(&rtl,
+					(pigen_rtl_expr_id){(uint32_t)(mux - rtl.expressions)},
+					&child_count);
+				REQUIRE(child_count >= 1);
+				cond_id = children[0]; /* the hold mux's condition child */
+				REQUIRE(pl_subtree_spells(&rtl,
+					pigen_rtl_expr_get(&rtl, cond_id), &p, "en"));
+			}
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
 			pl_free(&p);
