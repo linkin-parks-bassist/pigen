@@ -806,6 +806,46 @@ static int pl_stage_next_value_holds(const pigen_rtl_model *rtl,
 	return 0;
 }
 
+/* The yield write to the outgoing packet (the final-stage write to the `yield`
+ * target) as the published RTL equation whose value is a
+ * PIGEN_RTL_EXPR_CONCATENATION (the outgoing-packet aggregate, the
+ * concatenation of the yield members in source order - the terminal
+ * concatenation emitted-member-order pins); returns an invalid id when no such
+ * equation is published. The concatenation is the unique terminal aggregation
+ * in a pipeline model (the per-stage next-value stand-ins are integer
+ * constants and the ready is a 1-bit expression, never a concatenation), and a
+ * single-field yield still publishes it (one child), so locating it by kind is
+ * robust. The yield's outgoing fields are the pipeline's synthetic yield
+ * members (their origin is the member's own name span, never the guard's
+ * spelling), so the yield write's value and its reachable subtree is the
+ * observation point the output-handshake-guarded-by-en section checks: a
+ * false-guard implementation that gates the yield write publishes the guard
+ * object (origin spelling `en`) inside it, and the unguarded yield does not. */
+static pigen_rtl_expr_id pl_yield_write_value(const pigen_rtl_model *rtl)
+{
+	size_t i;
+
+	for (i = 0; i < rtl->equation_count; i++)
+	{
+		const pigen_rtl_equation *eq = pigen_rtl_equation_get(rtl,
+			(pigen_rtl_equation_id){(uint32_t)i});
+		const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(rtl, eq->value) : NULL;
+
+		if (v && v->kind == PIGEN_RTL_EXPR_CONCATENATION)
+			return eq->value;
+	}
+	for (i = 0; i < rtl->update_count; i++)
+	{
+		const pigen_rtl_update *up = pigen_rtl_update_get(rtl,
+			(pigen_rtl_update_id){(uint32_t)i});
+		const pigen_rtl_expr *v = up ? pigen_rtl_expr_get(rtl, up->value) : NULL;
+
+		if (v && v->kind == PIGEN_RTL_EXPR_CONCATENATION)
+			return up->value;
+	}
+	return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+}
+
 /* Establishes the step-(a) outgoing-packet identity the lowering consumes as a
  * validated input, fills *ident, and returns the establish status (0 accepted,
  * -1 diagnosed). */
@@ -4226,6 +4266,76 @@ int main(int argc, char **argv)
 			 * AND all storage holds together when the guard is false. */
 			REQUIRE(ready_ok);
 			REQUIRE(holds_ok);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	SECTION("output-handshake-guarded-by-en") {
+		/* Scenario 6 (storage-io map): the output handshake is disabled on a
+		 * false guard - the final-stage write to the outgoing packet (the `yield`
+		 * write) is gated by the guard `en`. The guarded pipeline is the shared
+		 * pl_parse_guarded fixture (a legal 2-stage pipeline nested under `if
+		 * (en)`); the step-(a) identity and the step-(b) stage-law each read only
+		 * the pipeline node and its body, so the guarded pipeline drives the
+		 * unchanged seam. The yield write's published value must carry, in its
+		 * reachable subtree, the guard object whose origin spells `en`. Against
+		 * the current master lowering the yield write's value is a plain
+		 * concatenation of the (synthetic, guard-unspelled-origin) yield members
+		 * with no guard, so its reachable subtree does not spell `en` and this
+		 * section fails - the unguarded yield is the stand-in. The section does
+		 * not re-assert the ready equation's value (ready-guarded-by-en owns
+		 * that). */
+		{
+			parsed p = pl_parse_guarded("ogh_en.pigen",
+				"module ogh_en(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline ogh_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			pigen_rtl_expr_id yield_value;
+			const pigen_rtl_expr *yield_expr;
+			int rc;
+
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* Locate the outgoing-packet write (the yield write) through the
+			 * owner accessors: the RTL equation (or clocked update) whose value
+			 * is the outgoing-packet aggregate concatenation. */
+			yield_value = pl_yield_write_value(&rtl);
+			REQUIRE(!IS_INVALID_ID(yield_value));
+			yield_expr = pigen_rtl_expr_get(&rtl, yield_value);
+			REQUIRE(yield_expr != NULL);
+			/* The yield write's value is the outgoing-packet concatenation (the
+			 * terminal aggregation emitted-member-order pins), confirming the
+			 * locator found the final-stage yield write. */
+			REQUIRE(yield_expr->kind == PIGEN_RTL_EXPR_CONCATENATION);
+			/* The observation point: the yield write's value, reachable subtree
+			 * included, carries the guard object (origin spelling `en`). Against
+			 * the current master lowering the concatenation's reachable subtree
+			 * is only the guard-unspelled synthetic yield members, so this
+			 * fails (the red). */
+			REQUIRE(pl_subtree_spells(&rtl, yield_expr, &p, "en"));
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
 			pl_free(&p);
