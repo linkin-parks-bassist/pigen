@@ -1452,5 +1452,17 @@
       "pipeline-lower-test",
       "T=calc-arithmetic"
     ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=calc-no-standin"
+    ]
   }
 ]

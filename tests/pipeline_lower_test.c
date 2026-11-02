@@ -3110,5 +3110,135 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* ------------------------------------------------------------------ */
+	/* (6) calc-no-standin: the published per-stage combinational          */
+	/*     next-value equations carry the stage's SPECIFIED computation    */
+	/*     over the immutable incoming fields, never a constant stand-in   */
+	/*     (spec what/is/the/spec.md; the per-stage next-value step (c):   */
+	/*     what/is/the/pipeline/parent/module/lowering.md; the stage-      */
+	/*     execution law how/do/pipeline/stage/reads/work.md; scenario     */
+	/*     what/are/the/pipeline/stage/computation/test/scenarios.md,      */
+	/*     line 5). The current (c3) lowering publishes each stage's       */
+	/*     next-value equation with a constant-0 value (the stand-in for the */
+	/*     computation the stage performs). The anchor lowers a legal        */
+	/*     2-stage pipeline whose stage computations are nontrivial (stage   */
+	/*     1: `a <= x`; stage 2: `b <= a + 8'h1`) to rc == 0 and asserts     */
+	/*     that NO published per-stage next-value equation carries an        */
+	/*     integer-constant value (PIGEN_RTL_EXPR_INTEGER). The per-stage    */
+	/*     next-value equations are distinguished from the other equations   */
+	/*     the lowering publishes by their destination: they all drive the   */
+	/*     established step-(a) outgoing-packet object (the object bound,    */
+	/*     by provenance, to the established outgoing-packet signal), and    */
+	/*     within that set the single equation whose value is the outgoing-  */
+	/*     packet CONCATENATION is the final yield write, not a per-stage    */
+	/*     next-value equation - the per-stage equations are the rest.       */
+	/*     Against the current (c3) lowering every per-stage next-value      */
+	/*     equation's value IS the constant-0 stand-in, so this section is   */
+	/*     the discriminating red: it fails until the (c3) implementation    */
+	/*     publishes each stage's actual computation. A builder that drops   */
+	/*     the per-stage next-value equations (publishing only the yield)    */
+	/*     fails the count; a builder that keeps the stand-in fails the      */
+	/*     integer-constant exclusion. The same computation obligation is    */
+	/*     pinned positively by the sibling scenario sections (lines 1-4,    */
+	/*     6); this section pins the negative that the stand-in is gone.     */
+	/* ------------------------------------------------------------------ */
+	SECTION("calc-no-standin") {
+		/* Anchor: a legal 2-stage pipeline with nontrivial stage
+		 * computations (stage 1 reads the enclosing input x; stage 2
+		 * computes `a + 8'h1` over the immutable incoming field a) lowers to
+		 * rc == 0 and NO per-stage next-value equation carries an
+		 * integer-constant value. */
+		{
+			parsed p = pl_parse("cns_ok.pigen",
+				"module cns_ok(input logic clk, input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline cns_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= x;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tb <= a + 8'h1;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield b;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			size_t stage_count;
+			pigen_pipeline_identifier ident;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			size_t stage_eq_count = 0;
+
+			stage_count = pl_stage_nodes(&p, stages);
+			REQUIRE(stage_count == 2);
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			/* Establish the step-(a) outgoing-packet identity directly (so we
+			 * hold the established signal's id to key the outgoing-packet
+			 * object) and drive the lowering on it - pl_drive would establish
+			 * it a second time, which the duplicate symbol declaration
+			 * rejects. */
+			REQUIRE(pl_establish(&p, &u, &ident) == 0);
+			REQUIRE(!IS_INVALID_ID(ident.signal));
+			memset(&rtl, 0, sizeof rtl);
+			pigen_rtl_lowering_init(&lowering, &u.model, &rtl);
+			rc = pigen_pipeline_lower(&lowering, u.module, p.pipeline_id,
+				p.pipeline, &p.pre.expanded);
+			pigen_rtl_lowering_free(&lowering);
+			REQUIRE(rc == 0);
+			/* Walk the published RTL equations. The per-stage next-value
+			 * equations are exactly the ones whose destination is the
+			 * established step-(a) outgoing-packet object (bound, by
+			 * provenance, to the established outgoing-packet signal), MINUS
+			 * the single equation whose value is the outgoing-packet
+			 * concatenation (the final yield write). Every remaining
+			 * equation in that set is a per-stage next-value equation and,
+			 * per the contract, must carry the stage's computed expression -
+			 * never an integer constant. */
+			for (i = 0; i < rtl.equation_count; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_object *dest = eq ? pigen_rtl_object_get(&rtl,
+					eq->destination) : NULL;
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				int is_packet_dest;
+
+				if (!eq || !dest || !v)
+					continue;
+				is_packet_dest =
+					!IS_INVALID_ID(dest->semantic_signal) &&
+					dest->semantic_signal.index == ident.signal.index;
+				if (!is_packet_dest)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_CONCATENATION)
+					/* The final yield write: the outgoing-packet object driven
+					 * by the concatenation of the yield members in source
+					 * order. Not a per-stage next-value equation. */
+					continue;
+				/* A per-stage next-value equation. It must carry the stage's
+				 * computed expression over the immutable incoming fields, not
+				 * an integer-constant stand-in. */
+				stage_eq_count++;
+				REQUIRE(v->kind != PIGEN_RTL_EXPR_INTEGER);
+			}
+			/* The anchor actually inspected the per-stage next-value equations:
+			 * a legal 2-stage pipeline publishes one per stage. A builder that
+			 * dropped them (publishing only the yield) would leave the count
+			 * below stage_count and pass the exclusion vacuously. */
+			REQUIRE(stage_eq_count >= stage_count);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
 	return check_finish();
 }
