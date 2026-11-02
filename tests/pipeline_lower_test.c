@@ -828,6 +828,39 @@ static int pl_seam_red(const parsed *p, unit *u, pigen_rtl_lowering *lowering,
 	}
 }
 
+/* File-local per-stage next-value locator (the storage-io map's NEW helper for
+ * scenarios 1, 2, 5, 8): the per-stage next-value equation's VALUE expression.
+ * The equation is located by its own origin span - the stage's node span (the
+ * lowering publishes each stage's next-value equation with the stage node's
+ * source span as its origin; the yield write carries the pipeline span and the
+ * ready equation an invalid span, so the stage span is the discriminator,
+ * exactly as the guard-io-1/guard-io-5 sibling locators do) - never by a
+ * source-text search. Returns the equation's value expression id: the
+ * guard-gated hold mux, a PIGEN_RTL_EXPR_CONDITIONAL, once the guard-wiring
+ * owner publishes it, or the invalid id when it is not yet published (the
+ * current stand-in lowering publishes an integer-constant value on the same
+ * equation, so the section's CONDITIONAL pin is the discriminating red). */
+static pigen_rtl_expr_id pl_next_value(const pigen_rtl_model *rtl,
+	const pigen_syntax_node *stage)
+{
+	pigen_source_span stage_span = stage->location.source_span;
+	size_t i;
+
+	for (i = 0; i < rtl->equation_count; i++)
+	{
+		const pigen_rtl_equation *eq = pigen_rtl_equation_get(rtl,
+			(pigen_rtl_equation_id){(uint32_t)i});
+
+		if (!eq)
+			continue;
+		if (eq->origin.start != stage_span.start ||
+			eq->origin.end != stage_span.end)
+			continue;
+		return eq->value;
+	}
+	return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+}
+
 int main(int argc, char **argv)
 {
 	check_init(argc, argv);
@@ -3591,6 +3624,127 @@ int main(int argc, char **argv)
 				cond_id = children[0]; /* the hold mux's condition child */
 				REQUIRE(pl_subtree_spells(&rtl,
 					pigen_rtl_expr_get(&rtl, cond_id), &p, "en"));
+			}
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	SECTION("hold-mux-stored") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers to rc == 0
+		 * and each per-stage next-value equation's value is a hold mux:
+		 * PIGEN_RTL_EXPR_CONDITIONAL whose when-false child (children[2]) is
+		 * the stage's stored value (PIGEN_RTL_EXPR_OBJECT), the false branch
+		 * holding. Plan item 1 (the stand-in replacement) has not landed, so
+		 * the when-true child is still the constant-0 stand-in and is NOT
+		 * asserted; only the mux shape and the when-false stored-value object
+		 * are pinned. */
+		{
+			parsed p = pl_parse_guarded("hms_ok.pigen",
+				"module hms_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline hms_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a name
+			 * spelling exactly `en` (the guard signal). */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* For each stage: the per-stage next-value equation (located by
+			 * its stage node's own origin span, the discriminator the
+			 * guard-io-1/guard-io-5 siblings use) is a hold mux - a
+			 * PIGEN_RTL_EXPR_CONDITIONAL whose when-false child (children[2])
+			 * is the stage's stored value, an OBJECT. The constant-0 stand-in
+			 * the current lowering publishes on that equation (an INTEGER
+			 * expression, which has no children) is not a conditional, so this
+			 * assertion discriminates the stand-in and fails today until the
+			 * guard-wiring implementation publishes the hold mux. */
+			{
+				pigen_rtl_expr_id va = pl_next_value(&rtl, stages[0]);
+				pigen_rtl_expr_id vb = pl_next_value(&rtl, stages[1]);
+				const pigen_rtl_expr *ea = pigen_rtl_expr_get(&rtl, va);
+				const pigen_rtl_expr *eb = pigen_rtl_expr_get(&rtl, vb);
+
+				REQUIRE(!IS_INVALID_ID(va));
+				REQUIRE(!IS_INVALID_ID(vb));
+				/* The per-stage next value is the hold mux, not the
+				 * constant-0 stand-in: it is a CONDITIONAL expression. */
+				REQUIRE(ea->kind == PIGEN_RTL_EXPR_CONDITIONAL);
+				REQUIRE(eb->kind == PIGEN_RTL_EXPR_CONDITIONAL);
+				/* The when-false child (children[2]) is the stage's stored
+				 * value: a PIGEN_RTL_EXPR_OBJECT. The false branch holds. */
+				{
+					const pigen_rtl_expr_id *ca;
+					const pigen_rtl_expr_id *cb;
+					size_t na = 0, nb = 0;
+					const pigen_rtl_expr *fa;
+					const pigen_rtl_expr *fb;
+					pigen_source_span sspan_a = stages[0]->location.source_span;
+					pigen_source_span sspan_b = stages[1]->location.source_span;
+
+					ca = pigen_rtl_expr_children(&rtl, va, &na);
+					cb = pigen_rtl_expr_children(&rtl, vb, &nb);
+					REQUIRE(na == 3);
+					REQUIRE(nb == 3);
+					fa = pigen_rtl_expr_get(&rtl, ca[2]);
+					fb = pigen_rtl_expr_get(&rtl, cb[2]);
+					REQUIRE(fa && fa->kind == PIGEN_RTL_EXPR_OBJECT);
+					REQUIRE(fb && fb->kind == PIGEN_RTL_EXPR_OBJECT);
+					/* The when-false object is the stage's stored value, a
+					 * synthetic object the hold mux publishes: its origin is
+					 * the stage's own node span (not the field's name span,
+					 * which the when-true incoming-field-read operands carry),
+					 * the same span the per-stage next-value equation is
+					 * located by. */
+					REQUIRE(pigen_rtl_object_get(&rtl, fa->object) &&
+						pigen_rtl_object_get(&rtl, fa->object)->origin.start ==
+						sspan_a.start &&
+						pigen_rtl_object_get(&rtl, fa->object)->origin.end ==
+						sspan_a.end);
+					REQUIRE(pigen_rtl_object_get(&rtl, fb->object) &&
+						pigen_rtl_object_get(&rtl, fb->object)->origin.start ==
+						sspan_b.start &&
+						pigen_rtl_object_get(&rtl, fb->object)->origin.end ==
+						sspan_b.end);
+				}
 			}
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
