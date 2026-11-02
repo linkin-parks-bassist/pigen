@@ -861,6 +861,43 @@ static pigen_rtl_expr_id pl_next_value(const pigen_rtl_model *rtl,
 	return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 }
 
+/* The stage-boundary buf storage's guard port: among the published RTL
+ * instances (pigen_rtl_model.instances), locate the one whose `connections`
+ * record range is non-empty and whose connection objects (each a
+ * pigen_rtl_object_id resolved through the model's instance-connection arena)
+ * include a connection whose origin span spells exactly WORD (the guard signal
+ * `en`, an owner-text check against the span, never a search over the output).
+ * Returns 1 when such a guard port is published, 0 otherwise (the
+ * connectionless instance the current master lowering adds -
+ * pigen_rtl_instance_add_with_owner(..., NULL, 0, ...) leaves the connections
+ * range empty, so the count-zero gate and the empty-scan both return 0). */
+static int pl_buf_guard_port(const pigen_rtl_model *rtl, const parsed *p,
+	const char *word)
+{
+	size_t i;
+
+	for (i = 0; i < rtl->instance_count; i++)
+	{
+		const pigen_rtl_instance *inst = pigen_rtl_instance_get(rtl,
+			(pigen_rtl_instance_id){(uint32_t)i});
+		const pigen_rtl_object_id *connections;
+		size_t c;
+
+		if (!inst || inst->connections.count == 0)
+			continue;
+		connections = &rtl->instance_connections[inst->connections.first];
+		for (c = 0; c < inst->connections.count; c++)
+		{
+			const pigen_rtl_object *obj = pigen_rtl_object_get(rtl,
+				connections[c]);
+
+			if (obj && span_is(&p->sources, obj->origin, word))
+				return 1;
+		}
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	check_init(argc, argv);
@@ -3752,5 +3789,98 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* ------------------------------------------------------------------ */
+	/* (3) buf-guard-port: the stage-boundary buf storage is published with  */
+	/*     a guard port, not the current connectionless instance            */
+	/*     (what/are/the/pipeline/guard/storage/io/test/scenarios.md line   */
+	/*     3, reviewed at what/is/the/review/of/the/pipeline/guard/storage/ */
+	/*     io/test/scenarios.md; the buf what/is/a/buf.md; the guard law    */
+	/*     how/to/reset/and/enable/a/pipeline.md). The anchor is the legal  */
+	/*     2-stage pipeline nested under `if (en)` inside the clocked       */
+	/*     process (1-bit module input en, stage 1 a <= x, stage 2 b <= a,  */
+	/*     yield b), driven through the established guarded-fixture seam    */
+	/*     (pl_parse_guarded) and lowered through pl_drive to rc == 0. It   */
+	/*     publishes its one stage-boundary buf storage (the N-1 = 1        */
+	/*     one-entry primitive pigen_rtl_instance) with a NON-EMPTY         */
+	/*     connections record range whose connection objects include a      */
+	/*     guard connection whose origin span spells exactly `en` - the     */
+	/*     guard port. This is the discriminating red: against the current  */
+	/*     master lowering the buf instance is added connectionless         */
+	/*     (src/pipeline_lower.c: pigen_rtl_instance_add_with_owner(...,    */
+	/*     NULL, 0, NULL, 0, ...), connections == NULL, count 0), so the   */
+	/*     connections range is empty and pl_buf_guard_port returns 0,      */
+	/*     failing the section. A lowering that publishes the buf with a    */
+	/*     guard port whose connection object spells `en` passes.           */
+	/* ------------------------------------------------------------------ */
+	SECTION("buf-guard-port") {
+		/* Anchor: the guarded 2-stage pipeline lowers and its one
+		 * stage-boundary buf storage is published with a guard port whose
+		 * connection object spells `en`. */
+		{
+			parsed p = pl_parse_guarded("bgp_ok.pigen",
+				"module bgp_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline bgp_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). This pins the
+			 * guard span the guard-port assertion checks for. */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The 2-stage pipeline publishes exactly N-1 = 1 stage-boundary
+			 * buf storage. */
+			REQUIRE(rtl.instance_count == 1);
+			/* The one stage-boundary buf storage is published with a guard
+			 * port: a non-empty connections record range whose connection
+			 * objects include one whose origin span spells exactly `en`.
+			 * Against the current master lowering the instance is added
+			 * connectionless (connections == NULL, count 0), so the
+			 * connections range is empty, pl_buf_guard_port returns 0 and
+			 * this fails - the discriminating red. */
+			REQUIRE(pl_buf_guard_port(&rtl, &p, "en"));
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
 	return check_finish();
-}
+ }
