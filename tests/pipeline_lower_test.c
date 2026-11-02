@@ -2651,7 +2651,173 @@ int main(int argc, char **argv)
 				REQUIRE(rendered != NULL && rendered != (char *)"sentinel");
 				REQUIRE(strstr(rendered, "en") != NULL);
 				REQUIRE(strstr(rendered, "1") == NULL);
-				free(rendered);
+			free(rendered);
+		}
+		pl_free_unit(&u);
+		pigen_free_rtl_model(&rtl);
+		pl_free(&p);
+	}
+}
+
+	/* ------------------------------------------------------------------ */
+	/* calc-concat: pipeline stage-computation scenario 6                 */
+	/*     (what/are/the/pipeline/stage/computation/test/scenarios.md     */
+	/*     line 6, reviewed at what/is/the/review/of/the/pipeline/stage/  */
+	/*     computation/test/scenarios.md): a legal 2-stage pipeline whose  */
+	/*     stage 2 computes `c <= {a, b}` over two 8-bit incoming fields   */
+	/*     `a`, `b` (stage 1 writes both from external inputs `x`, `y`)   */
+	/*     lowers to rc == 0 and publishes stage 2's combinational        */
+	/*     next-value equation whose value is a                          */
+	/*     PIGEN_RTL_EXPR_CONCATENATION naming BOTH incoming field        */
+	/*     objects in source order: the first field `a` the leftmost (MSB)*/
+	/*     child, the second field `b` the rightmost (LSB) child. The     */
+	/*     fixture is legal under the step-(b) first-stage law (stage 1   */
+	/*     reads only the external inputs `x`, `y` - no pipeline-field    */
+	/*     read) and the repartition law (the stage 1 -> stage 2 boundary */
+	/*     carries 16 bits in and 16 bits out). The stage-2 next-value    */
+	/*     concatenation is located as the published RTL equation whose   */
+	/*     value is a concatenation of TWO children: the outgoing-packet  */
+	/*     yield aggregate for `yield c` is a single-member concatenation */
+	/*     (child_count == 1), so the two-child concatenation is the      */
+	/*     stage next-value, never the yield write. Each child must be a  */
+	/*     PIGEN_RTL_EXPR_OBJECT whose origin span spells exactly `a`     */
+	/*     (child 0, the MSB) and `b` (child 1, the LSB) in the parsed    */
+	/*     source - the object identities, not a search over the output.  */
+	/*     Against the current master lowering the per-stage next-value   */
+	/*     equations are the constant-0 integer stand-in (src/            */
+	/*     pipeline_lower.c, pigen_rtl_expr_add_integer(..., 0, ...)), so */
+	/*     NO published equation carries a two-child concatenation and    */
+	/*     this section is the discriminating red: it FAILS here and      */
+	/*     turns green only when the stage-computation implementation     */
+	/*     publishes stage 2's next value as the concatenation of its two */
+	/*     incoming fields, in source order. The established unguarded    */
+	/*     seam helpers (pl_parse/pl_unit/pl_port/pl_drive/pl_name_span/  */
+	/*     span_is) and the owner accessors (pigen_rtl_equation_get,      */
+	/*     pigen_rtl_expr_get, pigen_rtl_object_get, pigen_rtl_expr_      */
+	/*     children) are reused; no new fixture owner is required.        */
+	/* ------------------------------------------------------------------ */
+	SECTION("calc-concat") {
+		/* Anchor: a legal 2-stage pipeline whose stage 2 computes
+		 * `c <= {a, b}` over the two incoming fields lowers to rc == 0 and
+		 * publishes stage 2's next-value equation as a two-child
+		 * concatenation naming both incoming field objects in source order. */
+		{
+			parsed p = pl_parse("cc_ok.pigen",
+				"module cc_ok(input logic clk, input logic [7:0] x, "
+				"input logic [7:0] y);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline cc_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tbit [15:0] c;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= x;\n"
+				"\t\t\t\tb <= y;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tc <= {a, b};\n"
+				"\t\t\tend\n"
+				"\t\t\tyield c;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			const pigen_syntax_node *fields[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			pigen_rtl_expr_id nv = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+
+			/* The fixture: two stages, three fields, stage 2 reads both
+			 * incoming fields. */
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			REQUIRE(pl_field_nodes(&p, fields) == 3);
+			/* Pin the incoming field objects' identity through the parse:
+			 * the two 8-bit fields `a`, `b` are the stage 2 inputs, and the
+			 * 16-bit field `c` is the stage 2 output. Each field's name span
+			 * is read from its own declarator (the field's one
+			 * PIGEN_SYNTAX_SIGNAL_DECLARATOR child's name token, resolved
+			 * through the expanded-source origin exactly as pl_port does). */
+			{
+				const char *const field_names[3] = { "a", "b", "c" };
+				size_t k;
+
+				for (k = 0; k < 3; k++)
+				{
+					const pigen_syntax_node *declarator =
+						pigen_syntax_get(&p.tree, fields[k]->first_child);
+					const pigen_expanded_token *token;
+					pigen_source_span fspan;
+
+					REQUIRE(declarator &&
+						declarator->kind ==
+							PIGEN_SYNTAX_SIGNAL_DECLARATOR);
+					token = pigen_expanded_token_get(&p.pre.expanded,
+						declarator->as.signal_declarator.name);
+					REQUIRE(token);
+					fspan = pigen_origin_spelling_span(&p.pre.expanded,
+						token->origin);
+					REQUIRE(span_is(&p.sources, fspan, field_names[k]));
+				}
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "y", 8);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* Locate stage 2's combinational next-value equation: the
+			 * published RTL equation whose value is a two-child
+			 * concatenation. The outgoing-packet yield aggregate for
+			 * `yield c` is a single-member concatenation, so the two-child
+			 * concatenation is the stage next-value, never the yield write.
+			 * Against the current master lowering the per-stage next-value
+			 * equations are the constant-0 integer stand-in, so no
+			 * two-child concatenation exists and nv stays invalid (the
+			 * discriminating red). */
+			for (i = 0; i < rtl.equation_count && IS_INVALID_ID(nv); i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_expr_id *children;
+				size_t child_count = 0;
+
+				if (!v || v->kind != PIGEN_RTL_EXPR_CONCATENATION)
+					continue;
+				children = pigen_rtl_expr_children(&rtl, eq->value,
+					&child_count);
+				if (children && child_count == 2)
+					nv = eq->value;
+			}
+			REQUIRE(!IS_INVALID_ID(nv));
+			/* The stage-2 next-value concatenation names BOTH incoming field
+			 * objects in source order: the first field `a` the leftmost
+			 * (MSB) child, the second field `b` the rightmost (LSB) child.
+			 * A reversed or missing object identity fails this pin. */
+			{
+				const pigen_rtl_expr_id *children;
+				size_t child_count = 0;
+
+				children = pigen_rtl_expr_children(&rtl, nv, &child_count);
+				REQUIRE(children && child_count == 2);
+				{
+					const pigen_rtl_expr *left = pigen_rtl_expr_get(&rtl,
+						children[0]);
+					const pigen_rtl_expr *right = pigen_rtl_expr_get(&rtl,
+						children[1]);
+
+					REQUIRE(left && left->kind == PIGEN_RTL_EXPR_OBJECT);
+					REQUIRE(span_is(&p.sources,
+						pigen_rtl_object_get(&rtl, left->object)->origin,
+						"a"));
+					REQUIRE(right && right->kind == PIGEN_RTL_EXPR_OBJECT);
+					REQUIRE(span_is(&p.sources,
+						pigen_rtl_object_get(&rtl, right->object)->origin,
+						"b"));
+				}
 			}
 			pl_free_unit(&u);
 			pigen_free_rtl_model(&rtl);
