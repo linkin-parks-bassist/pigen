@@ -4507,5 +4507,201 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* ------------------------------------------------------------------ */
+	/* (8) storage-io-8-renders-guard-sv: the storage-hold and I/O-         */
+	/*     handshake render the guard signal through the terminal SV       */
+	/*     (scenario line 8 of the accepted pipeline guard-law             */
+	/*     storage-hold / I/O-handshake list, what/are/the/pipeline/guard/ */
+	/*     storage/io/test/scenarios.md, independently reviewed and        */
+	/*     accepted at what/is/the/review/of/the/pipeline/guard/storage/   */
+	/*     io/test/scenarios.md). The anchor is the guarded fixture: a     */
+	/*     legal 2-stage pipeline nested under `if (en)` inside the        */
+	/*     clocked process (1-bit module input en, stage 1 a <= x, stage   */
+	/*     2 b <= a, yield b). It lowers to rc == 0 and BOTH the per-stage */
+	/*     next-value equation's value (the hold mux - the stage's         */
+	/*     equation value, which is NOT the yield write's concatenation)   */
+	/*     AND the yield write's value render through                     */
+	/*     pigen_sv_render_expression (after pigen_rtl_assign_names,       */
+	/*     PIGEN_RTL_NAME_SOURCE, for the reachable object origins) as     */
+	/*     text containing the spelled guard signal `en` - the emitted     */
+	/*     storage update and output handshake are gated by the guard's    */
+	/*     spelling, not the stand-in (how/to/reset/and/enable/a/          */
+	/*     pipeline.md guard law; include/pigen/pipeline_lower.h). The     */
+	/*     two values are located among the published RTL equations by     */
+	/*     their destination object: the yield write is the equation whose */
+	/*     value is a PIGEN_RTL_EXPR_CONCATENATION (the outgoing-packet    */
+	/*     aggregate), and the per-stage next-value equation is an         */
+	/*     equation over the SAME destination object whose value is NOT    */
+	/*     the concatenation - the constant-0 stand-in on the current      */
+	/*     master lowering (src/pipeline_lower.c: the per-stage value is   */
+	/*     pigen_rtl_expr_add_integer(rtl, packet_type, 0, ...)), the      */
+	/*     guard-gated hold mux once the guard is wired into the storage   */
+	/*     update. Against the current master lowering the next-value      */
+	/*     value renders as the bare constant `0` and the yield write      */
+	/*     renders as the bare member concatenation - neither carries the  */
+	/*     guard's spelling - so this section is the discriminating red:   */
+	/*     it FAILS here at the rendered-text assertions and turns green   */
+	/*     only when the guard is wired into the storage update and the    */
+	/*     output. It follows exactly the established rendered-handshake   */
+	/*     pattern the sibling ready-renders-guard-sv section uses (the    */
+	/*     same two APIs, the same reachable-object-origin naming),        */
+	/*     applied to the hold mux and the yield; it does not re-assert    */
+	/*     the ready equation's value. The guard-signal name span is       */
+	/*     pinned through the expanded-source token origins (exactly as    */
+	/*     pl_name_span resolves the if condition's name), so the fixture  */
+	/*     pin is against the parsed source, never a search over the       */
+	/*     output. The guarded-fixture extension (pl_parse_guarded) is the */
+	/*     file-local seam the sibling guarded sections share; the         */
+	/*     step-(a) identity and step-(b) stage-law owners read only the   */
+	/*     pipeline node and its body, so the guarded pipeline drives the  */
+	/*     unchanged 5-arg seam.                                           */
+	/* ------------------------------------------------------------------ */
+	SECTION("storage-io-8-renders-guard-sv") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers to rc == 0
+		 * and the per-stage next-value equation's value (the hold mux) and
+		 * the yield write's value each render through the terminal SV as
+		 * text containing the spelled guard signal `en`. */
+		{
+			parsed p = pl_parse_guarded("gio8_ok.pigen",
+				"module gio8_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline gio8_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			pigen_rtl_expr_id next_value =
+				(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			pigen_rtl_expr_id yield_value =
+				(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			pigen_rtl_object_id packet_object =
+				(pigen_rtl_object_id){PIGEN_INVALID_ID};
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a
+			 * name spelling exactly `en` (the guard signal). */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* Locate the two published values by their destination object:
+			 * the yield write is the equation whose value is a
+			 * PIGEN_RTL_EXPR_CONCATENATION (the outgoing-packet aggregate),
+			 * and the per-stage next-value equation is an equation over the
+			 * SAME destination object whose value is NOT the concatenation
+			 * (the constant-0 stand-in on the current master lowering; the
+			 * guard-gated hold mux once the guard is wired into the storage
+			 * update). */
+			for (i = 0; i < rtl.equation_count; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+
+				if (!eq || !v)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_CONCATENATION)
+				{
+					yield_value = eq->value;
+					packet_object = eq->destination;
+					continue;
+				}
+				if (IS_INVALID_ID(yield_value) ||
+					(!IS_INVALID_ID(packet_object) &&
+					 eq->destination.index == packet_object.index))
+					if (IS_INVALID_ID(next_value))
+						next_value = eq->value;
+			}
+			REQUIRE(!IS_INVALID_ID(next_value));
+			REQUIRE(!IS_INVALID_ID(yield_value));
+			/* Name the reachable OBJECT origins of BOTH values (SOURCE role)
+			 * so the terminal renderer can spell them, then render each value
+			 * through the terminal SV emission and pin the emitted storage
+			 * update and output handshake. */
+			{
+				pigen_rtl_name_request requests[8];
+				size_t request_count = 0;
+				char *rendered = (char *)"sentinel";
+
+				for (i = 0; i < rtl.expression_count; i++)
+				{
+					const pigen_rtl_expr *e = pigen_rtl_expr_get(&rtl,
+						(pigen_rtl_expr_id){(uint32_t)i});
+
+					if (!e || e->kind != PIGEN_RTL_EXPR_OBJECT)
+						continue;
+					requests[request_count].kind = PIGEN_RTL_NAME_SOURCE;
+					requests[request_count].origin =
+						pigen_rtl_object_get(&rtl, e->object)->origin;
+					request_count++;
+					REQUIRE(request_count <= 8);
+				}
+				if (request_count)
+					REQUIRE(pigen_rtl_assign_names(&rtl, &p.sources, requests,
+						request_count).index != PIGEN_INVALID_ID);
+				/* (storage-hold half) the per-stage next-value equation's
+				 * value - the hold mux - renders as text containing the
+				 * spelled guard signal `en`. Against the current master
+				 * lowering that value is the constant-0 stand-in, so the
+				 * rendered text is the bare constant `0` (no `en` spelling)
+				 * and this fails: the emitted storage update is the
+				 * stand-in, not the guard-gated hold. */
+				REQUIRE(pigen_sv_render_expression(&rtl,
+					pigen_rtl_expr_get(&rtl, next_value), &rendered) == 0);
+				REQUIRE(rendered != NULL && rendered != (char *)"sentinel");
+				REQUIRE(strstr(rendered, "en") != NULL);
+				free(rendered);
+				/* (I/O-handshake half) the yield write's value renders as
+				 * text containing the spelled guard signal `en`. Against the
+				 * current master lowering that value is the unconditional
+				 * member concatenation, so the rendered text is the bare
+				 * member names (no `en` spelling) and this fails: the
+				 * emitted output handshake is ungated, not guard-disabled. */
+				rendered = (char *)"sentinel";
+				REQUIRE(pigen_sv_render_expression(&rtl,
+					pigen_rtl_expr_get(&rtl, yield_value), &rendered) == 0);
+				REQUIRE(rendered != NULL && rendered != (char *)"sentinel");
+				REQUIRE(strstr(rendered, "en") != NULL);
+				free(rendered);
+			}
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
 	return check_finish();
 }

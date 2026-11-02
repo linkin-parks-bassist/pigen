@@ -1560,5 +1560,19 @@
       "pipeline-lower-test",
       "T=output-handshake-guarded-by-en"
     ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
+      "src/pipeline_identity.c",
+      "src/sv_emit.c",
+      "src/rtl_name.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=storage-io-8-renders-guard-sv"
+    ]
   }
 ]
