@@ -2484,5 +2484,200 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* ------------------------------------------------------------------ */
+	/* (8) calc-arithmetic: a stage performs its specified next-value      */
+	/*     computation over the immutable incoming fields (how/do/        */
+	/*     pipeline/stage/reads/work.md; what/is/the/pipeline/parent/     */
+	/*     module/lowering.md step (c)): the published stage next-value   */
+	/*     is the stage's expression over its inputs, NOT an object       */
+	/*     pass-through and NOT a constant. The anchor is line 1 of the   */
+	/*     accepted pipeline stage computation scenario list (what/are/   */
+	/*     the/pipeline/stage/computation/test/scenarios.md, reviewed     */
+	/*     at what/is/the/review/of/the/pipeline/stage/computation/test/ */
+	/*     scenarios.md, list pinned c3513cb5): a legal 2-stage pipeline  */
+	/*     (stage 1 `a <= x`, stage 2 `b <= a + 8'h3D`, `yield b`) whose  */
+	/*     stage 2 computes over the immutable incoming 8-bit field `a`.  */
+	/*     It lowers to rc == 0 and publishes, for stage 2, a             */
+	/*     combinational next-value equation whose value is a binary `+`  */
+	/*     expression (PIGEN_RTL_EXPR_BINARY, PIGEN_BINARY_ADD) with      */
+	/*     EXACTLY two children: one a PIGEN_RTL_EXPR_OBJECT whose        */
+	/*     object (located through pigen_rtl_object_get) is the 8-bit     */
+	/*     incoming field `a` - its origin span spelling exactly `a` in   */
+	/*     the parsed source - and the other the integer 8'h3D (a         */
+	/*     PIGEN_RTL_EXPR_INTEGER of width 8 with value 0x3D = 61). The   */
+	/*     two-object shape pins that the value is a binary + over the    */
+	/*     incoming field AND the literal: an object pass-through (a      */
+	/*     single object child, or a wider binary naming no second        */
+	/*     operand) and a constant stand-in both fail the pins. The      */
+	/*     fixture is pinned through the parse: stage 2's single          */
+	/*     nonblocking-assignment item carries a binary `+` expression    */
+	/*     whose left name spells exactly `a` and whose right literal     */
+	/*     spells exactly `8'h3D`, so the assertion is against the        */
+	/*     parsed source, never a search over the output. This section is */
+	/*     the discriminating red: against the current master lowering    */
+	/*     (src/pipeline_lower.c: the per-stage next-value equation       */
+	/*     value is the constant-0 integer stand-in) no published         */
+	/*     equation carries a binary `+` value, so the location finds     */
+	/*     nothing and this section FAILS here; it turns green when the   */
+	/*     stage-computation implementation publishes stage 2's next      */
+	/*     value as the binary + over the incoming field object and the   */
+	/*     literal. The same unguarded 2-stage fixture shape the other    */
+	/*     sections use, reached through the established seam helpers     */
+	/*     (pl_parse/pl_unit/pl_port/pl_stage_nodes/pl_drive) unchanged.  */
+	/* ------------------------------------------------------------------ */
+	SECTION("calc-arithmetic") {
+		/* Anchor: a legal 2-stage pipeline whose stage 2 computes
+		 * `b <= a + 8'h3D` over the immutable incoming 8-bit field `a`
+		 * lowers to rc == 0 and publishes stage 2's next-value equation
+		 * as a binary `+` over the field's object and the literal. */
+		{
+			parsed p = pl_parse("ca_ok.pigen",
+				"module ca_ok(input logic clk, input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline ca_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= x;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tb <= a + 8'h3D;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield b;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			const pigen_syntax_node *items[8];
+			size_t item_count;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			int found = 0;
+
+			REQUIRE(pl_stage_nodes(&p, stages) == 2);
+			/* The fixture pin through the parse: stage 2's single item is a
+			 * nonblocking assignment whose value is a binary `+` expression
+			 * over the name `a` (the incoming field, resolved through the
+			 * expanded-source token origins) and the literal `8'h3D` - the
+			 * spans the assertion below checks for. */
+			item_count = pl_stage_items(&p, stages[1], items);
+			REQUIRE(item_count == 1);
+			REQUIRE(items[0]->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
+			{
+				const pigen_syntax_expr *rhs = pigen_syntax_expr_get(
+					&p.tree.expressions,
+					items[0]->as.nonblocking_assignment.value);
+				const pigen_syntax_expr *left;
+				const pigen_syntax_expr *right;
+				const pigen_expanded_token *token;
+				pigen_source_span lspan;
+				pigen_source_span rspan;
+
+				REQUIRE(rhs && rhs->kind == PIGEN_SYNTAX_EXPR_BINARY);
+				REQUIRE(rhs->as.binary.operator == PIGEN_SYNTAX_OP_ADD);
+				left = pigen_syntax_expr_get(&p.tree.expressions,
+					rhs->as.binary.left);
+				right = pigen_syntax_expr_get(&p.tree.expressions,
+					rhs->as.binary.right);
+				REQUIRE(left && left->kind == PIGEN_SYNTAX_EXPR_NAME);
+				lspan = pl_name_span(&p, rhs->as.binary.left);
+				REQUIRE(span_is(&p.sources, lspan, "a"));
+				REQUIRE(right && right->kind == PIGEN_SYNTAX_EXPR_LITERAL);
+				token = pigen_expanded_token_get(&p.pre.expanded,
+					right->as.atom.token);
+				REQUIRE(token);
+				rspan = pigen_origin_spelling_span(&p.pre.expanded,
+					token->origin);
+				REQUIRE(span_is(&p.sources, rspan, "8'h3D"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* Locate stage 2's next-value equation among the published RTL
+			 * equations: the one whose value is a binary `+`
+			 * (PIGEN_RTL_EXPR_BINARY, PIGEN_BINARY_ADD). Against the current
+			 * master lowering the per-stage next-value values are the
+			 * constant-0 integer stand-in and no published equation carries
+			 * a binary + value, so found stays 0 - the discriminating red. */
+			for (i = 0; i < rtl.equation_count && !found; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+
+				if (!v || v->kind != PIGEN_RTL_EXPR_BINARY)
+					continue;
+				if (v->as.binary.resolution.operation.operator !=
+					PIGEN_BINARY_ADD)
+					continue;
+				found = 1;
+				/* The value is a binary + over EXACTLY two operands: an
+				 * object pass-through (one object, no second operand) or a
+				 * wider expression fails the child count; a constant
+				 * stand-in failed the kind above. */
+				{
+					const pigen_rtl_expr_id *children;
+					size_t child_count;
+
+					children = pigen_rtl_expr_children(&rtl, eq->value,
+						&child_count);
+					REQUIRE(children && child_count == 2);
+				}
+				/* One operand is the incoming field `a`'s object: a
+				 * PIGEN_RTL_EXPR_OBJECT whose object (located through
+				 * pigen_rtl_object_get) carries the 8-bit type and whose
+				 * origin span spells exactly `a` in the parsed source. The
+				 * other is the integer 8'h3D: a PIGEN_RTL_EXPR_INTEGER of
+				 * width 8 with value 0x3D. A value naming the enclosing
+				 * input `x`, the outgoing field `b`, or the literal alone
+				 * fails the matching pin. */
+				{
+					int field_a = 0;
+					int literal = 0;
+					const pigen_rtl_expr_id *children;
+					size_t child_count;
+					size_t c;
+
+					children = pigen_rtl_expr_children(&rtl, eq->value,
+						&child_count);
+					for (c = 0; c < child_count; c++)
+					{
+						const pigen_rtl_expr *ch = pigen_rtl_expr_get(&rtl,
+							children[c]);
+						const pigen_rtl_type *t;
+
+						if (!ch)
+							continue;
+						t = pigen_rtl_type_get(&rtl, ch->type);
+						if (ch->kind == PIGEN_RTL_EXPR_OBJECT && t &&
+							t->width == 8)
+						{
+							const pigen_rtl_object *obj =
+								pigen_rtl_object_get(&rtl, ch->object);
+
+							if (obj && span_is(&p.sources,
+								obj->origin, "a"))
+								field_a = 1;
+						}
+						if (ch->kind == PIGEN_RTL_EXPR_INTEGER && t &&
+							t->width == 8 && ch->value == 0x3D)
+							literal = 1;
+					}
+					REQUIRE(field_a);
+					REQUIRE(literal);
+				}
+			}
+			REQUIRE(found);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
 	return check_finish();
 }
