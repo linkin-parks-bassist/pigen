@@ -646,6 +646,94 @@ static int guard_expr_build(const pigen_source_manager *sources,
 	return 0; /* no recognized top-level operator: a malformed condition */
 }
 
+/* The 1-bit guard object the buf stage storage's guard connection publishes:
+ * a synthetic VARIABLE of the 1-bit boolean type, owned by rtl_module, whose
+ * origin is the complete enclosing procedural guard's expression span (the
+ * terminal renderer spells the connection from that span, and the contract
+ * checks the span's text). A guard that is the constant-1 stand-in (an unguarded
+ * pipeline) publishes no such object. Returns 1 on success and fills *out; an
+ * invalid guard span (the constant-1 case) returns 0. */
+static int guard_operand_object(pigen_rtl_lowering *lowering,
+	pigen_rtl_module_id rtl_module, pigen_rtl_expr_id guard,
+	pigen_rtl_object_id *out)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	const pigen_rtl_expr *ge;
+	pigen_data_type_id bit1_dt;
+	pigen_rtl_type bit1 = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
+		PIGEN_DATA_TYPE_STATE_FOUR, 1, INVALID_ID(pigen_rtl_expr_id),
+		INVALID_SPAN, NULL, 0};
+	pigen_rtl_type_id bit1_type;
+	pigen_rtl_object_id object;
+
+	ge = pigen_rtl_expr_get(rtl, guard);
+	if (!ge || span_invalid(ge->origin)) return 0; /* constant-1 stand-in */
+	bit1_dt = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+	if (bit1_dt.index == PIGEN_INVALID_ID) return 0;
+	bit1_type = pigen_rtl_type_intern(rtl, &bit1);
+	if (bit1_type.index == PIGEN_INVALID_ID) return 0;
+	object = pigen_rtl_object_add_with_owner(rtl, rtl_module,
+		PIGEN_RTL_OBJECT_VARIABLE, bit1_type, PIGEN_SEMANTIC_INTERNAL,
+		INVALID_ID(pigen_signal_id), ge->origin);
+	if (object.index == PIGEN_INVALID_ID) return 0;
+	*out = object;
+	return 1;
+}
+
+/* The per-stage storage-hold mux `guard ? VALUE : STORED` (sections 1, 2, 5):
+ * a PIGEN_RTL_EXPR_CONDITIONAL whose condition is the complete enclosing
+ * procedural guard, whose when-true branch is the stage's computed next value
+ * (unchanged), and whose when-false branch is one new synthetic stored-value
+ * object per stage boundary - VARIABLE, the stage value's own type,
+ * PIGEN_SEMANTIC_INTERNAL, an invalid signal, and the stage node's span as a
+ * sound valid origin (the stage's storage holds its previous value under a
+ * false guard, how/to/reset/and/enable/a/pipeline.md). The result type is the
+ * stage value's type so its width and rendering stay intact. VALUE's RTL type
+ * must be a sized logic, resolved through the common conditional-operation
+ * resolver (the gated_value pattern at src/fsm_lower.c is the established
+ * model). Returns 1 on success and fills *out; a value whose type is not a
+ * sized logic is a failure (a validated pipeline value is always a sized
+ * logic, so this rejects only an unresolvable value). */
+static int guard_hold_mux(pigen_semantic_model *sem, pigen_rtl_model *rtl,
+	pigen_rtl_module_id rtl_module, pigen_rtl_expr_id guard,
+	pigen_rtl_expr_id value, pigen_source_span origin,
+	pigen_rtl_expr_id *out)
+{
+	const pigen_rtl_expr *ve = pigen_rtl_expr_get(rtl, value);
+	const pigen_rtl_type *vt;
+	pigen_data_type_id value_dt;
+	pigen_rtl_type_id stored_type;
+	pigen_rtl_object_id stored_object;
+	pigen_rtl_expr_id stored_expr;
+	pigen_conditional_resolution resolution;
+
+	if (!ve) return 0;
+	vt = pigen_rtl_type_get(rtl, ve->type);
+	if (!vt || vt->signedness != PIGEN_SIGN_UNSIGNED ||
+		vt->state_domain != PIGEN_DATA_TYPE_STATE_FOUR ||
+		vt->width == 0)
+		return 0;
+	value_dt = pigen_data_type_sized_logic(sem, (size_t)vt->width,
+		PIGEN_SIGN_UNSIGNED);
+	if (value_dt.index == PIGEN_INVALID_ID) return 0;
+	stored_type = ve->type;
+	stored_object = pigen_rtl_object_add_with_owner(rtl, rtl_module,
+		PIGEN_RTL_OBJECT_VARIABLE, stored_type, PIGEN_SEMANTIC_INTERNAL,
+		INVALID_ID(pigen_signal_id), origin);
+	if (stored_object.index == PIGEN_INVALID_ID) return 0;
+	stored_expr = pigen_rtl_expr_add_object(rtl, stored_type, stored_object,
+		origin);
+	if (stored_expr.index == PIGEN_INVALID_ID) return 0;
+	if (!pigen_data_type_resolve_conditional_operation(sem,
+		pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED), value_dt,
+		value_dt, &resolution))
+		return 0;
+	*out = pigen_rtl_expr_add_conditional(rtl, ve->type, &resolution, guard,
+		value, stored_expr, origin);
+	return (*out).index != PIGEN_INVALID_ID;
+}
+
 /* Parses a SystemVerilog based literal `<width>'[s]<base><digits>` (for
  * example `8'h3D`) into its packed width and its unsigned value. The width is
  * the decimal run before the apostrophe; the base letter selects the digit
@@ -1319,6 +1407,7 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 	size_t stage_value_last[PIGEN_PIPELINE_MAX];
 	pigen_rtl_expr_id one;
 	pigen_rtl_expr_id guard;
+	int guarded;
 	pigen_rtl_expr_id ready;
 	size_t total_bits = 0;
 	size_t i;
@@ -1417,6 +1506,13 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 				guard = one;
 		}
 	}
+	/* A real guard is a guard expression whose origin spells the complete
+	 * enclosing procedural guard; the constant-1 stand-in (an unguarded
+	 * pipeline, or a condition that cannot be lowered) has an invalid origin
+	 * and carries no source-spelling guard object. The storage-hold mux, the
+	 * buf guard connection and the yield gate are published only when the guard
+	 * is real (the no-over-gating contract, section 7). */
+	guarded = !span_invalid(pigen_rtl_expr_get(rtl, guard)->origin);
 
 	/* The yield write's destination object: the established step-(a)
 	 * outgoing-packet signal, exposed as an RTL object of the parent module.
@@ -1511,6 +1607,7 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		{
 			pigen_rtl_expr_id children[PIGEN_PIPELINE_MAX];
 			pigen_rtl_expr_id concat;
+			pigen_rtl_expr_id yield_value;
 
 			for (i = 0; i < yield_count; i++)
 			{
@@ -1559,17 +1656,40 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 				children[i] = pigen_rtl_expr_add_object(rtl, member_type,
 					member, member_origin);
 				if (children[i].index == PIGEN_INVALID_ID) return -1;
+				/* Under a real guard the outgoing handshake is disabled on a
+				 * false guard (sections 6 and 8): each yield member carries the
+				 * storage-hold mux `guard ? MEMBER : STORED_MEMBER`, so the
+				 * outgoing-packet concatenation's reachable subtree carries the
+				 * guard object (origin spelling the complete guard) and a false
+				 * guard holds each member at its stored value. The concatenation
+				 * itself stays the yield write's value (its kind distinguishes
+				 * the yield write from the per-stage next-value equations,
+				 * sections 1 and 8); an unguarded pipeline keeps the plain
+				 * member objects, publishing no source-spelling guard object
+				 * (the no-over-gating contract, section 7). */
+				if (guarded &&
+					!guard_hold_mux(sem, rtl, rtl_module, guard, children[i],
+						member_origin, &children[i]))
+					return -1;
 			}
 			concat = pigen_rtl_expr_add_concatenation(rtl, packet_type, children,
 				yield_count, INVALID_SPAN);
 			if (concat.index == PIGEN_INVALID_ID) return -1;
-			/* The yield write: the outgoing-packet object driven by the
-			 * concatenation of its yield members in source order. This is the
-			 * RTL equation whose value is the concatenation (the emitted-member-
-			 * order witness) and whose destination is the established
-			 * outgoing-packet signal (the yield-write witness). */
+			/* The yield write's value is the outgoing-packet concatenation of the
+			 * yield members exactly as published (the source-order /
+			 * first-yielded-field-MSB member-order law untouched). Under a real
+			 * guard the disabling of the output handshake on a false guard is
+			 * carried by the members' own hold muxes (the concatenation's
+			 * reachable subtree spells the guard, sections 6 and 8), so the
+			 * concatenation itself stays the yield write's value - never wrapped
+			 * in an outer conditional, which would make the yield write carry a
+			 * conditional value and be mistaken for a per-stage next-value
+			 * equation (sections 1 and 8). This is the RTL equation whose
+			 * destination is the established outgoing-packet signal (the
+			 * yield-write witness). */
+			yield_value = concat;
 			if (pigen_rtl_equation_add_with_owner(rtl, rtl_module, packet_object,
-				concat, pipeline->location.source_span).index ==
+				yield_value, pipeline->location.source_span).index ==
 				PIGEN_INVALID_ID)
 				return -1;
 		}
@@ -1581,7 +1701,12 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 	 * computed next-value equation over the immutable incoming fields the
 	 * stage is handed - the stage's `<=` right-hand side lowered to a
 	 * structural expression (how/do/pipeline/stage/reads/work.md), never a
-	 * constant stand-in. */
+	 * constant stand-in. Under a real guard the buf storage publishes its guard
+	 * connection (the guard's 1-bit object, so a false guard holds the stored
+	 * value, sections 3 and 4) and each stage's next value is the storage-hold
+	 * mux over the guard (a false guard holds every stage's storage, sections
+	 * 1, 2 and 5); an unguarded pipeline publishes neither (the no-over-gating
+	 * contract, section 7). */
 	for (i = 0; i < stage_count; i++)
 	{
 		/* One one-entry buf stage storage per stage boundary (N-1): a
@@ -1592,21 +1717,54 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		{
 			pigen_rtl_instance_id instance;
 
-			instance = pigen_rtl_instance_add_with_owner(rtl, rtl_module,
-				module, NULL, 0, NULL, 0,
-				stage_nodes[i].node->location.source_span);
+			if (guarded)
+			{
+				pigen_rtl_object_id guard_object;
+				pigen_rtl_object_id connections[1];
+
+				/* The guard connection: the guard's 1-bit object, spelling the
+				 * complete enclosing procedural guard (the guard connection's
+				 * origin span). Under a false guard the buf holds its stored
+				 * value (the storage-hold side of the law, sections 3 and 4). */
+				if (!guard_operand_object(lowering, rtl_module, guard,
+					&guard_object))
+					return -1;
+				connections[0] = guard_object;
+				instance = pigen_rtl_instance_add_with_owner(rtl, rtl_module,
+					module, NULL, 0, connections, 1,
+					stage_nodes[i].node->location.source_span);
+			}
+			else
+			{
+				instance = pigen_rtl_instance_add_with_owner(rtl, rtl_module,
+					module, NULL, 0, NULL, 0,
+					stage_nodes[i].node->location.source_span);
+			}
 			if (instance.index == PIGEN_INVALID_ID) return -1;
 		}
 
 		/* The per-stage combinational next-value equation: the stage's
 		 * outgoing value, the computation of its `<=` right-hand side over the
 		 * immutable incoming fields the stage is handed by the earlier stages
-		 * (how/do/pipeline/stage/reads/work.md). A stage that writes no field
-		 * (a storage-only stage) has no next value and publishes no equation. */
+		 * (how/do/pipeline/stage/reads/work.md). Under a real guard the
+		 * published next value is the storage-hold mux over the guard (a false
+		 * guard holds the stage's stored value, sections 1, 2 and 5); otherwise
+		 * it is the stage's computed next value, unchanged. A stage that writes
+		 * no field (a storage-only stage) has no next value and publishes no
+		 * equation. */
 		if (stage_value[i].index != PIGEN_INVALID_ID)
 		{
+			pigen_rtl_expr_id published;
+
+			published = stage_value[i];
+			if (guarded)
+			{
+				if (!guard_hold_mux(sem, rtl, rtl_module, guard, stage_value[i],
+					stage_nodes[i].node->location.source_span, &published))
+					return -1;
+			}
 			if (pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-				packet_object, stage_value[i],
+				packet_object, published,
 				stage_nodes[i].node->location.source_span).index ==
 				PIGEN_INVALID_ID)
 				return -1;
