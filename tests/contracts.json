@@ -1158,6 +1158,66 @@
   },
   {
     "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=reset-value-initial-state"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=state-active-action-gate"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=goto-guard-gates-next-state"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=goto-never-waits-for-transfer"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=one-synchronous-controller"
+    ]
+  },
+  {
+    "covers": [
       "tests/fsm_identity_test.c",
       "src/fsm_identity.c"
     ],
