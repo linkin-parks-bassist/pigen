@@ -770,6 +770,42 @@ static size_t pl_next_value_equations(const pigen_rtl_model *rtl,
 	return count;
 }
 
+/* The per-stage next-value hold-mux check (scenario 5's storage-hold half,
+ * what/are/the/pipeline/guard/storage/io/test/scenarios.md line 5). The
+ * per-stage next-value equation is the one whose origin span is the stage's
+ * own node span (the lowering publishes each stage's next-value equation with
+ * the stage node's source span as its origin; the yield write carries the
+ * pipeline span and the ready equation an invalid span, so the stage span is
+ * the discriminator). True iff that equation exists, its value is a
+ * PIGEN_RTL_EXPR_CONDITIONAL (the hold mux) and the value's reachable subtree
+ * carries an object spelling exactly `en` (the storage holds while the guard
+ * is false, scenario 1's hold mux). Against the current master lowering the
+ * per-stage next-value value is the constant-0 integer stand-in, so this is
+ * the discriminating red: it is false here and turns true only when the
+ * guard-wiring owner publishes the hold mux. */
+static int pl_stage_next_value_holds(const pigen_rtl_model *rtl,
+	pigen_source_span stage_span, const parsed *p)
+{
+	size_t i;
+
+	for (i = 0; i < rtl->equation_count; i++)
+	{
+		const pigen_rtl_equation *eq = pigen_rtl_equation_get(rtl,
+			(pigen_rtl_equation_id){(uint32_t)i});
+		const pigen_rtl_expr *v;
+
+		if (!eq) continue;
+		if (eq->origin.start != stage_span.start ||
+			eq->origin.end != stage_span.end)
+			continue;
+		v = pigen_rtl_expr_get(rtl, eq->value);
+		if (!v) return 0;
+		if (v->kind != PIGEN_RTL_EXPR_CONDITIONAL) return 0;
+		return pl_ready_subtree_guard(rtl, v, p);
+	}
+	return 0;
+}
+
 /* Establishes the step-(a) outgoing-packet identity the lowering consumes as a
  * validated input, fills *ident, and returns the establish status (0 accepted,
  * -1 diagnosed). */
@@ -2857,13 +2893,13 @@ int main(int argc, char **argv)
 				REQUIRE(rendered != NULL && rendered != (char *)"sentinel");
 				REQUIRE(strstr(rendered, "en") != NULL);
 				REQUIRE(strstr(rendered, "1") == NULL);
-			free(rendered);
+				free(rendered);
+			}
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
 		}
-		pl_free_unit(&u);
-		pigen_free_rtl_model(&rtl);
-		pl_free(&p);
 	}
-}
 
 	/* ------------------------------------------------------------------ */
 	/* calc-concat: pipeline stage-computation scenario 6                 */
@@ -4067,5 +4103,134 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* ------------------------------------------------------------------ */
+	/* (5) input-handshake-disabled: the input handshake is disabled and all  */
+	/*     storage holds together when the complete enclosing guard is false   */
+	/*     (what/are/the/pipeline/guard/storage/io/test/scenarios.md line 5;  */
+	/*     how/to/reset/and/enable/a/pipeline.md: a false guard disables the  */
+	/*     input AND output handshake and holds every stage's storage). The    */
+	/*     anchor is a legal 2-stage pipeline nested under `if (en)` inside    */
+	/*     the clocked process (1-bit input en, stage 1 a <= x, stage 2 b <=   */
+	/*     a, yield b), reusing the guarded-fixture extension pl_parse_guarded */
+	/*     and the 5-arg seam pl_drive. It lowers to rc == 0 and TWO effects   */
+	/*     hold together: (a) the ready equation is gated by the guard - its   */
+	/*     value, or a reachable object in its subtree, is a PIGEN_RTL_EXPR_   */
+	/*     OBJECT spelling exactly `en` (the input-handshake effect here, not  */
+	/*     the ready-value law already owned by the halt/stop list); and (b)   */
+	/*     EACH stage's storage next value holds - the per-stage next-value    */
+	/*     equation (located by the stage node's origin span) has a value that */
+	/*     is the hold mux, a PIGEN_RTL_EXPR_CONDITIONAL whose reachable      */
+	/*     subtree carries an object spelling `en` (scenario 1's hold mux).    */
+	/*     The discriminating red is (b): against the current master lowering */
+	/*     the per-stage next-value value is the constant-0 integer stand-in   */
+	/*     (the guard unused, src/pipeline_lower.c), so each stage's next      */
+	/*     value is not the hold mux and holds_ok stays 0. (a) is already      */
+	/*     green (the ready is gated by the guard) - this section re-asserts   */
+	/*     it only as the input-handshake *effect* half of the conjunction,    */
+	/*     and the conjunction fails until (b) lands. This section does not    */
+	/*     re-map the ready equation's value (owned by the six halt/stop       */
+	/*     sections) nor the output-handshake (yield) gating (scenario 6).     */
+	/* ------------------------------------------------------------------ */
+	SECTION("input-handshake-disabled") {
+		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers to rc == 0
+		 * and the input handshake is disabled (ready gated by the guard) and
+		 * all storage holds (each stage's next value is the guard hold mux). */
+		{
+			parsed p = pl_parse_guarded("ihd_ok.pigen",
+				"module ihd_ok(input logic clk, input logic en, "
+				"input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tif (en) begin\n"
+				"\t\t\tpipeline ihd_pipe begin\n"
+				"\t\t\t\tbit [7:0] a;\n"
+				"\t\t\t\tbit [7:0] b;\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\ta <= x;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tstage begin\n"
+				"\t\t\t\t\tb <= a;\n"
+				"\t\t\t\tend\n"
+				"\t\t\t\tyield b;\n"
+				"\t\t\tendpipeline\n"
+				"\t\tend\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			size_t stage_count;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			int ready_ok = 0;
+			int holds_ok = 1;
+
+			stage_count = pl_stage_nodes(&p, stages);
+			REQUIRE(stage_count == 2);
+			/* The guarded-fixture extension: the pipeline sits under its
+			 * PIGEN_SYNTAX_IF_STATEMENT ancestor and the if's condition
+			 * resolves, through the expanded-source token origins, to a name
+			 * spelling exactly `en` (the guard signal). */
+			REQUIRE(p.if_statement &&
+				p.if_statement->kind == PIGEN_SYNTAX_IF_STATEMENT);
+			REQUIRE(!IS_INVALID_ID(p.if_condition));
+			{
+				const pigen_syntax_expr *cond = pigen_syntax_expr_get(
+					&p.tree.expressions, p.if_condition);
+				pigen_source_span gspan;
+
+				REQUIRE(cond && cond->kind == PIGEN_SYNTAX_EXPR_NAME);
+				gspan = pl_name_span(&p, p.if_condition);
+				REQUIRE(span_is(&p.sources, gspan, "en"));
+			}
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			pl_port(&p, &u, "en", 1);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* (input-handshake half) the input handshake is disabled by the
+			 * guard: the pipeline's ready equation is a published 1-bit RTL
+			 * equation whose value is not an integer constant and whose
+			 * reachable subtree carries an object spelling exactly `en` (the
+			 * input-handshake effect, pl_ready_subtree_guard - the same walk
+			 * the ready-value sections use, asserted here as the effect half
+			 * of the conjunction rather than the ready-value law). */
+			for (i = 0; i < rtl.equation_count && !ready_ok; i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+				const pigen_rtl_type *vt = v ? pigen_rtl_type_get(&rtl,
+					v->type) : NULL;
+
+				if (!v || !vt || vt->width != 1)
+					continue;
+				if (v->kind == PIGEN_RTL_EXPR_INTEGER)
+					continue;
+				ready_ok = pl_ready_subtree_guard(&rtl, v, &p);
+			}
+			/* (storage-hold half) every stage's storage next value holds: for
+			 * EACH of the two stage nodes, the per-stage next-value equation
+			 * (located by the stage node's own origin span) has a value that
+			 * is the hold mux, a PIGEN_RTL_EXPR_CONDITIONAL whose reachable
+			 * subtree carries an object spelling `en` (scenario 1's hold
+			 * mux). Against the current master lowering each stage's next
+			 * value is the constant-0 integer stand-in (the guard unused), so
+			 * neither stage's value is the hold mux and holds_ok stays 0 -
+			 * the discriminating red. */
+			for (i = 0; i < stage_count && holds_ok; i++)
+				holds_ok = pl_stage_next_value_holds(&rtl,
+					stages[i]->location.source_span, &p);
+			/* The conjunction: the input handshake is disabled by the guard
+			 * AND all storage holds together when the guard is false. */
+			REQUIRE(ready_ok);
+			REQUIRE(holds_ok);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
 	return check_finish();
- }
+}
