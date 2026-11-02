@@ -1274,6 +1274,147 @@ int main(int argc, char **argv)
 	}
 
 	/* ------------------------------------------------------------------ */
+	/* (4b) calc-cross-boundary: a COMPUTED value carried across a stage     */
+	/*     boundary is rendered, through the terminal SV emission, with its  */
+	/*     computed expression present for the carried field. The anchor is  */
+	/*     a legal 2-stage pipeline whose first stage computes (a <=         */
+	/*     x + 8'h10) and whose second stage carries the result across the   */
+	/*     boundary as a pass-through (b <= a), `yield b`; it lowers to      */
+	/*     rc == 0 and the yield write's source chain renders - through the  */
+	/*     terminal SV emission - with the computed expression (the +        */
+	/*     operator) present for the carried field. The gate is the terminal */
+	/*     rendering of the yield write's value itself, never the mere       */
+	/*     existence of a computed expression elsewhere in the model: a      */
+	/*     boundary-dropping builder that publishes the stage-1 next-value    */
+	/*     equation as the binary x + 8'h10 yet still drives the yield from  */
+	/*     the member objects (yield b -> the object concatenation {b})      */
+	/*     renders an emitted carry with no computed expression, and this    */
+	/*     section fails exactly that form. A builder that leaves the yield   */
+	/*     as the uncomputed stand-in (the current master: the yield write    */
+	/*     renders {b}) fails the same way. Once the carried value's computed */
+	/*     expression is published on the yield write's source chain, the +  */
+	/*     renders and the pin holds. The discriminator is the terminal      */
+	/*     emission, never a source-text search over the output.             */
+	/* ------------------------------------------------------------------ */
+	SECTION("calc-cross-boundary") {
+		/* Anchor: a legal 2-stage pipeline in which the first stage computes
+		 * a value (a <= x + 8'h10) that the second stage carries across the
+		 * boundary as a pass-through (b <= a) and the final yield emits
+		 * (yield b) lowers to rc == 0 and the yield write's source chain
+		 * renders, through the terminal SV emission, with the computed
+		 * expression (the + operator) present for the carried field. */
+		{
+			parsed p = pl_parse("ccb_ok.pigen",
+				"module ccb_ok(input logic clk, input logic [7:0] x);\n"
+				"\talways @(posedge clk) begin\n"
+				"\t\tpipeline ccb_pipe begin\n"
+				"\t\t\tbit [7:0] a;\n"
+				"\t\t\tbit [7:0] b;\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\ta <= x + 8'h10;\n"
+				"\t\t\tend\n"
+				"\t\t\tstage begin\n"
+				"\t\t\t\tb <= a;\n"
+				"\t\t\tend\n"
+				"\t\t\tyield b;\n"
+				"\t\tendpipeline\n"
+				"\tend\n"
+				"endmodule");
+			unit u;
+			const pigen_syntax_node *stages[4];
+			size_t stage_count;
+			pigen_rtl_lowering lowering;
+			pigen_rtl_model rtl;
+			int rc;
+			size_t i;
+			pigen_rtl_expr_id write = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			const pigen_rtl_expr_id *children;
+			size_t child_count = 0;
+			int yield_add = 0;
+
+			stage_count = pl_stage_nodes(&p, stages);
+			REQUIRE(stage_count == 2);
+			pl_unit(&p, &u);
+			pl_port(&p, &u, "x", 8);
+			rc = pl_drive(&p, &u, &lowering, &rtl);
+			REQUIRE(rc == 0);
+			/* The yield write: the outgoing-packet object driven by the
+			 * concatenation of its yield members in source order (the same
+			 * RTL equation the emitted-member-order witness locates), or - for
+			 * robustness - the clocked update the lowering publishes instead.
+			 * Render its value through the terminal SV emission and gate on
+			 * the rendered result: the terminal rendering of the yield
+			 * write's source chain must carry the computed expression (the +
+			 * operator) for the carried field. */
+			for (i = 0; i < rtl.equation_count && IS_INVALID_ID(write); i++)
+			{
+				const pigen_rtl_equation *eq = pigen_rtl_equation_get(&rtl,
+					(pigen_rtl_equation_id){(uint32_t)i});
+				const pigen_rtl_expr *v = eq ? pigen_rtl_expr_get(&rtl,
+					eq->value) : NULL;
+
+				if (v && v->kind == PIGEN_RTL_EXPR_CONCATENATION)
+					write = eq->value;
+			}
+			if (IS_INVALID_ID(write))
+				for (i = 0; i < rtl.update_count && IS_INVALID_ID(write); i++)
+				{
+					const pigen_rtl_update *up = pigen_rtl_update_get(&rtl,
+						(pigen_rtl_update_id){(uint32_t)i});
+					const pigen_rtl_expr *v = up ? pigen_rtl_expr_get(&rtl,
+						up->value) : NULL;
+
+					if (v && v->kind == PIGEN_RTL_EXPR_CONCATENATION)
+						write = up->value;
+				}
+			REQUIRE(!IS_INVALID_ID(write));
+			/* Name the yield write's reachable object origins (SOURCE role)
+			 * so the terminal renderer can spell them. */
+			{
+				pigen_rtl_name_request requests[8];
+				size_t request_count = 0;
+				char *rendered = (char *)"sentinel";
+
+				children = pigen_rtl_expr_children(&rtl, write, &child_count);
+				REQUIRE(children && child_count >= 1);
+				for (i = 0; i < child_count; i++)
+				{
+					const pigen_rtl_expr *c = pigen_rtl_expr_get(&rtl,
+						children[i]);
+
+					if (!c || c->kind != PIGEN_RTL_EXPR_OBJECT)
+						continue;
+					requests[request_count].kind = PIGEN_RTL_NAME_SOURCE;
+					requests[request_count].origin =
+						pigen_rtl_object_get(&rtl, c->object)->origin;
+					request_count++;
+					REQUIRE(request_count <= 8);
+				}
+				if (request_count)
+					REQUIRE(pigen_rtl_assign_names(&rtl, &p.sources, requests,
+						request_count).index != PIGEN_INVALID_ID);
+				/* Render the yield write's value through the terminal SV
+				 * emission and gate on the rendered result: the terminal
+				 * rendering of the yield write's source chain must carry the
+				 * computed expression (the + operator) for the carried field.
+				 * Against the current master lowering the yield write's value
+				 * is the member-object concatenation {b}, which renders with
+				 * no + (the computed value is dropped at the boundary and the
+				 * emitted carry is a bare stand-in), so this is the red. */
+				REQUIRE(pigen_sv_render_expression(&rtl,
+					pigen_rtl_expr_get(&rtl, write), &rendered) == 0);
+				REQUIRE(rendered != NULL && rendered != (char *)"sentinel");
+				yield_add = strstr(rendered, "+") != NULL;
+				free(rendered);
+			}
+			REQUIRE(yield_add);
+			pl_free_unit(&u);
+			pigen_free_rtl_model(&rtl);
+			pl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
 	/* (5) step-b-witnesses: the two step-(b) storage/temporal-law witnesses */
 	/*     that have no route-level negative witness, pinned here as         */
 	/*     emission/behavioral witnesses (how/to/reset/and/enable/a/        */

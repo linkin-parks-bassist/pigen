@@ -1053,6 +1053,21 @@
     "covers": [
       "tests/pipeline_lower_test.c",
       "src/pipeline_lower.c",
+      "src/pipeline_identity.c",
+      "src/pipeline_stage.c",
+      "src/sv_emit.c",
+      "src/rtl_name.c"
+    ],
+    "command": [
+      "make",
+      "pipeline-lower-test",
+      "T=calc-cross-boundary"
+    ]
+  },
+  {
+    "covers": [
+      "tests/pipeline_lower_test.c",
+      "src/pipeline_lower.c",
       "src/pipeline_identity.c"
     ],
     "command": [
