@@ -332,6 +332,76 @@ static void test_vertical_slice_simulation_infrastructure(void)
     pclose(f);
 }
 
+/* Test 15: Scenario line 7 (CLI FSM emitted-SV list): an undeclared goto
+ * target is diagnosed at the original span. The witness is the legal
+ * two-state controller whose idle-state goto names `nowhere`, a token no
+ * state declaration declares. The compile must fail loudly (rc == -1,
+ * result zeroed) with the native parse diagnostic: a non-empty message
+ * naming the violation and a non-degenerate span over the `nowhere` token
+ * at its original byte coordinates in the source (a zeroed or dropped span,
+ * or a span over any other token, fails this pin). This line holds on
+ * master (parse-stage diagnostic) and must keep holding. */
+static void test_fsm_goto_undeclared_target_span(void)
+{
+    const char *source_text =
+        "module fsm_goto_undeclared\n"
+        "(\n"
+        "\tinput logic clk,\n"
+        "\tinput logic rst,\n"
+        "\tinput logic start,\n"
+        "\toutput logic done\n"
+        ");\n"
+        "\n"
+        "fsm fsm_goto_undeclared @(posedge clk) reset (rst) initial idle\n"
+        "begin\n"
+        "\tstate idle:\n"
+        "\tbegin\n"
+        "\t\tif (start)\n"
+        "\t\t\tgoto nowhere;\n"
+        "\tend\n"
+        "\tstate run:\n"
+        "\tbegin\n"
+        "\t\tdone <= 1;\n"
+        "\tend\n"
+        "end\n"
+        "endmodule\n";
+    size_t source_length = strlen(source_text);
+
+    /* The original location of the `nowhere` token: its unique occurrence
+     * in the literal source, so the expected span is deterministic. */
+    const char *token = strstr(source_text, "nowhere");
+    size_t token_start = (size_t)(token - source_text);
+    size_t token_end = token_start + strlen("nowhere");
+
+    pigen_source_manager sources = {0};
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/fsm_goto_undeclared.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    assert(ret == -1); /* the undeclared goto target is diagnosed */
+    assert(result.systemverilog == NULL); /* no output on failure */
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+    assert(!strcmp(error.message, "goto references an undeclared state"));
+    /* Non-degenerate span ... */
+    assert(error.span.end > error.span.start);
+    /* ... over the `nowhere` token ... */
+    {
+        size_t span_length = 0;
+        const char *span_text = pigen_source_span_text(&sources, error.span, &span_length);
+        assert(span_text != NULL);
+        assert(span_length == strlen("nowhere"));
+        assert(!memcmp(span_text, "nowhere", span_length));
+    }
+    /* ... at its original byte coordinates in the source. */
+    assert(error.span.start == token_start);
+    assert(error.span.end == token_end);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -347,6 +417,7 @@ int main(void)
     test_cross_domain_error_detailed();
     test_async_domain_error_detailed();
     test_vertical_slice_simulation_infrastructure();
+    test_fsm_goto_undeclared_target_span();
 
     printf("All compile tests passed\n");
     return 0;
