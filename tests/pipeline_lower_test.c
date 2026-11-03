@@ -3988,13 +3988,20 @@ int main(int argc, char **argv)
 
 	SECTION("hold-mux-stored") {
 		/* Anchor: a legal 2-stage pipeline under `if (en)` lowers to rc == 0
-		 * and each per-stage next-value equation's value is a hold mux:
-		 * PIGEN_RTL_EXPR_CONDITIONAL whose when-false child (children[2]) is
-		 * the stage's stored value (PIGEN_RTL_EXPR_OBJECT), the false branch
-		 * holding. Plan item 1 (the stand-in replacement) has not landed, so
-		 * the when-true child is still the constant-0 stand-in and is NOT
-		 * asserted; only the mux shape and the when-false stored-value object
-		 * are pinned. */
+		 * and each per-stage next-value equation's value is the storage-hold
+		 * mux with the guard law's full polarity (how/to/reset/and/enable/
+		 * a/pipeline.md: the hold mux is `guard ? computed_next :
+		 * stored_value` - the false branch holds, the true branch advances):
+		 * a PIGEN_RTL_EXPR_CONDITIONAL whose condition child (children[0]) is
+		 * the guard itself - a direct PIGEN_RTL_EXPR_OBJECT whose origin span
+		 * spells exactly `en` (not a negation, not any other kind, so an
+		 * inverted mux `!en ? ...` fails) - whose when-true child (children[1])
+		 * is the stage's computed next value (stage 1 the input read whose
+		 * origin spells `x`, stage 2 the field read whose origin spells `a`),
+		 * and whose when-false child (children[2]) is the stage's stored value
+		 * (a PIGEN_RTL_EXPR_OBJECT whose origin is the stage node's own span).
+		 * The section pins the whole mux: shape, guard polarity, the computed
+		 * next value and the stored-value object. */
 		{
 			parsed p = pl_parse_guarded("hms_ok.pigen",
 				"module hms_ok(input logic clk, input logic en, "
@@ -4045,13 +4052,16 @@ int main(int argc, char **argv)
 			REQUIRE(rc == 0);
 			/* For each stage: the per-stage next-value equation (located by
 			 * its stage node's own origin span, the discriminator the
-			 * guard-io-1/guard-io-5 siblings use) is a hold mux - a
-			 * PIGEN_RTL_EXPR_CONDITIONAL whose when-false child (children[2])
-			 * is the stage's stored value, an OBJECT. The constant-0 stand-in
-			 * the current lowering publishes on that equation (an INTEGER
-			 * expression, which has no children) is not a conditional, so this
-			 * assertion discriminates the stand-in and fails today until the
-			 * guard-wiring implementation publishes the hold mux. */
+			 * guard-io-1/guard-io-5 siblings use) is the storage-hold mux with
+			 * the guard law's full polarity: a PIGEN_RTL_EXPR_CONDITIONAL whose
+			 * condition child (children[0]) is the guard itself (a direct
+			 * OBJECT spelling `en`), whose when-true child (children[1]) is the
+			 * stage's computed next value and whose when-false child
+			 * (children[2]) is the stage's stored value (an OBJECT). The
+			 * condition is pinned to the direct guard OBJECT (not a negation or
+			 * any other kind) so an inverted mux `!en ? ...` fails, and the
+			 * when-true child is pinned to the computed next value (not a
+			 * constant stand-in) so the true branch advances. */
 			{
 				pigen_rtl_expr_id va = pl_next_value(&rtl, stages[0]);
 				pigen_rtl_expr_id vb = pl_next_value(&rtl, stages[1]);
@@ -4060,18 +4070,17 @@ int main(int argc, char **argv)
 
 				REQUIRE(!IS_INVALID_ID(va));
 				REQUIRE(!IS_INVALID_ID(vb));
-				/* The per-stage next value is the hold mux, not the
-				 * constant-0 stand-in: it is a CONDITIONAL expression. */
+				/* The per-stage next value is the storage-hold mux: it is a
+				 * CONDITIONAL expression. */
 				REQUIRE(ea->kind == PIGEN_RTL_EXPR_CONDITIONAL);
 				REQUIRE(eb->kind == PIGEN_RTL_EXPR_CONDITIONAL);
-				/* The when-false child (children[2]) is the stage's stored
-				 * value: a PIGEN_RTL_EXPR_OBJECT. The false branch holds. */
 				{
 					const pigen_rtl_expr_id *ca;
 					const pigen_rtl_expr_id *cb;
 					size_t na = 0, nb = 0;
-					const pigen_rtl_expr *fa;
-					const pigen_rtl_expr *fb;
+					const pigen_rtl_expr *ca0, *cb0;
+					const pigen_rtl_expr *ta, *tb;
+					const pigen_rtl_expr *fa, *fb;
 					pigen_source_span sspan_a = stages[0]->location.source_span;
 					pigen_source_span sspan_b = stages[1]->location.source_span;
 
@@ -4079,6 +4088,40 @@ int main(int argc, char **argv)
 					cb = pigen_rtl_expr_children(&rtl, vb, &nb);
 					REQUIRE(na == 3);
 					REQUIRE(nb == 3);
+					/* The condition child (children[0]) is the guard itself: a
+					 * DIRECT PIGEN_RTL_EXPR_OBJECT whose origin span spells exactly
+					 * `en`. Pinning the kind to OBJECT (rejecting a PIGEN_RTL_EXPR_
+					 * UNARY negation, a BINARY or any other kind) enforces the mux's
+					 * polarity - a lowering that inverts the guard (`!en ? ... : ...`)
+					 * publishes a UNARY NOT over the guard object here and fails. */
+					ca0 = pigen_rtl_expr_get(&rtl, ca[0]);
+					cb0 = pigen_rtl_expr_get(&rtl, cb[0]);
+					REQUIRE(ca0 && ca0->kind == PIGEN_RTL_EXPR_OBJECT);
+					REQUIRE(cb0 && cb0->kind == PIGEN_RTL_EXPR_OBJECT);
+					REQUIRE(pigen_rtl_object_get(&rtl, ca0->object) &&
+						span_is(&p.sources,
+							pigen_rtl_object_get(&rtl, ca0->object)->origin, "en"));
+					REQUIRE(pigen_rtl_object_get(&rtl, cb0->object) &&
+						span_is(&p.sources,
+							pigen_rtl_object_get(&rtl, cb0->object)->origin, "en"));
+					/* The when-true child (children[1]) is the stage's computed
+					 * next value, the value the landed stand-in replacement publishes:
+					 * stage 1 (a <= x) the enclosing input read whose origin spells
+					 * `x`, stage 2 (b <= a) the pipeline-field read whose origin
+					 * spells `a`. A direct OBJECT whose origin spells the computed
+					 * operand - the true branch advances, it is not a constant stand-in. */
+					ta = pigen_rtl_expr_get(&rtl, ca[1]);
+					tb = pigen_rtl_expr_get(&rtl, cb[1]);
+					REQUIRE(ta && ta->kind == PIGEN_RTL_EXPR_OBJECT);
+					REQUIRE(tb && tb->kind == PIGEN_RTL_EXPR_OBJECT);
+					REQUIRE(pigen_rtl_object_get(&rtl, ta->object) &&
+						span_is(&p.sources,
+							pigen_rtl_object_get(&rtl, ta->object)->origin, "x"));
+					REQUIRE(pigen_rtl_object_get(&rtl, tb->object) &&
+						span_is(&p.sources,
+							pigen_rtl_object_get(&rtl, tb->object)->origin, "a"));
+					/* The when-false child (children[2]) is the stage's stored
+					 * value: a PIGEN_RTL_EXPR_OBJECT. The false branch holds. */
 					fa = pigen_rtl_expr_get(&rtl, ca[2]);
 					fb = pigen_rtl_expr_get(&rtl, cb[2]);
 					REQUIRE(fa && fa->kind == PIGEN_RTL_EXPR_OBJECT);
