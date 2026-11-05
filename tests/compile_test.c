@@ -839,6 +839,85 @@ static void test_pipeline_first_stage_read_original_span(void)
     pigen_free_sources(&sources);
 }
 
+/* Scenario line 7 (CLI pipeline emitted-SV list, what/are/the/cli/pipeline/
+ * emitted/sv/test/scenarios.md): a pipeline outside a clocked process is
+ * diagnosed, not silently dropped. The witness is the section-(1) pipeline body
+ * (tests/pipeline_lower_test.c bs_ok: fields a/b/c 8-bit, a <= x, b <= a,
+ * c <= b, yield c) placed directly in the module with no enclosing
+ * `always @(posedge clk)` process. On master this source compiles rc == 0 into
+ * an empty module body (the pipeline is silently dropped); the production
+ * pipeline step must instead fail loud with rc == -1, no output text, a
+ * non-degenerate span over the `pipeline` keyword at its original location, and
+ * a non-empty message. This line is RED on master (rc == 0 today) and goes green
+ * when the production pipeline step lands. */
+static void test_pipeline_module_level_diagnosed_at_original_span(void)
+{
+    pigen_source_manager sources = {0};
+    /* The witness: the section-(1) pipeline body placed directly in the module,
+     * with no enclosing clocked process (the always block and its begin/end are
+     * removed, the pipeline statement sits at module level). */
+    const char *source_text =
+        "module mlp_pipe(input logic clk, input logic [7:0] x);\n"
+        "\tpipeline mlp_pipe_pipe begin\n"
+        "\t\tbit [7:0] a;\n"
+        "\t\tbit [7:0] b;\n"
+        "\t\tbit [7:0] c;\n"
+        "\t\tstage begin\n"
+        "\t\t\ta <= x;\n"
+        "\t\tend\n"
+        "\t\tstage begin\n"
+        "\t\t\tb <= a;\n"
+        "\t\tend\n"
+        "\t\tstage begin\n"
+        "\t\t\tc <= b;\n"
+        "\t\tend\n"
+        "\t\tyield c;\n"
+        "\tendpipeline\n"
+        "endmodule";
+    size_t source_length = strlen(source_text);
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    size_t span_length = 0;
+    const char *span_text;
+    int ret;
+
+    /* The compile seam adds the source itself; a pre-added source would be a
+     * duplicate path and is not this scenario's witness. */
+    ret = pigen_compile_source(&sources, "tests/mlp_pipe.pigen",
+                               source_text, source_length,
+                               NULL, &result, &error);
+    /* A module-level pipeline is an unsupported procedural position: the
+     * production step fails loud (rc == -1) rather than silently dropping it
+     * into an empty module (rc == 0, master's current behavior). */
+    if (ret != -1) {
+        fprintf(stderr,
+                "test_pipeline_module_level_diagnosed_at_original_span: "
+                "expected rc == -1 (a module-level pipeline must be diagnosed, "
+                "not silently dropped); got rc=%d, message='%s'\n",
+                ret, error.message ? error.message : "(null)");
+        abort();
+    }
+    /* No SystemVerilog is emitted on failure. */
+    assert(result.systemverilog == NULL);
+    assert(result.length == 0);
+    /* The diagnostic is non-empty. */
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+    /* The span is non-degenerate (start < end) and located at the `pipeline`
+     * keyword's original span, not a degenerate or foreign span. */
+    assert(error.span.source.index != PIGEN_INVALID_ID);
+    assert(error.span.start < error.span.end);
+    assert(pigen_source_span_valid(&sources, error.span));
+    span_text = pigen_source_span_text(&sources, error.span, &span_length);
+    assert(span_text != NULL);
+    assert(span_length == strlen("pipeline"));
+    assert(memcmp(span_text, "pipeline", span_length) == 0);
+    /* The span's source is the one the compile added (source 0). */
+    assert(error.span.source.index == 0);
+
+    pigen_free_sources(&sources);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -860,6 +939,7 @@ int main(void)
     test_pipeline_next_value_equations_in_emission();
     test_pipeline_ready_valid_handshake_emission();
     test_pipeline_first_stage_read_original_span();
+    test_pipeline_module_level_diagnosed_at_original_span();
 
     printf("All compile tests passed\n");
     return 0;
