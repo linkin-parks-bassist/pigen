@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-29T07:46:34+11:00"
+revised_at: "2026-11-05T18:51:51+11:00"
 ---
 
 On accepted master (418adb1), pipeline and FSM statements do not reach the CLI-compiled output.
@@ -10,7 +10,7 @@ On accepted master (418adb1), pipeline and FSM statements do not reach the CLI-c
 
 Checked probes (data-first dialect, ./pigen on the 418adb1 build): a two-stage pipeline source -> RC=1, `invalid procedural statement` at the `pipeline` token; an idle/send FSM with a guarded goto -> RC=0, output module body empty.
 
-Cause: the production compile path (src/compile.c -> pigen_lower_rtl_transfers / pigen_lower_rtl_module in src/rtl_lower.c) lowers declarations and direct transfers only. The complete, green-manifested lowering owners pigen_pipeline_lower (src/pipeline_lower.c, step (c), what/is/the/pipeline/parent/module/lowering.md) and pigen_fsm_lower (src/fsm_lower.c, (s5), what/is/the/fsm/parent/module/lowering.md) are not called from the production path; the quarantined textual fsm.c/pipeline.c are still in the production link line.
+Cause: the production compile path (src/compile.c -> pigen_lower_rtl_transfers / pigen_lower_rtl_module in src/rtl_lower.c) lowers declarations and direct transfers only. The complete, green-manifested lowering owners pigen_pipeline_lower (src/pipeline_lower.c, step (c), what/is/the/pipeline/parent/module/lowering.md) and pigen_fsm_lower (src/fsm_lower.c, (s5), what/is/the/fsm/parent/module/lowering.md) are not called from the production path; the production link line links their structured owners (src/pipeline_lower.c, src/pipeline_identity.c, src/pipeline_stage.c, src/fsm_identity.c, src/fsm_lower.c) rather than the quarantined textual fsm.c/pipeline.c.
 
 Consequence: the user-facing outcome - a .pigen source containing a pipeline or FSM compiles through the CLI to SV that implements the specified computation and halt/stop semantics, with test contracts enforcing it - is not met. The cli-wiring milestone covered the CLI shell itself (what/is/the/command/line/contract.md), not statement lowering through it. The corpus tests/pipeline.pigen and tests/fsm.pigen remain prototype-dialect and go red as per-subsystem migration debt (what/is/broken.md); the pipeline-test/fsm-test verify targets therefore also miss the structured dialect.
 
