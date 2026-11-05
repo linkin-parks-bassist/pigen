@@ -744,6 +744,101 @@ static void test_pipeline_ready_valid_handshake_emission(void)
     pigen_free_sources(&sources);
 }
 
+/* Test 15: Pipeline first-stage field read is diagnosed at the original span.
+ * A 2-stage pipeline whose first stage reads pipeline field b, which no earlier
+ * stage has written (fields a, b, each 8-bit; stage 1 `a <= b;`, stage 2
+ * `b <= x;`, `yield b;` - the section-(1) red of tests/pipeline_lower_test.c),
+ * must fail loudly: rc == -1, no output text, and a non-degenerate error span
+ * over the offending first-stage statement at its original location with a
+ * non-empty message. This line witnesses the production path (pigen_compile_
+ * source, the extended lowering entry, naming, output model, emission) reaching
+ * the step-(b) first-stage law owner and reporting it at the original span with
+ * no output (how/should/compiler/builders/fail.md). A permissive step that
+ * lowers the violation returns rc == 0 and fails this line; a step that reports
+ * the whole `pipeline ... endpipeline` block (the current diagnostic) rather
+ * than the offending statement fails the span pin. */
+static void test_pipeline_first_stage_read_original_span(void)
+{
+    pigen_source_manager sources = {0};
+    const char *source_text =
+        "module bs_red(input logic clk, input logic [7:0] x);\n"
+        "\talways @(posedge clk) begin\n"
+        "\t\tpipeline bs_pipe begin\n"
+        "\t\t\tbit [7:0] a;\n"
+        "\t\t\tbit [7:0] b;\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\ta <= b;\n"
+        "\t\t\tend\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\tb <= x;\n"
+        "\t\t\tend\n"
+        "\t\t\tyield b;\n"
+        "\t\tendpipeline\n"
+        "\tend\n"
+        "endmodule";
+    size_t source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/compile_test_pipeline_first_stage.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    /* Fail loud: the step-(b) first-stage law is violated. */
+    assert(ret == -1);
+    /* No output text is published on failure. */
+    assert(result.systemverilog == NULL);
+    /* A non-empty diagnostic message. */
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+    /* Non-degenerate span: a real source and a non-zero-length interval. */
+    assert(error.span.source.index != PIGEN_INVALID_ID);
+    assert(error.span.end > error.span.start);
+    /* The offending first-stage statement is `a <= b;`; locate it in the
+     * literal source and confirm the span covers it at its original location.
+     * The span must point at that statement, not at the enclosing
+     * `pipeline ... endpipeline` block (which would start at the `pipeline`
+     * keyword, far before the statement). */
+    size_t stmt_start = (size_t)(strstr(source_text, "a <= b;") - source_text);
+    size_t stmt_end = stmt_start + strlen("a <= b;");
+    assert(error.span.start <= stmt_start);
+    assert(error.span.end >= stmt_end);
+    {
+        size_t tlen = 0;
+        const char *t = pigen_source_span_text(&sources, error.span, &tlen);
+        char buf[512];
+        size_t n;
+        if (t == NULL || tlen == 0) {
+            fprintf(stderr,
+                "pipeline first-stage read: expected a non-empty error span "
+                "over the offending statement; got NULL or empty span text\n");
+            abort();
+        }
+        /* pigen_source_span_text returns a pointer into the middle of the
+         * source buffer, not a NUL-terminated string; copy the located span
+         * bounded by tlen before searching, so the search cannot read past
+         * the span into the rest of the source. */
+        n = tlen < sizeof(buf) ? tlen : sizeof(buf);
+        memcpy(buf, t, n);
+        buf[n] = '\0';
+        if (strstr(buf, "a <= b") == NULL || strstr(buf, "pipeline") != NULL) {
+            fprintf(stderr,
+                "pipeline first-stage read: expected the error span to cover "
+                "the offending first-stage statement `a <= b;` at its original "
+                "location and NOT the whole `pipeline ... endpipeline` block.\n"
+                "  offending statement `a <= b;` at offset [%zu..%zu]\n"
+                "  actual span [%zu..%zu] text = %s\n"
+                "  (a block-level span starting at the `pipeline` keyword fails "
+                "this pin)\n",
+                stmt_start, stmt_end,
+                error.span.start, error.span.end,
+                buf);
+            abort();
+        }
+    }
+
+    pigen_free_sources(&sources);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -764,6 +859,7 @@ int main(void)
     test_pipeline_emitted_module_and_buf_count();
     test_pipeline_next_value_equations_in_emission();
     test_pipeline_ready_valid_handshake_emission();
+    test_pipeline_first_stage_read_original_span();
 
     printf("All compile tests passed\n");
     return 0;
