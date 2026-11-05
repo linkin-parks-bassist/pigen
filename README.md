@@ -12,13 +12,6 @@ clocks, storage, timing boundaries and cycle behaviour remain explicit. What
 Pigen takes away is the repeated flow-control bookkeeping that tends to bury the
 actual design.
 
-Pigen compiles `.pigen` files to readable, synthesizable SystemVerilog. This
-README describes the target language. The shared structured frontend already
-parses and resolves the data-first declarations shown below, but `./pigen` is
-not yet connected to that frontend. The production executable will adopt this
-syntax with the first semantic-to-elastic-RTL vertical lowering slice; until
-then, use [`USER_GUIDE.md`](USER_GUIDE.md) for its runnable prototype subset.
-
 ## Transfer types
 
 Every signal has a transfer type. It defines the signal's validity, readiness,
