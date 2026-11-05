@@ -186,6 +186,88 @@ static void test_owned_signal_full_pipeline(void)
     free(source_text);
 }
 
+/* Line 4 of the accepted CLI emitted-SV test map
+ * (what/are/the/cli/pipeline/emitted/sv/test/scenarios.md): a legal two-field
+ * pipeline (field x, 8-bit, and field y, 16-bit; a single stage writing both
+ * from enclosing module inputs; `yield {x, y};`) compiles with rc == 0 and
+ * the emitted SV (a) declares the pipeline identifier as a module-scope buf
+ * output packet port with packed width 24 (8 + 16) and (b) carries the yield
+ * write into that port whose concatenation renders in SOURCE ORDER - the
+ * first-yielded field x the leftmost (MSB) member, y the rightmost (LSB) -
+ * the reversed order `{y, x}` failing the pin.
+ *
+ * The witness stage writes each field from a distinct enclosing input (d,
+ * 8-bit, and e, 16-bit): a first-stage pipeline-field read, including the
+ * self-read, is rc == -1 under the step-(b) first-stage law, so the stage's
+ * only legal reads of module scope are external. Each yield member therefore
+ * carries nothing across the boundary (an external read) and the lowering
+ * publishes its plain field object, named by the field's provenance
+ * declaration span, so the terminal renderer spells the members x and y in
+ * the yield's source order.
+ *
+ * The destination provenance and the member-order law are pinned standalone
+ * by pipeline-lower-test sections (3) yield-write and (4)
+ * emitted-member-order; this line witnesses both in the terminal emission
+ * through the production path (pigen_compile_source).
+ *
+ * RED against master until the production pipeline step lands: the
+ * clocked-process pipeline is diagnosed "invalid procedural statement" at
+ * the resolve stage, so this line fails at the rc == 0 pin. */
+static void test_pipeline_yield_two_field_msbsrc(void)
+{
+    pigen_source_manager sources = {0};
+    const char *source_text =
+        "module p2f_yield(input logic clk, input logic [7:0] d, "
+        "input logic [15:0] e);\n"
+        "\talways @(posedge clk) begin\n"
+        "\t\tpipeline p2f_pipe begin\n"
+        "\t\t\tbit [7:0] x;\n"
+        "\t\t\tbuf bit [15:0] y;\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\tx <= d;\n"
+        "\t\t\t\ty <= e;\n"
+        "\t\t\tend\n"
+        "\t\t\tyield {x, y};\n"
+        "\t\tendpipeline\n"
+        "\tend\n"
+        "endmodule";
+    size_t source_length = strlen(source_text);
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret;
+    const char *port;
+    const char *in_order;
+    const char *reversed;
+
+    ret = pigen_compile_source(&sources, "tests/p2f_yield.pigen",
+                               source_text, source_length,
+                               NULL, &result, &error);
+    /* RED against master: the production pipeline step is absent, so the
+     * clocked-process pipeline is diagnosed "invalid procedural statement"
+     * (resolve stage) and rc == -1. */
+    assert(ret == 0);
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+    /* (a) The pipeline identifier is declared as a module-scope buf output
+     *     packet port with packed width 24 (8 + 16): the emission renders a
+     *     24-bit port as `output logic [23:0] <name>` (sv_emit port header,
+     *     direction right-aligned to six columns). */
+    port = strstr(result.systemverilog, "output logic [23:0] p2f_pipe");
+    assert(port != NULL);
+    /* (b) The yield write into that port renders the member concatenation in
+     *     SOURCE ORDER: the first-yielded field x (8-bit) the leftmost (MSB)
+     *     member, y (16-bit) the rightmost (LSB) member; the terminal
+     *     renderer spells the concatenation without spaces. The reversed
+     *     order {y,x} fails this pin. */
+    in_order = strstr(result.systemverilog, "{x,y}");
+    assert(in_order != NULL);
+    reversed = strstr(result.systemverilog, "{y,x}");
+    assert(reversed == NULL);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 /* Test 8: Syntax error - missing semicolon produces diagnostic with span */
 static void test_syntax_error_span(void)
 {
@@ -670,6 +752,7 @@ int main(void)
     test_error_provenance();
     test_cross_domain_error_provenance();
     test_owned_signal_full_pipeline();
+    test_pipeline_yield_two_field_msbsrc();
     test_syntax_error_span();
     test_type_mismatch_error();
     test_ready_cycle_error();
