@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -481,6 +482,96 @@ static void test_pipeline_emitted_module_and_buf_count(void)
     pigen_free_sources(&sources);
 }
 
+/* Line 2 of the CLI pipeline emitted-SV test map (local:what/are/the/cli/
+ * pipeline/emitted/sv/test/scenarios.md, accepted by
+ * local:what/is/the/review/of/the/cli/pipeline/emitted/sv/test/scenarios.md):
+ * per-stage next-value equations reach the emission.
+ *
+ * A legal 2-stage pipeline (fields a, b, each 8-bit; stage 1 `a <= x`,
+ * stage 2 `b <= a`; `yield b;`) is the section-(2) witness shape of
+ * tests/pipeline_lower_test.c, driven through the production seam
+ * pigen_compile_source. The promised behavior: the compile succeeds
+ * (rc == 0) and the emitted SV carries the per-stage next-value equations of
+ * BOTH stages as continuous assignments or clocked updates inside the parent
+ * module - not only the buf instances and ports.
+ *
+ * The equation VALUES are constant stand-ins this line does not discriminate
+ * (local:what/are/the/pipeline/stage/computation/test/scenarios.md owns them
+ * at the pipeline-lower-test seam): the pin is the PRESENCE of the per-stage
+ * equations as emitted continuous assignments (`assign`) or clocked updates
+ * (`always ... <=`), which a builder that publishes only the pigen_buf
+ * instances and the module ports would lack. The standalone pin is
+ * pipeline-lower-test section (2) next-value-equations (equation_count >=
+ * stage_count); this line witnesses those equations in the terminal emission.
+ * The emission observations are text scans over result.systemverilog, never by
+ * re-parsing.
+ *
+ * RED against master: the production pipeline step (src/compile.c) is not yet
+ * in place, so a clocked-process pipeline source returns rc == -1 ("invalid
+ * procedural statement") with no output text; the first pin (rc == 0) aborts
+ * the run, and this line goes green when that step lands. */
+static void test_pipeline_next_value_equations_in_emission(void)
+{
+    pigen_source_manager sources = {0};
+    const char *source_text =
+        "module nve_ok(input logic clk, input logic [7:0] x);\n"
+        "\talways @(posedge clk) begin\n"
+        "\t\tpipeline nve_pipe begin\n"
+        "\t\t\tbit [7:0] a;\n"
+        "\t\t\tbit [7:0] b;\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\ta <= x;\n"
+        "\t\t\tend\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\tb <= a;\n"
+        "\t\t\tend\n"
+        "\t\t\tyield b;\n"
+        "\t\tendpipeline\n"
+        "\tend\n"
+        "endmodule";
+    size_t source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/nve_ok.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    if (ret != 0) {
+        fprintf(stderr,
+                "test_pipeline_next_value_equations_in_emission: compile "
+                "failed (expected rc == 0); rc=%d message='%s'\n",
+                ret, error.message ? error.message : "(null)");
+        abort();
+    }
+    assert(result.systemverilog != NULL);
+
+    /* The per-stage next-value equations must reach the emission as
+     * continuous assignments (`assign`) or clocked updates (`always` ...
+     * `<=`) - not only the pigen_buf instances and ports. A whole-word
+     * `assign` is a continuous assignment; a `<=` inside an `always` block is
+     * a clocked update. The equation VALUES are constant stand-ins and are
+     * not discriminated here. */
+    const char *sv = result.systemverilog;
+    int has_continuous = 0;
+    int has_update = 0;
+    const char *assign = strstr(sv, "assign");
+    if (assign && (assign == sv || isspace((unsigned char)assign[-1])))
+        has_continuous = 1;
+    const char *clocked = strstr(sv, "always");
+    if (clocked) {
+        for (const char *p = clocked; (p = strchr(p, '<')) != NULL; p++) {
+            if (p[1] == '=') {
+                has_update = 1;
+                break;
+            }
+        }
+    }
+    assert(has_continuous || has_update);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -498,6 +589,7 @@ int main(void)
     test_vertical_slice_simulation_infrastructure();
     test_fsm_goto_undeclared_target_span();
     test_pipeline_emitted_module_and_buf_count();
+    test_pipeline_next_value_equations_in_emission();
 
     printf("All compile tests passed\n");
     return 0;
