@@ -402,6 +402,85 @@ static void test_fsm_goto_undeclared_target_span(void)
     pigen_free_sources(&sources);
 }
 
+/* Test 15: A legal 3-stage pipeline compiles (rc == 0) and the emitted SV
+ * declares exactly ONE parent module and instantiates the dedicated one-entry
+ * buf primitive `pigen_buf` exactly (N-1) = 2 times, one per stage boundary.
+ *
+ * Line 1 of the accepted test map what/are/the/cli/pipeline/emitted/sv/test/
+ * scenarios.md, witnessed through the production seam pigen_compile_source. The
+ * witness source is the section-(1) shape of tests/pipeline_lower_test.c: a
+ * clocked process holding a 3-stage pipeline (fields a, b, c each 8-bit; stages
+ * `a <= x`, `b <= a`, `c <= b`; `yield c;`). The standalone instance count is
+ * pinned by pipeline-lower-test section (1) buf-storage
+ * (rtl.instance_count == 2); this line witnesses it in the terminal emission.
+ * The emission observations are text counts over result.systemverilog, never by
+ * re-parsing.
+ *
+ * RED against master: the production pipeline step (src/compile.c) is not yet
+ * in place, so a clocked-process pipeline source returns rc == -1 ("invalid
+ * procedural statement") with no output text; this line goes green when that
+ * step lands. */
+static void test_pipeline_emitted_module_and_buf_count(void)
+{
+    pigen_source_manager sources = {0};
+    const char *source_text =
+        "module bs_ok(input logic clk, input logic [7:0] x);\n"
+        "\talways @(posedge clk) begin\n"
+        "\t\tpipeline bs_pipe begin\n"
+        "\t\t\tbit [7:0] a;\n"
+        "\t\t\tbit [7:0] b;\n"
+        "\t\t\tbit [7:0] c;\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\ta <= x;\n"
+        "\t\t\tend\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\tb <= a;\n"
+        "\t\t\tend\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\tc <= b;\n"
+        "\t\t\tend\n"
+        "\t\t\tyield c;\n"
+        "\t\tendpipeline\n"
+        "\tend\n"
+        "endmodule";
+    size_t source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/pipeline_emitted.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    if (ret != 0) {
+        fprintf(stderr,
+                "test_pipeline_emitted_module_and_buf_count: compile failed "
+                "(expected rc == 0); rc=%d message='%s'\n",
+                ret, error.message ? error.message : "(null)");
+        abort();
+    }
+    assert(result.systemverilog != NULL);
+
+    /* Count the module declarations: every emitted module ends with exactly
+     * one `endmodule`, and `endmodule` is a substring of nothing else in the
+     * SV, so its occurrence count is the module count. */
+    size_t module_count = 0;
+    for (const char *p = result.systemverilog;
+         (p = strstr(p, "endmodule")) != NULL; p += strlen("endmodule"))
+        module_count++;
+    assert(module_count == 1);
+
+    /* Count the dedicated one-entry buf primitive instances: the production
+     * pipeline step instantiates `pigen_buf` once per stage boundary, so a
+     * 3-stage pipeline (N-1) carries exactly 2. */
+    size_t buf_count = 0;
+    for (const char *p = result.systemverilog;
+         (p = strstr(p, "pigen_buf")) != NULL; p += strlen("pigen_buf"))
+        buf_count++;
+    assert(buf_count == 2);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -418,6 +497,7 @@ int main(void)
     test_async_domain_error_detailed();
     test_vertical_slice_simulation_infrastructure();
     test_fsm_goto_undeclared_target_span();
+    test_pipeline_emitted_module_and_buf_count();
 
     printf("All compile tests passed\n");
     return 0;
