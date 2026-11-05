@@ -572,6 +572,96 @@ static void test_pipeline_next_value_equations_in_emission(void)
     pigen_free_sources(&sources);
 }
 
+/* Test 15: A legal 2-stage pipeline compiles (rc == 0) and the emitted SV
+ * carries the ready/valid handshake EQUATIONS, gated as the owner publishes
+ * them (this step's guard is the constant 1); the one-entry buf boundary's
+ * live-handshake obligation is witnessed at that equation level.
+ *
+ * This is line 3 of the accepted test map
+ * local:what/are/the/cli/pipeline/emitted/sv/test/scenarios.md (ACCEPTED by
+ * local:what/is/the/review/of/the/cli/pipeline/emitted/sv/test/scenarios.md).
+ * The witness shape is the section-(1) source of tests/pipeline_lower_test.c
+ * adapted to this line's 2-stage pipeline: fields a, b, each 8-bit; stage 1
+ * `a <= x`, stage 2 `b <= a`; `yield b;`.
+ *
+ * The owner (src/pipeline_lower.c, lower_pipeline) publishes, for an unguarded
+ * pipeline (guard = the constant 1), the ready/valid handshake as the
+ * ready equation `ready = guard`: a 1-bit continuous assignment whose value is
+ * the integer constant 1 (the no-over-gating contract - an unguarded pipeline
+ * publishes no guard object, no hold mux and no guard connection). The
+ * stage-boundary storage is a dedicated one-entry buf primitive instance
+ * (what/is/a/buf.md), one per boundary (N-1 = 1 for a 2-stage pipeline). The
+ * line's live-handshake obligation is witnessed by the ready/valid handshake
+ * EQUATIONS in the emission (ready = the constant 1 for this unguarded witness),
+ * never by instance port-connection text: the owner publishes no in_ready /
+ * out_valid objects, and the unguarded buf instance carries no connections (its
+ * only published connection is the guard one, and only under a real enclosing
+ * guard), so no port-connection string can appear for this witness (the
+ * interpretation is pinned at what/is/the/review/of/the/cli/pipeline/emitted/
+ * sv/test/scenarios.md, line-3 finding).
+ *
+ * This line witnesses the ready/valid handshake equations in the terminal
+ * emission; the guarded-handshake publication is pinned standalone by
+ * pipeline-lower-test section (5) step-b-witnesses. False-guard halt
+ * enforcement and the pipe_reset/pipeline_reset bindings are NOT pinned here
+ * (their owning plan item at the pipeline-lower-test seam).
+ *
+ * RED against master: on master a clocked-process pipeline statement is
+ * rejected with "invalid procedural statement" at the pipeline token
+ * (does/the/pipeline/and/fsm/reach/the/compiled/output.md), so compile_ret is
+ * -1 and no output is emitted. The discriminating pin is the rc == 0 check;
+ * the emission pins (the ready/valid handshake equation to the constant 1 and
+ * the pigen_buf instance) go green with it when the production pipeline step
+ * lands (how/does/a/pipeline/statement/reach/the/production/rtl/path.md). */
+static void test_pipeline_ready_valid_handshake_emission(void)
+{
+    pigen_source_manager sources = {0};
+    const char *source_text =
+        "module line3_pipe(input logic clk, input logic [7:0] x);\n"
+        "\talways @(posedge clk) begin\n"
+        "\t\tpipeline line3_pipe_body begin\n"
+        "\t\t\tbit [7:0] a;\n"
+        "\t\t\tbit [7:0] b;\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\ta <= x;\n"
+        "\t\t\tend\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\tb <= a;\n"
+        "\t\t\tend\n"
+        "\t\t\tyield b;\n"
+        "\t\tendpipeline\n"
+        "\tend\n"
+        "endmodule";
+    size_t source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/line3_pipe.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    /* The legal 2-stage pipeline compiles. On master this is the
+     * discriminating red: the production pipeline step is not yet in the
+     * path, so the resolve stage rejects the clocked-process pipeline
+     * statement with "invalid procedural statement" and ret is -1. */
+    assert(ret == 0);
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+
+    /* The ready/valid handshake equation is present, gated as the owner
+     * publishes it: this step's guard is the constant 1, so the ready
+     * equation `ready = guard` is a continuous assignment to the integer
+     * constant 1 (the no-over-gating contract - an unguarded pipeline
+     * publishes no guard object or hold mux). */
+    assert(strstr(result.systemverilog, " = 1;") != NULL);
+
+    /* The one-entry buf stage storage is a dedicated primitive instance, one
+     * per stage boundary (N-1 = 1 for a 2-stage pipeline). */
+    assert(strstr(result.systemverilog, "pigen_buf") != NULL);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -590,6 +680,7 @@ int main(void)
     test_fsm_goto_undeclared_target_span();
     test_pipeline_emitted_module_and_buf_count();
     test_pipeline_next_value_equations_in_emission();
+    test_pipeline_ready_valid_handshake_emission();
 
     printf("All compile tests passed\n");
     return 0;
