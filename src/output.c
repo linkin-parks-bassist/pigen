@@ -339,6 +339,184 @@ static int node_identity(uint32_t node_index, const pigen_syntax_node *node,
 	}
 }
 
+/* A half-open span is valid when its source is a real source id. */
+static int out_span_valid(const pigen_source_span *span)
+{
+	return span->source.index != PIGEN_INVALID_ID;
+}
+
+/* True when the half-open span A lies entirely within the half-open span B
+ * (the same source). */
+static int out_span_within(const pigen_source_span *a, const pigen_source_span *b)
+{
+	if (!out_span_valid(a) || !out_span_valid(b))
+		return 0;
+	return a->source.index == b->source.index &&
+		a->start >= b->start && a->end <= b->end;
+}
+
+/* Mark every object the expression subtree rooted at E references - the
+ * subtree's direct OBJECT operands and each child's subtree - in the boolean
+ * set (capacity count). */
+static void out_expr_objects_mark(const pigen_rtl_model *rtl,
+	pigen_rtl_expr_id e, int *marked, size_t count)
+{
+	const pigen_rtl_expr *expr;
+	const pigen_rtl_expr_id *children;
+	size_t child_count = 0;
+	size_t i;
+
+	expr = pigen_rtl_expr_get(rtl, e);
+	if (!expr)
+		return;
+	if (expr->kind == PIGEN_RTL_EXPR_OBJECT &&
+		expr->object.index != PIGEN_INVALID_ID &&
+		expr->object.index < count)
+		marked[expr->object.index] = 1;
+	children = pigen_rtl_expr_children(rtl, e, &child_count);
+	if (!children)
+		return;
+	for (i = 0; i < child_count; i++)
+		out_expr_objects_mark(rtl, children[i], marked, count);
+}
+
+/* Emit one pipeline statement's published RTL records as the module's
+ * children: the production pipeline step (src/rtl_lower.c,
+ * pigen_lower_rtl_pipelines) publishes the pipeline's one-entry buf stage
+ * storage, its per-stage next-value equations, its guarded ready/valid
+ * handshake and its yield write into the parent module's shared record, and
+ * the pipeline's own field/stage syntax nodes publish no declarator
+ * identities, so the walk adds the pipeline's records directly instead of
+ * recursing into the pipeline's children. The records are the module's RTL
+ * objects, instances and equations whose origin lies within the pipeline
+ * statement's span, plus the pipeline's synthetic records with an invalid
+ * origin (the ready object and ready equation), plus every object the
+ * pipeline's equations and instance connections reference from outside the
+ * span (the enclosing guard object, an enclosing module-signal read object).
+ * A pipeline node outside any open module is a container the walk keeps
+ * recursing (the resolve stage diagnoses a module-level pipeline, so this
+ * walk only sees one inside a module). */
+static int emit_pipeline_records(pigen_output_model *model,
+	const pigen_rtl_lowering *lowering, const pigen_syntax_node *pipeline,
+	pigen_rtl_module_id module, pigen_output_error *error)
+{
+	const pigen_rtl_model *rtl = lowering->rtl;
+	const pigen_source_span span = pipeline->location.source_span;
+	int *marked = NULL;
+	size_t i;
+	int rc = -1;
+
+	if (!out_span_valid(&span))
+		goto out;
+	marked = calloc(rtl->object_count ? rtl->object_count : 1, sizeof(*marked));
+	if (!marked)
+		goto out;
+
+	/* The objects and instances the pipeline's own records reference. */
+	for (i = 0; i < rtl->equation_count; i++)
+	{
+		const pigen_rtl_equation *equation = &rtl->equations[i];
+
+		if (equation->module.index != module.index)
+			continue;
+		if (out_span_valid(&equation->origin) &&
+			!out_span_within(&equation->origin, &span))
+			continue;
+		out_expr_objects_mark(rtl, equation->value, marked,
+			rtl->object_count);
+		/* The synthetic ready equation carries an invalid origin and its
+		 * value (the guard, a constant when unguarded) references no object,
+		 * so its destination - the synthetic ready object - is marked here or
+		 * the equation's destination would have no emitted record. */
+		if (!out_span_valid(&equation->origin) &&
+			equation->destination.index != PIGEN_INVALID_ID &&
+			equation->destination.index < rtl->object_count &&
+			!out_span_valid(&rtl->objects[equation->destination.index].origin))
+			marked[equation->destination.index] = 1;
+	}
+	for (i = 0; i < rtl->instance_count; i++)
+	{
+		const pigen_rtl_instance *instance = &rtl->instances[i];
+		size_t j;
+
+		if (instance->module.index != module.index ||
+			!out_span_within(&instance->origin, &span))
+			continue;
+		for (j = 0; j < instance->connections.count; j++)
+		{
+			pigen_rtl_object_id c =
+				rtl->instance_connections[instance->connections.first + j];
+
+			if (c.index != PIGEN_INVALID_ID && c.index < rtl->object_count)
+				marked[c.index] = 1;
+		}
+	}
+
+	/* The objects, in arena order. */
+	for (i = 0; i < rtl->object_count; i++)
+	{
+		const pigen_rtl_object *object = &rtl->objects[i];
+		pigen_output_item item = {0};
+
+		if (object->module.index != module.index)
+			continue;
+		if (out_span_valid(&object->origin))
+		{
+			if (!out_span_within(&object->origin, &span) && !marked[i])
+				continue;
+		}
+		else if (!marked[i])
+			continue;
+		item.kind = PIGEN_OUTPUT_RTL_OBJECT;
+		item.as.object = (pigen_rtl_object_id){(uint32_t)i};
+		if (pigen_output_item_add_child(model, module, item) ==
+			PIGEN_INVALID_ID)
+			goto out;
+	}
+	/* The buf stage-storage instances, in arena order. */
+	for (i = 0; i < rtl->instance_count; i++)
+	{
+		const pigen_rtl_instance *instance = &rtl->instances[i];
+		pigen_output_item item = {0};
+
+		if (instance->module.index != module.index ||
+			!out_span_within(&instance->origin, &span))
+			continue;
+		item.kind = PIGEN_OUTPUT_RTL_INSTANCE;
+		item.as.instance = (pigen_rtl_instance_id){(uint32_t)i};
+		if (pigen_output_item_add_child(model, module, item) ==
+			PIGEN_INVALID_ID)
+			goto out;
+	}
+	/* The per-stage next-value, yield-write and ready equations, in arena
+	 * order. */
+	for (i = 0; i < rtl->equation_count; i++)
+	{
+		const pigen_rtl_equation *equation = &rtl->equations[i];
+		pigen_output_item item = {0};
+
+		if (equation->module.index != module.index)
+			continue;
+		if (out_span_valid(&equation->origin) &&
+			!out_span_within(&equation->origin, &span))
+			continue;
+		item.kind = PIGEN_OUTPUT_RTL_EQUATION;
+		item.as.equation = (pigen_rtl_equation_id){(uint32_t)i};
+		if (pigen_output_item_add_child(model, module, item) ==
+			PIGEN_INVALID_ID)
+			goto out;
+	}
+	rc = 0;
+out:
+	free(marked);
+	if (rc != 0 && error)
+	{
+		error->span = span;
+		error->message = "pipeline RTL records are not publishable";
+	}
+	return rc;
+}
+
 static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, uint32_t node_index,
 	pigen_rtl_module_id module, int in_module, pigen_output_error *error);
@@ -380,6 +558,15 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 			return pigen_output_item_add_child(model, module, item) ==
 				PIGEN_INVALID_ID ? -1 : 0;
 		return pigen_output_item_add(model, item) == PIGEN_INVALID_ID ? -1 : 0;
+	}
+	if (node->kind == PIGEN_SYNTAX_PIPELINE)
+	{
+		/* The pipeline's published records nest in the parent module; the
+		 * pipeline's own children publish no declarator identities, so the
+		 * walk never recurses into them. */
+		if (in_module)
+			return emit_pipeline_records(model, lowering, node, module, error);
+		return emit_children(model, syntax, lowering, node, module, in_module, error);
 	}
 	if (node->kind != PIGEN_SYNTAX_COMPILATION_UNIT &&
 		node_identity(node_index, node, lowering, &item))

@@ -5,8 +5,10 @@
 
 #include "pigen/data_type.h"
 #include "pigen/ids.h"
+#include "pigen/preprocess.h"
 #include "pigen/rtl.h"
 #include "pigen/semantic.h"
+#include "pigen/syntax.h"
 
 /* Owner-based type and expression lowering for the elastic RTL vertical
  * slice. The lowering consumes validated data-type and constant-expression
@@ -117,5 +119,31 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
  * the RTL model. */
 pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
 	pigen_module_id module);
+
+/* The production pipeline step: for one module, walk each clocked process's
+ * procedural statement tree (through procedural blocks and if statements)
+ * collecting PIGEN_SYNTAX_PIPELINE nodes, and for each, first establish the
+ * module-scope outgoing buf packet signal (pigen_pipeline_identifier_establish,
+ * the step-(a) owner) and then lower the pipeline (pigen_pipeline_lower_into,
+ * the step-(b)/(c) owner) publishing its one-entry buf stage storage, its
+ * per-stage next-value equations, its guarded ready/valid handshake and its
+ * yield write into the module's already-published RTL module record - the same
+ * record the declaration and transfer lowering published, resolved through the
+ * lowering memo (this entry does not reset that memo). syntax is the parsed
+ * syntax tree (the node ids the processes carry point into it) and expanded is
+ * the expanded source the pipelines were parsed from (the step-(a)/(b) owners
+ * resolve their token origins through it). It must run after
+ * pigen_lower_rtl_transfers (the declarations are already lowered) and before
+ * pigen_lower_rtl_module (the composition gate composes the shared record).
+ * Returns 0 on success and -1 on error; on failure it reports the diagnostic
+ * through error_span - a violated step-(b) stage law at the offending
+ * statement's original span (the stage node's span for a stage-level
+ * violation, carried back by pigen_pipeline_lower_into), and any other
+ * failure (an unestablishable identifier, a record publication failure) at
+ * the offending pipeline node's span - and the compile stops
+ * (how/should/compiler/builders/fail.md). */
+int pigen_lower_rtl_pipelines(pigen_rtl_lowering *lowering,
+	pigen_module_id module, const pigen_syntax_tree *syntax,
+	const pigen_expanded_source *expanded, pigen_source_span *error_span);
 
 #endif

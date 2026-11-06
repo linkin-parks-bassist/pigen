@@ -456,11 +456,19 @@ static pigen_signal_id signal_for_name(const pigen_source_manager *sources,
 	for (i = 0; i < sem->signal_count; i++)
 	{
 		const pigen_semantic_signal *signal = &sem->signals[i];
+		const pigen_symbol *symbol;
+		pigen_source_span span;
 		size_t sig_length;
 		const char *sig_text;
 
-		if (span_invalid(signal->span)) continue;
-		sig_text = pigen_source_span_text(sources, signal->span, &sig_length);
+		/* Match the symbol's name span: the production semantic model
+		 * keys the signal's own span on the whole declaration, while the
+		 * symbol carries the declarator name token. */
+		symbol = pigen_symbol_get(sem, signal->symbol);
+		span = (symbol && !span_invalid(symbol->name)) ? symbol->name :
+			signal->span;
+		if (span_invalid(span)) continue;
+		sig_text = pigen_source_span_text(sources, span, &sig_length);
 		if (!sig_text) continue;
 		if (sig_length == name_length &&
 			!memcmp(sig_text, name_text, name_length))
@@ -786,7 +794,7 @@ static int parse_based_literal(const char *text, size_t length, size_t *width,
  * whose origin is the field's provenance name span and whose type is the
  * field's packed width; an enclosing module signal binds its own object, whose
  * type is the signal's lowered data type and whose origin is the signal's
- * declaration span (the terminal renderer spells it from that span). Returns 1
+ * identifier span (the symbol's name span, which the entry names). Returns 1
  * on success and fills *out. A name that is neither a pipeline field nor a
  * declared signal is a failure (the step-(b) stage law already validated the
  * source, so this rejects only an unresolvable read). */
@@ -835,19 +843,31 @@ static int stage_expr_name(const pigen_source_manager *sources,
 	{
 		pigen_signal_id signal = signal_for_name(sources, sem, span);
 		const pigen_semantic_signal *sig;
+		const pigen_symbol *owner_symbol;
+		pigen_source_span object_origin;
 		pigen_rtl_type_id operand_type;
 		pigen_rtl_object_id object;
 
-		if (signal.index == PIGEN_INVALID_ID) return 0;
+		if (signal.index == PIGEN_INVALID_ID)
+			return 0;
 		sig = pigen_signal_get(sem, signal);
 		if (!sig) return 0;
+		/* The emitter resolves the object's name as the SOURCE name whose
+		 * origin equals the object's origin; the entry names the signal at
+		 * its identifier span (the symbol's name span), so the object must
+		 * carry that span, not the whole declaration. */
+		owner_symbol = pigen_symbol_get(sem, sig->symbol);
+		object_origin = owner_symbol ? owner_symbol->name
+			: (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
 		operand_type = pigen_lower_rtl_type(lowering, sig->data_type);
-		if (operand_type.index == PIGEN_INVALID_ID) return 0;
+		if (operand_type.index == PIGEN_INVALID_ID)
+			return 0;
 		object = pigen_rtl_object_add_with_owner(rtl, rtl_module,
 			PIGEN_RTL_OBJECT_VARIABLE, operand_type, sig->direction, signal,
-			sig->span);
-		if (object.index == PIGEN_INVALID_ID) return 0;
-		*out = pigen_rtl_expr_add_object(rtl, operand_type, object, sig->span);
+			object_origin);
+		if (object.index == PIGEN_INVALID_ID)
+			return 0;
+		*out = pigen_rtl_expr_add_object(rtl, operand_type, object, object_origin);
 		return (*out).index != PIGEN_INVALID_ID;
 	}
 }
@@ -1383,16 +1403,18 @@ static pigen_source_span carry_span_for_field(
  * (pigen_rtl_*), owned by the parent module record. Returns 0 on success and
  * -1 on error; a failure may leave partial state behind (no rollback,
  * how/should/compiler/builders/fail.md). */
-static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
-	pigen_syntax_id syntax, const pigen_syntax_node *pipeline,
-	const pigen_expanded_source *expanded)
+int pigen_pipeline_lower_into(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_syntax_id syntax,
+	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,
+	pigen_rtl_module_id rtl_module,
+	pigen_source_span *error_span)
 {
 	pigen_semantic_model *sem = lowering->semantics;
 	pigen_rtl_model *rtl = lowering->rtl;
 	const pigen_source_manager *sources = sem->sources;
 	pigen_rtl_type_id field_type;
 	pigen_rtl_type_id packet_type;
-	pigen_rtl_module_id rtl_module;
 	stage_ref stage_nodes[PIGEN_PIPELINE_MAX];
 	size_t stage_count;
 	field_ref fields[PIGEN_PIPELINE_MAX];
@@ -1412,6 +1434,9 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 	size_t total_bits = 0;
 	size_t i;
 
+	if (error_span)
+		*error_span = INVALID_SPAN;
+
 	/* The established step-(a) outgoing-packet identity: the lowering consumes
 	 * it as a validated input (the yield write's destination). A missing or
 	 * unestablished identity is a failure (the node kind is already validated
@@ -1420,9 +1445,6 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		&ident) != 0)
 		return -1;
 
-	/* The yield members in source order (the member order of the outgoing
-	 * packet) and the declared fields (the provenance for the buf stage
-	 * storage and the per-stage next-value equations). */
 	yield_count = yield_members(sources, pipeline, syntax, expanded, yield,
 		PIGEN_PIPELINE_MAX);
 	if (yield_count == 0) return -1;
@@ -1430,8 +1452,6 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		PIGEN_PIPELINE_MAX);
 	if (field_count == 0) return -1;
 
-	/* The stage nodes in source order (the per-stage next-value equations and
-	 * the stage-boundary count). */
 	stage_count = pipeline_stages(pipeline, stage_nodes, PIGEN_PIPELINE_MAX);
 	if (stage_count == 0) return -1;
 
@@ -1440,14 +1460,24 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 	 * only the immutable incoming fields its earlier stages wrote; each `<=`
 	 * writes one outgoing field; every boundary keeps an equal total $bits;
 	 * at most one item per cycle). A violated law is a source-level failure
-	 * the seam reaches through the pipeline node it carries. */
+	 * the seam reaches through the pipeline node it carries, reported at the
+	 * offending statement's original span (the stage node's span for a
+	 * stage-level violation) through error_span, not at the whole
+	 * `pipeline ... endpipeline` block. */
 	for (i = 0; i < stage_count; i++)
 	{
 		pigen_pipeline_stage stage;
+		pigen_source_span offending;
 
 		if (pigen_pipeline_stage_laws(sem, stage_nodes[i].id, module,
 			pipeline, expanded, &stage) != 0)
+		{
+			offending = pigen_pipeline_stage_law_violation_span(sem,
+				stage_nodes[i].id, module, pipeline, expanded);
+			if (error_span && !span_invalid(offending))
+				*error_span = offending;
 			return -1;
+		}
 	}
 
 	/* One data type per field width, interned so shared widths share a record
@@ -1464,11 +1494,9 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		if (field_type.index == PIGEN_INVALID_ID) return -1;
 	}
 
-	/* The parent module record the pipeline's RTL records are owned by. A
-	 * fresh lowering pass lowers one pipeline into one parent module, so the
-	 * record is created once here. */
-	rtl_module = pigen_rtl_module_add_with_owner(rtl, module,
-		pipeline->location.source_span);
+	/* The parent module record the pipeline's RTL records are owned by. The
+	 * production composition (src/rtl_lower.c) supplies the already-published
+	 * parent record; the standalone form (pigen_pipeline_lower) creates it. */
 	if (rtl_module.index == PIGEN_INVALID_ID) return -1;
 
 	/* The 1-bit boolean type and the guard: the complete enclosing procedural
@@ -1573,7 +1601,7 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 					if (!stage_item_tokens(sources, expanded,
 						item->location.source_span, fields, field_count,
 						&dest_field, &value_first, &value_last))
-						return -1;
+					return -1;
 					if (!stage_expr_build(sources, lowering, rtl_module,
 						expanded, value_first, value_last, fields,
 						field_count, &value))
@@ -1821,5 +1849,16 @@ int pigen_pipeline_lower(pigen_rtl_lowering *lowering,
 	 * lowering rejects). */
 	if (!pipeline || pipeline->kind != PIGEN_SYNTAX_PIPELINE || !expanded)
 		return -1;
-	return lower_pipeline(lowering, module, syntax, pipeline, expanded);
+	/* The standalone seam creates its own parent module record (the green
+	 * pipeline-lower-test manifest lowers one pipeline into a fresh record);
+	 * the production composition publishes into the parent's existing record. */
+	{
+		pigen_rtl_module_id rtl_module;
+
+		rtl_module = pigen_rtl_module_add_with_owner(lowering->rtl, module,
+			pipeline->location.source_span);
+		if (rtl_module.index == PIGEN_INVALID_ID) return -1;
+		return pigen_pipeline_lower_into(lowering, module, syntax, pipeline,
+			expanded, rtl_module, NULL);
+	}
 }

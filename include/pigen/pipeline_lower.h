@@ -117,4 +117,28 @@ int pigen_pipeline_lower(pigen_rtl_lowering *lowering,
 	const pigen_syntax_node *pipeline,
 	const pigen_expanded_source *expanded);
 
+/* The production form of the pipeline lowering: publishes the same buf stage
+ * storage, per-stage next-value equations, guarded ready/valid handshake and
+ * yield write as pigen_pipeline_lower, but into a caller-supplied RTL module
+ * record (rtl_module, the parent module's already-published record) instead of
+ * creating a fresh record. The production composition (src/rtl_lower.c,
+ * pigen_lower_rtl_pipelines) resolves the parent's existing record through the
+ * lowering memo and passes it here, so the pipeline's records live in the same
+ * record the declaration and transfer lowering published (what/are/the/cli/
+ * pipeline/emitted/sv/test/scenarios.md: the output model picks the first RTL
+ * record per semantic module, so a second record's children would be silently
+ * absent from the emitted SV). On success it returns 0. On error it returns -1
+ * and the compile stops (how/should/compiler/builders/fail.md). error_span is
+ * optional: on a violated step-(b) stage law it receives the offending
+ * statement's original span (the stage node's span for a stage-level
+ * violation) through pigen_pipeline_stage_law_violation_span, and on any
+ * other failure it receives the invalid span, so the caller can fall back to
+ * the pipeline node's span. */
+int pigen_pipeline_lower_into(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_syntax_id syntax,
+	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,
+	pigen_rtl_module_id rtl_module,
+	pigen_source_span *error_span);
+
 #endif

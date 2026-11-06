@@ -113,4 +113,26 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 	const pigen_expanded_source *expanded,
 	pigen_pipeline_stage *out);
 
+/* The offending original-spelling span of a stage's first violated
+ * execution law: the nonblocking assignment that wrote a destination that
+ * is not a pipeline field or that read a field the law forbids it to read
+ * (the first stage reading an uninitialized field, a later stage reading a
+ * field no earlier stage produced), or the stage node's own span for a
+ * stage-level violation (an empty stage, a boundary whose total $bits does
+ * not keep). Takes the same arguments as pigen_pipeline_stage_laws and
+ * returns the invalid span (the PIGEN_INVALID_ID source with no range)
+ * when the stage passes every law or its arguments are invalid; the span
+ * it returns is the offending statement's location.source_span (the
+ * stage's span for a stage-level violation), resolved through the
+ * pipeline node's flat array like the law check itself. The production
+ * pipeline step (src/rtl_lower.c) reports a violated stage law at this
+ * span, not at the whole `pipeline ... endpipeline` block, so the
+ * diagnostic points at the statement that breaks the law
+ * (how/should/compiler/builders/fail.md). */
+pigen_source_span pigen_pipeline_stage_law_violation_span(
+	pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module,
+	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded);
+
 #endif

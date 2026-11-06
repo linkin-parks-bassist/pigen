@@ -37,6 +37,8 @@
 #include "pigen/transfer_type.h"
 #include "pigen/util.h"
 #include "pigen/predicate.h"
+#include "pigen/pipeline_lower.h"
+#include "pigen/pipeline_identity.h"
 
 void pigen_rtl_lowering_init(pigen_rtl_lowering *lowering,
 	pigen_semantic_model *semantics, pigen_rtl_model *rtl)
@@ -54,6 +56,12 @@ void pigen_rtl_lowering_free(pigen_rtl_lowering *lowering)
 	free(lowering->lowered_expressions);
 	free(lowering->lowered_endpoints);
 	*lowering = (pigen_rtl_lowering){0};
+}
+
+/* The invalid source span: the PIGEN_INVALID_ID source with no range. */
+static int span_invalid(pigen_source_span span)
+{
+	return span.source.index == PIGEN_INVALID_ID;
 }
 
 /* Grow the type memo map so that slot index < needed is addressable, keeping
@@ -1526,6 +1534,170 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	return 0;
 }
 
+#define PIGEN_PIPELINE_COLLECT_MAX 64
+
+struct pigen_pipeline_collected {
+	const pigen_syntax_node *node;
+	pigen_syntax_id id;
+};
+
+/* Recurse one procedural statement node, collecting its PIGEN_SYNTAX_PIPELINE
+ * descendants (the node itself, and - for a procedural block or an if
+ * statement - its children) in source order into out (capacity capacity).
+ * Returns the running count, or -1 when the buffer overflows or a child node
+ * is missing. A nonblocking assignment is a procedural leaf. */
+static int collect_pipelines(const pigen_syntax_tree *syntax,
+	const pigen_syntax_node *node, pigen_syntax_id node_id,
+	struct pigen_pipeline_collected *out, int count, size_t capacity)
+{
+	if (!node)
+		return -1;
+	if (node->kind == PIGEN_SYNTAX_PIPELINE)
+	{
+		if ((size_t)count >= capacity)
+			return -1;
+		out[count].node = node;
+		out[count].id = node_id;
+		return count + 1;
+	}
+	if (node->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK ||
+		node->kind == PIGEN_SYNTAX_IF_STATEMENT)
+	{
+		pigen_syntax_id child = node->first_child;
+
+		while (child.index != PIGEN_INVALID_ID)
+		{
+			const pigen_syntax_node *cnode = pigen_syntax_get(syntax, child);
+
+			count = collect_pipelines(syntax, cnode, child, out, count,
+				capacity);
+			if (count < 0)
+				return -1;
+			child = cnode ? cnode->next_sibling :
+				(pigen_syntax_id){PIGEN_INVALID_ID};
+		}
+		return count;
+	}
+	return count;
+}
+
+/* The production pipeline step (what/is/the/plan.md: a data-first
+ * pipeline ... endpipeline inside a clocked process reaches terminal SV
+ * emission through the production RTL path). For one module, walk each
+ * clocked process's procedural statement tree (through procedural blocks and
+ * if statements) collecting PIGEN_SYNTAX_PIPELINE nodes; for each, first
+ * establish the module-scope outgoing buf packet signal (the step-(a) owner,
+ * pigen_pipeline_identifier_establish) and then lower the pipeline
+ * (the step-(b)/(c) owner, pigen_pipeline_lower_into) publishing its one-entry
+ * buf stage storage, its per-stage next-value equations, its guarded
+ * ready/valid handshake and its yield write into the module's
+ * already-published RTL module record, resolved through the lowering memo
+ * (this step does not reset that memo, so the parent record the declaration
+ * and transfer lowering published is reused). It must run after
+ * pigen_lower_rtl_transfers (the declarations are already lowered) and before
+ * pigen_lower_rtl_module (the composition gate composes the shared record). On
+ * any failure it reports the diagnostic at the offending pipeline node's span
+ * through error_span and the compile stops (how/should/compiler/builders/
+ * fail.md). */
+int pigen_lower_rtl_pipelines(pigen_rtl_lowering *lowering,
+	pigen_module_id module, const pigen_syntax_tree *syntax,
+	const pigen_expanded_source *expanded, pigen_source_span *error_span)
+{
+	pigen_semantic_model *sem;
+	pigen_rtl_model *rtl;
+	pigen_rtl_module_id rtl_module;
+	pigen_process_id *processes;
+	size_t process_count;
+	size_t pi;
+
+	if (error_span)
+		*error_span = (pigen_source_span){
+			(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+	if (!lowering || !lowering->semantics || !lowering->rtl)
+		return -1;
+	if (!syntax || !syntax->nodes || !expanded)
+		return -1;
+	sem = lowering->semantics;
+	rtl = lowering->rtl;
+	if (module.index == PIGEN_INVALID_ID ||
+		!pigen_module_get(sem, module))
+		return -1;
+	/* Resolve the already-published parent record through the memo: a prior
+	 * transfer lowering of this module is a memo hit and returns the module
+	 * that owns the published records. The step does not reset the memo. */
+	rtl_module = rtl_module_for_semantic(rtl, module);
+	if (rtl_module.index == PIGEN_INVALID_ID)
+		return -1;
+	processes = pigen_module_processes(sem, module, &process_count);
+	if (!processes && process_count)
+		return -1;
+	for (pi = 0; pi < process_count; pi++)
+	{
+		const pigen_semantic_process *owner_process;
+		const pigen_syntax_node *body;
+		const pigen_syntax_node *node;
+		pigen_syntax_id body_id;
+		struct pigen_pipeline_collected pipelines[PIGEN_PIPELINE_COLLECT_MAX];
+		int pipeline_count;
+		size_t k;
+
+		owner_process = pigen_process_get(sem, processes[pi]);
+		if (!owner_process)
+			return -1;
+		node = pigen_syntax_get(syntax, owner_process->syntax);
+		if (!node)
+			return -1;
+		body_id = node->first_child;
+		if (body_id.index == PIGEN_INVALID_ID)
+			continue;
+		body = pigen_syntax_get(syntax, body_id);
+		if (!body)
+			return -1;
+		pipeline_count = collect_pipelines(syntax, body, body_id, pipelines,
+			0, PIGEN_PIPELINE_COLLECT_MAX);
+		if (pipeline_count < 0)
+			return -1;
+		for (k = 0; k < (size_t)pipeline_count; k++)
+		{
+			const pigen_syntax_node *pipeline = pipelines[k].node;
+			pigen_syntax_id pipeline_id = pipelines[k].id;
+			pigen_pipeline_identifier ident;
+
+			/* Step (a): establish the module-scope outgoing buf packet signal.
+			 * A failure (an unestablishable identifier, a missing yield, a
+			 * missing field set) is reported at the pipeline node's span. */
+			if (pigen_pipeline_identifier_establish(sem, pipeline_id, module,
+				pipeline, expanded, &ident) != 0)
+			{
+				if (error_span)
+					*error_span = pipeline->location.source_span;
+				return -1;
+			}
+			/* Step (b)/(c): lower the pipeline into the shared record. A
+			 * violated step-(b) stage law is reported at the offending
+			 * statement's original span (the stage node's span for a
+			 * stage-level violation), as pigen_pipeline_lower_into carries
+			 * it back through error_span; any other failure (a rejected
+			 * node kind, a record publication failure) is reported at the
+			 * pipeline node's span. */
+			{
+				pigen_source_span lower_span;
+
+				if (pigen_pipeline_lower_into(lowering, module, pipeline_id,
+					pipeline, expanded, rtl_module, &lower_span) != 0)
+				{
+					if (error_span)
+						*error_span = span_invalid(lower_span)
+							? pipeline->location.source_span
+							: lower_span;
+					return -1;
+				}
+			}
+		}
+	}
+	return 0;
+}
+
 /* Task 8 (6) module composition: returns the published module identity whose
  * four record ranges - objects, instances, equations and processes - cover
  * exactly the witness's records in arena order. The transfer lowering
@@ -1673,7 +1845,14 @@ pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
 	/* The declaration lowering publishes exactly one payload object per signal
 	 * in the module and the transfer lowering publishes exactly one source-
 	 * ready equation per transfer; the composed module's object and equation
-	 * ranges must cover exactly those records. */
+	 * ranges must cover at least those records. The production pipeline step
+	 * (pigen_lower_rtl_pipelines) may additionally publish the pipeline's
+	 * one-entry buf stage storage, its per-stage next-value equations, its
+	 * guarded ready/valid handshake and its yield write into the same record,
+	 * so the object and equation counts may EXCEED the declaration/transfer
+	 * minimums: the gate requires the minimums and admits the pipeline
+	 * synthetics, while the range-at-tail and per-process update checks above
+	 * still bound every record to this module. */
 	{
 		size_t signal_count;
 		size_t i;
@@ -1682,10 +1861,10 @@ pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
 		for (i = 0; i < sem->signal_count; i++)
 			if (sem->signals[i].module.index == module.index)
 				signal_count++;
-		if (record->objects.count != signal_count)
+		if (record->objects.count < signal_count)
 			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
 	}
-	if (record->equations.count != expected_equations)
+	if (record->equations.count < expected_equations)
 		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
 	return rtl_module;
 }

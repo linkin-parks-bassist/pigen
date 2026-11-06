@@ -654,6 +654,13 @@ static int resolve_procedural_statement(resolver *resolver,
 	if (statement->kind == PIGEN_SYNTAX_IF_STATEMENT)
 		return resolve_if_statement(resolver, module_id, process, domain,
 			statement, guard);
+	if (statement->kind == PIGEN_SYNTAX_PIPELINE)
+		/* A pipeline statement inside a clocked process is accepted here
+		 * without semantic validation: the production pipeline step
+		 * (pigen_lower_rtl_pipelines, src/rtl_lower.c) is its owner and
+		 * reports any pipeline law violation at the original span
+		 * (how/does/a/pipeline/statement/reach/the/production/rtl/path.md). */
+		return 1;
 	if (statement->kind != PIGEN_SYNTAX_PROCEDURAL_BLOCK)
 		return fail_location(resolver, statement->location,
 			"invalid procedural statement");
@@ -749,6 +756,12 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);
+		if (node->kind == PIGEN_SYNTAX_PIPELINE)
+			/* A pipeline outside a clocked process is diagnosed at the
+			 * pipeline keyword's original span, not silently dropped
+			 * (does/the/pipeline/and/fsm/reach/the/compiled/output.md). */
+			return fail_location(resolver, node->location,
+				"pipeline outside a clocked process");
 		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS &&
 			!add_clocked_process(resolver, module_id, child, node)) return 0;
 		child = node->next_sibling;
