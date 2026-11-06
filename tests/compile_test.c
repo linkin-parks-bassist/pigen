@@ -918,6 +918,109 @@ static void test_pipeline_module_level_diagnosed_at_original_span(void)
     pigen_free_sources(&sources);
 }
 
+/* Test 15: A boundary that keeps unequal total $bits is diagnosed at the
+ * original span. A 2-stage pipeline whose stage 1 writes a (8-bit) and b
+ * (8-bit) and whose stage 2 reads both (16 bits in) but writes only c (8-bit
+ * out) (stage 1 `a <= x; b <= y;`, stage 2 `c <= {a, b};`, `yield c;` - the
+ * section-(2) red of tests/pipeline_lower_test.c) violates the step-(b)
+ * repartition law: the stage boundary carries 16 bits in and 8 bits out. It
+ * must fail loudly: rc == -1, no output text, and a non-degenerate error span
+ * over the offending stage-2 statement at its original location with a
+ * non-empty message. This line witnesses the production path (pigen_compile_
+ * source, the extended lowering entry, naming, output model, emission)
+ * reaching the step-(b) repartition law owner and reporting it at the
+ * original span with no output (how/should/compiler/builders/fail.md). A step
+ * that widens or narrows the carried packet across the boundary lowers it
+ * (rc == 0) and fails the rc pin; a step that reports the whole `pipeline
+ * ... endpipeline` block (the current diagnostic) rather than the offending
+ * statement fails the span pin. */
+static void test_pipeline_repartition_unequal_bits_original_span(void)
+{
+    pigen_source_manager sources = {0};
+    const char *source_text =
+        "module nve_red(input logic clk, input logic [7:0] x, input logic [7:0] y);\n"
+        "\talways @(posedge clk) begin\n"
+        "\t\tpipeline nve_pipe begin\n"
+        "\t\t\tbit [7:0] a;\n"
+        "\t\t\tbit [7:0] b;\n"
+        "\t\t\tbit [7:0] c;\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\ta <= x;\n"
+        "\t\t\t\tb <= y;\n"
+        "\t\t\tend\n"
+        "\t\t\tstage begin\n"
+        "\t\t\t\tc <= {a, b};\n"
+        "\t\t\tend\n"
+        "\t\t\tyield c;\n"
+        "\t\tendpipeline\n"
+        "\tend\n"
+        "endmodule";
+    size_t source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/compile_test_pipeline_repartition.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    /* Fail loud: the step-(b) repartition law is violated - the boundary
+     * keeps unequal total $bits (16 bits in, 8 bits out). */
+    assert(ret == -1);
+    /* No output text is published on failure. */
+    assert(result.systemverilog == NULL);
+    /* A non-empty diagnostic message. */
+    assert(error.message != NULL);
+    assert(strlen(error.message) > 0);
+    /* Non-degenerate span: a real source and a non-zero-length interval. */
+    assert(error.span.source.index != PIGEN_INVALID_ID);
+    assert(error.span.end > error.span.start);
+    /* The offending stage-2 statement is `c <= {a, b};`; locate it in the
+     * literal source and confirm the span covers it at its original location.
+     * The span must point at that statement, not at the enclosing
+     * `pipeline ... endpipeline` block (which would start at the `pipeline`
+     * keyword, far before the statement). */
+    size_t stmt_start = (size_t)(strstr(source_text, "c <= {a, b};") - source_text);
+    size_t stmt_end = stmt_start + strlen("c <= {a, b};");
+    assert(error.span.start <= stmt_start);
+    assert(error.span.end >= stmt_end);
+    {
+        size_t tlen = 0;
+        const char *t = pigen_source_span_text(&sources, error.span, &tlen);
+        char *tcopy;
+        if (t == NULL || tlen == 0) {
+            fprintf(stderr,
+                "pipeline repartition: expected a non-empty error span "
+                "over the offending statement; got NULL or empty span text\n");
+            abort();
+        }
+        /* pigen_source_span_text points into the full source buffer and is
+         * not NUL-terminated at the span end; bound every search to the
+         * returned span length so text after the span cannot leak in. */
+        tcopy = malloc(tlen + 1);
+        if (tcopy == NULL)
+            abort();
+        memcpy(tcopy, t, tlen);
+        tcopy[tlen] = '\0';
+        if (strstr(tcopy, "c <= {a, b}") == NULL || strstr(tcopy, "pipeline") != NULL) {
+            fprintf(stderr,
+                "pipeline repartition: expected the error span to cover "
+                "the offending stage-2 statement `c <= {a, b};` at its "
+                "original location and NOT the whole `pipeline ... "
+                "endpipeline` block.\n"
+                "  offending statement `c <= {a, b};` at offset [%zu..%zu]\n"
+                "  actual span [%zu..%zu] text = %.*s\n"
+                "  (a block-level span starting at the `pipeline` keyword "
+                "fails this pin)\n",
+                stmt_start, stmt_end,
+                error.span.start, error.span.end,
+                (int)tlen, t);
+            abort();
+        }
+        free(tcopy);
+    }
+
+    pigen_free_sources(&sources);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -940,6 +1043,7 @@ int main(void)
     test_pipeline_ready_valid_handshake_emission();
     test_pipeline_first_stage_read_original_span();
     test_pipeline_module_level_diagnosed_at_original_span();
+    test_pipeline_repartition_unequal_bits_original_span();
 
     printf("All compile tests passed\n");
     return 0;
