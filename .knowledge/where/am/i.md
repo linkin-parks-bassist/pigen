@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-10-26T09:36:03+11:00"
+revised_at: "2026-11-05T18:19:08+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -8,7 +8,7 @@ Pigen is an active personal C17 source-to-source compiler project extending Syst
 
 The structured frontend resolves data-first declarations and intrinsic semantic types/expressions and is the production path of ./pigen: the CLI wiring is complete (295032f), the old text-macro scanning machine is deleted from main(), and the textual machinery is quarantined until the retained subsystems' structured paths cover the spec (does/the/structured/frontend/run/in/production.md). Elastic RTL Tasks 1–9 are implemented (owners what/is/elastic/rtl/task/five.md through nine.md): Tasks 1–4 give IDs/arena, canonical types/expressions, owner-validated constructors and collision-safe names; Task 5 the type/expression adapters with owner-value-derived exact-integer widths; Task 6 declaration lowering; Tasks 8–9 fire/identity lowering and the ordered output model with their green rtl-lower-test manifests. Failure rollback is not a requirement: compiler stages report their diagnostic and stop (how/should/compiler/builders/fail.md). Tasks 10 (terminal SV emission), 11 (quarantined composition/simulation) and 12 (verification) are COMPLETE. No partial frontend production attachment, fallback, second dialect or per-file choice is approved.
 
-Repository topology: src/ owner subsystems and production prototype; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ executable prototype designs/testbenches; .knowledge/ the sole local documentation and architectural answer authority. Local docs, notes, root Markdown and AGENTS.md are absent. Keep only current contracts, implementation evidence and actionable unresolved questions; delete obsolete material. Detailed semantic coverage is in what/is/the/knowledge/ingestion/coverage.md.
+Repository topology: src/ owner subsystems and production prototype; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ executable prototype designs/testbenches; .knowledge/ the sole local documentation and architectural answer authority. README.md is David's public introduction restored from d14aef2. Preserve it; see how/to/choose/the/current/documentation/authority.md. Other docs, notes, root Markdown and AGENTS.md are absent. Keep only current contracts, implementation evidence and actionable unresolved questions; delete obsolete material. Detailed semantic coverage is in what/is/the/knowledge/ingestion/coverage.md.
 
 - how/ answers mechanisms/procedures: how/does/an/atomic/transfer/fire.md, how/to/write/runnable/prototype/declarations.md, how/to/test/the/structured/foundation.md.
 - what/ answers definitions/contracts/current work: what/is/a/signal.md, what/is/the/spec.md, what/is/the/plan.md, what/is/elastic/rtl/task/five.md.
