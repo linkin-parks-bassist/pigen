@@ -453,8 +453,16 @@ static int stage_laws_check(pigen_semantic_model *model,
 	 * width (the chain neither widens nor narrows the carried packet). */
 	if (!is_first_stage && in_bits != out_bits)
 	{
+		/* The boundary width mismatch is the stage's own write that carries
+		 * the unequal packet width: report that statement, mirroring the
+		 * other stage laws, not the whole stage block. */
+		const pigen_syntax_node *write_node =
+			stage_node(pipeline, pipeline_id, first_write);
+
 		if (offending)
-			*offending = stage->location.source_span;
+			*offending = write_node
+				? write_node->location.source_span
+				: stage->location.source_span;
 		return -1;
 	}
 
