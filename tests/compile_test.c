@@ -794,6 +794,242 @@ static void test_fsm_goto_undeclared_target_span(void)
     pigen_free_sources(&sources);
 }
 
+/* The start of the identifier token immediately preceding AT in SV (the LHS
+ * destination of an update whose ` <= ` begins at AT): walk back over
+ * whitespace, then over identifier characters. NULL when there is no such
+ * identifier. Used to witness the destination of a next-state update. */
+static const char *lhs_identifier(const char *sv, const char *at)
+{
+    const char *p = at;
+
+    (void)sv;
+    if (p < sv || *p != ' ') {
+        return NULL;
+    }
+    p--;
+    while (p >= sv && (*p == ' ' || *p == '\t')) {
+        p--;
+    }
+    if (p < sv) {
+        return NULL;
+    }
+    /* P now points at the identifier's last character; advance to its first
+     * character. */
+    {
+        const char *first = p;
+
+        while (first > sv && ((*first >= 'a' && *first <= 'z') ||
+            (*first >= 'A' && *first <= 'Z') || (*first >= '0' &&
+            *first <= '9') || *first == '_')) {
+            first--;
+        }
+        if (first > sv) {
+            first++;
+        }
+        if (first == p + 1) {
+            /* No identifier characters found (P was not part of one). */
+            return NULL;
+        }
+        return first;
+    }
+}
+
+/* True when A and B begin with the same identifier token (a SystemVerilog
+ * register name). A and B are located positions inside the one emitted
+ * buffer: the tokens are not NUL-terminated after them, so the token itself
+ * is the comparison - both must carry identifier characters to the same
+ * length and a different first character fails. Used to witness that two
+ * next-state values read the same state register without modifying the
+ * emitted text. */
+static int register_name_equals(const char *a, const char *b)
+{
+    if (!a || !b) {
+        return 0;
+    }
+    while (1) {
+        int a_id = (*a >= 'a' && *a <= 'z') || (*a >= 'A' && *a <= 'Z') ||
+            (*a >= '0' && *a <= '9') || *a == '_';
+        int b_id = (*b >= 'a' && *b <= 'z') || (*b >= 'A' && *b <= 'Z') ||
+            (*b >= '0' && *b <= '9') || *b == '_';
+        if (a_id != b_id) {
+            return 0;
+        }
+        if (!a_id) {
+            return 1;
+        }
+        if (*a != *b) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+}
+
+/* Test 15: Guard-gated FSM goto transitions share the one state register as
+ * their single destination (CLI FSM emitted-SV scenario, line 4).
+ *
+ * A legal witness with one guarded goto per state, whose guards are mutually
+ * exclusive (start vs !start), must compile successfully. Its emitted
+ * SystemVerilog then pins the guard-gated single-destination controller:
+ *   - the ONE state register, declared as an internal module object;
+ *   - ONE posedge-clocked process carrying every next-state update;
+ *   - one guard-gated next-state value per goto: a ternary whose true branch is
+ *     the goto target state's encoding and whose false branch holds the current
+ *     state (the register read), each driving the one state register, and no
+ *     second such update (the per-goto update count is the second-destination
+ *     witness, since the located-identifier pins only see the first occurrence).
+ * A second destination, a second posedge process, or a next-state value that
+ * does not read the register must fail these pins.
+ *
+ * RED on master: the production path does not lower the FSM statement yet, so
+ * the emitted module is declaration-only (ports + endmodule) and none of the
+ * pins below hold. */
+static void test_fsm_guard_gated_single_destination(void)
+{
+    const char *source_text =
+        "module w\n"
+        "(\n"
+        "\tinput logic clk,\n"
+        "\tinput logic rst,\n"
+        "\tinput logic start,\n"
+        "\toutput logic done\n"
+        ");\n"
+        "\n"
+        "fsm w @(posedge clk) reset (rst) initial idle\n"
+        "begin\n"
+        "\tstate idle:\n"
+        "\tbegin\n"
+        "\t\tif (start)\n"
+        "\t\t\tgoto run;\n"
+        "\tend\n"
+        "\tstate run:\n"
+        "\tbegin\n"
+        "\t\tdone <= 1;\n"
+        "\t\tif (!start)\n"
+        "\t\t\tgoto idle;\n"
+        "\tend\n"
+        "end\n"
+        "endmodule";
+    size_t source_length = strlen(source_text);
+
+    pigen_source_manager sources = {0};
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/fsm_guard_gated_single_dest.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    /* The legal witness compiles. */
+    assert(ret == 0);
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+
+    const char *sv = result.systemverilog;
+
+    /* Pin A: the module is emitted and is NOT declaration-only. On master the
+     * FSM statement is a non-emitted container (the output walk maps only a
+     * module and its signal declarators), so the body is just the port header
+     * and endmodule; the controller below is absent. */
+    assert(strstr(sv, "module w") != NULL);
+
+    /* Pin B: ONE posedge-clocked process, clocked by `clk`. A second
+     * always @(posedge clk) block would split the next-state updates across two
+     * processes, which the one synchronous controller forbids. */
+    assert(strstr(sv, "always @(posedge clk)") != NULL);
+    {
+        const char *p = sv;
+        int processes = 0;
+        while ((p = strstr(p, "always @(posedge clk)")) != NULL) {
+            processes++;
+            p += 1;
+        }
+        assert(processes == 1);
+    }
+
+    /* Pins C/D: one guard-gated next-state value per goto, each a ternary whose
+     * true branch is the goto target state's encoding and whose false branch
+     * holds the current state (the register read). The state encodings are the
+     * per-state indices (idle=0, run=1), so the idle->run transition is
+     * `start ? 1 : <register read>` and the run->idle transition is
+     * `!start ? 0 : <register read>`. Every such conditional drives the ONE
+     * state register via a non-blocking update, so each appears as
+     * `<register> <= guard ? <target> : <register read>`; the register-read
+     * false branch (`: <register read>`) is what keeps a transition that does
+     * not read the register from passing. The register's terminal name is the
+     * (s5) implementation's (what/is/the/fsm/parent/module/lowering.md leaves the
+     * synthetic names open), so it is located, not pinned, by the update form. */
+    assert(strstr(sv, " <= start ? 1 : ") != NULL);
+    assert(strstr(sv, " <= !start ? 0 : ") != NULL);
+
+    /* Pin D2: exactly ONE guard-gated next-state value per goto. Pins C/D and E
+     * locate the FIRST occurrence of each pattern, so a second destination
+     * driven by identical guarded ternaries (a shadow register carrying
+     * `nstate <= start ? 1 : nstate` and `nstate <= !start ? 0 : nstate`) would
+     * still let every located identifier equal the shared register and pass
+     * them. Counting the whole emitted buffer closes that gap: the one
+     * synchronous controller carries exactly one update per goto, so any
+     * second destination or duplicate update fails here. The count idiom
+     * advances by one from each match (the same idiom Pin B uses for process
+     * count); the reset path (` <= rst ? 0 : `) is a distinct pattern and is
+     * not counted. */
+    {
+        const char *p = sv;
+        int start_updates = 0;
+        int not_start_updates = 0;
+        while ((p = strstr(p, " <= start ? 1 : ")) != NULL) {
+            start_updates++;
+            p += 1;
+        }
+        p = sv;
+        while ((p = strstr(p, " <= !start ? 0 : ")) != NULL) {
+            not_start_updates++;
+            p += 1;
+        }
+        assert(start_updates == 1);
+        assert(not_start_updates == 1);
+    }
+
+    /* Pin E: the ONE state register is the single destination the transitions
+     * share, and every next-state value reads the register (its false branch).
+     * Each next-state value is emitted as `<register> <= guard ? <target> :
+     * <register read>`, so the single-destination law is witnessed by the
+     * destination (LHS) identifier of every next-state value: a second
+     * destination (the two values naming different LHS registers) or a
+     * transition not reading the register (an LHS or false-branch that is not
+     * the shared register) breaks the equality below. The reset path also drives
+     * the same register; a second destination is caught by the count pin above,
+     * so this pin witnesses the shared register of the located updates. */
+    {
+        const char *idle_next = strstr(sv, " <= start ? 1 : ");
+        const char *run_next = strstr(sv, " <= !start ? 0 : ");
+        const char *idle_dest;
+        const char *run_dest;
+        const char *idle_read;
+        const char *run_read;
+
+        assert(idle_next != NULL);
+        assert(run_next != NULL);
+        idle_dest = lhs_identifier(sv, idle_next);
+        run_dest = lhs_identifier(sv, run_next);
+        idle_read = idle_next + strlen(" <= start ? 1 : ");
+        run_read = run_next + strlen(" <= !start ? 0 : ");
+        /* Every next-state value drives an identifier register (not a constant),
+         * and reads an identifier register in its false branch (a literal digit
+         * false branch would be a transition that does not read the register). */
+        assert(idle_dest != NULL && run_dest != NULL);
+        assert(idle_read[0] != '0' && idle_read[0] != '1');
+        assert(run_read[0] != '0' && run_read[0] != '1');
+        /* Single destination: both next-state values drive the same register,
+         * and that register is the one they read (a second destination or a
+         * non-register-reading transition names a different register). */
+        assert(register_name_equals(idle_dest, run_dest));
+        assert(register_name_equals(idle_dest, idle_read));
+        assert(register_name_equals(run_dest, run_read));
+    }
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 /* Test 15: A legal 3-stage pipeline compiles (rc == 0) and the emitted SV
  * declares exactly ONE parent module and instantiates the dedicated one-entry
  * buf primitive `pigen_buf` exactly (N-1) = 2 times, one per stage boundary.
@@ -1682,6 +1918,7 @@ int main(int argc, char **argv)
     test_pipeline_repartition_unequal_bits_original_span();
     test_fsm_parent_module_emission();
     test_fsm_emitted_state_active_gating();
+    test_fsm_guard_gated_single_destination();
 
     printf("All compile tests passed\n");
     return check_finish();

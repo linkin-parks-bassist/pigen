@@ -659,7 +659,11 @@
       "tests/compile_test.c",
       "src/compile.c",
       "src/source.c",
-      "src/util.c"
+      "src/util.c",
+      "src/fsm.c",
+      "src/rtl.c",
+      "src/rtl_lower.c",
+      "src/sv_emit.c"
     ],
     "command": [
       "make",
