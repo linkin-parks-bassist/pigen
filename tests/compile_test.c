@@ -13,6 +13,8 @@
 #include "pigen/resolve.h"
 #include "pigen/semantic.h"
 
+#include "check.h"
+
 /* Helper to read a file into memory */
 static char *read_file(const char *path, size_t *length)
 {
@@ -1131,8 +1133,220 @@ static void test_fsm_parent_module_emission(void)
     pigen_free_sources(&sources);
 }
 
-int main(void)
+/* Line 2 of the accepted CLI FSM emitted-SV scenario list (what/are/the/cli/
+ * fsm/emitted/sv/test/scenarios.md): the state register is one internal
+ * variable reset to the header initial state's encoding resolved by the
+ * header token's text. The witness is the FSM_WITNESS shape of
+ * tests/fsm_lower_test.c whose header names the SECOND declared state
+ * (states idle then run, header `initial run`): the emitted SV must declare
+ * exactly ONE internal (non-port) logic object - the synthetic state
+ * register - wide enough for every state's encoding (a 1-bit register fails
+ * the pin), and carry a reset path driving the register to the header-named
+ * state's encoding (a reset to the first declared state's encoding fails the
+ * pin). RED on master: the module-level FSM is silently dropped and the
+ * emitted body is the port header only. */
+
+/* The first line of SV text starting with PREFIX (the returned pointer ends
+ * at the line's newline or the string's NUL). */
+static const char *sv_line(const char *sv, const char *prefix)
 {
+    const char *p = sv;
+    size_t prefix_length = strlen(prefix);
+
+    while (p && *p) {
+        if (strncmp(p, prefix, prefix_length) == 0)
+            return p;
+        p = strchr(p, '\n');
+        if (p)
+            p++;
+    }
+    return NULL;
+}
+
+/* The number of lines of SV text starting with PREFIX. */
+static size_t sv_line_count(const char *sv, const char *prefix)
+{
+    size_t count = 0;
+    const char *p = sv;
+    size_t prefix_length = strlen(prefix);
+
+    while (p && *p) {
+        if (strncmp(p, prefix, prefix_length) == 0)
+            count++;
+        p = strchr(p, '\n');
+        if (p)
+            p++;
+    }
+    return count;
+}
+
+/* The first line of SV text starting with PREFIX and containing NEEDLE, or
+ * NULL when no line does. */
+static const char *sv_line_with(const char *sv, const char *prefix,
+                                 const char *needle)
+{
+    const char *p = sv;
+    size_t prefix_length = strlen(prefix);
+
+    while (p && *p) {
+        if (strncmp(p, prefix, prefix_length) == 0 &&
+            strstr(p, needle) != NULL)
+            return p;
+        p = strchr(p, '\n');
+        if (p)
+            p++;
+    }
+    return NULL;
+}
+
+/* The `[h:l]` high bound of an internal declaration line, or -1 when the
+ * line carries no range (a width-1 object). */
+static long sv_decl_width(const char *line)
+{
+    const char *range = strstr(line, "[");
+
+    if (!range)
+        return -1;
+    range++;
+    if (!isdigit((unsigned char)*range))
+        return -1;
+    return strtol(range, NULL, 10);
+}
+
+/* The declared name of an internal declaration line
+ * (`  logic [h:l] name;` / `  logic name;`), or NULL. */
+static const char *sv_decl_name(const char *line)
+{
+    const char *p = line + 2; /* skip the object indent */
+
+    while (*p == ' ')
+        p++;
+    if (strncmp(p, "logic", 5) != 0)
+        return NULL;
+    p += 5;
+    while (*p == ' ')
+        p++;
+    if (*p == '[') { /* skip the packed range */
+        p = strchr(p, ']');
+        if (!p)
+            return NULL;
+        p++;
+    }
+    while (*p == ' ')
+        p++;
+    if (!isalpha((unsigned char)*p) && *p != '_')
+        return NULL;
+    return p;
+}
+
+static void test_fsm_state_register_reset(void)
+{
+    pigen_source_manager sources = {0};
+    /* The legal two-state witness of tests/fsm_lower_test.c's FSM_WITNESS
+     * shape, with the header naming the SECOND declared state (`run`). */
+    const char *source_text =
+        "module fsm_srr\n"
+        "(\n"
+        "\tinput logic clk,\n"
+        "\tinput logic rst,\n"
+        "\tinput logic start,\n"
+        "\toutput logic done\n"
+        ");\n"
+        "\n"
+        "fsm fsm_srr @(posedge clk) reset (rst) initial run\n"
+        "begin\n"
+        "\tstate idle:\n"
+        "\tbegin\n"
+        "\t\tif (start)\n"
+        "\t\t\tgoto run;\n"
+        "\tend\n"
+        "\tstate run:\n"
+        "\tbegin\n"
+        "\t\tdone <= 1;\n"
+        "\t\tif (!start)\n"
+        "\t\t\tgoto idle;\n"
+        "\tend\n"
+        "end\n"
+        "endmodule\n";
+    size_t source_length = strlen(source_text);
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret;
+    const char *decl;
+    const char *name;
+    size_t register_name_length;
+
+    ret = pigen_compile_source(&sources, "tests/fsm_state_register_reset.pigen",
+                               source_text, source_length,
+                               NULL, &result, &error);
+    /* (rc) the legal witness compiles. */
+    REQUIRE(ret == 0);
+    REQUIRE(result.systemverilog != NULL);
+    REQUIRE(result.length > 0);
+
+    /* (a) exactly ONE internal (non-port) logic object: the port header
+     * lines start with `  input` / `  output` / `  inout`, so the only
+     * `  logic`-prefixed lines are internal declarations. */
+    REQUIRE(sv_line_count(result.systemverilog, "  logic ") == 1);
+
+    /* (a) the one internal object is wide enough for every state's
+     * encoding: the 2-state witness needs a ranged declaration
+     * (`[h:l]` with h >= 1); a width-1 (rangeless) register fails the
+     * pin. */
+    decl = sv_line(result.systemverilog, "  logic ");
+    REQUIRE(decl != NULL);
+    REQUIRE(sv_decl_width(decl) >= 1);
+
+    /* (b) the reset path drives THAT register to the header-named state's
+     * encoding: run is the second declared state, so its encoding is 1 and
+     * the reset line carries a conditional whose true branch is the
+     * literal 1, gated by the header's reset signal (rst). A reset to the
+     * first declared state's encoding (0), or a reset that drives no
+     * register, fails the pin. */
+    name = sv_decl_name(decl);
+    REQUIRE(name != NULL);
+    register_name_length = 0;
+    while (isalnum((unsigned char)name[register_name_length]) ||
+           name[register_name_length] == '_')
+        register_name_length++;
+    {
+        const char *drives = NULL;
+        char drive_prefix[64];
+        char *register_token = malloc(register_name_length + 1);
+
+        REQUIRE(register_token != NULL);
+        memcpy(register_token, name, register_name_length);
+        register_token[register_name_length] = 0;
+        snprintf(drive_prefix, sizeof(drive_prefix),
+                 "    %s <= ", register_token);
+        drives = sv_line(result.systemverilog, drive_prefix);
+        free(register_token);
+        /* The register is driven at all. */
+        REQUIRE(drives != NULL);
+        /* One of its driving updates is the reset path: gated by the
+         * header's reset signal (rst) with the true branch the header
+         * initial state's encoding (the literal 1, run's index). */
+        REQUIRE(sv_line_with(result.systemverilog, drive_prefix,
+                             "rst ? 1") != NULL ||
+                sv_line_with(result.systemverilog, drive_prefix,
+                             "rst? 1") != NULL);
+        /* The reset path is not a reset to the first declared state's
+         * encoding: no update gated by rst drives the register with the
+         * false-first-state literal 0 as its true branch. */
+        REQUIRE(sv_line_with(result.systemverilog, drive_prefix,
+                             "rst ? 0") == NULL);
+        REQUIRE(sv_line_with(result.systemverilog, drive_prefix,
+                             "rst? 0") == NULL);
+    }
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
+int main(int argc, char **argv)
+{
+    check_init(argc, argv);
+
     test_skeleton_fails_all();
     test_free_null_result();
     test_free_allocated_result();
@@ -1146,6 +1360,11 @@ int main(void)
     test_unsupported_opaque_error();
     test_cross_domain_error_detailed();
     test_async_domain_error_detailed();
+
+    SECTION("fsm-state-register-reset") {
+        test_fsm_state_register_reset();
+    }
+
     test_vertical_slice_simulation_infrastructure();
     test_fsm_goto_undeclared_target_span();
     test_pipeline_emitted_module_and_buf_count();
@@ -1157,5 +1376,5 @@ int main(void)
     test_fsm_parent_module_emission();
 
     printf("All compile tests passed\n");
-    return 0;
+    return check_finish();
 }
