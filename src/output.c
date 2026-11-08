@@ -521,6 +521,131 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, uint32_t node_index,
 	pigen_rtl_module_id module, int in_module, pigen_output_error *error);
 
+/* Append one published record as a child of the module's open scope. */
+static int add_record_item(pigen_output_model *model,
+	pigen_rtl_module_id module, pigen_output_item item)
+{
+	return pigen_output_item_add_child(model, module, item) ==
+		PIGEN_INVALID_ID ? -1 : 0;
+}
+
+/* The FSM's published records inside the module's shared RTL record, in
+ * source order. The lowering composes the record (one payload object per
+ * signal, one source-ready equation per transfer, one process per semantic
+ * process) and the FSM step appends its own records at each range's tail, one
+ * FSM per module child in source order: the k-th FSM child publishes the k-th
+ * synthetic state register (the record's only kind-VARIABLE object without
+ * signal provenance), one action equation past the composed per-transfer
+ * equations, and one posedge process past the composed per-process processes.
+ * RECORD is the parent module's RTL record (the walk's open module); RANK is
+ * the FSM's source order among the module's FSM children. Returns 0 on
+ * success, -1 when the record carries no published state register or process
+ * for this FSM (a missing-lowered-identity condition the caller reports). */
+static int emit_fsm_records(pigen_output_model *model,
+	const pigen_rtl_lowering *lowering, pigen_rtl_module_id module,
+	size_t fsm_rank)
+{
+	const pigen_semantic_model *sem = lowering->semantics;
+	const pigen_rtl_model *rtl = lowering->rtl;
+	const pigen_rtl_module *module_record;
+	size_t composed_equations = 0;
+	size_t composed_processes = 0;
+	size_t synthetic = 0;
+	size_t i;
+	int emitted_object = 0;
+	int emitted_equation = 0;
+	int emitted_process = 0;
+
+	module_record = pigen_rtl_module_get(rtl, module);
+	if (!module_record)
+		return -1;
+
+	for (i = 0; i < sem->transfer_count; i++)
+		if (sem->transfers[i].module.index ==
+			module_record->semantic_module.index)
+			composed_equations++;
+	for (i = 0; i < sem->process_count; i++)
+		if (sem->processes[i].module.index ==
+			module_record->semantic_module.index)
+			composed_processes++;
+
+	for (i = 0; i < module_record->objects.count; i++)
+	{
+		const pigen_rtl_object *object =
+			&rtl->objects[module_record->objects.first + i];
+
+		if (object->kind != PIGEN_RTL_OBJECT_VARIABLE ||
+			object->semantic_signal.index != PIGEN_INVALID_ID)
+			continue;
+		if (synthetic == fsm_rank)
+		{
+			pigen_output_item item = {0};
+
+			item.kind = PIGEN_OUTPUT_RTL_OBJECT;
+			item.as.object = (pigen_rtl_object_id){
+				(uint32_t)(module_record->objects.first + i)};
+			if (add_record_item(model, module, item))
+				return -1;
+			emitted_object = 1;
+		}
+		synthetic++;
+	}
+
+	if (module_record->equations.count > composed_equations + fsm_rank)
+	{
+		pigen_output_item item = {0};
+
+		item.kind = PIGEN_OUTPUT_RTL_EQUATION;
+		item.as.equation = (pigen_rtl_equation_id){
+			(uint32_t)(module_record->equations.first +
+				composed_equations + fsm_rank)};
+		if (add_record_item(model, module, item))
+			return -1;
+		emitted_equation = 1;
+	}
+
+	if (module_record->processes.count > composed_processes + fsm_rank)
+	{
+		pigen_output_item item = {0};
+
+		item.kind = PIGEN_OUTPUT_RTL_PROCESS;
+		item.as.process = (pigen_rtl_process_id){
+			(uint32_t)(module_record->processes.first +
+				composed_processes + fsm_rank)};
+		if (add_record_item(model, module, item))
+			return -1;
+		emitted_process = 1;
+	}
+
+	if (!emitted_object || !emitted_process)
+		return -1;
+	(void)emitted_equation;
+	return 0;
+}
+
+/* The module's FSM children in source order: the index of NODE among the
+ * PIGEN_SYNTAX_FSM children of MODULE_NODE (its publication rank), or -1 when
+ * NODE is not one of them. */
+static long fsm_child_rank(const pigen_syntax_tree *syntax,
+	const pigen_syntax_node *module_node, const pigen_syntax_node *fsm_node)
+{
+	uint32_t child;
+	long rank = -1;
+
+	for (child = module_node->first_child.index; child != PIGEN_INVALID_ID;
+		child = pigen_syntax_get(syntax, (pigen_syntax_id){child})->next_sibling.index)
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(syntax, (pigen_syntax_id){child});
+
+		if (node->kind != PIGEN_SYNTAX_FSM)
+			continue;
+		rank++;
+		if (node == fsm_node)
+			return rank;
+	}
+	return -1;
+}
+
 /* Recurse over one node's children in source order. */
 static int emit_children(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, const pigen_syntax_node *node,
@@ -566,6 +691,31 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 		 * walk never recurses into them. */
 		if (in_module)
 			return emit_pipeline_records(model, lowering, node, module, error);
+		return emit_children(model, syntax, lowering, node, module, in_module, error);
+	}
+	/* A module-level FSM is a non-emitted container whose lowering publishes
+	 * its records into the shared module record: emit those published records
+	 * (the state register, the action equation and the posedge process) as
+	 * children of the enclosing module in source order, then keep recursing. */
+	if (node->kind == PIGEN_SYNTAX_FSM && in_module)
+	{
+		const pigen_syntax_node *module_node;
+		long rank;
+
+		module_node = pigen_syntax_get(syntax, node->parent);
+		rank = (module_node &&
+			module_node->kind == PIGEN_SYNTAX_MODULE) ?
+			fsm_child_rank(syntax, module_node, node) : -1;
+		if (rank < 0 ||
+			emit_fsm_records(model, lowering, module, (size_t)rank))
+		{
+			if (error)
+			{
+				error->span = node->location.source_span;
+				error->message = "structured node has no published RTL identity";
+			}
+			return -1;
+		}
 		return emit_children(model, syntax, lowering, node, module, in_module, error);
 	}
 	if (node->kind != PIGEN_SYNTAX_COMPILATION_UNIT &&

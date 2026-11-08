@@ -112,4 +112,49 @@ int pigen_fsm_lower(pigen_rtl_lowering *lowering,
 	const pigen_syntax_node *fsm,
 	const pigen_expanded_source *expanded);
 
+/* Lowers one PIGEN_SYNTAX_FSM statement (a module-level fsm item) through the
+ * common RTL model, publishing its state register (reset to the header initial
+ * state), its per-state action bodies (the ordinary statements of each state,
+ * lowered through the shared signal/expression/guard/domain/ownership services
+ * and gated so each runs only while its state is active), and its guard-gated
+ * goto transitions (a goto changes state only under its explicit enclosing
+ * guard and never implicitly waits for a transfer; overlapping transitions
+ * require structural exclusion), all as common RTL objects, equations and
+ * processes of the parent module, as one synchronous controller. The record
+ * argument is the caller-supplied parent module's existing shared RTL module
+ * record: the controller publishes into that one record (the shared
+ * module-record law), reusing the record's already-published objects for the
+ * clock and the action destination signals, so a production compile never
+ * gains a second record (the output model maps the module node to the first
+ * matching record per semantic module; a second record's children would be
+ * silently absent from the emitted SV). lowering is the lowering context (the
+ * validated source model and the target RTL model the records are published
+ * into); module is the parent module identity the fsm statement lives inside;
+ * syntax_tree is the owning syntax tree (the expression arena the goto
+ * guards' conditions lower from) and may be NULL, in which case the guards
+ * keep their structurally-present constant-1 gate placeholders; syntax is the
+ * FSM node identity (PIGEN_SYNTAX_FSM); fsm is the FSM node
+ * itself, and expanded is the expanded source the node was parsed from -
+ * together they carry the syntax-tree facts the lowering reads (the state
+ * set, the initial state, the per-state action statements, the goto
+ * transitions and their guards, and the clock and reset the header names),
+ * consistent with the step-(s2) sibling (pigen_fsm_identity_establish, which
+ * takes the const pigen_syntax_node *fsm). On success it returns 0 and
+ * publishes the controller's owned records: the state register reset to the
+ * header initial state (obligation a), the per-state action bodies gated so
+ * each runs only while its state is active (obligation b), and the guard-gated
+ * goto transitions whose next-state value is conditioned on the goto's guard
+ * so the state holds otherwise, all sharing the one state register as their
+ * single destination (obligation c, structural exclusion). On error it returns
+ * -1 and reports the diagnostic and the compile stops - it may leave partial
+ * state behind, and no test asserts that the RTL model or the lowering maps
+ * are unchanged (how/should/compiler/builders/fail.md). A non-PIGEN_SYNTAX_FSM
+ * node or an invalid argument is rejected (rc == -1) without publishing any
+ * RTL record - the seam's own full-contract obligation. */
+int pigen_fsm_lower_into_record(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_rtl_module_id record,
+	const pigen_syntax_tree *syntax_tree, pigen_syntax_id syntax,
+	const pigen_syntax_node *fsm,
+	const pigen_expanded_source *expanded);
+
 #endif
