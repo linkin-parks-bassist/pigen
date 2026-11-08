@@ -417,6 +417,313 @@ static void test_vertical_slice_simulation_infrastructure(void)
     pclose(f);
 }
 
+/* Test 15: FSM emitted-SV line 3 - per-state action bodies gated on
+ * state-active (one line of the accepted CLI FSM emitted-SV scenario list,
+ * review leaf what/is/the/review/of/the/cli/fsm/emitted/sv/test/scenarios.md,
+ * ACCEPTED).
+ *
+ * One setup: the legal two-state FSM witness in the tests/fsm_lower_test.c
+ * FSM_WITNESS shape - a module with `input logic clk, input logic rst,
+ * input logic start, output logic done`, a module-level
+ * `fsm NAME @(posedge clk) reset (rst) initial idle` item and a
+ * `begin ... end` body of `state IDENT:` items, `endmodule` - whose run
+ * state (the second declared state) carries the action `done <= 1;` plus
+ * a guarded goto.
+ *
+ * One action: compile the literal source through pigen_compile_source.
+ *
+ * One behavioral question: does the emitted SV carry the run state's
+ * action as an equation on the module's `done` output that is conditioned
+ * on the state-active comparison between the state register and the run
+ * state's encoding? A register-read-free equation, or an ungated one,
+ * fails the pin: the emission must (a) declare the controller's state
+ * register as an internal (non-port) logic object, (b) READ that register
+ * in the module body (a register-read-free action equation fails
+ * (b)), and (c) gate the done write with a conditional whose condition
+ * references the register (an ungated action write fails (c)). The
+ * register name is found textually as the unique non-keyword, non-port
+ * identifier of the body, so the pin does not over-pin the declaration
+ * form, the encoding or the register width - the (s5) implementation's.
+ * The emitted text is observed as text - never re-parsed. */
+
+/* A SystemVerilog identifier character. */
+static int sv_ident_char(int c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+}
+
+/* The witness's four port names: any other body identifier is a
+ * synthetic controller object, the state register. */
+static const char *fsm_gate_ports[] = { "clk", "rst", "start", "done" };
+
+/* A SystemVerilog keyword (the emitted body's reserved words): any body
+ * identifier outside this set that is not a port is the register. */
+static const char *fsm_gate_keywords[] = {
+    "always", "assign", "begin", "case", "default", "else", "end",
+    "endcase", "endmodule", "endprocess", "endfunction", "endtask",
+    "if", "initial", "input", "inout", "integer", "logic", "module",
+    "negedge", "output", "parameter", "posedge", "reg", "signed",
+    "wire", "while"
+};
+
+static int is_fsm_gate_keyword(const char *ident, size_t len)
+{
+    size_t i;
+    for (i = 0; i < sizeof(fsm_gate_keywords) / sizeof(fsm_gate_keywords[0]); i++) {
+        if (strlen(fsm_gate_keywords[i]) == len &&
+            memcmp(fsm_gate_keywords[i], ident, len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int is_fsm_gate_port(const char *ident, size_t len)
+{
+    size_t i;
+    for (i = 0; i < sizeof(fsm_gate_ports) / sizeof(fsm_gate_ports[0]); i++) {
+        if (strlen(fsm_gate_ports[i]) == len &&
+            memcmp(fsm_gate_ports[i], ident, len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The body's non-port identifiers: the state register is the module's unique
+ * internal (non-port) logic object. The witness's four ports are clk, rst,
+ * start, done; any other identifier in the body is a synthetic controller
+ * object. The register is referenced many times (declaration, reset, every
+ * state-active gate, every transition), so it is found as the body's single
+ * non-keyword, non-port identifier - not by occurrence count. Digit-led
+ * tokens and base-suffix tails of literals (the `d` of `2'd1`, the `b` of
+ * `1'b1`, after the literal's quote) are not identifiers, so the pin does not
+ * depend on whether the emitter renders the encoding and values as bare
+ * decimals or in the 'b/'d literal style. */
+static int find_state_register(const char *body, char *name, size_t name_size)
+{
+    const char *p = body;
+    int found = 0;
+    const char *found_start = NULL;
+    size_t found_len = 0;
+
+    while (*p) {
+        if (sv_ident_char((unsigned char)*p) &&
+            (p == body || !sv_ident_char((unsigned char)*(p - 1))) &&
+            !(*p >= '0' && *p <= '9') &&
+            /* A base-suffix tail (the `d` of `2'd1`, the `b` of `1'b1`)
+             * follows the literal's quote: not an identifier. */
+            (p == body || *(p - 1) != '\'')) {
+            const char *start = p;
+            while (sv_ident_char((unsigned char)*p)) p++;
+            size_t len = (size_t)(p - start);
+            if (is_fsm_gate_keyword(start, len) ||
+                is_fsm_gate_port(start, len))
+                continue;
+            /* A second distinct non-keyword, non-port identifier means the
+             * body is not the single-register controller this pin assumes. */
+            if (found && len != found_len &&
+                memcmp(found_start, start, found_len) != 0)
+                return 0;
+            if (!found) {
+                found = 1;
+                found_start = start;
+                found_len = len;
+            }
+        } else {
+            p++;
+        }
+    }
+    if (!found || found_len + 1 > name_size) return 0;
+    memcpy(name, found_start, found_len);
+    name[found_len] = 0;
+    return 1;
+}
+
+/* True when the done write is GATED on the state-active comparison. The
+ * state-active gate is the CONDITION of the conditional expression whose
+ * value is the done equation (the production emitter renders it as a ternary
+ * `cond ? t : f` in the done's continuous assign, or an `if (cond) done <= v;`
+ * form). A register-read-free or ungated done write fails here: the condition
+ * operand must reference the state register, so a done equation that is a bare
+ * constant, a conditional on a port or constant alone, or a register write in
+ * the clocked process (whose condition is the reset or goto guard, not the
+ * state-active gate on done) carries no register reference in the done's own
+ * gate. */
+static int done_write_is_gated_on_register(const char *body, const char *reg_name)
+{
+    /* Ternary form: the done equation's value is `cond ? t : f`. For each `?`
+     * take the enclosing statement (back to the previous `;`/newline, forward
+     * to the next `;`); the statement is the gated done write when it names
+     * done as its destination AND the text of the statement before the `?`
+     * (the condition operand) reads the state register. A bare-constant done
+     * write, a conditional on a port/constant alone, or a register write in
+     * the clocked process (a different statement, whose condition is the
+     * reset or goto guard) fails here. */
+    {
+        const char *p = body;
+        while ((p = strchr(p, '?')) != NULL) {
+            const char *stmt_start = p;
+            while (stmt_start > body &&
+                *(stmt_start - 1) != ';' && *(stmt_start - 1) != '\n')
+                stmt_start--;
+            const char *stmt_end = strchr(p, ';');
+            if (stmt_end == NULL) stmt_end = body + strlen(body);
+            {
+                size_t sl = (size_t)(stmt_end - stmt_start);
+                char stmt[512];
+                int is_done = 0;
+
+                if (sl >= sizeof(stmt))
+                    sl = sizeof(stmt) - 1;
+                memcpy(stmt, stmt_start, sl);
+                stmt[sl] = 0;
+                is_done = (strstr(stmt, "done") != NULL);
+                if (is_done) {
+                    /* The condition operand: the statement text before the
+                     * `?` (the ternary's condition). */
+                    size_t cl = (size_t)(p - stmt_start);
+                    char cond[512];
+
+                    if (cl >= sizeof(cond))
+                        cl = sizeof(cond) - 1;
+                    memcpy(cond, stmt_start, cl);
+                    cond[cl] = 0;
+                    if (strstr(cond, reg_name) != NULL)
+                        return 1;
+                }
+            }
+            p++;
+        }
+    }
+    /* If-form: `if (cond) ... done <= ... ;` where cond reads the register. */
+    {
+        const char *p = body;
+        while ((p = strstr(p, "if")) != NULL) {
+            const char *cond = p + 2;
+            while (*cond == ' ' || *cond == '\t') cond++;
+            if (*cond == '(') {
+                const char *cs = cond + 1;
+                const char *ce = strchr(cs, ')');
+                if (ce != NULL) {
+                    size_t cl = (size_t)(ce - cs);
+                    char ctext[256];
+                    int reads_reg = 0;
+
+                    if (cl >= sizeof(ctext))
+                        cl = sizeof(ctext) - 1;
+                    memcpy(ctext, cs, cl);
+                    ctext[cl] = 0;
+                    reads_reg = (strstr(ctext, reg_name) != NULL);
+                    if (reads_reg) {
+                        /* The guarded statement is the text after `)` to the
+                         * next `;`: it must be the done write. */
+                        const char *s = ce + 1;
+                        const char *e = strchr(s, ';');
+                        if (e == NULL) e = body + strlen(body);
+                        {
+                            size_t sl = (size_t)(e - s);
+                            char stmt[256];
+
+                            if (sl >= sizeof(stmt))
+                                sl = sizeof(stmt) - 1;
+                            memcpy(stmt, s, sl);
+                            stmt[sl] = 0;
+                            if (strstr(stmt, "done") != NULL)
+                                return 1;
+                        }
+                    }
+                }
+            }
+            p += 2;
+        }
+    }
+    return 0;
+}
+
+static void test_fsm_emitted_state_active_gating(void)
+{
+    const char *source =
+        "module gate_probe\n"
+        "(\n"
+        "\tinput logic clk,\n"
+        "\tinput logic rst,\n"
+        "\tinput logic start,\n"
+        "\toutput logic done\n"
+        ");\n"
+        "\nfsm gate_probe @(posedge clk) reset (rst) initial idle\n"
+        "begin\n"
+        "\tstate idle:\n"
+        "\tbegin\n"
+        "\t\tif (start)\n"
+        "\t\t\tgoto run;\n"
+        "\tend\n"
+        "\tstate run:\n"
+        "\tbegin\n"
+        "\t\tdone <= 1;\n"
+        "\t\tif (!start)\n"
+        "\t\t\tgoto idle;\n"
+        "\tend\n"
+        "end\n"
+        "endmodule\n";
+
+    pigen_source_manager sources = {0};
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "gate_probe.pigen",
+                                   source, strlen(source),
+                                   NULL, &result, &error);
+
+    /* The legal witness compiles. */
+    assert(ret == 0);
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+
+    const char *sv = result.systemverilog;
+
+    /* The module body: the text after the port list's closing `);`. The
+     * declaration-only emission (a module whose body is empty beyond the
+     * ports) carries no register and fails the next assertion. */
+    const char *body = strstr(sv, ");");
+    assert(body != NULL);
+    body += 2;
+
+    /* (a) The controller's state register is declared as the module's
+     * unique internal logic object: the body's unique non-keyword,
+     * non-port identifier. */
+    char reg_name[128];
+    assert(find_state_register(body, reg_name, sizeof(reg_name)));
+
+    /* (b) The register is READ by the emitted body, not merely
+     * declared: its identifier occurs after its declaration (a
+     * register-read-free action equation fails here). */
+    {
+        const char *decl = strstr(body, reg_name);
+        const char *after_decl = decl + strlen(reg_name);
+        assert(strstr(after_decl, reg_name) != NULL);
+    }
+
+    /* (c) The done write is GATED on the state-active comparison: the
+     * emitted body carries a conditional (the state-active gate `reg == enc`,
+     * rendered by the production emitter as a ternary `cond ? t : f` in the
+     * done equation, or an `if (cond)` form) whose condition operand
+     * references the state register and whose value is the done write. A
+     * register-read-free or ungated action equation fails here: a done
+     * equation that is a bare constant, a conditional on a port or constant
+     * alone, or a register write in the clocked process (whose condition is
+     * the reset or goto guard, not the state-active gate on done) carries no
+     * register reference in the done's own gate. */
+    assert(done_write_is_gated_on_register(body, reg_name));
+
+    /* The run state's action reaches the module's done output: the
+     * emitted body writes done. */
+    assert(strstr(body, "done") != NULL);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 /* Test 15: Scenario line 7 (CLI FSM emitted-SV list): an undeclared goto
  * target is diagnosed at the original span. The witness is the legal
  * two-state controller whose idle-state goto names `nowhere`, a token no
@@ -1374,6 +1681,7 @@ int main(int argc, char **argv)
     test_pipeline_module_level_diagnosed_at_original_span();
     test_pipeline_repartition_unequal_bits_original_span();
     test_fsm_parent_module_emission();
+    test_fsm_emitted_state_active_gating();
 
     printf("All compile tests passed\n");
     return check_finish();
