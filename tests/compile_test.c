@@ -1021,6 +1021,116 @@ static void test_pipeline_repartition_unequal_bits_original_span(void)
     pigen_free_sources(&sources);
 }
 
+/* Test 15: Line 1 of the accepted CLI FSM emitted-SV scenario list
+ * (.knowledge what/are/the/cli/fsm/emitted/sv/test/scenarios.md): the FSM
+ * lowers into the parent module's emitted SV, replacing the silent empty
+ * module. The legal two-state witness (the FSM_WITNESS shape of
+ * tests/fsm_lower_test.c) compiles with rc == 0 and the emitted SV declares
+ * exactly ONE module (the parent) whose body is non-empty beyond the port
+ * header - an internal declaration, continuous assignment and/or clocked
+ * process. RED on master: the same source returns rc == 0 with a
+ * declaration-only body. */
+static int is_identifier_char(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '_';
+}
+
+/* Count keyword-token occurrences of word in text: whole-word matches only,
+ * so "endmodule" does not count as "module". Text observation, not parsing. */
+static size_t count_keyword(const char *text, const char *word)
+{
+    size_t count = 0;
+    size_t len = strlen(word);
+    const char *p = text;
+    while ((p = strstr(p, word)) != NULL) {
+        int left_ok = (p == text) || !is_identifier_char(p[-1]);
+        int right_ok = !is_identifier_char(p[len]);
+        if (left_ok && right_ok) {
+            count++;
+        }
+        p++;
+    }
+    return count;
+}
+
+static void test_fsm_parent_module_emission(void)
+{
+    /* Literal data-first witness: the legal two-state FSM_WITNESS shape of
+     * tests/fsm_lower_test.c (module with clk/rst/start/done ports, a
+     * module-level fsm item with initial idle, idle -> run on start, run ->
+     * idle on !start with done <= 1). */
+    const char *source_text =
+        "module fsm_emitted_probe\n"
+        "(\n"
+        "\tinput logic clk,\n"
+        "\tinput logic rst,\n"
+        "\tinput logic start,\n"
+        "\toutput logic done\n"
+        ");\n"
+        "\nfsm fsm_emitted_probe @(posedge clk) reset (rst) initial idle\n"
+        "begin\n"
+        "\tstate idle:\n"
+        "\tbegin\n"
+        "\t\tif (start)\n"
+        "\t\t\tgoto run;\n"
+        "\tend\n"
+        "\tstate run:\n"
+        "\tbegin\n"
+        "\t\tdone <= 1;\n"
+        "\t\tif (!start)\n"
+        "\t\t\tgoto idle;\n"
+        "\tend\n"
+        "end\n"
+        "endmodule\n";
+    size_t source_length = strlen(source_text);
+
+    pigen_source_manager sources = {0};
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/fsm_emitted_probe.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    /* The legal witness compiles: rc == 0 with output text. */
+    assert(ret == 0);
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+
+    /* Exactly ONE module keyword in the emitted SV: the parent module. A
+     * second RTL record (whose children the output model drops) would emit a
+     * second module keyword and fail this pin. "endmodule" is a distinct
+     * keyword and does not count. */
+    assert(count_keyword(result.systemverilog, "module") == 1);
+
+    /* The parent module name is declared in the emission. */
+    assert(strstr(result.systemverilog, "fsm_emitted_probe") != NULL);
+
+    /* The body beyond the port header is non-empty: the emission after the
+     * port-list close ");" and before the module close must carry an internal
+     * declaration, continuous assignment and/or clocked process. On master
+     * the same source emits a declaration-only module (only ");" then
+     * "endmodule"), which fails this pin. */
+    const char *port_close = strstr(result.systemverilog, ");");
+    assert(port_close != NULL);
+    const char *body_start = port_close + strlen(");");
+    const char *endmodule = strstr(body_start, "endmodule");
+    assert(endmodule != NULL);
+    const char *cursor = body_start;
+    int body_has_content = 0;
+    while (cursor < endmodule) {
+        if ((*cursor != ' ') && (*cursor != '\t') &&
+            (*cursor != '\n') && (*cursor != '\r')) {
+            body_has_content = 1;
+            break;
+        }
+        cursor++;
+    }
+    assert(body_has_content);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 int main(void)
 {
     test_skeleton_fails_all();
@@ -1044,6 +1154,7 @@ int main(void)
     test_pipeline_first_stage_read_original_span();
     test_pipeline_module_level_diagnosed_at_original_span();
     test_pipeline_repartition_unequal_bits_original_span();
+    test_fsm_parent_module_emission();
 
     printf("All compile tests passed\n");
     return 0;
