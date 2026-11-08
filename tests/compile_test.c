@@ -417,6 +417,111 @@ static void test_vertical_slice_simulation_infrastructure(void)
     pclose(f);
 }
 
+/* Non-overlapping count of NEEDLE (needle_length bytes) in TEXT. */
+static size_t count_occurrences(const char *text, const char *needle,
+                                size_t needle_length)
+{
+    size_t count = 0;
+    const char *at = text;
+    while ((at = strstr(at, needle)) != NULL) {
+        count++;
+        at += needle_length;
+    }
+    return count;
+}
+
+/* Test 15: CLI FSM emitted-SV scenario line 5 (no second RTL record: the
+ * controller lives in the one parent module) at the pigen_compile_source seam.
+ *
+ * Line 5 of the independently accepted CLI FSM emitted-SV list (verdict
+ * ACCEPTED at what/is/the/review/of/the/cli/fsm/emitted/sv/test/scenarios.md):
+ * a second RTL record is not published for the FSM. The legal two-state
+ * witness (the FSM_WITNESS shape of tests/fsm_lower_test.c: a module with
+ * input logic clk, input logic rst, input logic start, output logic done; a
+ * module-level fsm item with the begin/end body of state idle: and state
+ * run:) compiles with rc == 0 and the emitted SV declares exactly ONE
+ * module (the parent) carrying the controller. The production step
+ * publishes through the parent module's existing shared RTL module record
+ * (how/does/a/fsm/statement/reach/the/production/rtl/path.md), so a
+ * second-record publish - whose children the output model drops, mapping the
+ * PIGEN_SYNTAX_MODULE node to the first matching RTL record - would leave
+ * the controller absent from the emitted module and fail lines 1-4; this
+ * line pins the shared-module-record law at the observation point where
+ * that failure shows. RED against master: the same source compiles with
+ * rc == 0 but the emitted module carries no body beyond the port header
+ * (does/the/pipeline/and/fsm/reach/the/compiled/output.md), so the
+ * controller-presence pin fails. */
+static void test_fsm_no_second_rtl_record(void)
+{
+    pigen_source_manager sources = {0};
+    /* The FSM_WITNESS witness shape of tests/fsm_lower_test.c, verbatim. */
+    const char *source_text =
+        "module fsm_w5\n"
+        "(\n"
+        "\tinput logic clk,\n"
+        "\tinput logic rst,\n"
+        "\tinput logic start,\n"
+        "\toutput logic done\n"
+        ");\n"
+        "\n"
+        "fsm fsm_w5 @(posedge clk) reset (rst) initial idle\n"
+        "begin\n"
+        "\tstate idle:\n"
+        "\tbegin\n"
+        "\t\tif (start)\n"
+        "\t\t\tgoto run;\n"
+        "\tend\n"
+        "\tstate run:\n"
+        "\tbegin\n"
+        "\t\tdone <= 1;\n"
+        "\t\tif (!start)\n"
+        "\t\t\tgoto idle;\n"
+        "\tend\n"
+        "end\n"
+        "endmodule\n";
+    size_t source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/fsm_w5.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    assert(ret == 0); /* the legal FSM witness compiles */
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+
+    /* Exactly ONE module (the parent fsm_w5): a second-record publish
+     * would declare a second module or, once the output model drops the
+     * second record's children, carry the controller in no module at all.
+     * The emitter renders "module <name> ("; "endmodule" cannot match the
+     * space-terminated needle. */
+    assert(count_occurrences(result.systemverilog, "module ", 7) == 1);
+    assert(strstr(result.systemverilog, "fsm_w5") != NULL);
+
+    /* The one module carries the controller: the emitted body is non-empty
+     * beyond the port header (between ");" and "endmodule"). A declaration-
+     * only module - master's silent drop, or a second-record publish whose
+     * children the output model drops - fails this pin. */
+    const char *header_close = strstr(result.systemverilog, ");");
+    assert(header_close != NULL);
+    const char *module_end = strstr(result.systemverilog, "endmodule");
+    assert(module_end != NULL);
+    assert(module_end > header_close + 2);
+    const char *body = header_close + 2;
+    size_t body_length = (size_t)(module_end - body);
+    size_t nonblank = 0;
+    size_t i;
+    for (i = 0; i < body_length; i++) {
+        if (body[i] != '\n' && body[i] != '\t' &&
+            body[i] != ' ' && body[i] != '\r')
+            nonblank++;
+    }
+    assert(nonblank > 0);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 /* Test 15: FSM emitted-SV line 3 - per-state action bodies gated on
  * state-active (one line of the accepted CLI FSM emitted-SV scenario list,
  * review leaf what/is/the/review/of/the/cli/fsm/emitted/sv/test/scenarios.md,
@@ -1919,6 +2024,7 @@ int main(int argc, char **argv)
     test_fsm_parent_module_emission();
     test_fsm_emitted_state_active_gating();
     test_fsm_guard_gated_single_destination();
+    test_fsm_no_second_rtl_record();
 
     printf("All compile tests passed\n");
     return check_finish();
