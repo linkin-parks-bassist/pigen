@@ -937,12 +937,10 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 
 	/* Clock and reset by the module's declared port convention. */
 	clock_index = module_input_named(lowering, semantic_module, "clk");
-	if (clock_index == SIZE_MAX ||
-		lowering->lowered_endpoint_count <= clock_index ||
-		lowering->lowered_endpoints[clock_index].payload.index ==
-			PIGEN_INVALID_ID)
-		goto done;
-	clock_object = lowering->lowered_endpoints[clock_index].payload;
+	clock_object = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	if (clock_index != SIZE_MAX &&
+		lowering->lowered_endpoint_count > clock_index)
+		clock_object = lowering->lowered_endpoints[clock_index].payload;
 	reset_index = module_input_named(lowering, semantic_module, "reset");
 	if (reset_index != SIZE_MAX &&
 		lowering->lowered_endpoint_count > reset_index)
@@ -1030,7 +1028,10 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 #define CONNECT_VALUE(port, value) \
 	connections[connection_count++] = (pigen_rtl_connection){ \
 		(port), (pigen_rtl_object_id){PIGEN_INVALID_ID}, (value)}
-	CONNECT("clk", clock_object);
+	if (clock_object.index != PIGEN_INVALID_ID)
+		CONNECT("clk", clock_object);
+	else
+		CONNECT_VALUE("clk", zero);
 	if (reset_object.index != PIGEN_INVALID_ID)
 		CONNECT("reset", reset_object);
 	else

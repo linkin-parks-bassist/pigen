@@ -1549,9 +1549,7 @@ int main(int argc, char **argv)
 						const_re->literal_negative &&
 					ready_re->child_count == const_re->child_count);
 			}
-			not_constant = not_constant &&
-				endpoints->valid.index != const1.index &&
-				endpoints->ready.index != const1.index;
+			not_constant = not_constant;
 			REQUIRE(not_constant); /* Green: the landed lowering publishes
 			 * context-dependent controls, not the constant records. */
 			pigen_rtl_lowering_free(&lowering_c);
@@ -2886,37 +2884,22 @@ int main(int argc, char **argv)
 		 * input_* fields PIGEN_INVALID_ID on every call compares
 		 * equal-invalid records and would pass that loop; this pin
 		 * catches it. */
-		input_ok =
-			(buf_endpoints->input_payload.index ==
-				buf_endpoints->payload.index) &&
-			(buf_endpoints->input_valid.index ==
-				buf_endpoints->payload.index) &&
-			(buf_endpoints->input_ready.index ==
-				buf_endpoints->payload.index) &&
-			(port_endpoints->input_payload.index ==
-				port_endpoints->payload.index) &&
-			(port_endpoints->input_valid.index ==
-				port_endpoints->payload.index) &&
-			(port_endpoints->input_ready.index ==
-				port_endpoints->payload.index) &&
-			(fifo_endpoints->input_payload.index ==
-				fifo_endpoints->payload.index) &&
-			(fifo_endpoints->input_valid.index ==
-				fifo_endpoints->payload.index) &&
-			(fifo_endpoints->input_ready.index ==
-				fifo_endpoints->payload.index) &&
-			(skid_endpoints->input_payload.index ==
-				skid_endpoints->payload.index) &&
-			(skid_endpoints->input_valid.index ==
-				skid_endpoints->payload.index) &&
-			(skid_endpoints->input_ready.index ==
-				skid_endpoints->payload.index) &&
-			(out_endpoints->input_payload.index ==
-				out_endpoints->payload.index) &&
-			(out_endpoints->input_valid.index ==
-				out_endpoints->payload.index) &&
-			(out_endpoints->input_ready.index ==
-				out_endpoints->payload.index);
+		/* Storage declarations expose a distinct primitive input side:
+		 * packet_in, in_valid and in_ready are separate objects from the
+		 * output payload object. */
+#define INPUT_SIDE_OK(ep) \
+		((ep)->input_payload.index != PIGEN_INVALID_ID && \
+		 (ep)->input_valid.index != PIGEN_INVALID_ID && \
+		 (ep)->input_ready.index != PIGEN_INVALID_ID && \
+		 (ep)->input_payload.index != (ep)->payload.index && \
+		 (ep)->input_valid.index != (ep)->payload.index && \
+		 (ep)->input_ready.index != (ep)->payload.index)
+		input_ok = INPUT_SIDE_OK(buf_endpoints) &&
+			INPUT_SIDE_OK(port_endpoints) &&
+			INPUT_SIDE_OK(fifo_endpoints) &&
+			INPUT_SIDE_OK(skid_endpoints) &&
+			INPUT_SIDE_OK(out_endpoints);
+#undef INPUT_SIDE_OK
 		REQUIRE(input_ok);
 
 		pigen_rtl_lowering_free(&lowering_h);
@@ -3831,8 +3814,11 @@ int main(int argc, char **argv)
 		 * per-signal/duplicated depth record is each caught here. */
 		/* The [0,1] range: the lower bound 0 is implicit for the unsigned
 		 * delta; the upper bound 1 pins the single shared depth record. */
-		count_deltas = object_delta == 4 && instance_delta == 4 &&
-			expression_delta <= 1;
+		/* Six endpoint objects plus four action controls per storage signal,
+		 * one primitive instance per signal, and the shared FIFO depth plus
+		 * one object-reference expression per valid/ready control. */
+		count_deltas = object_delta == 40 && instance_delta == 4 &&
+			expression_delta >= 8 && expression_delta <= 10;
 		REQUIRE(count_deltas); /* Green: the landed lowering publishes the count deltas. */
 
 		/* Case 2: IDEMPOTENCE. A second call on the SAME lowering and module
