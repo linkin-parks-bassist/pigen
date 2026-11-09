@@ -5,7 +5,7 @@ module skid_pipeline
 		input  logic [7:0]	in_packet
 	);
 
-	skid [7:0] queue;
+	logic [7:0] skid queue;
 
 	always_ff @(posedge clk)
 	begin
