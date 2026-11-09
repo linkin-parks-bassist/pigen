@@ -633,8 +633,9 @@ int main(int argc, char **argv)
 			"  instance #(8) (.clk(clk));\n"
 			"  assign b = signed'(16'(a));\n"
 			"  assign d = {c,e};\n"
-			"  always @(posedge clk)\n"
+			"  always @(posedge clk) begin\n"
 			"    e <= d;\n"
+			"  end\n"
 			"endmodule\n"
 			"// trailing golden comment\n";
 		char *out = (char *)"sentinel";

@@ -529,6 +529,7 @@ pigen_rtl_update_id pigen_rtl_update_add(pigen_rtl_model *model,
 	result.index = (uint32_t)model->update_count;
 	record = &model->updates[model->update_count++];
 	*record = (pigen_rtl_update){0};
+	record->enable = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	record->origin = origin;
 	return result;
 }
@@ -847,6 +848,7 @@ pigen_rtl_update_id pigen_rtl_update_add_with_owner(pigen_rtl_model *model,
 	result.index = (uint32_t)model->update_count;
 	record = &model->updates[model->update_count++];
 	*record = (pigen_rtl_update){0};
+	record->enable = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	record->origin = span;
 	record->destination = destination;
 	record->value = value;

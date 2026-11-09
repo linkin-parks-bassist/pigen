@@ -1377,7 +1377,11 @@ static int validate_coverage(const pigen_output_model *layout,
 	pigen_source_id src = (pigen_source_id){PIGEN_INVALID_ID};
 	const pigen_source_file *file = NULL;
 	size_t prev_end = 0;
+	int structured = 0;
 
+	for (i = 0; i < layout->item_count; i++)
+		if (layout->items[i].kind != PIGEN_OUTPUT_OPAQUE)
+			structured = 1;
 	for (i = 0; i < layout->item_count; i++)
 	{
 		const pigen_output_item *item = &layout->items[i];
@@ -1400,11 +1404,14 @@ static int validate_coverage(const pigen_output_model *layout,
 		 * the retained text between them, so they must stay in source order
 		 * and not overlap; they need not cover the structured spans. */
 		if (item->as.span.end > file->length ||
-			item->as.span.end < item->as.span.start)
+			item->as.span.end < item->as.span.start ||
+			(!structured && item->as.span.start != prev_end))
 			return -1;
 		if (item->as.span.end > prev_end)
 			prev_end = item->as.span.end;
 	}
+	if (!structured && have && prev_end != file->length)
+		return -1;
 	return 0;
 }
 

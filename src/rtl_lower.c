@@ -1940,6 +1940,54 @@ static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
 			groups[i].object, groups[i].guard,
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0}
 			).index != PIGEN_INVALID_ID;
+	/* Undriven action controls default to zero so the primitive sees a defined
+	 * disable instead of X/Z. */
+	for (i = 0; ok && i < sem->signal_count; i++)
+	{
+		const pigen_rtl_signal_endpoints *endpoints;
+		pigen_rtl_object_id controls[4];
+		size_t c;
+
+		if (sem->signals[i].module.index != module.index ||
+			lowering->lowered_endpoint_count <= i) continue;
+		endpoints = &lowering->lowered_endpoints[i];
+		controls[0] = endpoints->force_valid;
+		controls[1] = endpoints->force_invalid;
+		controls[2] = endpoints->clear;
+		controls[3] = endpoints->force_after_transfer;
+		for (c = 0; c < 4 && ok; c++)
+		{
+			size_t g;
+			int driven = controls[c].index == PIGEN_INVALID_ID;
+
+			if (driven) continue;
+			for (g = 0; g < group_count; g++)
+				if (groups[g].object.index == controls[c].index)
+				{ driven = 1; break; }
+			if (!driven)
+			{
+				pigen_data_type_id logic_one = pigen_data_type_sized_logic(
+					sem, 1, PIGEN_SIGN_UNSIGNED);
+				pigen_rtl_type_id control =
+					pigen_lower_rtl_type(lowering, logic_one);
+				pigen_rtl_literal_word word = {0, 0, 0};
+				pigen_rtl_expr_id zero;
+
+				if (control.index == PIGEN_INVALID_ID) { ok = 0; break; }
+				zero = pigen_rtl_expr_add_literal(rtl,
+					PIGEN_RTL_EXPR_INTEGER, control, &word, 1, 0,
+					(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID},
+						0, 0});
+				if (zero.index == PIGEN_INVALID_ID ||
+					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+						controls[c], zero,
+						(pigen_source_span){
+							(pigen_source_id){PIGEN_INVALID_ID}, 0, 0}
+						).index == PIGEN_INVALID_ID)
+					ok = 0;
+			}
+		}
+	}
 	free(groups);
 	return ok ? 0 : -1;
 }
