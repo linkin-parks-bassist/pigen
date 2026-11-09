@@ -435,6 +435,16 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	node = pigen_syntax_get(syntax, (pigen_syntax_id){node_index});
 	if (!node)
 		return -1;
+	if (node->kind == PIGEN_SYNTAX_INSTANCE)
+	{
+		item.kind = PIGEN_OUTPUT_RETAINED;
+		item.as.span = node->location.source_span;
+		if (in_module)
+			return pigen_output_item_add_child(model, module, item) ==
+				PIGEN_INVALID_ID ? -1 : 0;
+		return pigen_output_item_add(model, item) == PIGEN_INVALID_ID ?
+			-1 : 0;
+	}
 	if (node->kind == PIGEN_SYNTAX_RETAINED)
 	{
 		item.kind = PIGEN_OUTPUT_RETAINED;

@@ -2037,6 +2037,97 @@ static int looks_like_plain_instance(const syntax_parser *parser, size_t at,
 	return close < limit && token_is(parser, close + 1, ";");
 }
 
+static int parse_structural_instance(syntax_parser *parser,
+	pigen_syntax_id module, size_t start, size_t limit, size_t *after)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id instance;
+	size_t at = start + 2, close, semicolon, item, opaque_start, opaque_end;
+	const pigen_expanded_token *start_tok = token_at(parser, start);
+	const pigen_expanded_token *last_tok;
+
+	if (token_is(parser, at, "#"))
+	{
+		close = matching_parenthesis(parser, at + 1, limit);
+		if (close == limit) return 0;
+		at = close + 1;
+	}
+	if (!token_is(parser, at, "(")) return 0;
+	close = matching_parenthesis(parser, at, limit);
+	if (close == limit || !token_is(parser, close + 1, ";")) return 0;
+	semicolon = close + 1;
+	opaque_start = parser->opaque_byte_cursor;
+	opaque_end = start_tok ? pigen_origin_expansion_span(parser->expanded,
+		start_tok->origin).start : opaque_start;
+	add_opaque_bytes(parser, module, opaque_start, opaque_end);
+	node.kind = PIGEN_SYNTAX_INSTANCE;
+	node.location = range_location(parser, start, semicolon + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.instance.module = (pigen_token_id){(uint32_t)start};
+	node.as.instance.name = (pigen_token_id){(uint32_t)(start + 1)};
+	instance = add_node(parser, node);
+	add_child(parser, module, instance);
+	for (item = at + 1; item < close; )
+	{
+		pigen_syntax_node connection = {0};
+		pigen_token_id port = INVALID_ID(pigen_token_id);
+		pigen_syntax_expr_id value = INVALID_ID(pigen_syntax_expr_id);
+		size_t value_close;
+
+		if (token_is(parser, item, "."))
+		{
+			if (!identifier(parser, item + 1) ||
+				!token_is(parser, item + 2, "("))
+				return fail(parser, item,
+					"named instance connection requires .port(expression)");
+			port = (pigen_token_id){(uint32_t)(item + 1)};
+			value_close = matching_parenthesis(parser, item + 2, close);
+			if (value_close == close)
+				return fail(parser, item + 2,
+					"unterminated instance connection");
+			if (value_close > item + 3 &&
+				!pigen_parse_expression(parser->expanded, item + 3,
+					value_close, &parser->tree->expressions,
+					&parser->tree->types, &value, parser->error))
+				return 0;
+		}
+		else
+		{
+			size_t next_comma = item;
+			while (next_comma < close && !token_is(parser, next_comma, ","))
+				next_comma++;
+			value_close = next_comma - 1;
+			if (next_comma > item &&
+				!pigen_parse_expression(parser->expanded, item, next_comma,
+					&parser->tree->expressions, &parser->tree->types,
+					&value, parser->error))
+				return 0;
+		}
+		connection.kind = PIGEN_SYNTAX_CONNECTION;
+		connection.location = range_location(parser, item, value_close + 1);
+		connection.parent = INVALID_SYNTAX;
+		connection.first_child = connection.last_child =
+			connection.next_sibling = INVALID_SYNTAX;
+		connection.as.connection.port = port;
+		connection.as.connection.value = value;
+		add_child(parser, instance, add_node(parser, connection));
+		item = value_close + 1;
+		if (item < close)
+		{
+			if (!token_is(parser, item, ","))
+				return fail(parser, item, "instance connections require `,`");
+			item++;
+		}
+	}
+	last_tok = token_at(parser, semicolon);
+	if (last_tok)
+		parser->opaque_byte_cursor = pigen_origin_expansion_span(
+			parser->expanded, last_tok->origin).end;
+	*after = semicolon + 1;
+	return 1;
+}
+
 static int parse_retained_module_item(syntax_parser *parser,
 	pigen_syntax_id module, size_t start, size_t limit, size_t *after_item)
 {
@@ -2075,8 +2166,17 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 
 	while (at < after)
 	{
-		if (item_start && (token_is(parser, at, "assign") ||
-			looks_like_plain_instance(parser, at, after)))
+		if (item_start && looks_like_plain_instance(parser, at, after))
+		{
+			size_t instance_after;
+
+			if (!parse_structural_instance(parser, module, at, after,
+				&instance_after)) return 0;
+			at = instance_after;
+			item_start = 1;
+			continue;
+		}
+		if (item_start && token_is(parser, at, "assign"))
 		{
 			size_t retained_after;
 
