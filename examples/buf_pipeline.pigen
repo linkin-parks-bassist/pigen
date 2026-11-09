@@ -3,12 +3,12 @@ module buf_pipeline
 		input  logic		clk,
 		input  logic		reset,
 
-		input  buf [7:0]	in_packet,
-		output buf [7:0]	out_packet
+		input  bit[8] buf	in_packet,
+		output bit[8] buf	out_packet
 	);
 
-	buf [7:0] stage_a;
-	buf [7:0] stage_b;
+	bit[8] buf stage_a;
+	bit[8] buf stage_b;
 
 	always_ff @(posedge clk)
 	begin
