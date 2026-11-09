@@ -1991,6 +1991,81 @@ static void test_fsm_state_register_reset(void)
     pigen_free_sources(&sources);
 }
 
+/* Test 15: Action-destination non-first-output witness at the production
+ * seam (pigen_compile_source). The witness module declares TWO outputs -
+ * `first_out` FIRST and `done` SECOND - and the run state's action targets
+ * `done` (`done <= 1;`); `first_out` is never assigned by the FSM. The
+ * promised behavior: the compile succeeds (rc == 0) and the emitted SV
+ * publishes the state body's action as a write to the module's `done` output
+ * (the SECOND declared output), and publishes NO action write to `first_out`
+ * (the FIRST declared output, never assigned). This is the terminal-emission
+ * mirror of the standalone pin fsm-lower-test section (11)
+ * action-dest-nonfirst-output; the production path resolves the action
+ * destination through the real syntax tree, so it binds to `done`, not the
+ * module's first output. A builder that falls back to the module's first
+ * output publishes a `first_out` write (and no `done` write) and fails here. */
+static void test_fsm_action_dest_nonfirst_output(void)
+{
+    pigen_source_manager sources = {0};
+    const char *source_text =
+        "module adn_emit\n"
+        "(\n"
+        "\tinput logic clk,\n"
+        "\tinput logic rst,\n"
+        "\tinput logic start,\n"
+        "\toutput logic first_out,\n"
+        "\toutput logic done\n"
+        ");\n"
+        "\n"
+        "fsm adn_emit @(posedge clk) reset (rst) initial idle\n"
+        "begin\n"
+        "\tstate idle:\n"
+        "\tbegin\n"
+        "\t\tif (start)\n"
+        "\t\t\tgoto run;\n"
+        "\tend\n"
+        "\tstate run:\n"
+        "\tbegin\n"
+        "\t\tdone <= 1;\n"
+        "\t\tif (!start)\n"
+        "\t\t\tgoto idle;\n"
+        "\tend\n"
+        "end\n"
+        "endmodule\n";
+    size_t source_length = strlen(source_text);
+
+    pigen_compile_result result = {0};
+    pigen_compile_error error = {0};
+    int ret = pigen_compile_source(&sources, "tests/adn_emit.pigen",
+                                   source_text, source_length,
+                                   NULL, &result, &error);
+    assert(ret == 0);
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
+
+    const char *sv = result.systemverilog;
+
+    /* The module is emitted. */
+    assert(strstr(sv, "adn_emit") != NULL);
+
+    /* The action's destination is the SECOND declared output, done: the
+     * emitted body carries a write to done (a continuous `assign done` or a
+     * clocked `done <=`). */
+    assert(strstr(sv, "assign done") != NULL ||
+           strstr(sv, "done <=") != NULL);
+
+    /* NO action write to the FIRST declared output (first_out): the port
+     * declaration names first_out, so pin on the assignment forms, not the
+     * bare name. A first-output fallback publish writes `assign first_out`
+     * or `first_out <=` and fails here. */
+    assert(strstr(sv, "assign first_out") == NULL);
+    assert(strstr(sv, "first_out <=") == NULL);
+    assert(strstr(sv, "first_out =") == NULL);
+
+    pigen_free_compile_result(&result);
+    pigen_free_sources(&sources);
+}
+
 int main(int argc, char **argv)
 {
     check_init(argc, argv);
@@ -2025,6 +2100,7 @@ int main(int argc, char **argv)
     test_fsm_emitted_state_active_gating();
     test_fsm_guard_gated_single_destination();
     test_fsm_no_second_rtl_record();
+    test_fsm_action_dest_nonfirst_output();
 
     printf("All compile tests passed\n");
     return check_finish();

@@ -688,6 +688,22 @@
   },
   {
     "covers": [
+      "tests/compile_test.c",
+      "src/compile.c",
+      "src/fsm.c",
+      "src/rtl.c",
+      "src/output.c",
+      "src/sv_emit.c",
+      "src/source.c",
+      "src/util.c"
+    ],
+    "command": [
+      "make",
+      "compile-test"
+    ]
+  },
+  {
+    "covers": [
       "tests/route_test.c",
       "src/route.c"
     ],
@@ -1286,6 +1302,18 @@
       "make",
       "fsm-lower-test",
       "T=one-synchronous-controller"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_lower_test.c",
+      "src/fsm_lower.c",
+      "src/rtl.c"
+    ],
+    "command": [
+      "make",
+      "fsm-lower-test",
+      "T=action-dest-nonfirst-output"
     ]
   },
   {

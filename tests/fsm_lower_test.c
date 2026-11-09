@@ -332,6 +332,7 @@ typedef struct {
 	pigen_signal_id rst;
 	pigen_signal_id start;
 	pigen_signal_id done;
+	pigen_signal_id first_out;
 	pigen_clock_domain_id domain;
 	uint32_t next_port_syntax; /* per-port provenance syntax ids */
 } unit;
@@ -402,6 +403,7 @@ static void fl_unit(const parsed *p, unit *u)
 
 	memset(u, 0, sizeof *u);
 	u->next_port_syntax = 100;
+	u->first_out = (pigen_signal_id){PIGEN_INVALID_ID};
 	pigen_semantic_init(&u->model, &p->sources);
 	u->model.compilation_scope = pigen_scope_add(&u->model,
 		(pigen_scope_id){PIGEN_INVALID_ID},
@@ -430,6 +432,47 @@ static void fl_free_unit(unit *u)
 {
 	pigen_free_semantic_model(&u->model);
 	*u = (unit){0};
+}
+
+/* Builds the resolved two-output module skeleton: the module, its scope, the
+ * clock input (and its posedge clock domain) and the port signals - the clk,
+ * rst and start inputs and TWO outputs: `first_out` declared FIRST but never
+ * assigned by the FSM body, and `done` declared SECOND (the state body's
+ * action targets `done`). The two-output order is the action-destination
+ * discriminator: an action destination provenance-bound to the second output
+ * (done), not the first declared output (first_out), is the contract's pin. */
+static void fl_unit_two(const parsed *p, unit *u)
+{
+	pigen_symbol_id module_symbol;
+	pigen_declare_result declared;
+
+	memset(u, 0, sizeof *u);
+	u->next_port_syntax = 100;
+	pigen_semantic_init(&u->model, &p->sources);
+	u->model.compilation_scope = pigen_scope_add(&u->model,
+		(pigen_scope_id){PIGEN_INVALID_ID},
+		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+	REQUIRE(!IS_INVALID_ID(u->model.compilation_scope));
+	declared = pigen_symbol_declare(&u->model, u->model.compilation_scope,
+		PIGEN_SYMBOL_MODULE, (pigen_data_type_id){PIGEN_INVALID_ID},
+		p->module_span, p->module_span, &module_symbol, NULL);
+	REQUIRE(declared == PIGEN_DECLARE_OK);
+	u->module_scope = pigen_scope_add(&u->model, u->model.compilation_scope,
+		p->module_span);
+	REQUIRE(!IS_INVALID_ID(u->module_scope));
+	u->module = pigen_module_add(&u->model, (pigen_syntax_id){1}, module_symbol,
+		u->module_scope, p->module_span);
+	REQUIRE(!IS_INVALID_ID(u->module));
+	u->clk_symbol = fl_port(p, u, "clk", PIGEN_SEMANTIC_INPUT, &u->clk);
+	u->domain = pigen_clock_domain_intern(&u->model, u->clk_symbol,
+		PIGEN_SEMANTIC_POSEDGE);
+	REQUIRE(!IS_INVALID_ID(u->domain));
+	fl_port(p, u, "rst", PIGEN_SEMANTIC_INPUT, &u->rst);
+	fl_port(p, u, "start", PIGEN_SEMANTIC_INPUT, &u->start);
+	/* Two outputs: first_out (declared FIRST, never assigned), done (SECOND,
+	 * the state body's action target). */
+	fl_port(p, u, "first_out", PIGEN_SEMANTIC_OUTPUT, &u->first_out);
+	fl_port(p, u, "done", PIGEN_SEMANTIC_OUTPUT, &u->done);
 }
 
 /* Drives the owner under test (pigen_fsm_lower) for one parsed FSM node on the
@@ -713,6 +756,39 @@ static int owned_object_bound_to(const owned_records *g,
 	"\toutput logic done\n" \
 	");\n" \
 	"\nfsm " NAME " @(posedge clk) reset (rst) initial run\n" \
+	"begin\n" \
+	"\tstate idle:\n" \
+	"\tbegin\n" \
+	"\t\tif (start)\n" \
+	"\t\t\tgoto run;\n" \
+	"\tend\n" \
+	"\tstate run:\n" \
+	"\tbegin\n" \
+	"\t\tdone <= 1;\n" \
+	"\t\tif (!start)\n" \
+	"\t\t\tgoto idle;\n" \
+	"\tend\n" \
+	"end\n" \
+	"endmodule\n"
+
+/* The action-destination two-output witness for
+ * action-dest-nonfirst-output: the same legal two-state FSM body as
+ * FSM_WITNESS, but the module declares TWO outputs - `first_out` FIRST and
+ * `done` SECOND - and the run state's action targets `done` (`done <= 1;`).
+ * The first declared output (first_out) is never assigned by the FSM, so an
+ * action destination bound to the module's first output (the seam defect) is
+ * NOT the state body's action target; the correct destination is provenance-
+ * bound to the second output, done. */
+#define FSM_WITNESS_TWO(NAME) \
+	"module " NAME "\n" \
+	"(\n" \
+	"\tinput logic clk,\n" \
+	"\tinput logic rst,\n" \
+	"\tinput logic start,\n" \
+	"\toutput logic first_out,\n" \
+	"\toutput logic done\n" \
+	");\n" \
+	"\nfsm " NAME " @(posedge clk) reset (rst) initial idle\n" \
 	"begin\n" \
 	"\tstate idle:\n" \
 	"\tbegin\n" \
@@ -2085,6 +2161,119 @@ int main(int argc, char **argv)
 			 * controller rather than a loose record. */
 			REQUIRE(reset_updates == 1);
 			REQUIRE(all_drive_register);
+			pigen_free_rtl_model(&rtl);
+			fl_free_unit(&u);
+			fl_free(&p);
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* (11) action-dest-nonfirst-output: the state body's action destination */
+	/*      is a published RTL object bound, by provenance, to the signal    */
+	/*      the state body assigns to - here the module's SECOND declared   */
+	/*      output, `done` - not the module's first declared output         */
+	/*      (`first_out`, declared first but never assigned by the FSM).    */
+	/*      The anchor lowers a legal two-state FSM (the run state carries  */
+	/*      `done <= 1;`) whose module declares two outputs (first_out      */
+	/*      first, done second) to rc == 0 and pins that the action's       */
+	/*      destination object is provenance-bound to the `done` output     */
+	/*      signal and that NO action record (an equation or a process      */
+	/*      update) is provenance-bound to `first_out`. An action           */
+	/*      destination that falls back to the module's first output        */
+	/*      (the standalone seam's NULL syntax_tree defect) is provenance-  */
+	/*      bound to first_out - the discriminator this section pins: it    */
+	/*      finds no `done`-bound destination and a `first_out`-bound       */
+	/*      action record, so both pins fail. The destination binding is    */
+	/*      located through the parse (the port declarator name tokens)     */
+	/*      and every provenance is a semantic-signal span check - never a  */
+	/*      source-text search over the output. A failed lowering call      */
+	/*      stops the compile and may leave partial state behind, so no     */
+	/*      anchor asserts what a failure left unchanged (how/should/       */
+	/*      compiler/builders/fail.md).                                     */
+	/* ------------------------------------------------------------------ */
+	SECTION("action-dest-nonfirst-output") {
+		/* Anchor: a legal two-state FSM whose module declares two outputs
+		 * (first_out first, done second) lowers to rc == 0, and the action's
+		 * destination object is provenance-bound to the done output (not the
+		 * first declared output, first_out). */
+		{
+			parsed p;
+			fl_parse(&p, "adn_ok.pigen", FSM_WITNESS_TWO("adn_ok"));
+			unit u;
+			pigen_rtl_model rtl;
+			owned_records groups[4];
+			size_t group_count;
+			int rc;
+			size_t i;
+			size_t j;
+			int found_done = 0;
+			int bound_first_out = 0;
+
+			REQUIRE(p.fsm && p.fsm->kind == PIGEN_SYNTAX_FSM);
+			fl_unit_two(&p, &u);
+			rc = fl_drive(&p, &u, p.fsm, p.fsm_id, &rtl);
+			REQUIRE(rc == 0); /* the legal two-output FSM lowers */
+			group_count = fl_owned(&rtl, groups, 4);
+			REQUIRE(group_count >= 1);
+			/* The action's destination is a published owned object bound, by
+			 * provenance, to the module's `done` output signal (the state
+			 * body assigns to `done`, the SECOND declared output), and no
+			 * action record is bound to `first_out` (declared first, never
+			 * assigned). An action destination that falls back to the
+			 * module's first output is provenance-bound to first_out: it
+			 * leaves found_done 0 and sets bound_first_out, so both pins
+			 * below fail. */
+			for (i = 0; i < group_count; i++)
+			{
+				for (j = groups[i].first_equation;
+					j < groups[i].first_equation + groups[i].equation_count;
+					j++)
+				{
+					const pigen_rtl_equation *e =
+						pigen_rtl_equation_get(&rtl,
+							(pigen_rtl_equation_id){(uint32_t)j});
+					const pigen_rtl_object *dest;
+
+					if (!e)
+						continue;
+					dest = pigen_rtl_object_get(&rtl, e->destination);
+					if (!dest || IS_INVALID_ID(dest->semantic_signal))
+						continue;
+					if (dest->semantic_signal.index == u.done.index)
+						found_done = 1;
+					if (dest->semantic_signal.index == u.first_out.index)
+						bound_first_out = 1;
+				}
+				for (j = groups[i].first_process;
+					j < groups[i].first_process + groups[i].process_count;
+					j++)
+				{
+					const pigen_rtl_process *pr = pigen_rtl_process_get(&rtl,
+						(pigen_rtl_process_id){(uint32_t)j});
+					size_t ui;
+
+					if (!pr)
+						continue;
+					for (ui = pr->updates.first;
+						ui < pr->updates.first + pr->updates.count; ui++)
+					{
+						const pigen_rtl_update *up =
+							pigen_rtl_update_get(&rtl,
+								(pigen_rtl_update_id){(uint32_t)ui});
+						const pigen_rtl_object *dest;
+
+						if (!up)
+							continue;
+						dest = pigen_rtl_object_get(&rtl, up->destination);
+						if (!dest || IS_INVALID_ID(dest->semantic_signal))
+							continue;
+						if (dest->semantic_signal.index == u.first_out.index)
+							bound_first_out = 1;
+					}
+				}
+			}
+			REQUIRE(found_done); /* the action lands on done (the second output) */
+			REQUIRE(!bound_first_out); /* never bound to the first output */
 			pigen_free_rtl_model(&rtl);
 			fl_free_unit(&u);
 			fl_free(&p);
