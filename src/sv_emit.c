@@ -567,9 +567,13 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 			b->failed = 1;
 			return -1;
 		}
+		if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
+			buf_append_str(b, "(");
 		render(b, rtl, base);
 		if (b->failed)
 			return -1;
+		if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
+			buf_append_str(b, ")");
 		buf_append_str(b, "[");
 		render(b, rtl, index);
 		if (b->failed)
@@ -596,9 +600,13 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 			return -1;
 		}
 		kind = expr->as.select.kind;
+		if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
+			buf_append_str(b, "(");
 		render(b, rtl, base);
 		if (b->failed)
 			return -1;
+		if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
+			buf_append_str(b, ")");
 		buf_append_str(b, "[");
 		render(b, rtl, left);
 		if (b->failed)

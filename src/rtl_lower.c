@@ -37,6 +37,7 @@
 #include "pigen/transfer_type.h"
 #include "pigen/util.h"
 #include "pigen/predicate.h"
+#include "pigen/expression.h"
 
 void pigen_rtl_lowering_init(pigen_rtl_lowering *lowering,
 	pigen_semantic_model *semantics, pigen_rtl_model *rtl)
@@ -2314,13 +2315,152 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 					value_expr->as.sequence.child_count);
 				size_t c;
 
-				if (!dest_children || !value_children ||
-					lval->as.sequence.child_count !=
-						value_expr->as.sequence.child_count)
+				int aligned = dest_children && value_children &&
+					lval->as.sequence.child_count ==
+						value_expr->as.sequence.child_count;
+
+				if (aligned)
+					for (c = 0; c < lval->as.sequence.child_count; c++)
+					{
+						const pigen_semantic_lvalue *child =
+							pigen_lvalue_get(sem, dest_children[c]);
+						const pigen_semantic_expr *child_value_expr =
+							pigen_expr_get(sem, value_children[c]);
+						pigen_const_expr_id dw, vw;
+						uint64_t d = 0, v = 0;
+
+						if (!child || !child_value_expr)
+						{
+							aligned = 0;
+							break;
+						}
+						if (lowering->lowered_endpoint_count <=
+							child->as.projection.signal.index)
+						{
+							aligned = 0;
+							break;
+						}
+						dw = pigen_data_type_packed_width(sem,
+							pigen_signal_get(sem, child->as.projection.signal)
+								->data_type);
+						vw = pigen_data_type_packed_width(sem,
+							child_value_expr->data_type);
+						if (!pigen_const_expr_evaluate_u64(sem, dw, &d) ||
+							!pigen_const_expr_evaluate_u64(sem, vw, &v) ||
+							d != v)
+						{
+							aligned = 0;
+							break;
+						}
+					}
+				if (!aligned)
 				{
-					free(update_ids);
-					return -1;
+					pigen_const_expr_id total_width =
+						pigen_data_type_packed_width(sem,
+							value_expr->data_type);
+					uint64_t remaining = 0;
+					pigen_data_type_id index_data =
+						pigen_data_type_sized_logic(sem, 32,
+							PIGEN_SIGN_UNSIGNED);
+					pigen_rtl_type_id index_type =
+						pigen_lower_rtl_type(lowering, index_data);
+					pigen_rtl_expr_id whole = lower_expr(lowering,
+						owner->value);
+					pigen_rtl_type_id whole_type = pigen_lower_rtl_type(
+						lowering, value_expr->data_type);
+
+					if (!dest_children ||
+						total_width.index == PIGEN_INVALID_ID ||
+						!pigen_const_expr_evaluate_u64(sem, total_width,
+							&remaining) || remaining == 0 ||
+						index_type.index == PIGEN_INVALID_ID ||
+						whole.index == PIGEN_INVALID_ID ||
+						whole_type.index == PIGEN_INVALID_ID)
+					{
+						free(update_ids);
+						return -1;
+					}
+					for (c = 0; c < lval->as.sequence.child_count; c++)
+					{
+						const pigen_semantic_lvalue *child =
+							pigen_lvalue_get(sem, dest_children[c]);
+						const pigen_semantic_signal *child_signal;
+						pigen_const_expr_id child_width;
+						uint64_t width = 0;
+						pigen_rtl_type_id child_type;
+						pigen_rtl_literal_word low_word;
+						pigen_rtl_expr_id low, shifted, slice;
+						pigen_binary_resolution shift;
+						pigen_conversion conversion;
+
+						if (!child || child->kind !=
+							PIGEN_LVALUE_PROJECTION)
+						{
+							free(update_ids);
+							return -1;
+						}
+						child_signal = pigen_signal_get(sem,
+							child->as.projection.signal);
+						if (!child_signal)
+						{
+							free(update_ids);
+							return -1;
+						}
+						child_width = pigen_data_type_packed_width(sem,
+							child_signal->data_type);
+						if (!pigen_const_expr_evaluate_u64(sem,
+							child_width, &width) || width == 0 ||
+							width > remaining)
+						{
+							free(update_ids);
+							return -1;
+						}
+						child_type = pigen_lower_rtl_type(lowering,
+							child_signal->data_type);
+						low_word = (pigen_rtl_literal_word){
+							remaining - width, 0, 0};
+						low = pigen_rtl_expr_add_literal(rtl,
+							PIGEN_RTL_EXPR_INTEGER, index_type, &low_word,
+							64, 0, owner->span);
+						shift = (pigen_binary_resolution){
+							{PIGEN_CONVERSION_IDENTITY,
+								value_expr->data_type,
+								value_expr->data_type},
+							{PIGEN_CONVERSION_IDENTITY, index_data,
+								index_data},
+							{PIGEN_BINARY_SHIFT_RIGHT,
+								value_expr->data_type, index_data,
+								value_expr->data_type}};
+						if (child_type.index == PIGEN_INVALID_ID ||
+							low.index == PIGEN_INVALID_ID)
+						{
+							free(update_ids);
+							return -1;
+						}
+						shifted = pigen_rtl_expr_add_binary(rtl, whole_type,
+							&shift, whole, low, owner->span);
+						if (shifted.index == PIGEN_INVALID_ID ||
+							!pigen_data_type_resolve_assignment_conversion(
+								sem, value_expr->data_type,
+								child_signal->data_type, &conversion))
+						{
+							free(update_ids);
+							return -1;
+						}
+						slice = pigen_rtl_expr_add_conversion(rtl,
+							child_type, &conversion, shifted, owner->span);
+						if (slice.index == PIGEN_INVALID_ID ||
+							!drive_destination(lowering, rtl_module, child,
+								slice, NULL, fire, owner->span, update_ids,
+								&update_count))
+						{
+							free(update_ids);
+							return -1;
+						}
+						remaining -= width;
+					}
 				}
+				else
 				for (c = 0; c < lval->as.sequence.child_count; c++)
 				{
 					const pigen_semantic_lvalue *child = pigen_lvalue_get(sem,

@@ -1,0 +1,11 @@
+module cm(
+  input logic clk,
+  input logic reset,
+  input bit[16] buf s,
+  output bit[8] buf x,
+  output bit[8] buf y
+);
+  always_ff @(posedge clk) begin
+    {x, y} <= {s[15:8], s[3:0], s[7:4]};
+  end
+endmodule

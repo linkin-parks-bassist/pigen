@@ -4,7 +4,7 @@ LDLIBS		= -lm
 SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-.PHONY: all clean test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-merge-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
+.PHONY: all clean test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-merge-test concat-misaligned-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
 
 all: pigen
 
@@ -277,6 +277,13 @@ biquad-bank-test: pigen
 	./pigen examples/biquad_bank.pigen -o /tmp/pigen-biquad-bank.sv
 	iverilog -g2012 -o /tmp/pigen-biquad-bank-vvp rtl/pigen_primitives.sv /tmp/pigen-biquad-bank.sv examples/biquad_bank_tb.sv
 	vvp /tmp/pigen-biquad-bank-vvp
+
+concat-misaligned-test: pigen
+	dir=$$(mktemp -d); \
+	./pigen tests/concat_misaligned.pigen -o $$dir/misaligned.sv && \
+	iverilog -g2012 -s concat_misaligned_tb -o $$dir/misaligned \
+		rtl/pigen_primitives.sv $$dir/misaligned.sv tests/concat_misaligned_tb.sv && \
+	vvp $$dir/misaligned; status=$$?; rm -rf $$dir; exit $$status
 
 concat-dest-test: pigen
 	./pigen tests/concat_dest.pigen -o /tmp/pigen-concat-dest.sv
