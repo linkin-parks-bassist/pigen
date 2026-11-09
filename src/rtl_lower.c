@@ -940,7 +940,9 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 	payload = add_named_object(lowering, rtl_module, data_type,
 		payload_direction, signal_index, origin, base, NULL);
 	valid_object = add_named_object(lowering, rtl_module, control_type,
-		control_direction, signal_index, origin, base, "_valid");
+		control_direction, signal_index, origin, base,
+		owner_signal->direction == PIGEN_SEMANTIC_OUTPUT ?
+			"_valid" : "__pigen_valid");
 	in_valid = add_named_object(lowering, rtl_module, control_type,
 		PIGEN_SEMANTIC_INTERNAL, signal_index, origin, base,
 		"__pigen_in_valid");
