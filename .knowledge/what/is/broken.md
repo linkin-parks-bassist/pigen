@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-10T08:53:24+11:00"
+revised_at: "2026-11-10T08:56:27+11:00"
 ---
 
 The structured frontend is the production compiler and lowers datapath, pipeline, FSM, acceptance behavior and buffered inline fabric links, with standard SV compatibility for ordinary module items, but the language is not complete.
@@ -13,6 +13,6 @@ Defects and gaps:
 - **semantic-test is red.** Its alias conversion assertion expects IDENTITY where the ordinary-SV arithmetic extension yields a common integer conversion.
 - **Other owner tests are partially stale.** Nine rtl-lower sections and two sv-emit sections pin superseded contracts.
 - **Expression coverage is partial.** Aliases and some conditional/conversion forms remain incomplete.
-- **Examples use the legacy dialect** and need migration.
+- **Examples are mostly on the legacy dialect.** `examples/buf_pipeline.pigen` is migrated and passes `make vertical-slice-test`; the remaining examples still need data-first migration.
 
 Verilator 5.020 and Icarus 13 are installed; lint stays warnings-fatal. Simulate emitted behavior before treating compilation as correctness.
