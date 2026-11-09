@@ -1892,7 +1892,7 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 		((kind == PIGEN_SYMBOL_MODULE || kind == PIGEN_SYMBOL_PIPELINE ||
 			kind == PIGEN_SYMBOL_STAGE || kind == PIGEN_SYMBOL_FSM ||
 			kind == PIGEN_SYMBOL_FABRIC) && type.index != PIGEN_INVALID_ID) ||
-		kind < PIGEN_SYMBOL_SIGNAL || kind > PIGEN_SYMBOL_FABRIC ||
+		kind < PIGEN_SYMBOL_SIGNAL || kind > PIGEN_SYMBOL_INSTANCE ||
 		!pigen_source_span_valid(model->sources, name) || name.start == name.end ||
 		!pigen_source_span_valid(model->sources, declaration) ||
 		!span_contains(declaration, name) || !id_capacity_available(model->symbol_count))
@@ -1941,6 +1941,9 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 			break;
 		case PIGEN_SYMBOL_FABRIC:
 			symbol.object.fabric = INVALID_ID(pigen_fabric_id);
+			break;
+		case PIGEN_SYMBOL_INSTANCE:
+			symbol.object.instance = INVALID_ID(pigen_instance_id);
 			break;
 		case PIGEN_SYMBOL_TYPEDEF:
 			symbol.object.module = INVALID_ID(pigen_module_id);
@@ -2441,6 +2444,96 @@ pigen_transfer_id *pigen_process_transfers(
 	model->process_transfer_buffers[model->process_transfer_buffer_count++] =
 		buffer;
 	return buffer;
+}
+
+pigen_instance_id pigen_instance_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
+	pigen_module_id child_module, pigen_source_span span)
+{
+	pigen_semantic_instance *record;
+	pigen_instance_id result;
+	const pigen_symbol *known;
+
+	if (!model || !pigen_module_get(model, module) ||
+		!pigen_module_get(model, child_module) ||
+		!(known = pigen_symbol_get(model, symbol)) ||
+		known->kind != PIGEN_SYMBOL_INSTANCE)
+		return INVALID_ID(pigen_instance_id);
+	if (model->instance_count == model->instance_capacity)
+	{
+		model->instance_capacity = model->instance_capacity ?
+			model->instance_capacity * 2 : 8;
+		model->instances = pigen_resize(model->instances,
+			model->instance_capacity * sizeof(*model->instances));
+	}
+	result.index = (uint32_t)model->instance_count++;
+	record = &model->instances[result.index];
+	*record = (pigen_semantic_instance){0};
+	record->syntax = syntax;
+	record->module = module;
+	record->symbol = symbol;
+	record->child_module = child_module;
+	record->span = span;
+	record->first_connection = model->instance_connection_count;
+	model->symbols[symbol.index].object.instance = result;
+	return result;
+}
+
+int pigen_instance_add_connection(pigen_semantic_model *model,
+	pigen_instance_id instance, pigen_symbol_id port_symbol,
+	pigen_signal_id port_signal, pigen_expr_id value,
+	pigen_semantic_direction direction, pigen_source_span span)
+{
+	pigen_semantic_instance *owner;
+	pigen_semantic_instance_connection *record;
+
+	if (!model || instance.index >= model->instance_count)
+		return 0;
+	owner = &model->instances[instance.index];
+	if (!pigen_symbol_get(model, port_symbol) ||
+		!pigen_signal_get(model, port_signal) ||
+		(value.index != PIGEN_INVALID_ID && !pigen_expr_get(model, value)))
+		return 0;
+	if (model->instance_connection_count ==
+		model->instance_connection_capacity)
+	{
+		model->instance_connection_capacity =
+			model->instance_connection_capacity ?
+			model->instance_connection_capacity * 2 : 16;
+		model->instance_connections = pigen_resize(
+			model->instance_connections,
+			model->instance_connection_capacity *
+				sizeof(*model->instance_connections));
+	}
+	record = &model->instance_connections[
+		model->instance_connection_count++];
+	*record = (pigen_semantic_instance_connection){0};
+	record->port_symbol = port_symbol;
+	record->port_signal = port_signal;
+	record->value = value;
+	record->direction = direction;
+	record->span = span;
+	owner->connection_count++;
+	return 1;
+}
+
+const pigen_semantic_instance *pigen_instance_get(
+	const pigen_semantic_model *model, pigen_instance_id instance)
+{
+	if (!model || instance.index == PIGEN_INVALID_ID ||
+		instance.index >= model->instance_count)
+		return NULL;
+	return &model->instances[instance.index];
+}
+
+const pigen_semantic_instance_connection *pigen_instance_connections(
+	const pigen_semantic_model *model, pigen_instance_id instance)
+{
+	const pigen_semantic_instance *known = pigen_instance_get(model,
+		instance);
+
+	return known && known->connection_count ?
+		&model->instance_connections[known->first_connection] : NULL;
 }
 
 void pigen_free_semantic_model(pigen_semantic_model *model)

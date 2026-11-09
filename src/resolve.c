@@ -1336,6 +1336,137 @@ static int add_clocked_process(resolver *resolver,
 		body_id, pigen_predicate_true(model));
 }
 
+static int resolve_instance(resolver *resolver, pigen_module_id module_id,
+	pigen_syntax_id syntax_id, const pigen_syntax_node *node);
+
+static int child_port_at(pigen_semantic_model *model,
+	pigen_module_id child_module, size_t index, pigen_symbol_id *symbol,
+	pigen_signal_id *signal)
+{
+	size_t at = 0;
+	for (size_t i = 0; i < model->signal_count; i++)
+	{
+		const pigen_semantic_signal *known = &model->signals[i];
+		if (known->module.index != child_module.index ||
+			known->direction == PIGEN_SEMANTIC_INTERNAL) continue;
+		if (at++ == index)
+		{
+			*symbol = known->symbol;
+			*signal = (pigen_signal_id){(uint32_t)i};
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static int resolve_instance(resolver *resolver, pigen_module_id module_id,
+	pigen_syntax_id syntax_id, const pigen_syntax_node *node)
+{
+	pigen_semantic_model *model = resolver->model;
+	const pigen_semantic_module *module = pigen_module_get(model, module_id);
+	pigen_source_span module_name = token_spelling(resolver,
+		node->as.instance.module);
+	pigen_source_span instance_name = token_spelling(resolver,
+		node->as.instance.name);
+	pigen_symbol_id module_symbol = pigen_symbol_lookup(model,
+		model->compilation_scope, module_name);
+	const pigen_symbol *module_known = pigen_symbol_get(model, module_symbol);
+	pigen_module_id child_module;
+	const pigen_semantic_module *child;
+	pigen_symbol_id instance_symbol;
+	pigen_declare_result declared;
+	pigen_instance_id instance;
+	pigen_syntax_id child_id;
+	size_t positional = 0;
+
+	if (!module) return fail_location(resolver, node->location,
+		"instance requires a module");
+	if (!module_known || module_known->kind != PIGEN_SYMBOL_MODULE)
+		return fail_location(resolver, node->location,
+			"instance module is not declared");
+	child_module = module_known->object.module;
+	child = pigen_module_get(model, child_module);
+	if (!child) return fail_location(resolver, node->location,
+		"invalid instance module");
+	declared = pigen_symbol_declare(model, module->scope,
+		PIGEN_SYMBOL_INSTANCE, INVALID_ID(pigen_data_type_id),
+		instance_name, node->location.source_span, &instance_symbol, NULL);
+	if (declared == PIGEN_DECLARE_DUPLICATE)
+		return fail_location(resolver, node->location, "duplicate instance name");
+	if (declared != PIGEN_DECLARE_OK)
+		return fail_location(resolver, node->location, "invalid instance declaration");
+	instance = pigen_instance_add(model, syntax_id, module_id,
+		instance_symbol, child_module, node->location.source_span);
+	if (instance.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, node->location,
+			"invalid instance semantic object");
+	for (child_id = node->first_child; child_id.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *connection = pigen_syntax_get(resolver->syntax, child_id);
+		pigen_symbol_id port_symbol;
+		pigen_signal_id port_signal;
+		const pigen_symbol *port_known;
+		const pigen_semantic_signal *port;
+		pigen_expr_id value = INVALID_ID(pigen_expr_id);
+		pigen_semantic_direction direction;
+
+		if (!connection) break;
+		if (connection->kind != PIGEN_SYNTAX_CONNECTION)
+		{ child_id = connection->next_sibling; continue; }
+		if (connection->as.connection.port.index != PIGEN_INVALID_ID)
+		{
+			pigen_source_span port_name = token_spelling(resolver,
+				connection->as.connection.port);
+			port_symbol = pigen_symbol_lookup(model, child->scope, port_name);
+		}
+		else if (!child_port_at(model, child_module, positional, &port_symbol,
+			&port_signal))
+			return fail_location(resolver, connection->location,
+				"too many positional instance connections");
+		positional++;
+		port_known = pigen_symbol_get(model, port_symbol);
+		if (!port_known || port_known->kind != PIGEN_SYMBOL_SIGNAL)
+			return fail_location(resolver, connection->location,
+				"unknown child module port");
+		port_signal = pigen_symbol_signal(model, port_symbol);
+		port = pigen_signal_get(model, port_signal);
+		if (!port) return fail_location(resolver, connection->location,
+			"invalid child module port");
+		direction = port->direction;
+		if (connection->as.connection.value.index != PIGEN_INVALID_ID)
+		{
+			if (direction == PIGEN_SEMANTIC_OUTPUT)
+			{
+				pigen_expr_id expression = pigen_resolve_expression(
+					resolver->syntax, model, module->scope,
+					connection->as.connection.value, resolver->policy,
+					resolver->error);
+				pigen_lvalue_id lvalue = pigen_lvalue_resolve(model, expression);
+				const pigen_semantic_lvalue *known =
+					pigen_lvalue_get(model, lvalue);
+				if (!known || known->kind != PIGEN_LVALUE_PROJECTION)
+					return fail_location(resolver, connection->location,
+						"instance output requires a writable parent signal");
+				value = expression;
+			}
+			else
+				value = pigen_resolve_assignment_value(resolver->syntax,
+					model, module->scope,
+					connection->as.connection.value, port->data_type,
+					resolver->policy, resolver->error);
+			if (value.index == PIGEN_INVALID_ID)
+				return fail_location(resolver, connection->location,
+					"instance connection requires a compatible expression");
+		}
+		if (!pigen_instance_add_connection(model, instance, port_symbol,
+			port_signal, value, direction, connection->location.source_span))
+			return fail_location(resolver, connection->location,
+				"invalid instance connection");
+		child_id = connection->next_sibling;
+	}
+	return 1;
+}
+
 static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	pigen_syntax_id syntax_id)
 {
@@ -1385,6 +1516,8 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 			!add_clocked_process(resolver, module_id, child, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_FSM &&
 			!resolve_fsm(resolver, module_id, child, node)) return 0;
+		if (node->kind == PIGEN_SYNTAX_INSTANCE &&
+			!resolve_instance(resolver, module_id, child, node)) return 0;
 		child = node->next_sibling;
 	}
 	return 1;

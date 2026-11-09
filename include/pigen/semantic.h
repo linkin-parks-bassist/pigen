@@ -18,7 +18,8 @@ typedef enum {
 	PIGEN_SYMBOL_PIPELINE,
 	PIGEN_SYMBOL_STAGE,
 	PIGEN_SYMBOL_FSM,
-	PIGEN_SYMBOL_FABRIC
+	PIGEN_SYMBOL_FABRIC,
+	PIGEN_SYMBOL_INSTANCE
 } pigen_symbol_kind;
 
 typedef enum {
@@ -122,6 +123,7 @@ typedef struct {
 		pigen_stage_id stage;
 		pigen_fsm_id fsm;
 		pigen_fabric_id fabric;
+		pigen_instance_id instance;
 	} object;
 } pigen_symbol;
 
@@ -319,6 +321,24 @@ typedef struct {
 typedef struct {
 	pigen_syntax_id syntax;
 	pigen_module_id module;
+	pigen_symbol_id symbol;
+	pigen_module_id child_module;
+	pigen_source_span span;
+	size_t first_connection;
+	size_t connection_count;
+} pigen_semantic_instance;
+
+typedef struct {
+	pigen_symbol_id port_symbol;
+	pigen_signal_id port_signal;
+	pigen_expr_id value;
+	pigen_semantic_direction direction;
+	pigen_source_span span;
+} pigen_semantic_instance_connection;
+
+typedef struct {
+	pigen_syntax_id syntax;
+	pigen_module_id module;
 	pigen_process_id process;
 	pigen_lvalue_id destination;
 	pigen_expr_id value;
@@ -418,6 +438,12 @@ struct pigen_semantic_model {
 	pigen_semantic_transfer *transfers;
 	size_t transfer_count;
 	size_t transfer_capacity;
+	pigen_semantic_instance *instances;
+	size_t instance_count;
+	size_t instance_capacity;
+	pigen_semantic_instance_connection *instance_connections;
+	size_t instance_connection_count;
+	size_t instance_connection_capacity;
 	pigen_transfer_signal_use *transfer_signal_uses;
 	size_t transfer_signal_use_count;
 	size_t transfer_signal_use_capacity;
@@ -605,6 +631,17 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	const pigen_transfer_signal_use *signal_uses,
 	size_t signal_use_count,
 	pigen_source_span span);
+pigen_instance_id pigen_instance_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
+	pigen_module_id child_module, pigen_source_span span);
+int pigen_instance_add_connection(pigen_semantic_model *model,
+	pigen_instance_id instance, pigen_symbol_id port_symbol,
+	pigen_signal_id port_signal, pigen_expr_id value,
+	pigen_semantic_direction direction, pigen_source_span span);
+const pigen_semantic_instance *pigen_instance_get(
+	const pigen_semantic_model *model, pigen_instance_id instance);
+const pigen_semantic_instance_connection *pigen_instance_connections(
+	const pigen_semantic_model *model, pigen_instance_id instance);
 pigen_module_id pigen_symbol_module(const pigen_semantic_model *model,
 	pigen_symbol_id symbol);
 pigen_parameter_id pigen_symbol_parameter(const pigen_semantic_model *model,
