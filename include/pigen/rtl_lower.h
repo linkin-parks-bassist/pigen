@@ -35,6 +35,11 @@ typedef struct {
 	 * boundary ready port). Transfer lowering drives it from the fire
 	 * identity; invalid for always-ready static signals. */
 	pigen_rtl_object_id source_ready;
+	/* Storage validity-action controls; invalid for static/boundary signals. */
+	pigen_rtl_object_id force_valid;
+	pigen_rtl_object_id force_invalid;
+	pigen_rtl_object_id clear;
+	pigen_rtl_object_id force_after_transfer;
 } pigen_rtl_signal_endpoints;
 
 /* One lowering pass. semantics is the validated source model and rtl is the

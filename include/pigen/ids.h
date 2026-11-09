@@ -26,6 +26,7 @@ PIGEN_ID_TYPE(pigen_lvalue_id);
 PIGEN_ID_TYPE(pigen_parameter_id);
 PIGEN_ID_TYPE(pigen_signal_id);
 PIGEN_ID_TYPE(pigen_instance_id);
+PIGEN_ID_TYPE(pigen_action_id);
 PIGEN_ID_TYPE(pigen_clock_domain_id);
 PIGEN_ID_TYPE(pigen_process_id);
 PIGEN_ID_TYPE(pigen_transfer_id);

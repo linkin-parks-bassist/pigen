@@ -337,6 +337,23 @@ typedef struct {
 	pigen_source_span span;
 } pigen_semantic_instance_connection;
 
+typedef enum {
+	PIGEN_ACTION_VALIDATE,
+	PIGEN_ACTION_INVALIDATE,
+	PIGEN_ACTION_FLUSH
+} pigen_action_kind;
+
+typedef struct {
+	pigen_syntax_id syntax;
+	pigen_module_id module;
+	pigen_process_id process;
+	pigen_clock_domain_id domain;
+	pigen_signal_id signal;
+	pigen_action_kind action;
+	pigen_predicate_id guard;
+	pigen_source_span span;
+} pigen_semantic_action;
+
 typedef struct {
 	pigen_syntax_id syntax;
 	pigen_module_id module;
@@ -439,6 +456,9 @@ struct pigen_semantic_model {
 	pigen_semantic_transfer *transfers;
 	size_t transfer_count;
 	size_t transfer_capacity;
+	pigen_semantic_action *actions;
+	size_t action_count;
+	size_t action_capacity;
 	pigen_semantic_instance *instances;
 	size_t instance_count;
 	size_t instance_capacity;
@@ -632,6 +652,12 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	const pigen_transfer_signal_use *signal_uses,
 	size_t signal_use_count,
 	pigen_source_span span);
+pigen_action_id pigen_action_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module, pigen_process_id process,
+	pigen_clock_domain_id domain, pigen_signal_id signal,
+	pigen_action_kind action, pigen_predicate_id guard, pigen_source_span span);
+const pigen_semantic_action *pigen_action_get(const pigen_semantic_model *model,
+	size_t index);
 pigen_instance_id pigen_instance_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
 	pigen_module_id child_module, pigen_source_span span);

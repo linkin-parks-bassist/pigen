@@ -1258,6 +1258,42 @@ static int resolve_if_statement(resolver *resolver,
 			else_id, else_guard);
 }
 
+static int resolve_action(resolver *resolver, pigen_module_id module_id,
+	pigen_process_id process, pigen_clock_domain_id domain,
+	pigen_syntax_id syntax_id, const pigen_syntax_node *statement,
+	pigen_predicate_id guard)
+{
+	pigen_semantic_model *model = resolver->model;
+	pigen_source_span target = token_spelling(resolver,
+		statement->as.action.target);
+	pigen_symbol_id symbol;
+	const pigen_symbol *known;
+	pigen_signal_id signal;
+	pigen_action_kind kind;
+	const pigen_semantic_module *module = pigen_module_get(model, module_id);
+
+	(void)syntax_id;
+	if (!module) return 0;
+	symbol = pigen_symbol_lookup(model, module->scope, target);
+	known = pigen_symbol_get(model, symbol);
+	if (!known || known->kind != PIGEN_SYMBOL_SIGNAL)
+		return fail_location(resolver, statement->location,
+			"validity action requires a declared signal");
+	signal = pigen_symbol_signal(model, symbol);
+	if (signal.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, statement->location,
+			"validity action requires a signal");
+	kind = statement->as.action.action == 1 ? PIGEN_ACTION_VALIDATE :
+		statement->as.action.action == 2 ? PIGEN_ACTION_INVALIDATE :
+			PIGEN_ACTION_FLUSH;
+	if (pigen_action_add(model, syntax_id, module_id, process, domain, signal,
+		kind, guard, statement->location.source_span).index ==
+		PIGEN_INVALID_ID)
+		return fail_location(resolver, statement->location,
+			"invalid validity action");
+	return 1;
+}
+
 static int resolve_procedural_statement(resolver *resolver,
 	pigen_module_id module_id, pigen_process_id process,
 	pigen_clock_domain_id domain, pigen_syntax_id statement_id,
@@ -1279,6 +1315,9 @@ static int resolve_procedural_statement(resolver *resolver,
 			statement_id, statement, guard);
 	if (statement->kind == PIGEN_SYNTAX_GOTO)
 		return resolve_goto(resolver, module_id, process, domain,
+			statement_id, statement, guard);
+	if (statement->kind == PIGEN_SYNTAX_ACTION)
+		return resolve_action(resolver, module_id, process, domain,
 			statement_id, statement, guard);
 	if (statement->kind != PIGEN_SYNTAX_PROCEDURAL_BLOCK)
 		return fail_location(resolver, statement->location,

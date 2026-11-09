@@ -26,6 +26,7 @@ typedef enum {
 	PIGEN_SYNTAX_FABRIC,
 	PIGEN_SYNTAX_FABRIC_CONNECTION,
 	PIGEN_SYNTAX_CONNECTION,
+	PIGEN_SYNTAX_ACTION,
 	PIGEN_SYNTAX_RETAINED,
 	PIGEN_SYNTAX_OPAQUE
 } pigen_syntax_kind;
@@ -136,6 +137,10 @@ typedef struct {
 			pigen_token_id port;
 			pigen_syntax_expr_id value;
 		} connection;
+		struct {
+			int action;
+			pigen_token_id target;
+		} action;
 		struct {
 			pigen_token_id name;
 		} fabric;

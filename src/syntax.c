@@ -1943,10 +1943,44 @@ done:
 	return ok ? 1 : 0;
 }
 
+static int parse_validity_action(syntax_parser *parser,
+	pigen_syntax_id parent, size_t start, size_t limit, size_t *after,
+	size_t *assignment_count)
+{
+	pigen_syntax_node node = {0};
+	int action;
+	size_t length = 0;
+	const char *text = pigen_expanded_token_text(parser->expanded,
+		token_at(parser, start), &length);
+
+	(void)limit;
+	if (!text) return 0;
+	if (length == 8 && !memcmp(text, "validate", 8)) action = 1;
+	else if (length == 10 && !memcmp(text, "invalidate", 10)) action = 2;
+	else if (length == 5 && !memcmp(text, "flush", 5)) action = 3;
+	else return 0;
+	if (!token_is(parser, start + 1, "(") || !identifier(parser, start + 2) ||
+		!token_is(parser, start + 3, ")") || !token_is(parser, start + 4, ";"))
+		return 0;
+	node.kind = PIGEN_SYNTAX_ACTION;
+	node.location = range_location(parser, start, start + 5);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	node.as.action.action = action;
+	node.as.action.target = (pigen_token_id){(uint32_t)(start + 2)};
+	add_child(parser, parent, add_node(parser, node));
+	(*assignment_count)++;
+	*after = start + 5;
+	return 1;
+}
+
 static int parse_procedural_statement(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count)
 {
+	if (parse_validity_action(parser, parent, start, limit, after_statement,
+		assignment_count))
+		return 1;
 	if (token_is(parser, start, "begin"))
 		return parse_procedural_block(parser, parent, start, limit,
 			after_statement, assignment_count);

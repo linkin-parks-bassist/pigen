@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "pigen/semantic.h"
+#include "pigen/predicate.h"
 #include "pigen/util.h"
 
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
@@ -2444,6 +2445,45 @@ pigen_transfer_id *pigen_process_transfers(
 	model->process_transfer_buffers[model->process_transfer_buffer_count++] =
 		buffer;
 	return buffer;
+}
+
+pigen_action_id pigen_action_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module, pigen_process_id process,
+	pigen_clock_domain_id domain, pigen_signal_id signal,
+	pigen_action_kind action, pigen_predicate_id guard, pigen_source_span span)
+{
+	pigen_semantic_action *record;
+	pigen_action_id result;
+
+	if (!model || !pigen_module_get(model, module) ||
+		!pigen_signal_get(model, signal) || !pigen_predicate_get(model, guard))
+		return INVALID_ID(pigen_action_id);
+	if (model->action_count == model->action_capacity)
+	{
+		model->action_capacity = model->action_capacity ?
+			model->action_capacity * 2 : 8;
+		model->actions = pigen_resize(model->actions,
+			model->action_capacity * sizeof(*model->actions));
+	}
+	result.index = (uint32_t)model->action_count++;
+	record = &model->actions[result.index];
+	*record = (pigen_semantic_action){0};
+	record->syntax = syntax;
+	record->module = module;
+	record->process = process;
+	record->domain = domain;
+	record->signal = signal;
+	record->action = action;
+	record->guard = guard;
+	record->span = span;
+	return result;
+}
+
+const pigen_semantic_action *pigen_action_get(const pigen_semantic_model *model,
+	size_t index)
+{
+	if (!model || index >= model->action_count) return NULL;
+	return &model->actions[index];
 }
 
 pigen_instance_id pigen_instance_add(pigen_semantic_model *model,

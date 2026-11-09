@@ -746,7 +746,10 @@ static int boundary_endpoints(pigen_rtl_lowering *lowering,
 
 	*out = (pigen_rtl_signal_endpoints){
 		payload, valid, ready, payload, valid_object, ready_object,
-		ready_object};
+		ready_object, (pigen_rtl_object_id){PIGEN_INVALID_ID},
+		(pigen_rtl_object_id){PIGEN_INVALID_ID},
+		(pigen_rtl_object_id){PIGEN_INVALID_ID},
+		(pigen_rtl_object_id){PIGEN_INVALID_ID}};
 	return 1;
 }
 
@@ -829,6 +832,10 @@ static int net_variable_endpoints(pigen_rtl_lowering *lowering,
 
 	*out = (pigen_rtl_signal_endpoints){
 		payload, valid, ready, payload, payload, payload,
+		(pigen_rtl_object_id){PIGEN_INVALID_ID},
+		(pigen_rtl_object_id){PIGEN_INVALID_ID},
+		(pigen_rtl_object_id){PIGEN_INVALID_ID},
+		(pigen_rtl_object_id){PIGEN_INVALID_ID},
 		(pigen_rtl_object_id){PIGEN_INVALID_ID}};
 	return 1;
 }
@@ -884,6 +891,10 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 	pigen_rtl_object_id in_ready;
 	pigen_rtl_object_id packet_in;
 	pigen_rtl_object_id source_ready;
+	pigen_rtl_object_id force_valid_object = {PIGEN_INVALID_ID};
+	pigen_rtl_object_id force_invalid_object = {PIGEN_INVALID_ID};
+	pigen_rtl_object_id clear_object = {PIGEN_INVALID_ID};
+	pigen_rtl_object_id force_after_object = {PIGEN_INVALID_ID};
 	pigen_rtl_expr_id valid;
 	pigen_rtl_expr_id ready;
 	pigen_rtl_expr_id depth = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
@@ -966,6 +977,27 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 		packet_in.index == PIGEN_INVALID_ID ||
 		source_ready.index == PIGEN_INVALID_ID)
 		goto done;
+	{
+		force_valid_object = add_named_object(lowering,
+			rtl_module, control_type, PIGEN_SEMANTIC_INTERNAL, signal_index,
+			origin, base, "__pigen_force_valid");
+		force_invalid_object = add_named_object(lowering,
+			rtl_module, control_type, PIGEN_SEMANTIC_INTERNAL, signal_index,
+			origin, base, "__pigen_force_invalid");
+		clear_object = add_named_object(lowering, rtl_module,
+			control_type, PIGEN_SEMANTIC_INTERNAL, signal_index, origin, base,
+			"__pigen_clear");
+		force_after_object = add_named_object(lowering,
+			rtl_module, control_type, PIGEN_SEMANTIC_INTERNAL, signal_index,
+			origin, base, "__pigen_force_after_transfer");
+
+		if (force_valid_object.index == PIGEN_INVALID_ID ||
+			force_invalid_object.index == PIGEN_INVALID_ID ||
+			clear_object.index == PIGEN_INVALID_ID ||
+			force_after_object.index == PIGEN_INVALID_ID)
+			goto done;
+		/* published below with the endpoints record */
+	}
 	valid = object_expression(lowering, control_type, valid_object, origin);
 	ready = object_expression(lowering, control_type, in_ready, origin);
 	if (valid.index == PIGEN_INVALID_ID || ready.index == PIGEN_INVALID_ID)
@@ -1003,11 +1035,11 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 		CONNECT("reset", reset_object);
 	else
 		CONNECT_VALUE("reset", zero);
-	CONNECT_VALUE("clear", zero);
+	CONNECT("clear", clear_object);
 	CONNECT_VALUE("discard", zero);
-	CONNECT_VALUE("force_valid", zero);
-	CONNECT_VALUE("force_invalid", zero);
-	CONNECT_VALUE("force_after_transfer", zero);
+	CONNECT("force_valid", force_valid_object);
+	CONNECT("force_invalid", force_invalid_object);
+	CONNECT("force_after_transfer", force_after_object);
 	CONNECT("in_valid", in_valid);
 	CONNECT("in_ready", in_ready);
 	CONNECT("packet_in", packet_in);
@@ -1044,7 +1076,8 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 
 	*out = (pigen_rtl_signal_endpoints){
 		payload, valid, ready, packet_in, in_valid, in_ready,
-		source_ready};
+		source_ready, force_valid_object, force_invalid_object,
+		clear_object, force_after_object};
 	ok = 1;
 done:
 	free(base);
@@ -1455,6 +1488,24 @@ static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 	(void)logic_one;
 }
 
+static pigen_rtl_expr_id fire_or(pigen_rtl_lowering *lowering,
+	pigen_rtl_expr_id left, pigen_rtl_expr_id right)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_data_type_id logic_one = pigen_data_type_sized_logic(sem, 1,
+		PIGEN_SIGN_UNSIGNED);
+	pigen_rtl_type_id control = pigen_lower_rtl_type(lowering, logic_one);
+	pigen_binary_resolution resolution = {
+		{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
+		{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
+		{PIGEN_BINARY_LOGICAL_OR, logic_one, logic_one, logic_one}};
+
+	if (control.index == PIGEN_INVALID_ID) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	return pigen_rtl_expr_add_binary(rtl, control, &resolution, left, right,
+		(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+}
+
 /* Intern the 1-bit fire-identity "true" node - a 1-bit BITS literal 1 - once
  * through the constant-expression memo (so it is a single shared identity) and
  * return its lowered RTL expression. This is the fire identity of a transfer
@@ -1800,6 +1851,99 @@ static pigen_rtl_expr_id offer_identity_for_transfer(
 	return identity;
 }
 
+/* Lower validity actions into one equation per controlled storage port, OR-ing
+ * every action guard that targets that port. */
+static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
+	pigen_rtl_module_id rtl_module)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	struct group { pigen_rtl_object_id object; pigen_rtl_expr_id guard; };
+	struct group *groups = NULL;
+	size_t group_count = 0;
+	size_t i;
+	int ok = 1;
+
+	for (i = 0; i < sem->action_count && ok; i++)
+	{
+		const pigen_semantic_action *action = &sem->actions[i];
+		const pigen_predicate *predicate;
+		const pigen_predicate_atom *atoms;
+		pigen_rtl_expr_id guard = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		pigen_rtl_object_id targets[2];
+		size_t target_count = 0;
+		size_t j;
+
+		if (action->module.index != module.index) continue;
+		if (lowering->lowered_endpoint_count <= action->signal.index) continue;
+		{
+			const pigen_rtl_signal_endpoints *endpoints =
+				&lowering->lowered_endpoints[action->signal.index];
+
+			if (action->action == PIGEN_ACTION_VALIDATE)
+			{
+				targets[target_count++] = endpoints->force_valid;
+				targets[target_count++] = endpoints->force_after_transfer;
+			}
+			else if (action->action == PIGEN_ACTION_INVALIDATE)
+			{
+				targets[target_count++] = endpoints->force_invalid;
+				targets[target_count++] = endpoints->force_after_transfer;
+			}
+			else
+				targets[target_count++] = endpoints->clear;
+		}
+		if (targets[0].index == PIGEN_INVALID_ID) continue;
+		predicate = pigen_predicate_get(sem, action->guard);
+		if (!predicate) { ok = 0; break; }
+		atoms = predicate->atom_count ?
+			pigen_predicate_atoms(sem, action->guard) : NULL;
+		for (j = 0; j < predicate->atom_count; j++)
+		{
+			pigen_rtl_expr_id term = fire_atom(lowering, &atoms[j]);
+
+			if (term.index == PIGEN_INVALID_ID) { ok = 0; break; }
+			guard = guard.index == PIGEN_INVALID_ID ? term :
+				fire_and(lowering, guard, term);
+			if (guard.index == PIGEN_INVALID_ID) { ok = 0; break; }
+		}
+		if (!ok) break;
+		if (guard.index == PIGEN_INVALID_ID)
+			guard = fire_bits_one(lowering);
+		if (guard.index == PIGEN_INVALID_ID) { ok = 0; break; }
+		for (j = 0; j < target_count && ok; j++)
+		{
+			size_t g;
+			int found = 0;
+
+			for (g = 0; g < group_count; g++)
+				if (groups[g].object.index == targets[j].index)
+				{
+					groups[g].guard = fire_or(lowering, groups[g].guard,
+						guard);
+					found = groups[g].guard.index != PIGEN_INVALID_ID;
+					if (!found) ok = 0;
+					break;
+				}
+			if (!ok) break;
+			if (!found)
+			{
+				groups = pigen_resize(groups,
+					(group_count + 1) * sizeof(*groups));
+				groups[group_count++] =
+					(struct group){targets[j], guard};
+			}
+		}
+	}
+	for (i = 0; ok && i < group_count; i++)
+		ok = pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+			groups[i].object, groups[i].guard,
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0}
+			).index != PIGEN_INVALID_ID;
+	free(groups);
+	return ok ? 0 : -1;
+}
+
 int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -2056,6 +2200,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 		}
 		free(update_ids);
 	}
+	if (lower_actions(lowering, module, rtl_module)) return -1;
 	return 0;
 }
 
