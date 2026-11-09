@@ -1,14 +1,14 @@
 ---
 status: green
-revised_at: "2026-11-10T09:39:24+11:00"
+revised_at: "2026-11-10T09:56:13+11:00"
 ---
 
-pigen-fork runs a structured-only compiler. Done and verified end-to-end: declarations, abstract inputs, static/buffered transfers with real primitives, clocked processes, module emission, inline pipelines (both stage forms), FSMs, transfer-and-branch, `accepts`/`valid`/`ready`/`peek`, validity actions, multi-module sources, verbatim ordinary-SV items and standard child instantiations, semantic instance/port metadata, inline fabric endpoint wiring with direct links and skid-buffered routed links, aligned concatenation destinations, and nine migrated examples. semantic-test, compile-test, sv-emit-test and concat-dest-test are green.
+pigen-fork runs a structured-only compiler. Done and verified end-to-end: declarations, abstract inputs, static/buffered transfers with real primitives, clocked processes, module emission, inline pipelines (both stage forms), FSMs, transfer-and-branch, `accepts`/`valid`/`ready`/`peek`, validity actions, multi-module sources, verbatim ordinary-SV items and standard child instantiations, semantic instance/port metadata, inline fabric endpoint wiring with direct links and skid-buffered routed links, aligned concatenation destinations with per-child conversion, and nine migrated examples. semantic-test, compile-test, sv-emit-test, concat-dest-test pass; rtl-lower-test is 20/24.
 
 Remaining work, in order:
 1. Complete fabric routing: balanced three-port router networks, buffered hops, round-robin arbitration for multiple routed sources per destination, and SVG from the same topology.
-2. Generalize concatenation/co-slice lowering (misaligned widths, `_` placeholders) and aggregate/function forms; then migrate `text`, `biquad_bank` and `df1_biquad_bandpass`.
-3. Rebaseline the nine remaining rtl-lower stale sections.
+2. Rebaseline the four stale t8 rtl-lower sections to update-value-RHS/fire-in-equations semantics.
+3. Support typed parameters and mixed pigen-integer × ordinary-logic arithmetic; generalize concatenation (`_`, misaligned) and aggregate/function forms; migrate `text`, `biquad_bank`, `df1_biquad_bandpass`.
 4. Complete ordinary-SV expression coverage (aliases, conditionals, remaining conversions).
 
 Open questions for David: pipeline yield control surface; retention of fabric manifest/SVG; struct-like child-instantiation grammar (is/struct/like/child/instantiation/specified.md).
