@@ -1628,16 +1628,20 @@ static pigen_rtl_expr_id fire_atom(pigen_rtl_lowering *lowering,
 	condition = lower_expr(lowering, atom->condition);
 	if (condition.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-	expected = fire_bits_one(lowering);
-	if (expected.index == PIGEN_INVALID_ID)
-		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-	if (atom->expected)
-		return condition;
+	if (!atom->expected)
 	{
-		pigen_rtl_literal_word zero_word = {0, 0, 0};
+		pigen_unary_resolution not_resolution = {
+			{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
+			{PIGEN_UNARY_LOGICAL_NOT, logic_one, logic_one}};
+
+		return pigen_rtl_expr_add_unary(rtl, control_type, &not_resolution,
+			condition, origin);
+	}
+	{
+		pigen_rtl_literal_word word = {1, 0, 0};
 
 		expected = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
-			control_type, &zero_word, 1, 0, origin);
+			control_type, &word, 1, 0, origin);
 		if (expected.index == PIGEN_INVALID_ID)
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	}

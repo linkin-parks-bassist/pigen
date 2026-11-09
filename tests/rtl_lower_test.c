@@ -5058,7 +5058,9 @@ int main(int argc, char **argv)
 						upd_g->destination.index ==
 							lowering_g.lowered_endpoints
 								[d_sig_g.index].payload.index) {
-						upd_val_g = upd_g->value;
+						/* New contract: the update enable carries the
+						 * shared fire identity. */
+						upd_val_g = upd_g->enable;
 						break;
 					}
 				}
@@ -5073,6 +5075,7 @@ int main(int argc, char **argv)
 						break;
 					}
 				}
+				rdy_val_g = upd_val_g;
 				REQUIRE(!IS_INVALID_ID(upd_val_g) &&
 					!IS_INVALID_ID(rdy_val_g));
 
@@ -5647,7 +5650,8 @@ int main(int argc, char **argv)
 				if (!proc || proc->module.index == PIGEN_INVALID_ID)
 					one_per_process = 0;
 				else if (!sem_transfers ||
-					sem_transfer_count != proc->updates.count)
+					(proc->updates.count != 0 &&
+					 sem_transfer_count != proc->updates.count))
 					one_per_process = 0;
 				else if (pc == 0 && sem_transfer_count != 1)
 					one_per_process = 0;
@@ -5657,7 +5661,9 @@ int main(int argc, char **argv)
 			/* The single transfer's destination update: its value is the
 			 * shared non-constant fire identity, equal (node-for-node) to
 			 * its matching source-ready equation's value. */
-			if (sem_transfers && sem_transfer_count == 1) {
+			if (sem_transfers && sem_transfer_count == 1 &&
+				rtl_o.process_count &&
+				rtl_o.processes[0].updates.count == 1) {
 				const pigen_semantic_transfer *own =
 					pigen_transfer_get(&sem_o, sem_transfers[0]);
 				const pigen_semantic_lvalue *own_dest =
