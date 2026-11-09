@@ -4,8 +4,8 @@ module guarded_pipeline
 		input logic reset,
 		input logic enable,
 
-		input  buf [7:0] in_packet,
-		output buf [7:0] out_packet
+		input  logic [7:0] buf in_packet,
+		output logic [7:0] buf out_packet
 	);
 
 	always_ff @(posedge clk)
