@@ -1109,10 +1109,22 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	if (!destination_value)
 		return fail_location(resolver, assignment->location,
 			"transfer destination requires a supported expression");
-	value = pigen_resolve_assignment_value(resolver->syntax, model,
-		resolver->expression_scope,
-		assignment->as.nonblocking_assignment.value,
-		destination_value->data_type, resolver->policy, resolver->error);
+	{
+		const pigen_semantic_lvalue *dest_lvalue =
+			pigen_lvalue_get(model, destination);
+
+		if (dest_lvalue && dest_lvalue->kind == PIGEN_LVALUE_CONCATENATION)
+			value = pigen_resolve_expression(resolver->syntax, model,
+				resolver->expression_scope,
+				assignment->as.nonblocking_assignment.value,
+				resolver->policy, resolver->error);
+		else
+			value = pigen_resolve_assignment_value(resolver->syntax, model,
+				resolver->expression_scope,
+				assignment->as.nonblocking_assignment.value,
+				destination_value->data_type, resolver->policy,
+				resolver->error);
+	}
 	if (value.index == PIGEN_INVALID_ID)
 		return fail_location(resolver, assignment->location,
 			"transfer value requires a compatible expression");

@@ -2215,8 +2215,12 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 		process->domain.index != domain_id.index ||
 		!pigen_clock_domain_get(model, domain_id) ||
 		!destination_value || !destination_expression || !source_expression ||
-		destination_value->data_type.index != source_expression->data_type.index ||
-		destination_expression->shape.index != source_expression->shape.index ||
+		(destination_value->kind != PIGEN_LVALUE_CONCATENATION &&
+			destination_value->data_type.index !=
+				source_expression->data_type.index) ||
+		(destination_value->kind != PIGEN_LVALUE_CONCATENATION &&
+			destination_expression->shape.index !=
+				source_expression->shape.index) ||
 		guard.index == PIGEN_INVALID_ID || guard.index >= model->predicate_count ||
 		(signal_use_count && !signal_uses) ||
 		!span_contains(process->span, span) || syntax.index == PIGEN_INVALID_ID ||
