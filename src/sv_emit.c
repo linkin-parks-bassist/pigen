@@ -1166,13 +1166,21 @@ static int emit_module(struct buf *b, const pigen_source_manager *sources,
 				return -1;
 			break;
 		case PIGEN_OUTPUT_OPAQUE:
-			/* The output model nests the module's non-structured source
-			 * fragments (its original ANSI header, the inter-identifier
-			 * punctuation, the endmodule keyword) inside the module, in source
-			 * order. The emitter re-synthesizes a clean header, body and
-			 * endmodule from the RTL records, so these fragments are skipped
-			 * here exactly as the port loop above skips non-object children. */
+			/* Header/port punctuation gaps are re-synthesized, so skip. */
 			break;
+		case PIGEN_OUTPUT_RETAINED:
+		{
+			size_t length = 0;
+			const char *text = pigen_source_span_text(sources,
+				child->as.span, &length);
+
+			if (!text)
+				return -1;
+			buf_append_str(b, "  ");
+			buf_append(b, text, length);
+			buf_append_str(b, "\n");
+			break;
+		}
 		default:
 			return -1;
 		}
@@ -1213,6 +1221,7 @@ static int validate_record(const pigen_source_manager *sources,
 	switch (item->kind)
 	{
 	case PIGEN_OUTPUT_OPAQUE:
+	case PIGEN_OUTPUT_RETAINED:
 		if (!pigen_source_span_valid(sources, item->as.span))
 			return -1;
 		return 0;
@@ -1377,10 +1386,11 @@ static int validate_coverage(const pigen_output_model *layout,
 		/* Structured records cover the rest of the source. OPAQUE spans are
 		 * the retained text between them, so they must stay in source order
 		 * and not overlap; they need not cover the structured spans. */
-		if (item->as.span.start < prev_end ||
-			item->as.span.end > file->length)
+		if (item->as.span.end > file->length ||
+			item->as.span.end < item->as.span.start)
 			return -1;
-		prev_end = item->as.span.end;
+		if (item->as.span.end > prev_end)
+			prev_end = item->as.span.end;
 	}
 	return 0;
 }
@@ -1416,6 +1426,7 @@ int pigen_emit_systemverilog(const pigen_source_manager *sources,
 		switch (item->kind)
 		{
 		case PIGEN_OUTPUT_OPAQUE:
+		case PIGEN_OUTPUT_RETAINED:
 			if (emit_opaque(&b, sources, item) != 0)
 				goto fail;
 			break;

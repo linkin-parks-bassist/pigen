@@ -21,6 +21,7 @@
  * (pigen_output_item_add_child); the caller never sets the range by hand. */
 typedef enum {
 	PIGEN_OUTPUT_OPAQUE,
+	PIGEN_OUTPUT_RETAINED,
 	PIGEN_OUTPUT_MODULE,
 	PIGEN_OUTPUT_RTL_OBJECT,
 	PIGEN_OUTPUT_RTL_INSTANCE,

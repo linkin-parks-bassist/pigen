@@ -2017,6 +2017,54 @@ static int parse_clocked_process(syntax_parser *parser,
 	return 1;
 }
 
+static int looks_like_plain_instance(const syntax_parser *parser, size_t at,
+	size_t limit)
+{
+	size_t after_name, close;
+
+	if (at + 1 >= limit || !identifier(parser, at) ||
+		!identifier(parser, at + 1)) return 0;
+	after_name = at + 2;
+	if (token_is(parser, after_name, "#"))
+	{
+		if (!token_is(parser, after_name + 1, "(")) return 0;
+		close = matching_parenthesis(parser, after_name + 1, limit);
+		if (close == limit) return 0;
+		after_name = close + 1;
+	}
+	if (!token_is(parser, after_name, "(")) return 0;
+	close = matching_parenthesis(parser, after_name, limit);
+	return close < limit && token_is(parser, close + 1, ";");
+}
+
+static int parse_retained_module_item(syntax_parser *parser,
+	pigen_syntax_id module, size_t start, size_t limit, size_t *after_item)
+{
+	size_t semicolon = top_level_token(parser, start, limit, ";");
+	pigen_syntax_node node = {0};
+	size_t opaque_start;
+	size_t opaque_end;
+	const pigen_expanded_token *start_tok = token_at(parser, start);
+	const pigen_expanded_token *last_tok;
+
+	if (semicolon == limit) return 0;
+	opaque_start = parser->opaque_byte_cursor;
+	opaque_end = start_tok ? pigen_origin_expansion_span(parser->expanded,
+		start_tok->origin).start : opaque_start;
+	add_opaque_bytes(parser, module, opaque_start, opaque_end);
+	node.kind = PIGEN_SYNTAX_RETAINED;
+	node.location = range_location(parser, start, semicolon + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	add_child(parser, module, add_node(parser, node));
+	last_tok = token_at(parser, semicolon);
+	if (last_tok)
+		parser->opaque_byte_cursor = pigen_origin_expansion_span(
+			parser->expanded, last_tok->origin).end;
+	*after_item = semicolon + 1;
+	return 1;
+}
+
 static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 	size_t first, size_t after, syntax_cursor *opaque_cursor)
 {
@@ -2027,6 +2075,17 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 
 	while (at < after)
 	{
+		if (item_start && (token_is(parser, at, "assign") ||
+			looks_like_plain_instance(parser, at, after)))
+		{
+			size_t retained_after;
+
+			if (!parse_retained_module_item(parser, module, at, after,
+				&retained_after)) return 0;
+			at = retained_after;
+			item_start = 1;
+			continue;
+		}
 		if (item_start && (token_is(parser, at, "always") ||
 			token_is(parser, at, "always_ff")))
 		{
