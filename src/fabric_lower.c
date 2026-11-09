@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "pigen/fabric_lower.h"
 #include <stdlib.h>
 #include <string.h>
@@ -122,6 +123,89 @@ static int connect(pigen_rtl_lowering *lowering, pigen_rtl_module_id module,
 		destination, value, span).index != PIGEN_INVALID_ID;
 }
 
+static pigen_signal_id module_input_named(pigen_semantic_model *model,
+	pigen_module_id module, const char *name)
+{
+	size_t i;
+	for (i = 0; i < model->signal_count; i++)
+	{
+		const pigen_semantic_signal *signal = &model->signals[i];
+		const pigen_symbol *symbol;
+		const char *text;
+		size_t length = 0;
+		if (signal->module.index != module.index ||
+			signal->direction != PIGEN_SEMANTIC_INPUT) continue;
+		symbol = pigen_symbol_get(model, signal->symbol);
+		if (!symbol) continue;
+		text = pigen_source_span_text(model->sources, symbol->name, &length);
+		if (text && strlen(name) == length && !memcmp(text, name, length))
+			return (pigen_signal_id){(uint32_t)i};
+	}
+	return (pigen_signal_id){PIGEN_INVALID_ID};
+}
+
+static int route_through_skid(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_rtl_module_id rtl_module,
+	pigen_rtl_object_id source_payload, pigen_rtl_object_id source_valid,
+	pigen_rtl_object_id source_ready, pigen_rtl_object_id dest_payload,
+	pigen_rtl_object_id dest_valid, pigen_rtl_object_id dest_ready,
+	pigen_source_span span)
+{
+	pigen_semantic_model *model = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_signal_id clk = module_input_named(model, module, "clk");
+	pigen_signal_id reset = module_input_named(model, module, "reset");
+	const pigen_rtl_object *payload;
+	pigen_rtl_instance_id instance;
+	pigen_rtl_connection connections[13];
+	size_t count = 0;
+	pigen_rtl_record_range range;
+	pigen_data_type_id logic_one;
+	pigen_rtl_type_id control_type;
+	pigen_rtl_expr_id zero;
+	char name[64];
+	int written;
+
+	if (clk.index == PIGEN_INVALID_ID ||
+		lowering->lowered_endpoint_count <= clk.index)
+		return 0;
+	payload = pigen_rtl_object_get(rtl, source_payload);
+	if (!payload) return 0;
+	logic_one = pigen_data_type_sized_logic(model, 1, PIGEN_SIGN_UNSIGNED);
+	control_type = pigen_lower_rtl_type(lowering, logic_one);
+	zero = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
+		control_type, &(pigen_rtl_literal_word){0, 0, 0}, 1, 0, span);
+	if (control_type.index == PIGEN_INVALID_ID || zero.index == PIGEN_INVALID_ID)
+		return 0;
+	instance = pigen_rtl_instance_add_with_owner(rtl, rtl_module, module,
+		NULL, 0, NULL, 0, span);
+	if (instance.index == PIGEN_INVALID_ID) return 0;
+#define PORT(p, o) connections[count++] = (pigen_rtl_connection){(p), (o), (pigen_rtl_expr_id){PIGEN_INVALID_ID}}
+#define VAL(p, v) connections[count++] = (pigen_rtl_connection){(p), (pigen_rtl_object_id){PIGEN_INVALID_ID}, (v)}
+	PORT("clk", lowering->lowered_endpoints[clk.index].payload);
+	if (reset.index != PIGEN_INVALID_ID &&
+		lowering->lowered_endpoint_count > reset.index)
+		PORT("reset", lowering->lowered_endpoints[reset.index].payload);
+	else
+		VAL("reset", zero);
+	VAL("clear", zero); VAL("discard", zero); VAL("force_valid", zero);
+	VAL("force_invalid", zero); VAL("force_after_transfer", zero);
+	PORT("in_valid", source_valid); PORT("in_ready", source_ready);
+	PORT("packet_in", source_payload);
+	PORT("out_valid", dest_valid); PORT("out_ready", dest_ready);
+	PORT("packet_out", dest_payload);
+#undef PORT
+#undef VAL
+	range = pigen_rtl_connection_range_add(rtl, connections, count);
+	if (range.first == (size_t)PIGEN_INVALID_ID) return 0;
+	if (!pigen_rtl_instance_set_primitive(rtl, instance,
+		PIGEN_RTL_PRIMITIVE_SKID, payload->type, range)) return 0;
+	written = snprintf(name, sizeof(name), "fabric_route_%u", instance.index);
+	if (written > 0 && (size_t)written < sizeof(name))
+		pigen_rtl_set_name(rtl, &rtl->instances[instance.index].name, name);
+	return 1;
+}
+
 int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 	const pigen_syntax_tree *syntax)
 {
@@ -201,16 +285,33 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 			if (sp_obj.index == PIGEN_INVALID_ID ||
 				dp_obj.index == PIGEN_INVALID_ID)
 				return -1;
-			if (!connect(lowering, rtl_module, dp_obj, sp_obj,
-				connection->location.source_span)) return -1;
-			if (sv_obj.index != PIGEN_INVALID_ID &&
-				dv_obj.index != PIGEN_INVALID_ID &&
-				!connect(lowering, rtl_module, dv_obj, sv_obj,
+			if (!connection->as.fabric_connection.direct)
+			{
+				/* Routed links are buffered through a skid stage so the
+				 * ready path is broken and one item can hold under stall. */
+				if (sv_obj.index == PIGEN_INVALID_ID ||
+					dv_obj.index == PIGEN_INVALID_ID ||
+					sr_obj.index == PIGEN_INVALID_ID ||
+					dr_obj.index == PIGEN_INVALID_ID)
+					return -1;
+				if (!route_through_skid(lowering, module, rtl_module,
+					sp_obj, sv_obj, sr_obj, dp_obj, dv_obj, dr_obj,
+					connection->location.source_span))
+					return -1;
+			}
+			else
+			{
+				if (!connect(lowering, rtl_module, dp_obj, sp_obj,
 					connection->location.source_span)) return -1;
-			if (sr_obj.index != PIGEN_INVALID_ID &&
-				dr_obj.index != PIGEN_INVALID_ID &&
-				!connect(lowering, rtl_module, sr_obj, dr_obj,
-					connection->location.source_span)) return -1;
+				if (sv_obj.index != PIGEN_INVALID_ID &&
+					dv_obj.index != PIGEN_INVALID_ID &&
+					!connect(lowering, rtl_module, dv_obj, sv_obj,
+						connection->location.source_span)) return -1;
+				if (sr_obj.index != PIGEN_INVALID_ID &&
+					dr_obj.index != PIGEN_INVALID_ID &&
+					!connect(lowering, rtl_module, sr_obj, dr_obj,
+						connection->location.source_span)) return -1;
+			}
 			edge = connection->next_sibling;
 		}
 		child = node->next_sibling;
