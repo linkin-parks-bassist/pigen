@@ -51,6 +51,16 @@ typedef struct {
  * the pigen_rtl_signal_endpoints the declaration endpoint lowering will fill.
  * A zero map count is the empty state: every identity is still to be
  * lowered. */
+/* One pending storage-input drive from a transfer: the destination signal's
+ * input payload and the transfer's fire identity. Flushed into per-signal
+ * valid/payload equations so mutually exclusive producers share one driver. */
+typedef struct {
+	size_t signal_index;
+	pigen_rtl_expr_id value;
+	pigen_rtl_expr_id fire;
+	pigen_source_span span;
+} pigen_rtl_storage_drive;
+
 typedef struct {
 	pigen_semantic_model *semantics;
 	pigen_rtl_model *rtl;
@@ -63,6 +73,9 @@ typedef struct {
 	pigen_rtl_signal_endpoints *lowered_endpoints;
 	size_t lowered_endpoint_count;
 	size_t lowered_endpoint_capacity;
+	pigen_rtl_storage_drive *storage_drives;
+	size_t storage_drive_count;
+	size_t storage_drive_capacity;
 } pigen_rtl_lowering;
 
 /* Zeroes the record and leaves all three memo maps empty (no handles
