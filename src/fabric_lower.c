@@ -17,6 +17,16 @@ static int token_text(const pigen_syntax_tree *syntax, pigen_token_id token,
 	return *text != NULL;
 }
 
+static int token_equal(const pigen_syntax_tree *syntax, pigen_token_id a,
+	pigen_token_id b)
+{
+	const char *at, *bt;
+	size_t al = 0, bl = 0;
+	if (!token_text(syntax, a, &at, &al) ||
+		!token_text(syntax, b, &bt, &bl)) return 0;
+	return al == bl && !memcmp(at, bt, al);
+}
+
 static const pigen_semantic_instance *find_instance(
 	pigen_semantic_model *model, pigen_module_id module,
 	const pigen_syntax_tree *syntax, pigen_token_id name)
@@ -241,6 +251,34 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 		{
 			child = node->next_sibling;
 			continue;
+		}
+		/* Routed links to one input require arbitration; multiple drivers are
+		 * rejected here until the router/arbiter network is implemented. */
+		for (edge = node->first_child; edge.index != PIGEN_INVALID_ID; )
+		{
+			const pigen_syntax_node *a = pigen_syntax_get(syntax, edge);
+			pigen_syntax_id other;
+
+			if (!a) break;
+			if (a->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
+				!a->as.fabric_connection.direct)
+				for (other = a->next_sibling; other.index != PIGEN_INVALID_ID; )
+				{
+					const pigen_syntax_node *b = pigen_syntax_get(syntax,
+						other);
+					if (!b) break;
+					if (b->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
+						!b->as.fabric_connection.direct &&
+						token_equal(syntax,
+							a->as.fabric_connection.right_instance,
+							b->as.fabric_connection.right_instance) &&
+						token_equal(syntax,
+							a->as.fabric_connection.right_port,
+							b->as.fabric_connection.right_port))
+						return -1;
+					other = b->next_sibling;
+				}
+			edge = a->next_sibling;
 		}
 		for (edge = node->first_child; edge.index != PIGEN_INVALID_ID; )
 		{
