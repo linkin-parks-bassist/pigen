@@ -3,11 +3,11 @@ module join_pipeline
 		input logic		clk,
 		input logic		reset,
 
-		input buf [7:0]	left,
-		input buf [7:0]	right
+		input logic [7:0] buf left,
+		input logic [7:0] buf right
 	);
 
-	buf [7:0] sum;
+	logic [7:0] buf sum;
 
 	always_ff @(posedge clk)
 	begin

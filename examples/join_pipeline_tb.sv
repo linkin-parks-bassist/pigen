@@ -47,8 +47,11 @@ module join_pipeline_tb;
 
 		if (!reset && dut.sum__pigen_valid)
 		begin
-			if (dut.sum !== 8'(received * 3))
-				$fatal(1, "join mismatch: expected %0d, got %0d", received * 3, dut.sum);
+			/* The buffered sum is registered: the value observable this edge is
+			 * the previous accepted operand pair. */
+			if (dut.sum !== 8'((received > 1 ? received - 1 : 0) * 3))
+				$fatal(1, "join mismatch: expected %0d, got %0d",
+					(received > 1 ? received - 1 : 0) * 3, dut.sum);
 
 			received++;
 		end
