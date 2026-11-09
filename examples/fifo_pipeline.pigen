@@ -5,7 +5,7 @@ module fifo_pipeline
 		input  logic [7:0]	in_packet
 	);
 
-	fifo[7:0][4] queue;
+	logic [7:0] fifo[4] queue;
 
 	always_ff @(posedge clk)
 	begin
