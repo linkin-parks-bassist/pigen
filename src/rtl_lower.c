@@ -1992,6 +1992,81 @@ static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
 	return ok ? 0 : -1;
 }
 
+static int drive_destination(pigen_rtl_lowering *lowering,
+	pigen_rtl_module_id rtl_module, const pigen_semantic_lvalue *lval,
+	pigen_rtl_expr_id value, const pigen_semantic_expr *value_expr,
+	pigen_rtl_expr_id fire, pigen_source_span span,
+	pigen_rtl_update_id *updates, size_t *update_count)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_signal_id dest_signal;
+	const pigen_semantic_signal *dest_semantic;
+	const pigen_rtl_signal_endpoints *dest_endpoints;
+	const pigen_transfer_type_descriptor *dest_descriptor;
+	pigen_transfer_realization dest_realization;
+	pigen_rtl_type_id dest_type;
+
+	if (!lval || lval->kind != PIGEN_LVALUE_PROJECTION) return 0;
+	dest_signal = lval->as.projection.signal;
+	if (dest_signal.index == PIGEN_INVALID_ID ||
+		lowering->lowered_endpoint_count <= dest_signal.index) return 0;
+	dest_semantic = pigen_signal_get(sem, dest_signal);
+	dest_endpoints = &lowering->lowered_endpoints[dest_signal.index];
+	if (!dest_semantic || dest_endpoints->payload.index == PIGEN_INVALID_ID)
+		return 0;
+	dest_descriptor = pigen_transfer_type_descriptor_get(
+		dest_semantic->transfer_type);
+	if (!dest_descriptor) return 0;
+	dest_realization = dest_descriptor->realization;
+	dest_type = pigen_lower_rtl_type(lowering, lval->data_type);
+	if (dest_type.index == PIGEN_INVALID_ID) return 0;
+	if (value_expr && value_expr->data_type.index != lval->data_type.index)
+	{
+		pigen_conversion conversion = {PIGEN_CONVERSION_INTEGER_REINTERPRET,
+			value_expr->data_type, lval->data_type};
+		value = pigen_rtl_expr_add_conversion(rtl, dest_type, &conversion,
+			value, span);
+		if (value.index == PIGEN_INVALID_ID) return 0;
+	}
+	if (dest_realization == PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET)
+	{
+		pigen_rtl_expr_id zero = control_literal(lowering, dest_type, 0, span);
+		pigen_conditional_resolution resolution = {0};
+		pigen_rtl_expr_id gated;
+
+		if (zero.index == PIGEN_INVALID_ID) return 0;
+		resolution.operation.result_data_type = lval->data_type;
+		gated = pigen_rtl_expr_add_conditional(rtl, dest_type, &resolution,
+			fire, value, zero, span);
+		if (gated.index == PIGEN_INVALID_ID ||
+			pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+				dest_endpoints->payload, gated, span).index ==
+			PIGEN_INVALID_ID) return 0;
+	}
+	else if (dest_realization == PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE)
+	{
+		pigen_rtl_update_id update_id = pigen_rtl_update_add_with_owner(rtl,
+			rtl_module, dest_endpoints->payload, value, span);
+
+		if (update_id.index == PIGEN_INVALID_ID ||
+			!pigen_rtl_update_set_enable(rtl, update_id, fire)) return 0;
+		updates[(*update_count)++] = update_id;
+	}
+	else
+	{
+		if (dest_endpoints->input_payload.index == PIGEN_INVALID_ID ||
+			dest_endpoints->input_valid.index == PIGEN_INVALID_ID ||
+			pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+				dest_endpoints->input_payload, value, span).index ==
+			PIGEN_INVALID_ID ||
+			pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+				dest_endpoints->input_valid, fire, span).index ==
+			PIGEN_INVALID_ID) return 0;
+	}
+	return 1;
+}
+
 int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -2044,10 +2119,8 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			return -1;
 		if (transfer_count > SIZE_MAX / sizeof(*update_ids))
 			return -1;
-		update_ids = transfer_count ?
-			pigen_resize(NULL, transfer_count * sizeof(*update_ids)) : NULL;
-		if (!update_ids && transfer_count)
-			return -1;
+		update_ids = pigen_resize(NULL,
+			(transfer_count * 8 + 8) * sizeof(*update_ids));
 		update_count = 0;
 		for (ti = 0; ti < transfer_count; ti++)
 		{
@@ -2057,12 +2130,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			pigen_rtl_expr_id fire;
 			pigen_rtl_expr_id offer;
 			pigen_rtl_expr_id value;
-			pigen_rtl_type_id dest_type;
-			pigen_signal_id dest_signal;
-			const pigen_semantic_signal *dest_semantic;
-			const pigen_rtl_signal_endpoints *dest_endpoints;
-			const pigen_transfer_type_descriptor *dest_descriptor;
-			pigen_transfer_realization dest_realization;
+
 			size_t use_index;
 
 			owner = pigen_transfer_get(sem, transfers[ti]);
@@ -2080,127 +2148,65 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 				return -1;
 			}
 			lval = pigen_lvalue_get(sem, owner->destination);
-			if (!lval || lval->kind != PIGEN_LVALUE_PROJECTION)
-			{
-				free(update_ids);
-				return -1;
-			}
-			dest_signal = lval->as.projection.signal;
-			if (dest_signal.index == PIGEN_INVALID_ID ||
-				lowering->lowered_endpoint_count <= dest_signal.index)
-			{
-				free(update_ids);
-				return -1;
-			}
-			dest_semantic = pigen_signal_get(sem, dest_signal);
-			dest_endpoints = &lowering->lowered_endpoints[
-				dest_signal.index];
-			if (!dest_semantic || dest_endpoints->payload.index ==
-				PIGEN_INVALID_ID)
-			{
-				free(update_ids);
-				return -1;
-			}
-			dest_descriptor = pigen_transfer_type_descriptor_get(
-				dest_semantic->transfer_type);
-			if (!dest_descriptor)
-			{
-				free(update_ids);
-				return -1;
-			}
-			dest_realization = dest_descriptor->realization;
-
-			/* Lower the value and apply the assignment conversion to the
-			 * destination's data type. */
 			value_expr = pigen_expr_get(sem, owner->value);
-			value = lower_expr(lowering, owner->value);
-			if (!value_expr || value.index == PIGEN_INVALID_ID)
+			if (!lval || !value_expr ||
+				(value = lower_expr(lowering, owner->value)).index ==
+					PIGEN_INVALID_ID)
 			{
 				free(update_ids);
 				return -1;
 			}
-			dest_type = pigen_lower_rtl_type(lowering, lval->data_type);
-			if (dest_type.index == PIGEN_INVALID_ID)
+			if (lval->kind == PIGEN_LVALUE_PROJECTION)
 			{
-				free(update_ids);
-				return -1;
-			}
-			if (value_expr->data_type.index != lval->data_type.index)
-			{
-				pigen_conversion conversion = {
-					PIGEN_CONVERSION_INTEGER_REINTERPRET,
-					value_expr->data_type, lval->data_type};
-
-				value = pigen_rtl_expr_add_conversion(rtl, dest_type,
-					&conversion, value, owner->span);
-				if (value.index == PIGEN_INVALID_ID)
+				if (!drive_destination(lowering, rtl_module, lval, value,
+					value_expr, fire, owner->span, update_ids, &update_count))
 				{
 					free(update_ids);
 					return -1;
 				}
 			}
-
-			if (dest_realization ==
-				PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET)
+			else if (lval->kind == PIGEN_LVALUE_CONCATENATION &&
+				value_expr->kind == PIGEN_EXPR_CONCATENATION)
 			{
-				/* A wire has no state: drive it combinationally while the
-				 * transfer fires, and drive zero otherwise. */
-				pigen_rtl_expr_id zero = control_literal(lowering,
-					dest_type, 0, owner->span);
-				pigen_conditional_resolution resolution = {0};
-				pigen_rtl_expr_id gated;
+				const pigen_lvalue_id *dest_children = pigen_lvalue_children(
+					sem, lval->as.sequence.first_child,
+					lval->as.sequence.child_count);
+				const pigen_expr_id *value_children = pigen_expr_children(sem,
+					value_expr->as.sequence.first_child,
+					value_expr->as.sequence.child_count);
+				size_t c;
 
-				if (zero.index == PIGEN_INVALID_ID)
+				if (!dest_children || !value_children ||
+					lval->as.sequence.child_count !=
+						value_expr->as.sequence.child_count)
 				{
 					free(update_ids);
 					return -1;
 				}
-				resolution.operation.result_data_type = lval->data_type;
-				gated = pigen_rtl_expr_add_conditional(rtl, dest_type,
-					&resolution, fire, value, zero, owner->span);
-				if (gated.index == PIGEN_INVALID_ID ||
-					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-						dest_endpoints->payload, gated,
-						owner->span).index == PIGEN_INVALID_ID)
+				for (c = 0; c < lval->as.sequence.child_count; c++)
 				{
-					free(update_ids);
-					return -1;
-				}
-			}
-			else if (dest_realization ==
-				PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE)
-			{
-				pigen_rtl_update_id update_id =
-					pigen_rtl_update_add_with_owner(rtl, rtl_module,
-						dest_endpoints->payload, value,
-						owner->span);
+					const pigen_semantic_lvalue *child = pigen_lvalue_get(sem,
+						dest_children[c]);
+					const pigen_semantic_expr *child_value_expr =
+						pigen_expr_get(sem, value_children[c]);
+					pigen_rtl_expr_id child_value = lower_expr(lowering,
+						value_children[c]);
 
-				if (update_id.index == PIGEN_INVALID_ID ||
-					!pigen_rtl_update_set_enable(rtl, update_id, fire))
-				{
-					free(update_ids);
-					return -1;
+					if (!child || !child_value_expr ||
+						child_value.index == PIGEN_INVALID_ID ||
+						!drive_destination(lowering, rtl_module, child,
+							child_value, child_value_expr, fire, owner->span,
+							update_ids, &update_count))
+					{
+						free(update_ids);
+						return -1;
+					}
 				}
-				update_ids[update_count++] = update_id;
 			}
 			else
 			{
-				/* Buffered destination: drive its input payload and offer
-				 * the transfer atomically. The primitive owns storage. */
-				if (dest_endpoints->input_payload.index ==
-						PIGEN_INVALID_ID ||
-					dest_endpoints->input_valid.index ==
-						PIGEN_INVALID_ID ||
-					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-						dest_endpoints->input_payload, value,
-						owner->span).index == PIGEN_INVALID_ID ||
-					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-						dest_endpoints->input_valid, fire,
-						owner->span).index == PIGEN_INVALID_ID)
-				{
-					free(update_ids);
-					return -1;
-				}
+				free(update_ids);
+				return -1;
 			}
 
 			/* Consuming buffered/boundary sources release their token on the

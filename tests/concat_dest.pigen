@@ -1,0 +1,12 @@
+module cc(
+  input logic clk,
+  input logic reset,
+  input bit[8] buf a,
+  input bit[8] buf b,
+  output bit[8] buf x,
+  output bit[8] buf y
+);
+  always_ff @(posedge clk) begin
+    {x, y} <= {a, b};
+  end
+endmodule
