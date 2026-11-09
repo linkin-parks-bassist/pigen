@@ -659,6 +659,26 @@
       "tests/compile_test.c",
       "src/compile.c",
       "src/source.c",
+      "src/util.c",
+      "src/fsm.c",
+      "src/rtl.c",
+      "src/rtl_lower.c",
+      "src/sv_emit.c"
+    ],
+    "command": [
+      "make",
+      "compile-test"
+    ]
+  },
+  {
+    "covers": [
+      "tests/compile_test.c",
+      "src/compile.c",
+      "src/fsm.c",
+      "src/rtl.c",
+      "src/output.c",
+      "src/sv_emit.c",
+      "src/source.c",
       "src/util.c"
     ],
     "command": [

@@ -2177,6 +2177,7 @@ static int parse_clocked_process(syntax_parser *parser,
 	size_t assignment_count = 0;
 	pigen_syntax_node node = {0};
 	pigen_syntax_id process;
+	const pigen_expanded_token *process_last;
 
 	if ((!token_is(parser, start, "always") &&
 		!token_is(parser, start, "always_ff")) ||
@@ -2212,6 +2213,11 @@ static int parse_clocked_process(syntax_parser *parser,
 		process_after);
 	add_opaque(parser, module, *opaque_cursor, start);
 	add_child(parser, module, process);
+	process_last = pigen_expanded_token_get(parser->expanded,
+		(pigen_token_id){(uint32_t)(process_after - 1)});
+	if (process_last)
+		parser->opaque_byte_cursor = pigen_origin_expansion_span(
+			parser->expanded, process_last->origin).end;
 	*opaque_cursor = process_after;
 	*after_process = process_after;
 	return 1;
@@ -2251,6 +2257,14 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			}
 			return 0;
 		}
+		if (item_start && token_is(parser, at, "pipeline"))
+			/* A module-level pipeline is an unsupported procedural
+			 * position: pipelines live inside a clocked process. Fail
+			 * loud at the `pipeline` keyword's original span rather
+			 * than silently dropping the statement into an empty
+			 * module. */
+			return fail(parser, at,
+				"pipeline requires an enclosing clocked process");
 		if (item_start && (token_is(parser, at, "parameter") ||
 			token_is(parser, at, "localparam")))
 		{

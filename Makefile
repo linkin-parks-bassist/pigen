@@ -12,8 +12,8 @@ SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.
 
 all: pigen
 
-pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c
-	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS)
+pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c src/fsm_identity.c src/fsm_lower.c
+	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c src/fsm_identity.c src/fsm_lower.c $(LDLIBS)
 
 test: pigen source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test
 
@@ -129,49 +129,49 @@ rtl-name-test: $(TEST_BUILD)/pigen-rtl-name-test
 	@rm -f /tmp/pigen-rtl-name-test
 	@$(TEST_BUILD)/pigen-rtl-name-test
 
-$(TEST_BUILD)/pigen-output-model-test: tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
+$(TEST_BUILD)/pigen-output-model-test: tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
 	@mkdir -p $(TEST_BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
+	$(CC) $(CFLAGS) -o $@ tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 
 output-model-test: $(TEST_BUILD)/pigen-output-model-test
 	@rm -f /tmp/pigen-output-model-test
 	@$(TEST_BUILD)/pigen-output-model-test $(T)
 
-$(TEST_BUILD)/pigen-rtl-lower-test: tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+$(TEST_BUILD)/pigen-rtl-lower-test: tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
 	@mkdir -p $(TEST_BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+	$(CC) $(CFLAGS) -o $@ tests/rtl_lower_test.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 
 rtl-lower-test: $(TEST_BUILD)/pigen-rtl-lower-test
 	@rm -f /tmp/pigen-rtl-lower-test
 	@$(TEST_BUILD)/pigen-rtl-lower-test $(T)
 
-$(TEST_BUILD)/pigen-route-test: tests/route_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+$(TEST_BUILD)/pigen-route-test: tests/route_test.c src/route.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
 	@mkdir -p $(TEST_BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/route_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+	$(CC) $(CFLAGS) -o $@ tests/route_test.c src/route.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 
 route-test: $(TEST_BUILD)/pigen-route-test
 	@rm -f /tmp/pigen-route-test
 	@$(TEST_BUILD)/pigen-route-test $(T)
 
-$(TEST_BUILD)/pigen-route-law-test: tests/route_law_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+$(TEST_BUILD)/pigen-route-law-test: tests/route_law_test.c src/route.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
 	@mkdir -p $(TEST_BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/route_law_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+	$(CC) $(CFLAGS) -o $@ tests/route_law_test.c src/route.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 
 route-law-test: $(TEST_BUILD)/pigen-route-law-test
 	@rm -f /tmp/pigen-route-law-test
 	@$(TEST_BUILD)/pigen-route-law-test $(T)
 
-$(TEST_BUILD)/pigen-route-vdo-test: tests/route_validity_domain_ownership_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+$(TEST_BUILD)/pigen-route-vdo-test: tests/route_validity_domain_ownership_test.c src/route.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
 	@mkdir -p $(TEST_BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/route_validity_domain_ownership_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+	$(CC) $(CFLAGS) -o $@ tests/route_validity_domain_ownership_test.c src/route.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 
 route-vdo-test: $(TEST_BUILD)/pigen-route-vdo-test
 	@rm -f /tmp/pigen-route-vdo-test
 	@$(TEST_BUILD)/pigen-route-vdo-test $(T)
 
-$(TEST_BUILD)/pigen-route-stall-test: tests/route_stall_throughput_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c $(TEST_HEADERS) Makefile
+$(TEST_BUILD)/pigen-route-stall-test: tests/route_stall_throughput_test.c src/route.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) $(TEST_HEADERS) Makefile
 	@mkdir -p $(TEST_BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/route_stall_throughput_test.c src/route.c src/rtl_lower.c src/rtl.c src/source.c src/predicate.c $(SEMANTIC_SOURCES) src/util.c
+	$(CC) $(CFLAGS) -o $@ tests/route_stall_throughput_test.c src/route.c src/rtl_lower.c src/rtl.c src/predicate.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES)
 
 route-stall-test: $(TEST_BUILD)/pigen-route-stall-test
 	@rm -f /tmp/pigen-route-stall-test
@@ -270,9 +270,9 @@ clear-test:
 	verilator --binary --top-module fifo_discard_tb --Mdir /tmp/pigen-clear-verilator rtl/pigen_primitives.sv tests/fifo_discard_tb.sv
 	/tmp/pigen-clear-verilator/Vfifo_discard_tb
 
-$(TEST_BUILD)/pigen-compile-test: tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS) $(TEST_HEADERS) Makefile
+$(TEST_BUILD)/pigen-compile-test: tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c src/fsm_identity.c src/fsm_lower.c $(LDLIBS) $(TEST_HEADERS) Makefile
 	@mkdir -p $(TEST_BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS)
+	$(CC) $(CFLAGS) -o $@ tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline_lower.c src/pipeline_identity.c src/pipeline_stage.c src/fsm_identity.c src/fsm_lower.c $(LDLIBS)
 
 compile-test: $(TEST_BUILD)/pigen-compile-test
 	@rm -f /tmp/pigen-compile-test

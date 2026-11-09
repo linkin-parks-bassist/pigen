@@ -237,11 +237,20 @@ int pigen_pipeline_stage_is_invalid(const pigen_pipeline_stage *stage)
 		stage->out_bits == 0;
 }
 
-int pigen_pipeline_stage_laws(pigen_semantic_model *model,
-	pigen_syntax_id syntax, pigen_module_id module,
+/* The shared stage-law walk: validates one stage's execution laws and, when
+ * offending is non-NULL, records the offending original-spelling span of the
+ * first violated law - the nonblocking assignment that wrote a destination
+ * that is not a pipeline field or that read a field the law forbids it to
+ * read, or the stage node's own span for a stage-level violation (an empty
+ * stage, a boundary whose total $bits does not keep). offending is set to
+ * the invalid span at entry and overwritten at the first violated law.
+ * Returns 0 when the stage passes (with *out filled) and -1 at the first
+ * violated law (with *out left invalid). */
+static int stage_laws_check(pigen_semantic_model *model,
+	pigen_syntax_id syntax,
 	const pigen_syntax_node *pipeline,
 	const pigen_expanded_source *expanded,
-	pigen_pipeline_stage *out)
+	pigen_pipeline_stage *out, pigen_source_span *offending)
 {
 	const pigen_syntax_node *stage;
 	const pigen_syntax_node *item;
@@ -266,6 +275,9 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 			INVALID_ID(pigen_syntax_id), 0, 0, 0
 		};
 	}
+	if (offending)
+		*offending = (pigen_source_span){
+			INVALID_ID(pigen_source_id), 0, 0};
 	if (!model || !pipeline || !expanded ||
 		syntax.index == PIGEN_INVALID_ID ||
 		pipeline->kind != PIGEN_SYNTAX_PIPELINE)
@@ -286,7 +298,6 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 	read_count = 0;
 	in_bits = 0;
 	out_bits = 0;
-	(void)module;
 
 	/* The stage is the first stage of the pipeline when no stage sibling
 	 * precedes it in source order. */
@@ -333,7 +344,11 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 			field = field_node_for(sources, pipeline, pipeline_id, expanded,
 				destination);
 			if (span_invalid(destination) || !field)
+			{
+				if (offending)
+					*offending = item->location.source_span;
 				return -1;
+			}
 			out_bits += field_width(sources, field);
 
 			/* The value's identifier reads split into incoming pipeline
@@ -392,15 +407,26 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 							in_bits += field_width(sources,
 								read_field);
 						if (is_first_stage)
-							return -1; /* first stage reading
+						{
+							/* first stage reading
 							 * an uninitialized field */
+							if (offending)
+								*offending =
+									item->location.source_span;
+							return -1;
+						}
 						/* a later stage reads only the immutable
 						 * incoming fields its earlier stages wrote */
 						for (j = 0; j < produced_count; j++)
 							if (spans_equal(sources, produced[j], tok))
 								produced_here = 1;
 						if (!produced_here)
+						{
+							if (offending)
+								*offending =
+									item->location.source_span;
 							return -1;
+						}
 					}
 					else
 					{
@@ -415,13 +441,30 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 		}
 		child = item ? item->next_sibling : INVALID_ID(pigen_syntax_id);
 	}
-	if (!saw_item) return -1;
+	if (!saw_item)
+	{
+		if (offending)
+			*offending = stage->location.source_span;
+		return -1;
+	}
 
 	/* Every boundary between adjacent stages keeps an equal total $bits: a
 	 * later stage's incoming packet width must equal its outgoing packet
 	 * width (the chain neither widens nor narrows the carried packet). */
 	if (!is_first_stage && in_bits != out_bits)
+	{
+		/* The boundary width mismatch is the stage's own write that carries
+		 * the unequal packet width: report that statement, mirroring the
+		 * other stage laws, not the whole stage block. */
+		const pigen_syntax_node *write_node =
+			stage_node(pipeline, pipeline_id, first_write);
+
+		if (offending)
+			*offending = write_node
+				? write_node->location.source_span
+				: stage->location.source_span;
 		return -1;
+	}
 
 	*out = (pigen_pipeline_stage){
 		{syntax.index},
@@ -430,4 +473,31 @@ int pigen_pipeline_stage_laws(pigen_semantic_model *model,
 		in_bits, out_bits
 	};
 	return 0;
+}
+
+int pigen_pipeline_stage_laws(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module,
+	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,
+	pigen_pipeline_stage *out)
+{
+	(void)module;
+	return stage_laws_check(model, syntax, pipeline, expanded, out, NULL);
+}
+
+pigen_source_span pigen_pipeline_stage_law_violation_span(
+	pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module,
+	const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded)
+{
+	pigen_pipeline_stage stage;
+	pigen_source_span offending =
+		(pigen_source_span){INVALID_ID(pigen_source_id), 0, 0};
+
+	(void)module;
+	if (stage_laws_check(model, syntax, pipeline, expanded, &stage,
+		&offending) == 0)
+		return (pigen_source_span){INVALID_ID(pigen_source_id), 0, 0};
+	return offending;
 }
