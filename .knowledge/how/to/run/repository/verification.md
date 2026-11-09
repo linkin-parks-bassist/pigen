@@ -1,10 +1,10 @@
 ---
 status: green
-revised_at: "2026-11-10T09:56:13+11:00"
+revised_at: "2026-11-10T09:59:48+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-The structured C suite is the meaningful gate. These pass: source, preprocess, transfer-type, syntax-model, fsm-syntax, integer, semantic, predicate, expression-resolve, expression-use, resolve, rtl, rtl-name, output-model, sv-emit (all four sections), route (four), pipeline-output/stage/lower, fsm-lower and compile. `rtl-lower-test` passes 20 of 24 sections; four t8 sections still pin the old update-value-is-fire contract.
+The structured C suite is the meaningful gate. These pass: source, preprocess, transfer-type, syntax-model, fsm-syntax, integer, semantic, predicate, expression-resolve, expression-use, resolve, rtl, rtl-name, output-model, sv-emit (all four sections), route (four), pipeline-output/stage/lower, fsm-lower and compile. `rtl-lower-test` passes 21 of 24 sections; three t8 sections (fire-identity, guard, ownership) still pin the old update-value-is-fire contract.
 
 Behavioural checks that pass with bounded timeouts: the data-first buf chain, compiler/guarded/output/port/skid/fifo/join pipelines, fixed-point MAC, an FSM counter, the README sender FSM, an accepts()-based sender, a standard child instance, a two-leaf inline fabric routed link, and `concat-dest-test`. These emitted designs are compiled with rtl/pigen_primitives.sv. Router/arbitration/SVG behaviour and general concatenation/typed-parameter lowering are not yet generated.
 
