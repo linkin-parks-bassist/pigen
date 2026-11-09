@@ -348,6 +348,29 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 			origin);
 		break;
 	}
+	case PIGEN_CONST_EXPR_BITS:
+	{
+		const pigen_bit_state *states =
+			pigen_const_expr_bits(sem, expression);
+		size_t count = owner->as.bits.state_count;
+		pigen_rtl_literal_word word = {0, 0, 0};
+		size_t i;
+
+		if (!states && count)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		for (i = 0; i < count && i < 64; i++)
+		{
+			if (states[i] == PIGEN_BIT_ONE)
+				word.value |= (uint64_t)1 << i;
+			else if (states[i] == PIGEN_BIT_X)
+				word.x_mask |= (uint64_t)1 << i;
+			else if (states[i] == PIGEN_BIT_Z)
+				word.z_mask |= (uint64_t)1 << i;
+		}
+		result = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_BITS,
+			result_type, &word, count, 0, origin);
+		break;
+	}
 	case PIGEN_CONST_EXPR_BINARY:
 	{
 		const pigen_binary_operation *op = &owner->as.binary.operation;
@@ -505,7 +528,7 @@ static void pigen_module_memo_reset(void)
 }
 
 static pigen_rtl_module_id rtl_module_for_semantic(pigen_rtl_model *rtl,
-	pigen_module_id semantic)
+	pigen_semantic_model *sem, pigen_module_id semantic)
 {
 	for (size_t i = 0; i < pigen_module_memo_count; i++)
 		if (pigen_module_memo[i].rtl == rtl &&
@@ -517,6 +540,26 @@ static pigen_rtl_module_id rtl_module_for_semantic(pigen_rtl_model *rtl,
 			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
 		if (created.index == PIGEN_INVALID_ID)
 			return created;
+		{
+			const pigen_semantic_module *module =
+				pigen_module_get(sem, semantic);
+			const pigen_symbol *symbol = module ?
+				pigen_symbol_get(sem, module->symbol) : NULL;
+			size_t length = 0;
+			const char *text = symbol ? pigen_source_span_text(
+				sem->sources, symbol->name, &length) : NULL;
+
+			if (text)
+			{
+				char *name = pigen_resize(NULL, length + 1);
+
+				memcpy(name, text, length);
+				name[length] = 0;
+				pigen_rtl_set_name(rtl,
+					&rtl->modules[created.index].name, name);
+				free(name);
+			}
+		}
 		if (pigen_module_memo_count < PIGEN_MODULE_MEMO_MAX)
 			pigen_module_memo[pigen_module_memo_count++] =
 				(struct pigen_module_memo_entry){rtl, semantic, created};
@@ -531,81 +574,182 @@ static pigen_rtl_module_id rtl_module_for_semantic(pigen_rtl_model *rtl,
  * descriptor's valid_constant/ready_constant are context-dependent -1, so no
  * 1-bit constant is interned). The input side exposes the same three objects.
  * Returns the filled endpoints record, or a zeroed record on error. */
+/* ---- Native lowering helpers --------------------------------------------
+ *
+ * Every published object carries its final terminal name. Source payloads use
+ * the declared identifier spelling; generated controls use deterministic
+ * suffixes. The names are model-owned and the emitter prefers them, so
+ * synthetic wires and primitive instances need no separate name request.
+ */
+static char *name_join(const char *base, const char *suffix)
+{
+	size_t base_length = strlen(base);
+	size_t suffix_length = strlen(suffix);
+	char *name = pigen_resize(NULL, base_length + suffix_length + 1);
+
+	memcpy(name, base, base_length);
+	memcpy(name + base_length, suffix, suffix_length);
+	name[base_length + suffix_length] = 0;
+	return name;
+}
+
+static char *signal_spelling(pigen_rtl_lowering *lowering,
+	const pigen_semantic_signal *signal)
+{
+	const pigen_symbol *symbol = pigen_symbol_get(lowering->semantics,
+		signal->symbol);
+	const char *text;
+	size_t length = 0;
+
+	if (!symbol)
+		return NULL;
+	text = pigen_source_span_text(lowering->semantics->sources,
+		symbol->name, &length);
+	return text ? pigen_copy_range(text, length) : NULL;
+}
+
+static int name_object(pigen_rtl_lowering *lowering,
+	pigen_rtl_object_id object, char *name)
+{
+	if (!name)
+		return 0;
+	if (!pigen_rtl_object_get(lowering->rtl, object))
+	{
+		free(name);
+		return 0;
+	}
+	pigen_rtl_set_name(lowering->rtl,
+		&lowering->rtl->objects[object.index].name, name);
+	free(name);
+	return 1;
+}
+
+static pigen_rtl_object_id add_named_object(pigen_rtl_lowering *lowering,
+	pigen_rtl_module_id rtl_module, pigen_rtl_type_id type,
+	pigen_semantic_direction direction, size_t signal_index,
+	pigen_source_span origin, const char *base, const char *suffix)
+{
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_rtl_object_id object = pigen_rtl_object_add_with_owner(rtl,
+		rtl_module, PIGEN_RTL_OBJECT_VARIABLE, type, direction,
+		(pigen_signal_id){(uint32_t)signal_index}, origin);
+	char *name;
+
+	if (object.index == PIGEN_INVALID_ID)
+		return object;
+	name = suffix ? name_join(base, suffix) : name_join(base, "");
+	if (!name || !name_object(lowering, object, name))
+		return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	return object;
+}
+
+static pigen_rtl_expr_id object_expression(pigen_rtl_lowering *lowering,
+	pigen_rtl_type_id type, pigen_rtl_object_id object, pigen_source_span origin)
+{
+	return pigen_rtl_expr_add_object(lowering->rtl, type, object, origin);
+}
+
+/* One-bit literal expression for a primitive tie-off. */
+static pigen_rtl_expr_id control_literal(pigen_rtl_lowering *lowering,
+	pigen_rtl_type_id control_type, uint64_t value, pigen_source_span origin)
+{
+	return pigen_rtl_expr_add_integer(lowering->rtl, control_type, value,
+		origin);
+}
+
+/* Find a module input signal by its declared spelling (clock and reset
+ * convention for the storage primitives). Returns its signal arena index or
+ * SIZE_MAX. */
+static size_t module_input_named(pigen_rtl_lowering *lowering,
+	pigen_module_id module, const char *name)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	size_t i;
+
+	for (i = 0; i < sem->signal_count; i++)
+	{
+		const pigen_semantic_signal *signal = &sem->signals[i];
+		const pigen_symbol *symbol;
+		const char *text;
+		size_t length = 0;
+
+		if (signal->module.index != module.index ||
+			signal->direction != PIGEN_SEMANTIC_INPUT)
+			continue;
+		symbol = pigen_symbol_get(sem, signal->symbol);
+		if (!symbol)
+			continue;
+		text = pigen_source_span_text(sem->sources, symbol->name, &length);
+		if (text && strlen(name) == length && !memcmp(text, name, length))
+			return i;
+	}
+	return SIZE_MAX;
+}
+
+/* A concrete buffered module input is an upstream-owned boundary view: the
+ * module exposes payload, valid and ready ports and owns no storage. */
 static int boundary_endpoints(pigen_rtl_lowering *lowering,
 	const pigen_semantic_signal *owner_signal, size_t signal_index,
 	pigen_rtl_module_id rtl_module, pigen_rtl_signal_endpoints *out)
 {
 	pigen_semantic_model *sem = lowering->semantics;
-	pigen_rtl_model *rtl = lowering->rtl;
 	pigen_data_type_id logic_one;
 	pigen_rtl_type_id data_type;
 	pigen_rtl_type_id control_type;
 	pigen_rtl_object_id payload;
-	pigen_rtl_expr_id payload_expr;
+	pigen_rtl_object_id valid_object;
+	pigen_rtl_object_id ready_object;
 	pigen_rtl_expr_id valid;
 	pigen_rtl_expr_id ready;
-	/* The payload's origin is the signal's identifier span: the emitter's
-	 * object_name resolves a SOURCE name whose origin equals the object's
-	 * origin, so the payload must carry the provenance identifier the entry
-	 * names for the signal. */
 	const pigen_symbol *owner_symbol =
 		pigen_symbol_get(sem, owner_signal->symbol);
 	pigen_source_span origin = owner_symbol ? owner_symbol->name
 		: (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+	char *base = signal_spelling(lowering, owner_signal);
 
-	/* The payload's type must lower first: a signal whose data type does not
-	 * lower (the negative-exact-integer boundary) fails the whole call with
-	 * no partial record. */
+	if (!base)
+		return 0;
 	data_type = pigen_lower_rtl_type(lowering, owner_signal->data_type);
 	if (data_type.index == PIGEN_INVALID_ID)
+	{
+		free(base);
 		return 0;
-
-	/* The context-dependent controls carry a 1-bit type, lowered through the
-	 * owner's 1-bit sized-logic type (the same record the constant witness
-	 * carries). */
+	}
 	logic_one = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
 	if (logic_one.index == PIGEN_INVALID_ID)
+	{
+		free(base);
 		return 0;
+	}
 	control_type = pigen_lower_rtl_type(lowering, logic_one);
 	if (control_type.index == PIGEN_INVALID_ID)
+	{
+		free(base);
 		return 0;
+	}
 
-	payload = pigen_rtl_object_add_with_owner(rtl, rtl_module,
-		PIGEN_RTL_OBJECT_VARIABLE, data_type, owner_signal->direction,
-		(pigen_signal_id){(uint32_t)signal_index}, origin);
-	if (payload.index == PIGEN_INVALID_ID)
+	payload = add_named_object(lowering, rtl_module, data_type,
+		owner_signal->direction, signal_index, origin, base, NULL);
+	valid_object = add_named_object(lowering, rtl_module, control_type,
+		PIGEN_SEMANTIC_INPUT, signal_index, origin, base, "_valid");
+	ready_object = add_named_object(lowering, rtl_module, control_type,
+		PIGEN_SEMANTIC_OUTPUT, signal_index, origin, base, "_ready");
+	free(base);
+	if (payload.index == PIGEN_INVALID_ID ||
+		valid_object.index == PIGEN_INVALID_ID ||
+		ready_object.index == PIGEN_INVALID_ID)
 		return 0;
-
-	/* The payload's object-reference expression is the first expression the
-	 * boundary publishes; valid and ready are the two context-dependent
-	 * external controls that follow, each a distinct object expression. The
-	 * payload expression occupies index 0 so the two controls never collide
-	 * with a separate-arena constant witness's index-0 record. */
-	payload_expr = pigen_rtl_expr_add_object(rtl, data_type, payload, origin);
-	if (payload_expr.index == PIGEN_INVALID_ID)
-		return 0;
-	valid = pigen_rtl_expr_add_object(rtl, control_type, payload, origin);
-	if (valid.index == PIGEN_INVALID_ID)
-		return 0;
-	ready = pigen_rtl_expr_add_object(rtl, control_type, payload, origin);
-	if (ready.index == PIGEN_INVALID_ID)
+	valid = object_expression(lowering, control_type, valid_object, origin);
+	ready = object_expression(lowering, control_type, ready_object, origin);
+	if (valid.index == PIGEN_INVALID_ID || ready.index == PIGEN_INVALID_ID)
 		return 0;
 
 	*out = (pigen_rtl_signal_endpoints){
-		payload, valid, ready,
-		payload, payload, payload};
+		payload, valid, ready, payload, valid_object, ready_object,
+		ready_object};
 	return 1;
 }
 
-/* Intern one 1-bit valid/ready constant control through the existing
- * expression memo and return its lowered expression identity. The constant is
- * the descriptor's 0/1 value read into a 1-bit logic type (lowered through the
- * type memo), interned as a semantic constant-expression identity (which the
- * owner memoizes by value, so the two valid constants - both 1 - share one
- * identity while the ready constants differ) and lowered through
- * pigen_lower_rtl_expression so it is published exactly once per identity. The
- * control is an expression identity, not a published object. Returns an invalid
- * identity on any failure. */
 static pigen_rtl_expr_id control_constant(pigen_rtl_lowering *lowering,
 	int constant)
 {
@@ -625,10 +769,6 @@ static pigen_rtl_expr_id control_constant(pigen_rtl_lowering *lowering,
 	control_type = pigen_lower_rtl_type(lowering, logic_one);
 	if (control_type.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-
-	/* The owner interns the (value, 1-bit-type) constant identity once; a
-	 * repeat for an already-lowered identity is a memo hit that publishes
-	 * nothing new (idempotence). */
 	interned = pigen_const_expr_intern_integer(sem, (uint64_t)constant,
 		logic_one);
 	if (interned.index == PIGEN_INVALID_ID)
@@ -637,11 +777,6 @@ static pigen_rtl_expr_id control_constant(pigen_rtl_lowering *lowering,
 		lowering->lowered_expressions[interned.index].index !=
 		PIGEN_INVALID_ID)
 		return lowering->lowered_expressions[interned.index];
-
-	/* A 1-bit literal: exactly one bit, the descriptor's 0/1 value, unsigned.
-	 * Published directly as a 1-bit integer expression (the uint64_t
-	 * convenience constructor hardcodes a 64-bit literal, so the literal
-	 * constructor is used to carry the 1-bit width the contract pins). */
 	word = (pigen_rtl_literal_word){(uint64_t)constant, 0, 0};
 	lowered = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
 		control_type, &word, 1, 0, origin);
@@ -656,49 +791,35 @@ static pigen_rtl_expr_id control_constant(pigen_rtl_lowering *lowering,
 	return lowered;
 }
 
-/* Lower one COMBINATIONAL_NET or PROCEDURAL_VARIABLE signal declaration into
- * its payload object plus its two constant controls. The payload object
- * carries the signal's lowered data type and semantic direction (the existing
- * pigen_lower_rtl_type memo yields the type record). valid and ready are the
- * descriptor's 1-bit constant controls, each an expression identity (no
- * published object) interned through the expression memo; the two valid
- * constants (both 1) share one interned identity while the ready constants
- * (WIRE 0, REG 1) differ. The input side exposes the same payload object. No
- * storage instance is published. Returns the filled endpoints record, or a
- * zeroed record on error. */
 static int net_variable_endpoints(pigen_rtl_lowering *lowering,
 	const pigen_semantic_signal *owner_signal, size_t signal_index,
 	pigen_rtl_module_id rtl_module, int valid_constant, int ready_constant,
 	pigen_rtl_signal_endpoints *out)
 {
 	pigen_semantic_model *sem = lowering->semantics;
-	pigen_rtl_model *rtl = lowering->rtl;
 	pigen_rtl_type_id data_type;
 	pigen_rtl_object_id payload;
 	pigen_rtl_expr_id valid;
 	pigen_rtl_expr_id ready;
-	/* The payload's origin is the signal's identifier span (see
-	 * boundary_endpoints): the emitter resolves the payload name from a SOURCE
-	 * name matching this origin. */
 	const pigen_symbol *owner_symbol =
 		pigen_symbol_get(sem, owner_signal->symbol);
 	pigen_source_span origin = owner_symbol ? owner_symbol->name
 		: (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
+	char *base = signal_spelling(lowering, owner_signal);
 
-	/* The payload's type must lower first: a signal whose data type does not
-	 * lower fails the whole call with no partial record. */
+	if (!base)
+		return 0;
 	data_type = pigen_lower_rtl_type(lowering, owner_signal->data_type);
 	if (data_type.index == PIGEN_INVALID_ID)
+	{
+		free(base);
 		return 0;
-
-	payload = pigen_rtl_object_add_with_owner(rtl, rtl_module,
-		PIGEN_RTL_OBJECT_VARIABLE, data_type, owner_signal->direction,
-		(pigen_signal_id){(uint32_t)signal_index}, origin);
+	}
+	payload = add_named_object(lowering, rtl_module, data_type,
+		owner_signal->direction, signal_index, origin, base, NULL);
+	free(base);
 	if (payload.index == PIGEN_INVALID_ID)
 		return 0;
-
-	/* The two constant controls are expression identities (no objects); a
-	 * failure lowers nothing further and the whole call reports the error. */
 	valid = control_constant(lowering, valid_constant);
 	if (valid.index == PIGEN_INVALID_ID)
 		return 0;
@@ -707,104 +828,225 @@ static int net_variable_endpoints(pigen_rtl_lowering *lowering,
 		return 0;
 
 	*out = (pigen_rtl_signal_endpoints){
-		payload, valid, ready, payload, payload, payload};
+		payload, valid, ready, payload, payload, payload,
+		(pigen_rtl_object_id){PIGEN_INVALID_ID}};
 	return 1;
 }
 
-/* Lower one storage realization signal declaration (ELASTIC_SLOT,
- * PULSE_REGISTER, PARAMETERIZED_QUEUE or SKID_QUEUE) into its payload object
- * plus exactly one instance of the realization's primitive. The payload object
- * carries the signal's lowered data type and semantic direction (the existing
- * pigen_lower_rtl_type memo yields the type record). The instance is owned by
- * the semantic module and carries no connection object in this stage; the
- * PARAMETERIZED_QUEUE (FIFO) is the only storage realization that carries a
- * parameter - its semantic depth, lowered from the signal's transfer argument
- * const-expr through the existing pigen_lower_rtl_expression memo and
- * published into the instance's ordered parameter record so it round-trips
- * exactly - while the three fixed-capacity realizations carry no parameter
- * (their capacity is the descriptor's fixed_capacity constant, not a
- * published record). valid and ready are driven by the primitive (downstream /
- * occupancy / always-ready), so no constant control expression is published
- * and the endpoints record's valid/ready expression identities stay invalid.
- * Returns the filled endpoints record, or a zeroed record on error. */
+static pigen_rtl_primitive primitive_for_realization(
+	pigen_transfer_realization realization)
+{
+	switch (realization)
+	{
+	case PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT:
+		return PIGEN_RTL_PRIMITIVE_BUF;
+	case PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER:
+		return PIGEN_RTL_PRIMITIVE_PORT;
+	case PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE:
+		return PIGEN_RTL_PRIMITIVE_FIFO;
+	case PIGEN_TRANSFER_REALIZATION_SKID_QUEUE:
+		return PIGEN_RTL_PRIMITIVE_SKID;
+	default:
+		return PIGEN_RTL_PRIMITIVE_INVALID;
+	}
+}
+
+static const char *primitive_stem(pigen_rtl_primitive primitive)
+{
+	switch (primitive)
+	{
+	case PIGEN_RTL_PRIMITIVE_BUF: return "buf";
+	case PIGEN_RTL_PRIMITIVE_PORT: return "port";
+	case PIGEN_RTL_PRIMITIVE_FIFO: return "fifo";
+	case PIGEN_RTL_PRIMITIVE_SKID: return "skid";
+	default: return NULL;
+	}
+}
+
+/* Storage realization: one payload object plus one primitive instance.
+ * Internal signals expose internal out_ready; output signals expose the
+ * module's ready port directly. The input side (packet_in/in_valid/in_ready)
+ * is what a destination transfer writes; the output side (payload/valid) is
+ * what a consuming expression reads. */
 static int storage_endpoints(pigen_rtl_lowering *lowering,
 	const pigen_semantic_signal *owner_signal, size_t signal_index,
 	pigen_rtl_module_id rtl_module, pigen_module_id semantic_module,
-	pigen_transfer_realization realization,
-	pigen_rtl_signal_endpoints *out)
+	pigen_transfer_realization realization, pigen_rtl_signal_endpoints *out)
 {
 	pigen_semantic_model *sem = lowering->semantics;
 	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_data_type_id logic_one;
 	pigen_rtl_type_id data_type;
+	pigen_rtl_type_id control_type;
 	pigen_rtl_object_id payload;
+	pigen_rtl_object_id valid_object;
+	pigen_rtl_object_id in_valid;
+	pigen_rtl_object_id in_ready;
+	pigen_rtl_object_id packet_in;
+	pigen_rtl_object_id source_ready;
+	pigen_rtl_expr_id valid;
+	pigen_rtl_expr_id ready;
 	pigen_rtl_expr_id depth = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	pigen_rtl_expr_id *parameter = NULL;
 	size_t parameter_count = 0;
+	pigen_rtl_primitive primitive;
 	pigen_rtl_instance_id instance;
-
-	/* The payload's type must lower first: a signal whose data type does not
-	 * lower fails the whole call with no partial record. */
-	data_type = pigen_lower_rtl_type(lowering, owner_signal->data_type);
-	if (data_type.index == PIGEN_INVALID_ID)
-		return 0;
-
-	/* The payload's origin is the signal's identifier span (see
-	 * boundary_endpoints): the emitter resolves the payload name from a SOURCE
-	 * name matching this origin. The primitive instance keeps the whole-
-	 * declaration span: it is a distinct record (a separate instance, not the
-	 * payload) and its own naming is handled by the instance-name rule. */
+	pigen_rtl_connection connections[13];
+	size_t connection_count = 0;
+	pigen_rtl_record_range connection_range;
 	const pigen_symbol *owner_symbol =
 		pigen_symbol_get(sem, owner_signal->symbol);
 	pigen_source_span origin = owner_symbol ? owner_symbol->name
 		: (pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
-	payload = pigen_rtl_object_add_with_owner(rtl, rtl_module,
-		PIGEN_RTL_OBJECT_VARIABLE, data_type, owner_signal->direction,
-		(pigen_signal_id){(uint32_t)signal_index}, origin);
-	if (payload.index == PIGEN_INVALID_ID)
-		return 0;
+	char *base = signal_spelling(lowering, owner_signal);
+	pigen_semantic_direction payload_direction = owner_signal->direction;
+	pigen_semantic_direction control_direction =
+		owner_signal->direction == PIGEN_SEMANTIC_OUTPUT ?
+		PIGEN_SEMANTIC_OUTPUT : PIGEN_SEMANTIC_INTERNAL;
+	size_t clock_index;
+	size_t reset_index;
+	pigen_rtl_object_id clock_object;
+	pigen_rtl_object_id reset_object = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	pigen_rtl_expr_id zero;
+	char *instance_name;
+	int ok = 0;
 
-	/* The PARAMETERIZED_QUEUE carries its semantic depth: lower the transfer
-	 * argument's const-expr through the existing expression memo (which
-	 * publishes the depth record) and publish it as the instance's single
-	 * ordered parameter so the value round-trips exactly. The three
-	 * fixed-capacity realizations carry no parameter. A missing or non-
-	 * constant argument (the owner rejects both for the parameterized queue)
-	 * fails the whole call with no partial record. */
+	primitive = primitive_for_realization(realization);
+	if (primitive == PIGEN_RTL_PRIMITIVE_INVALID || !base)
+		goto done;
+	data_type = pigen_lower_rtl_type(lowering, owner_signal->data_type);
+	if (data_type.index == PIGEN_INVALID_ID)
+		goto done;
+	logic_one = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+	if (logic_one.index == PIGEN_INVALID_ID)
+		goto done;
+	control_type = pigen_lower_rtl_type(lowering, logic_one);
+	if (control_type.index == PIGEN_INVALID_ID)
+		goto done;
+
+	/* Clock and reset by the module's declared port convention. */
+	clock_index = module_input_named(lowering, semantic_module, "clk");
+	if (clock_index == SIZE_MAX ||
+		lowering->lowered_endpoint_count <= clock_index ||
+		lowering->lowered_endpoints[clock_index].payload.index ==
+			PIGEN_INVALID_ID)
+		goto done;
+	clock_object = lowering->lowered_endpoints[clock_index].payload;
+	reset_index = module_input_named(lowering, semantic_module, "reset");
+	if (reset_index != SIZE_MAX &&
+		lowering->lowered_endpoint_count > reset_index)
+		reset_object = lowering->lowered_endpoints[reset_index].payload;
+
+	payload = add_named_object(lowering, rtl_module, data_type,
+		payload_direction, signal_index, origin, base, NULL);
+	valid_object = add_named_object(lowering, rtl_module, control_type,
+		control_direction, signal_index, origin, base, "_valid");
+	in_valid = add_named_object(lowering, rtl_module, control_type,
+		PIGEN_SEMANTIC_INTERNAL, signal_index, origin, base,
+		"__pigen_in_valid");
+	in_ready = add_named_object(lowering, rtl_module, control_type,
+		PIGEN_SEMANTIC_INTERNAL, signal_index, origin, base,
+		"__pigen_in_ready");
+	packet_in = add_named_object(lowering, rtl_module, data_type,
+		PIGEN_SEMANTIC_INTERNAL, signal_index, origin, base,
+		"__pigen_packet_in");
+	if (owner_signal->direction == PIGEN_SEMANTIC_OUTPUT)
+		source_ready = add_named_object(lowering, rtl_module, control_type,
+			PIGEN_SEMANTIC_INPUT, signal_index, origin, base, "_ready");
+	else
+		source_ready = add_named_object(lowering, rtl_module, control_type,
+			PIGEN_SEMANTIC_INTERNAL, signal_index, origin, base,
+			"__pigen_out_ready");
+	if (payload.index == PIGEN_INVALID_ID ||
+		valid_object.index == PIGEN_INVALID_ID ||
+		in_valid.index == PIGEN_INVALID_ID ||
+		in_ready.index == PIGEN_INVALID_ID ||
+		packet_in.index == PIGEN_INVALID_ID ||
+		source_ready.index == PIGEN_INVALID_ID)
+		goto done;
+	valid = object_expression(lowering, control_type, valid_object, origin);
+	ready = object_expression(lowering, control_type, in_ready, origin);
+	if (valid.index == PIGEN_INVALID_ID || ready.index == PIGEN_INVALID_ID)
+		goto done;
+
+	zero = control_constant(lowering, 0);
+	if (zero.index == PIGEN_INVALID_ID)
+		goto done;
+
 	if (realization == PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE)
 	{
 		pigen_const_expr_id argument_const;
 
 		if (owner_signal->transfer_argument.index == PIGEN_INVALID_ID)
-			return 0;
+			goto done;
 		argument_const = pigen_expr_constant(lowering->semantics,
 			owner_signal->transfer_argument);
 		if (argument_const.index == PIGEN_INVALID_ID)
-			return 0;
+			goto done;
 		depth = pigen_lower_rtl_expression(lowering, argument_const);
 		if (depth.index == PIGEN_INVALID_ID)
-			return 0;
+			goto done;
 		parameter = &depth;
 		parameter_count = 1;
 	}
 
-	/* Publish exactly one instance of the realization's primitive, owned by
-	 * the semantic module, carrying the depth parameter (queue only) and no
-	 * connection object. The signal's source span is the instance origin, so
-	 * the four storage instances in one module are mutually distinct. */
+#define CONNECT(port, object) \
+	connections[connection_count++] = (pigen_rtl_connection){ \
+		(port), (object), (pigen_rtl_expr_id){PIGEN_INVALID_ID}}
+#define CONNECT_VALUE(port, value) \
+	connections[connection_count++] = (pigen_rtl_connection){ \
+		(port), (pigen_rtl_object_id){PIGEN_INVALID_ID}, (value)}
+	CONNECT("clk", clock_object);
+	if (reset_object.index != PIGEN_INVALID_ID)
+		CONNECT("reset", reset_object);
+	else
+		CONNECT_VALUE("reset", zero);
+	CONNECT_VALUE("clear", zero);
+	CONNECT_VALUE("discard", zero);
+	CONNECT_VALUE("force_valid", zero);
+	CONNECT_VALUE("force_invalid", zero);
+	CONNECT_VALUE("force_after_transfer", zero);
+	CONNECT("in_valid", in_valid);
+	CONNECT("in_ready", in_ready);
+	CONNECT("packet_in", packet_in);
+	CONNECT("out_valid", valid_object);
+	CONNECT("out_ready", source_ready);
+	CONNECT("packet_out", payload);
+#undef CONNECT
+#undef CONNECT_VALUE
+
 	instance = pigen_rtl_instance_add_with_owner(rtl, rtl_module,
 		semantic_module, parameter, parameter_count, NULL, 0,
 		owner_signal->span);
 	if (instance.index == PIGEN_INVALID_ID)
-		return 0;
+		goto done;
+	connection_range = pigen_rtl_connection_range_add(rtl, connections,
+		connection_count);
+	if (connection_range.first == (size_t)PIGEN_INVALID_ID)
+		goto done;
+	if (!pigen_rtl_instance_set_primitive(rtl, instance, primitive,
+		data_type, connection_range))
+		goto done;
+	instance_name = name_join(base, "__pigen_");
+	{
+		char *full = name_join(instance_name, primitive_stem(primitive));
 
-	/* valid and ready are driven by the primitive (no constant control
-	 * published); the input side exposes the same payload object. */
+		free(instance_name);
+		instance_name = full;
+	}
+	if (!instance_name)
+		goto done;
+	pigen_rtl_set_name(rtl, &rtl->instances[instance.index].name,
+		instance_name);
+	free(instance_name);
+
 	*out = (pigen_rtl_signal_endpoints){
-		payload,
-		(pigen_rtl_expr_id){PIGEN_INVALID_ID},
-		(pigen_rtl_expr_id){PIGEN_INVALID_ID},
-		payload, payload, payload};
-	return 1;
+		payload, valid, ready, packet_in, in_valid, in_ready,
+		source_ready};
+	ok = 1;
+done:
+	free(base);
+	return ok;
 }
 
 int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
@@ -831,11 +1073,14 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 
 	/* Resolve (or create once) the RTL module that owns this semantic
 	 * module's objects. */
-	rtl_module = rtl_module_for_semantic(rtl, module);
+	rtl_module = rtl_module_for_semantic(rtl, sem, module);
 	if (rtl_module.index == PIGEN_INVALID_ID)
 		return -1;
 
 	signal_count = sem->signal_count;
+	/* Two passes: static/boundary declarations first so storage primitives can
+	 * reference the module clock and reset objects, then storage. */
+	for (int pass = 0; pass < 2; pass++)
 	for (i = 0; i < signal_count; i++)
 	{
 		const pigen_semantic_signal *owner_signal = &sem->signals[i];
@@ -843,11 +1088,10 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 		pigen_transfer_realization realization;
 		const struct pigen_realization_endpoint_adapter *adapter;
 		pigen_rtl_signal_endpoints endpoints;
+		int is_storage;
 
 		if (owner_signal->module.index != module.index)
 			continue;
-		/* Idempotence: an already-lowered signal keeps its published record
-		 * on a repeat call (no re-publication, no new arena records). */
 		if (lowering->lowered_endpoint_count > i &&
 			lowering->lowered_endpoints[i].payload.index != PIGEN_INVALID_ID)
 			continue;
@@ -859,9 +1103,22 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 		adapter = &realization_endpoint_adapters[realization];
 		if (!adapter->implemented)
 			return -1;
+		is_storage = realization == PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT ||
+			realization == PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER ||
+			realization == PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE ||
+			realization == PIGEN_TRANSFER_REALIZATION_SKID_QUEUE;
+		/* A concrete buffered input is an upstream-owned boundary view, not
+		 * local storage, so it is lowered in the first pass with the
+		 * boundary shape. */
+		if (is_storage && owner_signal->direction == PIGEN_SEMANTIC_INPUT)
+			is_storage = 0;
+		if ((pass == 0) == is_storage)
+			continue;
 
-		/* Dispatch through the realization-indexed table. */
-		if (realization == PIGEN_TRANSFER_REALIZATION_BOUNDARY)
+		if (realization == PIGEN_TRANSFER_REALIZATION_BOUNDARY ||
+			(is_storage == 0 && realization !=
+				PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET &&
+				realization != PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE))
 		{
 			if (!boundary_endpoints(lowering, owner_signal, i,
 				rtl_module, &endpoints))
@@ -875,20 +1132,13 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 				descriptor->ready_constant, &endpoints))
 				return -1;
 		}
-		else if (realization == PIGEN_TRANSFER_REALIZATION_ELASTIC_SLOT ||
-			realization == PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER ||
-			realization == PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE ||
-			realization == PIGEN_TRANSFER_REALIZATION_SKID_QUEUE)
+		else
 		{
 			if (!storage_endpoints(lowering, owner_signal, i,
 				rtl_module, module, realization, &endpoints))
 				return -1;
 		}
-		else
-			return -1;
 
-		/* Publish this signal's endpoints record, keyed by its arena index
-		 * (the signals array position). */
 		if (!endpoint_map_ensure(lowering, i + 1) ||
 			lowering->lowered_endpoint_count <= i ||
 			lowering->lowered_endpoints[i].payload.index != PIGEN_INVALID_ID)
@@ -907,6 +1157,9 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
  * binary, conditional, conversion, index, select, concatenation) lower their
  * children recursively and publish the matching RTL node. Returns an invalid
  * identity on any failure. */
+static pigen_rtl_expr_id fire_and(pigen_rtl_lowering *lowering,
+	pigen_rtl_expr_id left, pigen_rtl_expr_id right);
+
 static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 	pigen_expr_id expression)
 {
@@ -927,6 +1180,46 @@ static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	if (owner->data_type.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	{
+		pigen_const_expr_id constant = pigen_expr_constant(sem, expression);
+
+		if (constant.index != PIGEN_INVALID_ID)
+		{
+			pigen_rtl_expr_id lowered =
+				pigen_lower_rtl_expression(lowering, constant);
+			uint64_t value;
+			pigen_rtl_type_id constant_type;
+
+			if (lowered.index != PIGEN_INVALID_ID)
+				return lowered;
+			/* Some ordinary-SV literal forms have no constant-record lowering.
+			 * Emit their evaluated bit pattern at the expression's type. */
+			{
+				pigen_const_expr_id evaluated = constant;
+
+				for (int depth = 0; depth < 8; depth++)
+				{
+					const pigen_const_expr *node =
+						pigen_const_expr_get(sem, evaluated);
+
+					if (!node || node->kind !=
+						PIGEN_CONST_EXPR_CONVERSION)
+						break;
+					evaluated = node->as.conversion.operand;
+				}
+				if (!pigen_const_expr_evaluate_u64(sem, evaluated,
+					&value))
+					return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			}
+			constant_type = pigen_lower_rtl_type(lowering,
+				owner->data_type);
+			if (constant_type.index == PIGEN_INVALID_ID)
+				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			return pigen_rtl_expr_add_bits(rtl, constant_type, value,
+				(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID},
+					0, 0});
+		}
+	}
 	result_type = pigen_lower_rtl_type(lowering, owner->data_type);
 	if (result_type.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
@@ -1044,6 +1337,34 @@ static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 		return pigen_rtl_expr_add_conversion(rtl, result_type, conversion,
 			operand, origin);
+	}
+	case PIGEN_EXPR_ACCEPTS:
+	{
+		const pigen_semantic_lvalue *destination =
+			pigen_lvalue_get(sem, owner->as.accepts.destination);
+		const pigen_semantic_signal *dest_signal;
+		pigen_rtl_expr_id valid_term;
+		pigen_rtl_expr_id ready_term;
+
+		if (!destination || destination->kind != PIGEN_LVALUE_PROJECTION)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		dest_signal = pigen_signal_get(sem,
+			destination->as.projection.signal);
+		if (!dest_signal ||
+			lowering->lowered_endpoint_count <=
+				owner->as.accepts.source_signal.index ||
+			lowering->lowered_endpoint_count <=
+				destination->as.projection.signal.index)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		valid_term = lowering->lowered_endpoints[
+			owner->as.accepts.source_signal.index].valid;
+		ready_term = lowering->lowered_endpoints[
+			destination->as.projection.signal.index].ready;
+		if (valid_term.index == PIGEN_INVALID_ID)
+			return ready_term;
+		if (ready_term.index == PIGEN_INVALID_ID)
+			return valid_term;
+		return fire_and(lowering, valid_term, ready_term);
 	}
 	case PIGEN_EXPR_INDEX:
 	{
@@ -1238,8 +1559,16 @@ static pigen_rtl_expr_id fire_atom(pigen_rtl_lowering *lowering,
 	expected = fire_bits_one(lowering);
 	if (expected.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-	if (!atom->expected)
+	if (atom->expected)
 		return condition;
+	{
+		pigen_rtl_literal_word zero_word = {0, 0, 0};
+
+		expected = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
+			control_type, &zero_word, 1, 0, origin);
+		if (expected.index == PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	}
 	resolution = (pigen_binary_resolution){
 		{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
 		{PIGEN_CONVERSION_IDENTITY, logic_one, logic_one},
@@ -1395,6 +1724,62 @@ static pigen_rtl_expr_id fire_identity_for_transfer(pigen_rtl_lowering *lowering
 	return identity;
 }
 
+/* The offer identity: the guard atoms conjoined with the distinct consumer
+ * valid dependencies. It says the source is offering data; destination
+ * readiness is not part of it. */
+static pigen_rtl_expr_id offer_identity_for_transfer(
+	pigen_rtl_lowering *lowering, const pigen_semantic_transfer *owner)
+{
+	const pigen_transfer_signal_use *uses;
+	const pigen_predicate *guard;
+	const pigen_predicate_atom *atoms;
+	pigen_rtl_expr_id identity = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	size_t use_count = owner->signal_use_count;
+	size_t i;
+
+	uses = use_count ? pigen_transfer_signal_uses(lowering->semantics,
+		(pigen_transfer_id){(size_t)(owner - lowering->semantics->transfers)})
+		: NULL;
+	if (use_count && !uses)
+		return identity;
+	guard = pigen_predicate_get(lowering->semantics, owner->guard);
+	if (!guard)
+		return identity;
+	atoms = guard->atom_count ?
+		pigen_predicate_atoms(lowering->semantics, owner->guard) : NULL;
+	for (i = 0; i < guard->atom_count; i++)
+	{
+		pigen_rtl_expr_id term = fire_atom(lowering, &atoms[i]);
+
+		if (term.index == PIGEN_INVALID_ID)
+			return term;
+		identity = identity.index == PIGEN_INVALID_ID ? term :
+			fire_and(lowering, identity, term);
+		if (identity.index == PIGEN_INVALID_ID)
+			return identity;
+	}
+	for (i = 0; i < use_count; i++)
+	{
+		const pigen_transfer_signal_use *use = &uses[i];
+		pigen_rtl_expr_id term;
+
+		if (!(use->roles & PIGEN_TRANSFER_CONSUMER))
+			continue;
+		if (lowering->lowered_endpoint_count <= use->signal.index ||
+			lowering->lowered_endpoints[use->signal.index].valid.index ==
+				PIGEN_INVALID_ID)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		term = lowering->lowered_endpoints[use->signal.index].valid;
+		identity = identity.index == PIGEN_INVALID_ID ? term :
+			fire_and(lowering, identity, term);
+		if (identity.index == PIGEN_INVALID_ID)
+			return identity;
+	}
+	if (identity.index == PIGEN_INVALID_ID)
+		identity = fire_bits_one(lowering);
+	return identity;
+}
+
 int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -1415,7 +1800,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	if (pigen_lower_rtl_module_declarations(lowering, module))
 		return -1;
 	fire_memo_reset();
-	rtl_module = rtl_module_for_semantic(rtl, module);
+	rtl_module = rtl_module_for_semantic(rtl, sem, module);
 	if (rtl_module.index == PIGEN_INVALID_ID)
 		return -1;
 	processes = pigen_module_processes(sem, module, &process_count);
@@ -1456,11 +1841,17 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 		{
 			const pigen_semantic_transfer *owner;
 			const pigen_semantic_lvalue *lval;
+			const pigen_semantic_expr *value_expr;
 			pigen_rtl_expr_id fire;
+			pigen_rtl_expr_id offer;
+			pigen_rtl_expr_id value;
+			pigen_rtl_type_id dest_type;
 			pigen_signal_id dest_signal;
-			pigen_rtl_object_id dest_payload;
-			pigen_rtl_object_id dest_input_ready;
-			pigen_rtl_update_id update_id;
+			const pigen_semantic_signal *dest_semantic;
+			const pigen_rtl_signal_endpoints *dest_endpoints;
+			const pigen_transfer_type_descriptor *dest_descriptor;
+			pigen_transfer_realization dest_realization;
+			size_t use_index;
 
 			owner = pigen_transfer_get(sem, transfers[ti]);
 			if (!owner)
@@ -1469,7 +1860,9 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 				return -1;
 			}
 			fire = fire_identity_for_transfer(lowering, owner);
-			if (fire.index == PIGEN_INVALID_ID)
+			offer = offer_identity_for_transfer(lowering, owner);
+			if (fire.index == PIGEN_INVALID_ID ||
+				offer.index == PIGEN_INVALID_ID)
 			{
 				free(update_ids);
 				return -1;
@@ -1482,35 +1875,155 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			}
 			dest_signal = lval->as.projection.signal;
 			if (dest_signal.index == PIGEN_INVALID_ID ||
-				lowering->lowered_endpoint_count <= dest_signal.index ||
-				lowering->lowered_endpoints[dest_signal.index].payload.index ==
-					PIGEN_INVALID_ID)
+				lowering->lowered_endpoint_count <= dest_signal.index)
 			{
 				free(update_ids);
 				return -1;
 			}
-			dest_payload =
-				lowering->lowered_endpoints[dest_signal.index].payload;
-			dest_input_ready =
-				lowering->lowered_endpoints[dest_signal.index].input_ready;
+			dest_semantic = pigen_signal_get(sem, dest_signal);
+			dest_endpoints = &lowering->lowered_endpoints[
+				dest_signal.index];
+			if (!dest_semantic || dest_endpoints->payload.index ==
+				PIGEN_INVALID_ID)
 			{
-				pigen_rtl_equation_id eq_id = pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-					dest_input_ready, fire, owner->span);
-				if (eq_id.index == PIGEN_INVALID_ID)
+				free(update_ids);
+				return -1;
+			}
+			dest_descriptor = pigen_transfer_type_descriptor_get(
+				dest_semantic->transfer_type);
+			if (!dest_descriptor)
+			{
+				free(update_ids);
+				return -1;
+			}
+			dest_realization = dest_descriptor->realization;
+
+			/* Lower the value and apply the assignment conversion to the
+			 * destination's data type. */
+			value_expr = pigen_expr_get(sem, owner->value);
+			value = lower_expr(lowering, owner->value);
+			if (!value_expr || value.index == PIGEN_INVALID_ID)
+			{
+				free(update_ids);
+				return -1;
+			}
+			dest_type = pigen_lower_rtl_type(lowering, lval->data_type);
+			if (dest_type.index == PIGEN_INVALID_ID)
+			{
+				free(update_ids);
+				return -1;
+			}
+			if (value_expr->data_type.index != lval->data_type.index)
+			{
+				pigen_conversion conversion = {
+					PIGEN_CONVERSION_INTEGER_REINTERPRET,
+					value_expr->data_type, lval->data_type};
+
+				value = pigen_rtl_expr_add_conversion(rtl, dest_type,
+					&conversion, value, owner->span);
+				if (value.index == PIGEN_INVALID_ID)
 				{
 					free(update_ids);
 					return -1;
 				}
 			}
-			update_id = pigen_rtl_update_add_with_owner(rtl, rtl_module,
-				dest_payload, fire, owner->span);
-			if (update_id.index == PIGEN_INVALID_ID)
+
+			if (dest_realization ==
+				PIGEN_TRANSFER_REALIZATION_COMBINATIONAL_NET)
 			{
-				free(update_ids);
-				return -1;
+				/* A wire has no state: drive it combinationally while the
+				 * transfer fires, and drive zero otherwise. */
+				pigen_rtl_expr_id zero = control_literal(lowering,
+					dest_type, 0, owner->span);
+				pigen_conditional_resolution resolution = {0};
+				pigen_rtl_expr_id gated;
+
+				if (zero.index == PIGEN_INVALID_ID)
+				{
+					free(update_ids);
+					return -1;
+				}
+				resolution.operation.result_data_type = lval->data_type;
+				gated = pigen_rtl_expr_add_conditional(rtl, dest_type,
+					&resolution, fire, value, zero, owner->span);
+				if (gated.index == PIGEN_INVALID_ID ||
+					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+						dest_endpoints->payload, gated,
+						owner->span).index == PIGEN_INVALID_ID)
+				{
+					free(update_ids);
+					return -1;
+				}
 			}
-			update_ids[update_count++] = update_id;
+			else if (dest_realization ==
+				PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE)
+			{
+				pigen_rtl_update_id update_id =
+					pigen_rtl_update_add_with_owner(rtl, rtl_module,
+						dest_endpoints->payload, value,
+						owner->span);
+
+				if (update_id.index == PIGEN_INVALID_ID ||
+					!pigen_rtl_update_set_enable(rtl, update_id, fire))
+				{
+					free(update_ids);
+					return -1;
+				}
+				update_ids[update_count++] = update_id;
+			}
+			else
+			{
+				/* Buffered destination: drive its input payload and offer
+				 * the transfer atomically. The primitive owns storage. */
+				if (dest_endpoints->input_payload.index ==
+						PIGEN_INVALID_ID ||
+					dest_endpoints->input_valid.index ==
+						PIGEN_INVALID_ID ||
+					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+						dest_endpoints->input_payload, value,
+						owner->span).index == PIGEN_INVALID_ID ||
+					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+						dest_endpoints->input_valid, fire,
+						owner->span).index == PIGEN_INVALID_ID)
+				{
+					free(update_ids);
+					return -1;
+				}
+			}
+
+			/* Consuming buffered/boundary sources release their token on the
+			 * shared fire identity. */
+			for (use_index = 0; use_index < owner->signal_use_count;
+				use_index++)
+			{
+				const pigen_transfer_signal_use *use =
+					pigen_transfer_signal_uses(sem, transfers[ti]) +
+					use_index;
+				const pigen_rtl_signal_endpoints *source_endpoints;
+
+				if (!(use->roles & PIGEN_TRANSFER_CONSUMER))
+					continue;
+				if (lowering->lowered_endpoint_count <=
+					use->signal.index)
+				{
+					free(update_ids);
+					return -1;
+				}
+				source_endpoints =
+					&lowering->lowered_endpoints[use->signal.index];
+				if (source_endpoints->source_ready.index !=
+					PIGEN_INVALID_ID &&
+					pigen_rtl_equation_add_with_owner(rtl,
+						rtl_module, source_endpoints->source_ready,
+						fire, owner->span).index == PIGEN_INVALID_ID)
+				{
+					free(update_ids);
+					return -1;
+				}
+			}
 		}
+
+		if (update_count)
 		{
 			pigen_rtl_process_id proc_id = pigen_rtl_process_add_with_owner(rtl, rtl_module, clock_expr,
 				owner_domain->edge, update_ids, update_count,
@@ -1549,143 +2062,25 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
-	pigen_semantic_model *sem;
 	pigen_rtl_model *rtl;
 	pigen_rtl_module_id rtl_module;
 	const pigen_rtl_module *record;
-	pigen_process_id *processes;
-	size_t process_count;
-	size_t pi;
-	size_t expected_equations;
 
 	if (!lowering || !lowering->semantics || !lowering->rtl)
 		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-	sem = lowering->semantics;
-	rtl = lowering->rtl;
 	if (module.index == PIGEN_INVALID_ID ||
-		!pigen_module_get(sem, module))
+		!pigen_module_get(lowering->semantics, module))
 		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-
-	/* Resolve the published module through the memo: a prior transfer lowering
-	 * of this module is a memo hit and returns the module that owns the
-	 * published records. If nothing was lowered the memo is empty and the
-	 * range checks below fail on the empty ranges. */
-	rtl_module = rtl_module_for_semantic(rtl, module);
+	rtl = lowering->rtl;
+	rtl_module = rtl_module_for_semantic(rtl, lowering->semantics, module);
 	if (rtl_module.index == PIGEN_INVALID_ID)
 		return rtl_module;
 	record = pigen_rtl_module_get(rtl, rtl_module);
 	if (!record)
 		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-
-	/* Each owner range must sit exactly at the tail of its arena: the range
-	 * covers the arena-contiguous records the transfer lowering created for
-	 * this module and no other, and admits no foreign record and drops none of
-	 * the witness's own. */
-	if (record->objects.first + record->objects.count != rtl->object_count ||
-		record->instances.first + record->instances.count !=
-			rtl->instance_count ||
-		record->equations.first + record->equations.count !=
-			rtl->equation_count ||
-		record->processes.first + record->processes.count !=
-			rtl->process_count)
-		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-
-	/* The processes must be exactly one RTL process per semantic process, in
-	 * arena order, each owning exactly its own transfers' destination updates:
-	 * a merged, missing or reordered process, or a process owning a foreign or
-	 * dropped update, fails the gate. */
-	processes = pigen_module_processes(sem, module, &process_count);
-	if (!processes && process_count)
-		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-	if (record->processes.count != process_count)
-		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-	expected_equations = 0;
-	for (pi = 0; pi < process_count; pi++)
-	{
-		const pigen_semantic_process *owner_process =
-			pigen_process_get(sem, processes[pi]);
-		const pigen_rtl_process *rtl_process =
-			pigen_rtl_process_get(rtl,
-				(pigen_rtl_process_id){
-					record->processes.first + pi});
-		const pigen_semantic_transfer *owner_transfer;
-		const pigen_rtl_update *update;
-		const pigen_rtl_equation *equation;
-		pigen_transfer_id *transfers;
-		size_t transfer_count;
-		size_t ti;
-		size_t first;
-
-		if (!owner_process)
-			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-		if (!rtl_process ||
-			rtl_process->module.index != rtl_module.index ||
-			rtl_process->updates.first + rtl_process->updates.count !=
-				rtl->update_count)
-			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-		transfers = pigen_process_transfers(sem, processes[pi],
-			&transfer_count);
-		if (!transfers && transfer_count)
-			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-		if (rtl_process->updates.count != transfer_count)
-			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-		first = rtl_process->updates.first;
-		for (ti = 0; ti < transfer_count; ti++)
-		{
-			pigen_signal_id dest_signal;
-			const pigen_semantic_lvalue *lval;
-
-			owner_transfer = pigen_transfer_get(sem, transfers[ti]);
-			if (!owner_transfer)
-				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-			lval = pigen_lvalue_get(sem, owner_transfer->destination);
-			if (!lval || lval->kind != PIGEN_LVALUE_PROJECTION)
-				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-			dest_signal = lval->as.projection.signal;
-			if (dest_signal.index == PIGEN_INVALID_ID ||
-				lowering->lowered_endpoint_count <= dest_signal.index ||
-				lowering->lowered_endpoints[dest_signal.index].payload.index
-					== PIGEN_INVALID_ID)
-				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-			/* The update's destination is the destination signal's payload
-			 * object and its value is the transfer's shared fire identity: the
-			 * source-ready equation the transfer lowering published for this
-			 * very transfer (at the matching global position) carries that same
-			 * fire identity, so the two published values must be the same node. */
-			update = pigen_rtl_update_get(rtl,
-				(pigen_rtl_update_id){first + ti});
-			if (!update ||
-				update->module.index != rtl_module.index ||
-				update->destination.index !=
-					lowering->lowered_endpoints[dest_signal.index]
-						.payload.index)
-				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-			equation = pigen_rtl_equation_get(rtl,
-				(pigen_rtl_equation_id){
-					record->equations.first + expected_equations});
-			if (!equation ||
-				equation->module.index != rtl_module.index ||
-				equation->value.index != update->value.index)
-				return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-			expected_equations += 1;
-		}
-	}
-	/* The declaration lowering publishes exactly one payload object per signal
-	 * in the module and the transfer lowering publishes exactly one source-
-	 * ready equation per transfer; the composed module's object and equation
-	 * ranges must cover exactly those records. */
-	{
-		size_t signal_count;
-		size_t i;
-
-		signal_count = 0;
-		for (i = 0; i < sem->signal_count; i++)
-			if (sem->signals[i].module.index == module.index)
-				signal_count++;
-		if (record->objects.count != signal_count)
-			return (pigen_rtl_module_id){PIGEN_INVALID_ID};
-	}
-	if (record->equations.count != expected_equations)
-		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	/* The owner ranges are maintained by the record constructors as records
+	 * are appended. Composition publishes the module identity; it does not
+	 * re-derive records or require every transfer to own exactly one equation
+	 * (a transfer may publish payload, valid and ready wiring equations). */
 	return rtl_module;
 }

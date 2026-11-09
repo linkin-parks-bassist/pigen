@@ -339,6 +339,65 @@ static int node_identity(uint32_t node_index, const pigen_syntax_node *node,
 	}
 }
 
+/* Append the module's backend-neutral records (instances, equations and
+ * processes) after the syntax-walk children. Source order for declarations is
+ * preserved; generated hardware follows in deterministic arena order. */
+static int emit_module_records(pigen_output_model *model,
+	const pigen_rtl_lowering *lowering, pigen_rtl_module_id module)
+{
+	const pigen_rtl_model *rtl = lowering->rtl;
+	const pigen_rtl_module *owner = pigen_rtl_module_get(rtl, module);
+	size_t i;
+
+	if (!owner)
+		return -1;
+	for (i = 0; i < owner->objects.count; i++)
+	{
+		pigen_output_item item = {0};
+
+		item.kind = PIGEN_OUTPUT_RTL_OBJECT;
+		item.as.object = (pigen_rtl_object_id){
+			(uint32_t)(owner->objects.first + i)};
+		if (pigen_output_item_add_child(model, module, item) ==
+			PIGEN_INVALID_ID)
+			return -1;
+	}
+	for (i = 0; i < owner->instances.count; i++)
+	{
+		pigen_output_item item = {0};
+
+		item.kind = PIGEN_OUTPUT_RTL_INSTANCE;
+		item.as.instance = (pigen_rtl_instance_id){
+			(uint32_t)(owner->instances.first + i)};
+		if (pigen_output_item_add_child(model, module, item) ==
+			PIGEN_INVALID_ID)
+			return -1;
+	}
+	for (i = 0; i < owner->equations.count; i++)
+	{
+		pigen_output_item item = {0};
+
+		item.kind = PIGEN_OUTPUT_RTL_EQUATION;
+		item.as.equation = (pigen_rtl_equation_id){
+			(uint32_t)(owner->equations.first + i)};
+		if (pigen_output_item_add_child(model, module, item) ==
+			PIGEN_INVALID_ID)
+			return -1;
+	}
+	for (i = 0; i < owner->processes.count; i++)
+	{
+		pigen_output_item item = {0};
+
+		item.kind = PIGEN_OUTPUT_RTL_PROCESS;
+		item.as.process = (pigen_rtl_process_id){
+			(uint32_t)(owner->processes.first + i)};
+		if (pigen_output_item_add_child(model, module, item) ==
+			PIGEN_INVALID_ID)
+			return -1;
+	}
+	return 0;
+}
+
 static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, uint32_t node_index,
 	pigen_rtl_module_id module, int in_module, pigen_output_error *error);
@@ -388,11 +447,19 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 		{
 			module = item.as.module;
 			in_module = 1;
-			/* The module item opens its nested scope: its children nest
-			 * inside it, so it is appended with open, not a flat add. */
-			return pigen_output_item_open(model, item) == PIGEN_INVALID_ID ?
-				-1 : emit_children(model, syntax, lowering, node, module, 1, error);
+			if (pigen_output_item_open(model, item) == PIGEN_INVALID_ID)
+				return -1;
+			if (emit_children(model, syntax, lowering, node, module, 1,
+				error))
+				return -1;
+			return emit_module_records(model, lowering, module);
 		}
+		/* Signal objects are published from the module record's object range
+		 * (which includes generated valid/ready wires), so the syntax walk
+		 * neither adds them here nor stops on them. */
+		if (item.kind == PIGEN_OUTPUT_RTL_OBJECT)
+			return emit_children(model, syntax, lowering, node, module,
+				in_module, error);
 		if (in_module)
 			return pigen_output_item_add_child(model, module, item) ==
 				PIGEN_INVALID_ID ? -1 : emit_children(model, syntax, lowering, node, module, 1, error);

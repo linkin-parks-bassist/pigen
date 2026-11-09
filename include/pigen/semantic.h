@@ -33,7 +33,8 @@ typedef enum {
 	PIGEN_EXPR_CONVERSION,
 	PIGEN_EXPR_INDEX,
 	PIGEN_EXPR_SELECT,
-	PIGEN_EXPR_CONCATENATION
+	PIGEN_EXPR_CONCATENATION,
+	PIGEN_EXPR_ACCEPTS
 } pigen_semantic_expr_kind;
 
 typedef enum {
@@ -167,6 +168,11 @@ typedef struct {
 			size_t first_child;
 			size_t child_count;
 		} sequence;
+		struct {
+			pigen_lvalue_id destination;
+			pigen_expr_id source;
+			pigen_signal_id source_signal;
+		} accepts;
 	} as;
 } pigen_semantic_expr;
 
@@ -530,6 +536,9 @@ pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 	pigen_select_kind kind, pigen_source_span span);
 pigen_expr_id pigen_expr_add_concatenation(pigen_semantic_model *model,
 	const pigen_expr_id *children, size_t count, pigen_source_span span);
+pigen_expr_id pigen_expr_add_accepts(pigen_semantic_model *model,
+	pigen_lvalue_id destination, pigen_expr_id source,
+	pigen_signal_id source_signal, pigen_source_span span);
 const pigen_expr_id *pigen_expr_children(
 	const pigen_semantic_model *model, size_t first, size_t count);
 const pigen_semantic_expr *pigen_expr_get(const pigen_semantic_model *model,

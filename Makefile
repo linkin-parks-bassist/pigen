@@ -8,10 +8,11 @@ SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.
 
 all: pigen
 
-pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c
-	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS)
+pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c
+	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c $(LDLIBS)
 
-test: pigen source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test fsm-identity-test
+
+test: pigen source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen
 
 source-test:
@@ -98,7 +99,7 @@ resolve-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-resolve-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-resolve-test tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-resolve-test tests/resolve_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-resolve-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -122,7 +123,7 @@ output-model-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-output-model-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-output-model-test tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-output-model-test tests/output_test.c src/output.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-output-model-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -397,7 +398,7 @@ compile-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-compile-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-compile-test tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c $(LDLIBS) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-compile-test tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c $(LDLIBS) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-compile-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 

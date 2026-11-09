@@ -159,6 +159,8 @@ static const char *name_for_span(const pigen_rtl_model *rtl,
 static const char *object_name(const pigen_rtl_model *rtl,
 	const pigen_rtl_object *object)
 {
+	if (object->name)
+		return object->name;
 	return name_for_span(rtl, &object->origin);
 }
 
@@ -171,7 +173,8 @@ static const char *module_name(const pigen_rtl_model *rtl,
 {
 	size_t i;
 
-	(void)module;
+	if (module->name)
+		return module->name;
 	for (i = 0; i < rtl->name_count; i++)
 	{
 		const pigen_rtl_name *name = &rtl->names[i];
@@ -199,6 +202,8 @@ static const char *instance_name(const pigen_rtl_model *rtl,
 {
 	size_t i;
 
+	if (instance->name)
+		return instance->name;
 	if (instance->origin.source.index != PIGEN_INVALID_ID)
 		return name_for_span(rtl, &instance->origin);
 	for (i = 0; i < rtl->name_count; i++)
@@ -768,7 +773,10 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 			buf_append_str(b, " ");
 		buf_append_str(b, " ");
 	}
-	buf_append_str(b, "logic");
+	if (type->signedness == PIGEN_SIGN_SIGNED)
+		buf_append_str(b, "logic signed");
+	else
+		buf_append_str(b, "logic");
 	if (width > 1)
 	{
 		buf_append_str(b, " ");
@@ -784,6 +792,53 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 	return b->failed ? -1 : 0;
 }
 
+/* A data type spelling for a type parameter: `logic [w-1:0]` (`logic` at
+ * width 1), signed when the type is signed. */
+static int emit_type(const struct buf *unused, struct buf *b,
+	const pigen_rtl_type *type)
+{
+	(void)unused;
+	buf_append_str(b, type->signedness == PIGEN_SIGN_SIGNED ?
+		"logic signed" : "logic");
+	if (type->width > 1)
+	{
+		buf_append_str(b, " ");
+		if (emit_range(b, type) != 0)
+			return -1;
+	}
+	return b->failed ? -1 : 0;
+}
+
+static const char *primitive_name(pigen_rtl_primitive primitive)
+{
+	switch (primitive)
+	{
+	case PIGEN_RTL_PRIMITIVE_BUF: return "pigen_buf";
+	case PIGEN_RTL_PRIMITIVE_PORT: return "pigen_port";
+	case PIGEN_RTL_PRIMITIVE_FIFO: return "pigen_fifo";
+	case PIGEN_RTL_PRIMITIVE_SKID: return "pigen_skid";
+	default: return NULL;
+	}
+}
+
+static int emit_connection(struct buf *b, const pigen_rtl_model *rtl,
+	const pigen_rtl_connection *connection)
+{
+	const char *name = NULL;
+
+	if (connection->object.index != PIGEN_INVALID_ID)
+	{
+		const pigen_rtl_object *object =
+			pigen_rtl_object_get(rtl, connection->object);
+
+		if (!object || !(name = object_name(rtl, object)))
+			return -1;
+		buf_append_str(b, name);
+		return b->failed ? -1 : 0;
+	}
+	return emit_expr(b, rtl, connection->value);
+}
+
 /* An instance: `  name #(...) (...);` each side present only when its range is
  * non-empty. A literal parameter renders its value. */
 static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
@@ -791,42 +846,112 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 {
 	const char *name = instance_name(rtl, instance);
 	const pigen_rtl_expr_id *parameters;
-	const pigen_rtl_object_id *connections;
 	size_t parameter_first = instance->parameters.first;
 	size_t parameter_count = instance->parameters.count;
-	size_t connection_first = instance->connections.first;
-	size_t connection_count = instance->connections.count;
 	size_t i;
+	int first_parameter = 1;
+	const char *definition = instance->name ? NULL : NULL;
 
+	(void)definition;
 	if (!name)
 		return -1;
 	parameters = parameter_count ? &rtl->instance_parameters[parameter_first]
 		: NULL;
-	connections = connection_count ? &rtl->instance_connections[connection_first]
-		: NULL;
 
 	buf_append_str(b, "  ");
-	buf_append_str(b, name);
-	if (parameter_count)
+	if (instance->primitive != PIGEN_RTL_PRIMITIVE_INVALID)
+	{
+		const char *definition = primitive_name(instance->primitive);
+
+		if (!definition)
+			return -1;
+		buf_append_str(b, definition);
+	}
+	else
+		buf_append_str(b, name);
+	if (parameter_count || instance->payload_type.index != PIGEN_INVALID_ID)
 	{
 		buf_append_str(b, " #(");
-		for (i = 0; i < parameter_count; i++)
+		if (instance->primitive != PIGEN_RTL_PRIMITIVE_INVALID)
 		{
-			buf_append_str(b, i ? ", " : "");
-			if (emit_expr(b, rtl, parameters[i]) != 0)
-				return -1;
+			if (instance->payload_type.index != PIGEN_INVALID_ID)
+			{
+				const pigen_rtl_type *type =
+					pigen_rtl_type_get(rtl, instance->payload_type);
+
+				if (!type)
+					return -1;
+				buf_append_str(b, ".PAYLOAD_T(");
+				if (emit_type(NULL, b, type) != 0)
+					return -1;
+				buf_append_str(b, ")");
+				first_parameter = 0;
+			}
+			for (i = 0; i < parameter_count; i++)
+			{
+				buf_append_str(b, first_parameter ? "" : ", ");
+				if (instance->primitive == PIGEN_RTL_PRIMITIVE_FIFO)
+					buf_append_str(b, ".DEPTH(");
+				if (emit_expr(b, rtl, parameters[i]) != 0)
+					return -1;
+				if (instance->primitive == PIGEN_RTL_PRIMITIVE_FIFO)
+					buf_append_str(b, ")");
+				first_parameter = 0;
+			}
+		}
+		else
+		{
+			for (i = 0; i < parameter_count; i++)
+			{
+				buf_append_str(b, first_parameter ? "" : ", ");
+				if (emit_expr(b, rtl, parameters[i]) != 0)
+					return -1;
+				first_parameter = 0;
+			}
 		}
 		buf_append_str(b, ")");
 	}
-	if (connection_count)
+	if (instance->primitive != PIGEN_RTL_PRIMITIVE_INVALID)
 	{
+		buf_append_str(b, " ");
+		buf_append_str(b, name);
+	}
+	if (instance->connection_records.count)
+	{
+		size_t first = instance->connection_records.first;
+		size_t count = instance->connection_records.count;
+
+		buf_append_str(b, " (");
+		for (i = 0; i < count; i++)
+		{
+			const pigen_rtl_connection *connection =
+				&rtl->connections[first + i];
+
+			if (!connection->port)
+				return -1;
+			buf_append_str(b, i ? ", ." : ".");
+			buf_append_str(b, connection->port);
+			buf_append_str(b, "(");
+			if (emit_connection(b, rtl, connection) != 0)
+				return -1;
+			buf_append_str(b, ")");
+		}
+		buf_append_str(b, ");");
+		return b->failed ? -1 : 0;
+	}
+	if (instance->connections.count)
+	{
+		const pigen_rtl_object_id *connections =
+			&rtl->instance_connections[instance->connections.first];
+		size_t connection_count = instance->connections.count;
+
 		buf_append_str(b, " (");
 		for (i = 0; i < connection_count; i++)
 		{
-			const pigen_rtl_object *port;
+			const pigen_rtl_object *port =
+				pigen_rtl_object_get(rtl, connections[i]);
 			const char *port_name;
 
-			port = pigen_rtl_object_get(rtl, connections[i]);
 			if (!port)
 				return -1;
 			port_name = object_name(rtl, port);
@@ -840,9 +965,9 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 			buf_append_str(b, ")");
 		}
 		buf_append_str(b, ");");
+		return b->failed ? -1 : 0;
 	}
-	else
-		buf_append_str(b, ";");
+	buf_append_str(b, ";");
 	return b->failed ? -1 : 0;
 }
 
@@ -896,7 +1021,7 @@ static int emit_process(struct buf *b, const pigen_rtl_model *rtl,
 	buf_append_str(b, " ");
 	if (emit_expr(b, rtl, process->clock) != 0)
 		return -1;
-	buf_append_str(b, ")\n");
+	buf_append_str(b, ") begin\n");
 	for (i = 0; i < count; i++)
 	{
 		const pigen_rtl_object *dest;
@@ -909,12 +1034,20 @@ static int emit_process(struct buf *b, const pigen_rtl_model *rtl,
 		if (!dest_name)
 			return -1;
 		buf_append_str(b, "    ");
+		if (updates[i].enable.index != PIGEN_INVALID_ID)
+		{
+			buf_append_str(b, "if (");
+			if (emit_expr(b, rtl, updates[i].enable) != 0)
+				return -1;
+			buf_append_str(b, ") ");
+		}
 		buf_append_str(b, dest_name);
 		buf_append_str(b, " <= ");
 		if (emit_expr(b, rtl, updates[i].value) != 0)
 			return -1;
 		buf_append_str(b, ";\n");
 	}
+	buf_append_str(b, "  end\n");
 	return b->failed ? -1 : 0;
 }
 
@@ -1235,21 +1368,20 @@ static int validate_coverage(const pigen_output_model *layout,
 		{
 			have = 1;
 			src = item->as.span.source;
-			if (item->as.span.start != 0)
-				return -1;
 			file = pigen_source_get(sources, src);
 			if (!file)
 				return -1;
 		}
 		else if (src.index != item->as.span.source.index)
 			return -1;
+		/* Structured records cover the rest of the source. OPAQUE spans are
+		 * the retained text between them, so they must stay in source order
+		 * and not overlap; they need not cover the structured spans. */
 		if (item->as.span.start < prev_end ||
 			item->as.span.end > file->length)
 			return -1;
 		prev_end = item->as.span.end;
 	}
-	if (have && prev_end != file->length)
-		return -1;
 	return 0;
 }
 

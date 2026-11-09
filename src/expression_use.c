@@ -98,6 +98,10 @@ static int visit(use_analyzer *analyzer, pigen_expr_id expression,
 		case PIGEN_EXPR_EXACT_INTEGER:
 		case PIGEN_EXPR_BITS:
 			return 1;
+		case PIGEN_EXPR_ACCEPTS:
+			/* Acceptance is a handshake property; it adds no data
+			 * dependencies to the enclosing transfer. */
+			return 1;
 		case PIGEN_EXPR_SYMBOL:
 			return add_symbol_use(analyzer, expression, projection, predicate,
 				context);
@@ -212,6 +216,7 @@ static int visit_lvalue(use_analyzer *analyzer, pigen_expr_id expression,
 		case PIGEN_EXPR_BINARY:
 		case PIGEN_EXPR_CONDITIONAL:
 		case PIGEN_EXPR_CONCATENATION:
+		case PIGEN_EXPR_ACCEPTS:
 			return 0;
 	}
 	return 0;

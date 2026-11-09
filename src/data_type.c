@@ -869,8 +869,10 @@ int pigen_data_type_conversion_is_valid(pigen_semantic_model *model,
 					required, model->constant_expression_count + 1);
 		}
 		case PIGEN_CONVERSION_INTEGER_REINTERPRET:
-			return numerical_is_concrete(source) &&
-				numerical_is_concrete(target) && source != target;
+			return pigen_data_type_is_integral(model,
+					conversion.source_data_type) &&
+				pigen_data_type_is_integral(model,
+					conversion.target_data_type) && source != target;
 		case PIGEN_CONVERSION_VECTOR_TO_INTEGER:
 			return data_type_is_raw_vector(model,
 				conversion.source_data_type) &&
@@ -903,7 +905,8 @@ int pigen_data_type_resolve_assignment_conversion(
 		target);
 	if (source_interpretation == PIGEN_NUMERICAL_EXACT_INTEGER &&
 		(target_interpretation == PIGEN_NUMERICAL_SIGNED_INTEGER ||
-		target_interpretation == PIGEN_NUMERICAL_UNSIGNED_INTEGER))
+		target_interpretation == PIGEN_NUMERICAL_UNSIGNED_INTEGER ||
+		pigen_data_type_is_integral(model, target)))
 		return conversion_resolve(model, source, target,
 			PIGEN_CONVERSION_EXACT_INTEGER, conversion);
 	if (data_type_is_pigen_integer(model, source) &&
@@ -911,6 +914,14 @@ int pigen_data_type_resolve_assignment_conversion(
 		source_interpretation == target_interpretation)
 		return conversion_resolve(model, source, target,
 			PIGEN_CONVERSION_INTEGER_RESIZE, conversion);
+	/* Assigning into an ordinary SystemVerilog vector target preserves bit
+	 * meaning; width changes are handled by the cast in emission. */
+	if (pigen_data_type_is_integral(model, source) &&
+		pigen_data_type_is_integral(model, target) &&
+		(target_interpretation == PIGEN_NUMERICAL_SYSTEMVERILOG ||
+		data_type_is_raw_vector(model, target)))
+		return conversion_resolve(model, source, target,
+			PIGEN_CONVERSION_INTEGER_REINTERPRET, conversion);
 	return 0;
 }
 

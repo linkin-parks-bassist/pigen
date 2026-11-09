@@ -99,6 +99,17 @@ typedef enum {
 	PIGEN_RTL_OBJECT_MEMORY
 } pigen_rtl_object_kind;
 
+/* Backend storage primitive selected by a buffered signal's realization.
+ * The emitter owns the primitive definition spellings and port names; the
+ * record carries only the semantic selection. */
+typedef enum {
+	PIGEN_RTL_PRIMITIVE_INVALID,
+	PIGEN_RTL_PRIMITIVE_BUF,
+	PIGEN_RTL_PRIMITIVE_PORT,
+	PIGEN_RTL_PRIMITIVE_FIFO,
+	PIGEN_RTL_PRIMITIVE_SKID
+} pigen_rtl_primitive;
+
 typedef struct {
 	pigen_source_span origin;
 	pigen_rtl_object_kind kind;
@@ -106,7 +117,17 @@ typedef struct {
 	pigen_semantic_direction direction;
 	pigen_signal_id semantic_signal; /* Provenance; invalid if synthetic. */
 	pigen_rtl_module_id module; /* Invalid until owner resolution publishes it. */
+	char *name; /* Final terminal name owned by the model; NULL falls back to
+	             * the name arena (the t10 emitter contract). */
 } pigen_rtl_object;
+
+/* One instance port connection: a named port bound to an object, or to a
+ * literal/expression value when object is invalid. */
+typedef struct {
+	const char *port;
+	pigen_rtl_object_id object;
+	pigen_rtl_expr_id value;
+} pigen_rtl_connection;
 
 typedef struct {
 	pigen_source_span origin;
@@ -114,6 +135,11 @@ typedef struct {
 	pigen_rtl_record_range parameters; /* Ordered instance parameter range. */
 	pigen_rtl_record_range connections; /* Ordered instance connection range. */
 	pigen_rtl_module_id module; /* Invalid until owner resolution publishes it. */
+	pigen_rtl_primitive primitive;
+	pigen_rtl_type_id payload_type; /* PAYLOAD_T type parameter; invalid if none. */
+	pigen_rtl_record_range connection_records; /* Named connections; empty uses
+	                                            * the positional object range. */
+	char *name; /* Final instance name; NULL falls back to the name arena. */
 } pigen_rtl_instance;
 
 typedef struct {
@@ -127,6 +153,7 @@ typedef struct {
 	pigen_source_span origin;
 	pigen_rtl_object_id destination;
 	pigen_rtl_expr_id value;
+	pigen_rtl_expr_id enable; /* Invalid means unconditional. */
 	pigen_rtl_module_id module; /* Invalid until owner resolution publishes it. */
 } pigen_rtl_update;
 
@@ -145,6 +172,7 @@ typedef struct {
 	pigen_rtl_record_range instances;
 	pigen_rtl_record_range equations;
 	pigen_rtl_record_range processes;
+	char *name; /* Final module name; NULL falls back to the name arena. */
 } pigen_rtl_module;
 
 typedef enum {
@@ -199,6 +227,9 @@ typedef struct {
 	pigen_rtl_object_id *instance_connections;
 	size_t instance_connection_count;
 	size_t instance_connection_capacity;
+	pigen_rtl_connection *connections;
+	size_t connection_count;
+	size_t connection_capacity;
 	pigen_rtl_name *names;
 	size_t name_count;
 	size_t name_capacity;
@@ -303,11 +334,21 @@ pigen_rtl_instance_id pigen_rtl_instance_add_with_owner(
 pigen_rtl_update_id pigen_rtl_update_add_with_owner(pigen_rtl_model *model,
 	pigen_rtl_module_id module, pigen_rtl_object_id destination,
 	pigen_rtl_expr_id value, pigen_source_span span);
+int pigen_rtl_update_set_enable(pigen_rtl_model *model,
+	pigen_rtl_update_id update, pigen_rtl_expr_id enable);
 pigen_rtl_process_id pigen_rtl_process_add_with_owner(
 	pigen_rtl_model *model, pigen_rtl_module_id module,
 	pigen_rtl_expr_id clock_expression, pigen_semantic_edge edge,
 	const pigen_rtl_update_id *updates, size_t update_count,
 	pigen_source_span span);
+/* Append a named connection range owned by the model. */
+pigen_rtl_record_range pigen_rtl_connection_range_add(pigen_rtl_model *model,
+	const pigen_rtl_connection *connections, size_t count);
+/* Attach a storage primitive selection to an instance. */
+int pigen_rtl_instance_set_primitive(pigen_rtl_model *model,
+	pigen_rtl_instance_id instance, pigen_rtl_primitive primitive,
+	pigen_rtl_type_id payload_type, pigen_rtl_record_range connection_records);
+void pigen_rtl_set_name(pigen_rtl_model *model, char **slot, const char *text);
 void pigen_free_rtl_model(pigen_rtl_model *model);
 
 #endif

@@ -262,19 +262,43 @@ static void add_child(syntax_parser *parser, pigen_syntax_id parent,
 	owner->last_child = child;
 }
 
+static void add_opaque_bytes(syntax_parser *parser, pigen_syntax_id parent,
+	size_t start, size_t end);
+/* Emit the bytes between the previous emitted item and the first byte of
+ * token `start` as OPAQUE filler. Opaque gaps are byte-exact so the emitter's
+ * monotonic-coverage gate sees one contiguous cover of the whole source; the
+ * token-extent form left whitespace uncovered and let the module-tail span
+ * overlap the last parsed process. The `end` cursor is retained for the
+ * historical call shape; coverage is driven by the byte cursor. */
 static void add_opaque(syntax_parser *parser, pigen_syntax_id parent,
 	syntax_cursor start, syntax_cursor end)
 {
-	pigen_syntax_node node = {0};
-	pigen_syntax_id id;
+	const pigen_expanded_token *token;
+	size_t start_byte;
 
-	if (start == end) return;
-	node.kind = PIGEN_SYNTAX_OPAQUE;
-	node.location = range_location(parser, start, end);
-	node.parent = INVALID_SYNTAX;
-	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
-	id = add_node(parser, node);
-	add_child(parser, parent, id);
+	/* The gap runs to the first byte of the next parsed item (`end`); `start`
+	 * records the previous item's end for the historical call shape. */
+	(void)start;
+	if (end >= parser->expanded->token_count) return;
+	token = &parser->expanded->tokens[end];
+	if (token->kind == PIGEN_TOKEN_EOF)
+		start_byte = parser->source_length;
+	else
+		start_byte = pigen_origin_expansion_span(parser->expanded,
+			token->origin).start;
+	add_opaque_bytes(parser, parent, parser->opaque_byte_cursor, start_byte);
+}
+
+/* Advance the opaque byte cursor to the end of the last consumed token. */
+static void advance_opaque_byte_cursor(syntax_parser *parser, size_t after)
+{
+	size_t end_byte;
+
+	if (!after || after > parser->expanded->token_count) return;
+	end_byte = pigen_origin_expansion_span(parser->expanded,
+		parser->expanded->tokens[after - 1].origin).end;
+	if (end_byte > parser->opaque_byte_cursor)
+		parser->opaque_byte_cursor = end_byte;
 }
 
 /* Emit an OPAQUE node with a byte-extent span (start..end are byte offsets
@@ -811,6 +835,7 @@ static declaration_parse_result parse_typedef(syntax_parser *parser,
 	add_child(parser, parent, id);
 	add_typedef_name_fact(parser, node.as.type_definition.name, parent,
 		TYPEDEF_NAME_ELIGIBLE);
+	advance_opaque_byte_cursor(parser, semicolon + 1);
 	*opaque_cursor = semicolon + 1;
 	return DECLARATION_RECOGNIZED;
 }
@@ -940,6 +965,7 @@ static int parse_parameter(syntax_parser *parser, pigen_syntax_id module,
 		return 0;
 	id = add_node(parser, node);
 	add_child(parser, module, id);
+	advance_opaque_byte_cursor(parser, after);
 	*opaque_cursor = after;
 	return 1;
 }
@@ -1361,6 +1387,26 @@ static int parse_pipeline_stage(syntax_parser *parser, pigen_syntax_id pipeline,
 	int has_name = 0;
 
 	if (!token_is(parser, start, "stage")) return 0;
+	/* Compact stage form: `stage: statement;` (no begin/end). */
+	if (token_is(parser, at, ":"))
+	{
+		size_t item_after;
+
+		node.kind = PIGEN_SYNTAX_STAGE;
+		node.as.stage.has_name = 0;
+		node.parent = INVALID_SYNTAX;
+		node.first_child = node.last_child = node.next_sibling =
+			INVALID_SYNTAX;
+		stage = add_node(parser, node);
+		add_child(parser, pipeline, stage);
+		if (!parse_pipeline_stage_item(parser, stage, at + 1, limit,
+			&item_after))
+			return 0;
+		parser->tree->nodes[stage.index].location = range_location(parser,
+			start, item_after);
+		*after_stage = item_after;
+		return 1;
+	}
 	if (at >= limit)
 		return fail(parser, start, "pipeline stage requires `begin`");
 	if (identifier(parser, at) && !token_is(parser, at, "begin"))
@@ -1965,6 +2011,7 @@ static int parse_clocked_process(syntax_parser *parser,
 		process_after);
 	add_opaque(parser, module, *opaque_cursor, start);
 	add_child(parser, module, process);
+	advance_opaque_byte_cursor(parser, process_after);
 	*opaque_cursor = process_after;
 	*after_process = process_after;
 	return 1;
@@ -1998,6 +2045,7 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			size_t fsm_after;
 			if (parse_fsm(parser, module, at, after, &fsm_after))
 			{
+				advance_opaque_byte_cursor(parser, fsm_after);
 				at = fsm_after;
 				item_start = 1;
 				continue;
@@ -2153,7 +2201,6 @@ static int parse_module(syntax_parser *parser, pigen_syntax_id root,
 	module = add_node(parser, node);
 	add_child(parser, root, module);
 	opaque_cursor = start;
-	parser->opaque_byte_cursor = 0;
 	header_at = name + 1;
 	if (token_is(parser, header_at, "#"))
 	{
@@ -2179,8 +2226,14 @@ static int parse_module(syntax_parser *parser, pigen_syntax_id root,
 	}
 	if (!parse_module_items(parser, module, header_end + 1, endmodule,
 		&opaque_cursor)) return 0;
-	add_opaque_bytes(parser, module, parser->opaque_byte_cursor,
-		parser->source_length);
+	{
+		size_t module_end = pigen_origin_expansion_span(parser->expanded,
+			parser->expanded->tokens[endmodule].origin).end;
+
+		add_opaque_bytes(parser, module, parser->opaque_byte_cursor,
+			module_end);
+		advance_opaque_byte_cursor(parser, endmodule + 1);
+	}
 	*after_module = endmodule + 1;
 	return 1;
 }
@@ -2261,7 +2314,20 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 		}
 		opaque_cursor = at;
 	}
-	add_opaque(&parser, root, opaque_cursor, at);
+	/* Trailing bytes after the last design unit belong to the last module's
+	 * nested scope when that is the most recent top-level item, so a module's
+	 * owner-managed layout covers the complete remaining source. */
+	{
+		pigen_syntax_id owner = root;
+		pigen_syntax_node *last = parser.tree->nodes[0].last_child.index ==
+			PIGEN_INVALID_ID ? NULL :
+			&parser.tree->nodes[parser.tree->nodes[0].last_child.index];
+
+		if (last && last->kind == PIGEN_SYNTAX_MODULE)
+			owner = parser.tree->nodes[0].last_child;
+		add_opaque_bytes(&parser, owner, parser.opaque_byte_cursor,
+			parser.source_length);
+	}
 	free(parser.typedef_name_facts);
 	return 1;
 }

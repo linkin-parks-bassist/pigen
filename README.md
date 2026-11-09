@@ -1,210 +1,322 @@
 # Pigen
 
-Pigen is a **pre-release C17 source-to-source compiler** that extends ordinary
-SystemVerilog with **ready/valid atomic transfers** and **inline pipeline,
-fabric, and FSM blocks**. It reads `.pigen` sources, performs type and semantic
-analysis, and emits readable, synthesizable SystemVerilog. Because it is
-source-to-source it does not change simulation timing: accepted non-Pigen
-SystemVerilog must preserve widths, signedness, events, reset, and observable
-cycles.
+Pigen (short for **pi**peline **gen**erator) is a SystemVerilog extension for
+building synchronous, ready/valid hardware. It adds the transfer types `buf`,
+`port`, `fifo`, and `skid` alongside the static `wire`, `reg`, and `logic`.
+Non-blocking assignment performs the appropriate handshake, so
+`destination <= source` says what moves where without separately rebuilding
+valid, ready, occupancy, and enable logic.
 
-## Language
+The aim is an ennicening of Verilog. The hardware is still there: widths,
+clocks, storage, timing boundaries and cycle behaviour remain explicit. What
+Pigen takes away is the repeated flow-control bookkeeping that tends to bury the
+actual design.
 
-A runtime signal is a **data type × transfer type × declarator shape**, declared
-data-first, e.g.:
+## Transfer types
+
+Every signal has a transfer type. It defines the signal's validity, readiness,
+storage, consumption, and production laws. In emitted RTL, payload and `valid`
+travel from producer to consumer while `ready` travels back. Pigen creates and
+connects that interface automatically.
+
+`valid` means that the producer is offering a value. `ready` means that the
+consumer can accept it. When both are high on a clock edge, the consumer
+accepts the offered value. That event is a *transfer*.
+
+The transfer type determines how the signal is stored and how its handshake
+behaves. Existing Verilog signals are statics in the same model, so all of
+these transfer types participate in the same operation.
+
+| Transfer type | Valid behaviour | Ready behaviour | What it is |
+| --- | --- | --- | --- |
+| `wire` | Always valid | Never a destination | An always-offered combinational value |
+| `reg`, `logic` | Always valid | Always ready | An always-available static signal; reading it does not consume it |
+| `buf` | Valid when occupied | Ready when it can accept | A one-entry elastic register |
+| `port` | A one-cycle pulse | Always ready | A registered result offered for one cycle |
+| `fifo` | Valid when non-empty | Ready when non-full | An ordered, depth-N queue |
+| `skid` | Valid when non-empty | Ready when non-full | A two-entry skid buffer with registered backpressure |
+
+`wire`, `reg`, and `logic` are static transfer types, or statics. Their constant
+laws are the trivial cases of the same transfer algebra, not exceptions to it.
+The compiler folds their constant handshake behavior out of generated hardware
+where the connection context permits.
+
+## Data types
+
+The data type says what bits a signal carries and how operations interpret
+them; the transfer type says how that value exists in time. Pigen's current
+primitive data types are signed `int[n]`, unsigned `uint[n]`, and one-bit
+`bit`. A count after `bit` is compact packed-width notation, so `bit[8]` is a
+neutral eight-bit value and `bit[32]` is a neutral 32-bit value.
+
+Every runtime datum is a signal with three independent components:
+
+```text
+signal = data type × transfer type × declarator shape
+```
+
+Declarations put the data type first, then the transfer type and any argument,
+then the signal name and its declarator shape:
 
 ```systemverilog
+bit[32] wire address;
+int[16] buf sample;
+uint[24] port result;
+bit[8] logic tag;
 int[16] fifo[8] pending[lanes];
 ```
 
-Pigen primitives are the two-state `int[n]`, `uint[n]`, and `bit`/`bit[n]`;
-ordinary SystemVerilog `byte` is its own signed type. Transfer types are the
-`wire`/`reg`/`logic` statics plus `buf`/`port`/`fifo`/`skid`, and abstract input
-variables.
+In the last declaration, `int[16]` is the data type, `fifo[8]` is a FIFO
+transfer type with depth eight, and `[lanes]` is the declarator shape. FIFO
+depth is storage behavior, not a payload or array dimension.
 
-Every module input has payload/valid inbound and ready outbound; unqualified
-inputs are abstract and explicit annotations constrain compatible peers. A
-**transfer** has one guard and one fire event across all ready destinations and
-distinct valid-consuming sources. Projections consume complete base tokens,
-repeated reads deduplicate, co-slices preserve packed bit-stream order, and
-buffered destinations are whole. Ownership requires exclusive buffered
-producers/consumers; self-consumption and unbroken ready cycles are errors.
+An unqualified Pigen module input has an abstract transfer type specialized by
+its connection, while an explicit transfer type constrains what may connect to
+it. Internal and output `int[n]` and `uint[n]` signals require an explicit
+realization; `bit` may use its data-type-owned static default where the
+specification permits. Ordinary SystemVerilog `byte` remains its distinct
+signed eight-bit integral type. It is neither a Pigen primitive nor an alias
+for `bit[8]`. The precise rules are in [`SPEC.md`](SPEC.md).
 
-Inline **pipeline** stages read immutable incoming fields and define outgoing
-packet state (`buf`, `yield`, complete procedural guards, reset bindings).
-**Fabrics** connect resolved child instance-port identities with per-connection
-payload compatibility, exclusive direct links or arbitrated routed links, and
-registered-occupancy buffering. **FSM** state bodies are ordinary statements;
-`goto` is guarded and terminal and never implicitly waits for a transfer.
+## The transfer is the fundamental unit
 
-## Current implementation state
+In Pigen, `<=` means **transfer this value**.
 
-Pigen has two frontends:
-
-- A **production prototype**: a quarantined textual pipeline that compiles the
-  full example set end to end and passes the full `make verify` regression
-  suite. This is what `make pigen` builds today.
-- A **structured frontend**: the data-first semantic model plus an elastic RTL
-  lowering slice, built in parallel and quarantined from production. It has not
-  been attached to `./pigen` yet, and there is no partial attachment, fallback,
-  second dialect, or per-file choice. Production switches only when the
-  structured route covers every retained feature and deletes the corresponding
-  textual machinery in the same change.
-
-The structured frontend has resolved source/token provenance and preprocessing,
-shared type/declaration syntax, scopes and stable symbols, canonical data
-types/shapes and exact integers, intrinsic two-stage expressions and explicit
-conversions, lvalues/predicates/clock domains, one signal arena, direct
-transfers, and deduplicated incidence and ownership.
-
-### The elastic RTL vertical slice
-
-This is the active structured work, tracked as Tasks 1–12 (Task 7,
-ready-cycle validation, is deferred to Pigen 1.0).
-
-- **Tasks 1–6 implemented.** IDs/arena, canonical types/expressions,
-  owner-validated hardware constructors and collision-safe names, type and
-  expression adapters, and declaration lowering (the realization/endpoint
-  shapes, the BOUNDARY three-port lowering, net/variable payload realizations
-  with their 1-bit valid/ready constant controls, and the four storage
-  realizations, FIFO carrying its semantic depth parameter).
-- **Task 8 (atomic transfers sharing one fire identity) complete.** Both
-  lowering entry points (`pigen_lower_rtl_transfers`, `pigen_lower_rtl_module`)
-  and the owner-level enumeration accessors (`pigen_module_processes`,
-  `pigen_process_transfers`) are implemented. The full contract is a permanent
-  green `rtl-lower-test` manifest: `t8-accessor`, `t8-module`, `t8-fire-identity`,
-  `t8-join`, `t8-guard` (including the strengthened shared-identity assertion on
-  its guard-bearing witness), `t8-ownership`, `t8-projection`, `t8-static`, and
-  `t8-process-order`, each its own `contracts.json` entry.
-- **Task 9 (exact ordered output) in motion.** The ordered output model's shape,
-  its owner-managed append/child-nesting, its failed-nested-append
-  state-invariance pin, and its exact monotonic-coverage gate are implemented and
-  green: `t9-skeleton`, `t9-nesting`, `t9-failed-append`, and `t9-coverage` are
-  each a permanent green `output-model-test` section. The next in-order step is
-  the build walk, `pigen_build_output_model`, walking syntax child order against
-  the lowering mappings; the missing-lowered-identity diagnostic follows it.
-  One product decision is pending on that step: the gate's `{1, OK}` pin is not
-  reachable under the emission rule (opaque spans are token-extent, so a
-  structured item's own extent is not spanned by an opaque item). The rule and
-  the rest of the walk are settled; the fix is either to relax that pin to a
-  reachable assertion or to let a structured extent stand without an opaque span
-  over it.
-- **Tasks 10–12 unimplemented**: terminal SV emission (Task 10), quarantined
-  composition/simulation (Task 11), and verification and accurate status
-  (Task 12).
-
-## Building and testing
-
-Requirements: a C17 compiler, Icarus Verilog 13.0, and Verilator 5.020.
-(On Ubuntu the packaged Icarus 12.0 mis-elaborates `$bits(<signal>)` widths; use
-13.0.)
-
-```sh
-make            # build the pigen executable (production prototype)
-make test       # build + run the structured foundation targets and smoke suite
-make verify     # full regression: every example/testbench through iverilog/verilator
+```systemverilog
+outgoing <= incoming;
 ```
 
-The structured foundation is eleven C test targets — `source-test`,
-`preprocess-test`, `transfer-type-test`, `syntax-model-test`, `integer-test`,
-`semantic-test`, `predicate-test`, `expression-resolve-test`,
-`expression-use-test`, `resolve-test`, and `rtl-test` — plus `fabric-test`,
-`core-language-test`, and `pipeline-test` (all exercised through `./pigen`), and
-`./tests/smoke.sh`. All pass on master.
+The transfer happens on a clock edge when `incoming` is valid and `outgoing` is
+ready. Otherwise nothing happens: the source is not consumed and the
+destination is not changed.
 
-Structured-RTL and ordered-output targets (the C test binaries compile
-standalone under `/tmp`):
+This rule does not depend on whether either end is a wire, register, buffer,
+port, FIFO or skid buffer. Those are all sources and destinations of the same
+operation. They differ in their ready/valid behaviour and in the storage they
+imply, but they do not require different assignment operators or different
+control structures.
 
-- `make rtl-lower-test` — the elastic RTL lowering slice (Tasks 5, 6, and 8).
-  Runs every present section and reports `24 passed, 0 failed` on master.
-- `make output-model-test` — the Task 9 ordered output model. Runs
-  `t9-skeleton`, `t9-nesting`, `t9-failed-append`, and `t9-coverage`; all four
-  pass.
-- `make rtl-test`, `make rtl-name-test`, and `make transfer-type-test` — the
-  structured RTL arena, collision-safe naming, and transfer-type catalogue
-  regressions. All green.
+This is the central idea of Pigen. A wire and a FIFO are very different pieces
+of hardware, but a transfer involving either means the same thing. The
+handshake may be tied high, last one cycle, or remain stalled for ten cycles;
+the surrounding logic does not need a special case.
 
-### The `T=` section filter
+Here is a complete elastic path:
 
-`rtl-lower-test` and `output-model-test` use a section harness. Sections are
-named by task (`t5-*`, `t6-*`, `t8-*` for the lowering slice; `t9-*` for the
-ordered output model). The `t5-*` sections share one semantic/RTL model and must
-run together, while each `t6-*` section builds its own model. Select sections by
-name prefix and `--list` prints the names:
+```systemverilog
+module packet_path
+    (
+        input  logic        clk,
+        input  logic        reset,
+        input  bit[32] buf  incoming,
+        output bit[32] buf  outgoing
+    );
 
-```sh
-make rtl-lower-test                      # run all present sections
-make rtl-lower-test T=t8-accessor        # run a single section
-make rtl-lower-test T="t6-storage t6-boundary"   # run a subset
-make rtl-lower-test T=--list             # list the section names
-make output-model-test T=t9-coverage     # one ordered-output section
+    bit[32] reg     decoded;
+    bit[32] skid    timing_break;
+    bit[32] fifo[8] pending;
+
+    always_ff @(posedge clk) begin
+        decoded      <= incoming;
+        timing_break <= decoded;
+        pending      <= timing_break;
+        outgoing     <= pending;
+    end
+endmodule
 ```
 
-The production-prototype regressions (all exercised by `make verify`):
-`pipeline-test`, `pipeline-scope-test`, `pipeline-syntax-test`, `biquad-bank-test`,
-`coslice-test`, `slicing-test`, `signal-syntax-test`, `validate-test`,
-`signed-widen-test`, `ready-break-test`, `clear-test`, `fsm-test`, and the
-example-design waveform builds (`make waveform`, `make compiler-waveform`,
-`make mac-waveform`, `make biquad-waveform`, `make text-waveform`,
-`make join-waveform`, `make fifo-waveform`, `make skid-waveform`,
-`make skid-compare-waveform`, `make port-waveform`, `make bram-waveform`,
-`make guarded-waveform`, `make output-waveform`). `make clean` removes the
-built `pigen` executable.
+Each line says what moves where. Pigen generates the occupancy bits, enables,
+backpressure and queue control needed to make it true.
 
-The compiler itself is invoked as:
+## Transfers compose
 
-```sh
-./pigen input.pigen -o output.sv
+The handshake applies to a whole expression, not one operand at a time:
+
+```systemverilog
+result <= sample * coefficient + bias;
 ```
 
-## Project layout
+This waits until all three inputs are valid and `result` is ready, then consumes
+the inputs together. Pigen treats it as one atomic join.
 
-- `src/` — compiler source. Frontend (source, lexer, preprocess, syntax,
-  type/declaration, semantic resolve), owner subsystems (`transfer`, `pipeline`,
-  `fsm`, `blocks`), the structured RTL layer (`rtl`, `rtl_lower`, `rtl_name`),
-  and the ordered output model (`output`). `pigen.c` is the production prototype
-  entry point.
-- `include/pigen/` — the C interfaces for every subsystem.
-- `rtl/pigen_primitives.sv` — synthesizable storage primitives (FIFO, skid, buf,
-  port) emitted alongside generated designs.
-- `tests/` — C/hardware regressions: structured foundation tests (`*_test.c`),
-  `.pigen` designs, and `*_tb.sv` testbenches. `contracts.json` and the shell
-  drivers (`smoke.sh`, `core_language.sh`, `fabric_smoke.sh`, …) orchestrate the
-  suites; each `rtl-lower-test` and `output-model-test` section is one manifest
-  entry.
-- `examples/` — executable prototype designs (`.pigen`) with testbenches
-  (`*_tb.sv`) covering pipelines, fabrics, and the retained-core examples.
-- `.knowledge/` — the project's maintained knowledge source (spec, plan,
-  contracts, and answer leaves).
+Concatenation gives the corresponding way to join, split and co-slice values:
 
-## Status
+```systemverilog
+packet <= {header, body};
+{opcode, payload} <= packet;
+{upper, lower} <= {wide_packet[15:8], wide_packet[7:0]};
+```
 
-Pigen is pre-release. The production prototype compiles the example set and
-passes `make verify`; the structured frontend's elastic RTL lowering has Task 8
-complete and Task 9 in motion (its ordered output model is implemented through
-the monotonic-coverage gate, with the build walk and the missing-identity
-diagnostic still to land). It does not yet emit terminal SV (Task 10) and is not
-attached to `./pigen`. Accepted non-Pigen SystemVerilog forms that fail to
-preserve meaning are compiler defects to diagnose, not language restrictions.
+The last two examples are each one transfer and one consumption of the source,
+even though several destinations receive pieces of it. Every destination must
+be ready before anything moves. This is how one token can be deliberately
+partitioned or duplicated into correlated outputs without accidentally
+creating several independent consumers.
 
-Known gaps, tracked in the project knowledge tree
-(`.knowledge/what/is/broken.md`):
+For related updates that are clearer as statements, a transfer block says the
+same thing explicitly:
 
-- **Co-slice gives the last destination the whole aggregate.** For a
-  multi-destination co-sliced transfer the prototype assigns the full packed
-  aggregate to the last destination instead of its slice. Verilator reports it
-  as `WIDTHTRUNC` warnings; `make verify` does not treat them as failures, so
-  they pass silently.
-- **`make verify` passes but does not fail on lint warnings.** Its Verilator
-  lint runs with `-Wno-fatal`, so width warnings such as the co-slice
-  truncation above pass silently. Making the lint fail on warnings is a named
-  next step.
-- **The elastic RTL vertical slice is incomplete.** Tasks 9 (build walk,
-  missing-identity diagnostic), 10 (terminal SV emission), 11 (quarantined
-  composition/simulation), and 12 (verification and accurate status) remain.
-- **The structured frontend is unlinked from production `./pigen`.** The
-  production `make pigen` target still builds the textual prototype, not the
-  structured path.
-- **`pigen_rtl_module_add` leaves a record partly uninitialized.** Only the
-  `origin` is set; the owner ranges stay uninitialized (unlike the
-  with-owner constructor). No production caller uses the plain form today.
+```systemverilog
+transfer begin
+    output_packet <= result;
+    history       <= result;
+end
+```
+
+The block fires as a unit. Either both destinations accept the value or neither
+does.
+
+By default, a buffered signal has one producer and one consumer. That rule
+is what makes backpressure and token ownership unambiguous. Multiple syntactic
+routes are allowed when Pigen can prove they are mutually exclusive; deliberate
+fan-out belongs in one co-sliced transfer or transfer block, where its atomicity
+is visible.
+
+## Control can ask whether a transfer happened
+
+Ordinary `if`, `else` and `case` statements can guard transfers. Pigen also
+provides a compact form for the common case where control should advance only
+when a value really moved:
+
+```systemverilog
+if (destination <= source) begin
+    count <= count + 1;
+end
+```
+
+This performs the transfer and enters the branch on the cycle it is accepted.
+It is the operational counterpart of `accepts(destination, source)`, and avoids
+writing a transfer in one place and a subtly different handshake test in
+another. `valid`, `ready`, `accepts`, `peek`, `validate`, `invalidate` and
+`flush` are available when control logic needs to inspect or manage signal
+state directly.
+
+## Pipeline blocks
+
+A `pipeline` block describes a sequence of elastic packet transformations:
+
+```systemverilog
+pipeline filter begin
+    int[16] sample, product, result;
+
+    stage: sample <= input_sample;
+    stage: product <= sample * coefficient;
+    stage: result <= product + bias;
+
+    yield result;
+endpipeline
+
+output_sample <= filter;
+```
+
+Pipeline fields travel with the packet. Every `stage` introduces an elastic
+boundary, and `yield` exposes the final result as another buffered transfer
+source. Stalls propagate through the pipeline automatically; a stage only
+advances when all of the values it needs are present and the next stage can
+accept them.
+
+Pipeline fields are necessarily `buf`, so their declarations normally omit the
+redundant transfer type. Writing `int[16] buf sample;` is also legal; writing any
+other transfer type for a pipeline field is an error.
+
+## Fabric blocks
+
+A `fabric` is an inline module block, like a `pipeline` or `transfer` block. It
+connects the input and output ports of child-module instances:
+
+```systemverilog
+fabric sample_path begin
+    adc.samples       -> filter.samples;
+    filter.results    >  dma.sample_data;
+    cpu.mem_requests  -> memory.requests;
+    dma.mem_requests  --> memory.requests;
+    memory.responses  -> cpu.mem_responses;
+endfabric
+```
+
+These are port-to-port transfers. Pigen infers and checks each payload width,
+then generates the ready/valid plumbing, backpressure, pipelining and
+arbitration. The child modules remain source-blind: each sees its own payload,
+valid and ready, not the topology on the other side.
+
+Dashed arrows use a balanced network of skid-buffered three-port routers, giving
+logarithmic routing depth, broken ready paths and a pipelined hop structure.
+The three-port shape is deliberate: once a packet arrives on one port, it has
+exactly two possible onward ports, so each hop needs only one direction bit.
+The complete relative address is therefore a shifting bitstring, with one bit
+consumed at each router. Contention is currently arbitrated round-robin;
+priorities are planned. A plain `>` is a direct exclusive connection and
+bypasses the routed network.
+
+Pigen generates an SVG from the same topology used to generate the RTL:
+
+<img src="docs/fabric.svg" alt="A Pigen fabric with endpoints and routed links" width="900">
+
+Use `--diagram PATH` to choose the SVG path or `--no-diagram` to suppress it.
+
+This inline, width-inferred form is intended but not yet implemented. The
+current compiler still accepts top-level, fixed-width fabric blocks; that form
+will be replaced outright. Cleaner struct-like module instantiation syntax is
+planned separately.
+
+## FSM blocks
+
+An `fsm` is not a different model of hardware. It is the familiar synchronous
+state register and `case` statement, with the boilerplate pulled out and
+transfers left in their natural form:
+
+```systemverilog
+fsm sender @(posedge clk) reset (reset) initial idle
+begin
+    state idle: if (start) goto send;
+
+    state send: if (destination <= source) goto idle;
+end
+```
+
+States, reset behaviour and transitions are explicit. The useful difference is
+that the state machine speaks the same transfer language as the datapath: it
+can wait on validity, readiness or an accepted transfer without rebuilding the
+handshake by hand.
+
+## SystemVerilog remains SystemVerilog
+
+Pigen is an extension to SystemVerilog, not a replacement HDL. Modules, ports,
+parameters, packed and unpacked arrays, expressions, functions, testbenches and
+ordinary procedural logic remain available. Pigen constructs can sit beside
+plain SystemVerilog, so a design can use them where they help without requiring
+the whole codebase to be rewritten.
+
+There is a strict compatibility contract: accepted non-Pigen SystemVerilog
+retains its widths, signedness, scheduling, reset and cycle behaviour when
+processed by Pigen. Pigen syntax may change freely while the project is young;
+unrelated SystemVerilog does not.
+
+## Build and try the production prototype
+
+A C compiler and `make` are enough to build Pigen. The full verification suite
+also uses Icarus Verilog and Verilator.
+
+```sh
+make
+./pigen design.pigen -o generated.sv
+./pigen network.pigen -o network.sv --diagram network.svg
+make verify
+```
+
+These commands build and exercise the current production prototype. Its
+accepted syntax is documented in [`USER_GUIDE.md`](USER_GUIDE.md); the
+data-first target examples in this README become executable when the vertical
+RTL-lowering slice connects the shared frontend to `./pigen`.
+
+Generated designs use the small primitives in
+[`rtl/pigen_primitives.sv`](rtl/pigen_primitives.sv).
+
+Useful places to continue:
+
+- [`USER_GUIDE.md`](USER_GUIDE.md) is a practical guide to the currently
+  implemented language.
+- [`SPEC.md`](SPEC.md) is the precise language and SystemVerilog compatibility
+  contract.
+- [`examples`](examples) contains small designs for buffers, joins, queues,
+  ports, skid stages and larger datapaths.

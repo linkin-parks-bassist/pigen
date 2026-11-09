@@ -1,10 +1,10 @@
 ---
 status: green
-revised_at: "2026-09-14T20:35:24+10:00"
+revised_at: "2026-10-31T15:51:30+11:00"
 ---
 
-The unlinked production executable still accepts transfer-first prototype declarations: `buf [15:0] work;`, `fifo [31:0][16] requests;`, `skid [31:0] response;`, `port [31:0] bram_result;`. FIFO spelling puts payload range before depth; reversing them is invalid. Signed payloads use `buf signed [23:0] sample;` or `fifo signed [23:0][4] samples;`; emitted payload and primitive type parameters retain signedness. `$signed` is an intentional reinterpretation. These forms are quarantined executable behavior, never an alternate specified Pigen language or compatibility promise. Target declarations are data-first and must replace them when one complete structured production path is ready.
+Production ./pigen uses the structured frontend. Transfer-first prototype declarations such as `buf [7:0] sample;` are rejected with "data type must precede the transfer type". Use data-first syntax, for example `logic [7:0] buf sample;` (tests/owned_signal.pigen). This is not evidence of complete executable semantics: the master CLI can accept declarations and emit plain logic while omitting transfer/storage behavior.
 
-Prototype ANSI ports may use `input buf [31:0] request` and `output fifo [31:0][8] response`. Public expansion uses payload, `_valid`, `_ready`. Input buf/fifo/skid is an upstream-owned view, not duplicate child storage; local validity actions cannot reach upstream. Child output storage belongs to the child. Connect generated public ports with ordinary SV instantiation and explicit signals; never depend on private `__pigen_*` names.
+The examples/ and tests/ corpus still contains prototype syntax, including transfer-first ports and inline pipelines. Those files are migration evidence, not a runnable production-language recipe. Consult does/the/structured/frontend/run/in/production.md and what/is/broken.md before relying on them. There is no approved alternate dialect, fallback or per-file compiler choice.
 
-An executable inline pipeline goes inside a clocked process: `pipeline add_then_clip begin logic [8:0] sum; logic [7:0] result; stage begin sum <= left + right; end stage begin result <= sum[8] ? 8'hff : sum[7:0]; end yield result; endpipeline`, then `out <= add_then_clip;`. This is an elastic packet transform, not an untimed multi-cycle program. Runnable examples/tests remain in examples/ and tests/.
+For an isolated CLI probe, build a pinned source snapshot outside active worktrees, run `./pigen INPUT.pigen -o OUTPUT.sv`, inspect the emitted behavior, and simulate relevant semantics; successful compilation alone does not establish correctness.

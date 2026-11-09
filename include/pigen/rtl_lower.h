@@ -31,6 +31,10 @@ typedef struct {
 	pigen_rtl_object_id input_payload;
 	pigen_rtl_object_id input_valid;
 	pigen_rtl_object_id input_ready;
+	/* The signal's consumption-ready control (the primitive's out_ready or a
+	 * boundary ready port). Transfer lowering drives it from the fire
+	 * identity; invalid for always-ready static signals. */
+	pigen_rtl_object_id source_ready;
 } pigen_rtl_signal_endpoints;
 
 /* One lowering pass. semantics is the validated source model and rtl is the

@@ -1565,6 +1565,28 @@ pigen_expr_id pigen_expr_add_concatenation(pigen_semantic_model *model,
 	return result;
 }
 
+pigen_expr_id pigen_expr_add_accepts(pigen_semantic_model *model,
+	pigen_lvalue_id destination, pigen_expr_id source,
+	pigen_signal_id source_signal, pigen_source_span span)
+{
+	pigen_semantic_expr expression = {0};
+
+	if (!model || destination.index == PIGEN_INVALID_ID ||
+		!pigen_expr_get(model, source) ||
+		source_signal.index == PIGEN_INVALID_ID ||
+		!pigen_signal_get(model, source_signal))
+		return INVALID_ID(pigen_expr_id);
+	expression.kind = PIGEN_EXPR_ACCEPTS;
+	expression.data_type = model->boolean_data_type;
+	expression.shape = pigen_semantic_scalar_shape(model);
+	expression.span = span;
+	expression.constant = INVALID_ID(pigen_const_expr_id);
+	expression.as.accepts.destination = destination;
+	expression.as.accepts.source = source;
+	expression.as.accepts.source_signal = source_signal;
+	return add_expression(model, expression);
+}
+
 const pigen_semantic_expr *pigen_expr_get(const pigen_semantic_model *model,
 	pigen_expr_id expression)
 {
