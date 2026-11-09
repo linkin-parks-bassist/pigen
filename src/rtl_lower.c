@@ -2242,7 +2242,6 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			}
 		}
 
-		if (update_count)
 		{
 			pigen_rtl_process_id proc_id = pigen_rtl_process_add_with_owner(rtl, rtl_module, clock_expr,
 				owner_domain->edge, update_ids, update_count,
