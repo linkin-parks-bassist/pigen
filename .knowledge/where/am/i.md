@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-10T06:04:38+11:00"
+revised_at: "2026-11-10T07:11:29+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -8,9 +8,9 @@ Pigen is an active personal C17 source-to-source compiler project extending Syst
 
 This checkout is **pigen-fork**, a delivery fork of /home/david/Projects/pigen. The production `./pigen` is the structured frontend (src/pigen.c through src/compile.c): preprocess, data-first syntax, semantic types/expressions/scopes, RTL lowering, naming, output model and SV emission. The classic textual CLI is removed; prototype sources remain only as quarantined reference material.
 
-Working end-to-end: data-first declarations; abstract inputs with generated valid/ready ports; static/buffered transfers with guards, negated predicates, conversions, offer/fire equations and real `pigen_*` primitives; clocked processes; inline pipelines (both stage forms); FSMs with state register/reset/guards/gotos; `if (destination <= source)` transfer-and-branch; user-callable `accepts`, `valid`, `ready` and `peek`. Behavioural simulations pass for a buf chain, an arithmetic pipeline, an FSM counter, the README sender FSM and an `accepts()`-based sender.
+Working end-to-end: data-first declarations; abstract inputs with generated valid/ready ports; static/buffered transfers with guards, negated predicates, conversions, offer/fire equations and real `pigen_*` primitives; clocked processes; inline pipelines (both stage forms); FSMs with state register/reset/guards/gotos; `if (destination <= source)` transfer-and-branch; user-callable `accepts`, `valid`, `ready` and `peek`; multi-module designs; ordinary SV module items and standard child-module instantiations retained verbatim (`assign`, `child u(.port(sig))`). Behavioural simulations pass for a buf chain, an arithmetic pipeline, an FSM counter, the README sender FSM, an `accepts()`-based sender and a standard child instance.
 
-Not built: child-module instance syntax/resolution and inline fabric. Missing: `validate`/`invalidate`/`flush` actions; some alias/conditional expression forms; migration of examples/ from the prototype dialect; rebaseline of nine rtl-lower and two sv-emit sections that pin the superseded storage/fire/instance contract. All other structured C tests pass.
+Not built: structural instance/port metadata and inline fabric. Missing: `validate`/`invalidate`/`flush` actions; some alias/conditional expression forms; migration of examples/ from the prototype dialect; rebaseline of semantic-test's alias conversion assertion and the nine rtl-lower and two sv-emit sections that pin superseded contracts. The rest of the structured C tests pass.
 
 Repository topology: src/ structured owners plus quarantined prototype sources; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ legacy prototype-dialect designs; .knowledge/ the sole local documentation and architectural answer authority. README.md is David's public introduction restored from d14aef2; preserve it. Other docs, notes, root Markdown and AGENTS.md are absent.
 
@@ -21,4 +21,4 @@ Repository topology: src/ structured owners plus quarantined prototype sources; 
 - does/ answers behavior: does/the/structured/frontend/run/in/production.md.
 - when/ gives gates: when/can/production/switch/to/the/structured/compiler.md.
 
-The structured frontend implements provenance and preprocessing, type/declaration syntax, scopes/symbols, canonical types/shapes/integers, typed expressions/predicates/domains, one signal arena, transfers/incidence/ownership, storage controls, primitive instances, pipeline/FSM semantic expansion, acceptance/introspection intrinsics, output process/instance records and terminal emission. OPAQUE spans are byte-contiguous. Icarus Verilog 13 and Verilator 5.020 are installed; Verilator lint stays warnings-fatal. The local tree is the sole project documentation authority; the immutable Kestrel reference remains applicable.
+The structured frontend implements provenance and preprocessing, type/declaration syntax, scopes/symbols, canonical types/shapes/integers, typed expressions/predicates/domains, one signal arena, transfers/incidence/ownership, storage controls, primitive instances, pipeline/FSM semantic expansion, acceptance/introspection intrinsics, retained ordinary-SV items, multi-module output and terminal emission. OPAQUE spans are byte-contiguous and retained-item spans may overlap by parser gaps. Icarus Verilog 13 and Verilator 5.020 are installed; Verilator lint stays warnings-fatal. The local tree is the sole project documentation authority; the immutable Kestrel reference remains applicable.
