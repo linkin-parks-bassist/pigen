@@ -1,0 +1,9 @@
+module mul(
+  input logic clk,
+  input logic reset,
+  input int[24] buf data_in,
+  output int[48] buf product
+);
+  parameter integer c0 = 3;
+  always_ff @(posedge clk) product <= data_in * c0;
+endmodule

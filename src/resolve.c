@@ -200,8 +200,26 @@ static int add_parameter(resolver *resolver, pigen_module_id module_id,
 				module->scope, syntax_node->as.parameter.data_type,
 				resolver->error);
 			if (parameter_type.index == PIGEN_INVALID_ID)
-				return fail_location(resolver, syntax_node->location,
-					"invalid parameter type");
+			{
+				const pigen_syntax_type *type = pigen_syntax_type_get(
+					&resolver->syntax->types,
+					syntax_node->as.parameter.data_type);
+				pigen_source_span base = type && type->base.index !=
+					PIGEN_INVALID_ID ? token_spelling(resolver, type->base) :
+					(pigen_source_span){INVALID_ID(pigen_source_id), 0, 0};
+				size_t length = 0;
+				const char *text = pigen_source_span_text(model->sources,
+					base, &length);
+
+				/* `integer`/`int` are ordinary 32-bit signed integer
+				 * parameter types; reuse the value's integer type. */
+				if (text && ((length == 3 && !memcmp(text, "int", 3)) ||
+					(length == 7 && !memcmp(text, "integer", 7))))
+					parameter_type = expression->data_type;
+				else
+					return fail_location(resolver, syntax_node->location,
+						"invalid parameter type");
+			}
 		}
 		declared = pigen_symbol_declare(model, module->scope,
 			PIGEN_SYMBOL_PARAMETER, parameter_type,
