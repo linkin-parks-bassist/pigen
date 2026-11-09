@@ -1577,13 +1577,48 @@ pigen_expr_id pigen_expr_add_accepts(pigen_semantic_model *model,
 		!pigen_signal_get(model, source_signal))
 		return INVALID_ID(pigen_expr_id);
 	expression.kind = PIGEN_EXPR_ACCEPTS;
-	expression.data_type = model->boolean_data_type;
+	expression.data_type = pigen_data_type_boolean(model);
 	expression.shape = pigen_semantic_scalar_shape(model);
 	expression.span = span;
 	expression.constant = INVALID_ID(pigen_const_expr_id);
 	expression.as.accepts.destination = destination;
 	expression.as.accepts.source = source;
 	expression.as.accepts.source_signal = source_signal;
+	return add_expression(model, expression);
+}
+
+pigen_expr_id pigen_expr_add_control(pigen_semantic_model *model,
+	pigen_semantic_expr_kind kind, pigen_signal_id signal,
+	pigen_source_span span)
+{
+	pigen_semantic_expr expression = {0};
+
+	if (!model || (kind != PIGEN_EXPR_VALID && kind != PIGEN_EXPR_READY) ||
+		signal.index == PIGEN_INVALID_ID ||
+		!pigen_signal_get(model, signal))
+		return INVALID_ID(pigen_expr_id);
+	expression.kind = kind;
+	expression.data_type = pigen_data_type_boolean(model);
+	expression.shape = pigen_semantic_scalar_shape(model);
+	expression.span = span;
+	expression.constant = INVALID_ID(pigen_const_expr_id);
+	expression.as.control.signal = signal;
+	return add_expression(model, expression);
+}
+
+pigen_expr_id pigen_expr_add_peek(pigen_semantic_model *model,
+	pigen_expr_id source, pigen_source_span span)
+{
+	const pigen_semantic_expr *known = pigen_expr_get(model, source);
+	pigen_semantic_expr expression = {0};
+
+	if (!known) return INVALID_ID(pigen_expr_id);
+	expression.kind = PIGEN_EXPR_PEEK;
+	expression.data_type = known->data_type;
+	expression.shape = known->shape;
+	expression.span = span;
+	expression.constant = known->constant;
+	expression.as.peek.source = source;
 	return add_expression(model, expression);
 }
 

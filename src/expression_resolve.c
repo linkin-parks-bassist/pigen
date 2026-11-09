@@ -1,5 +1,6 @@
 /* Public expression-resolution orchestration and semantic materialization. */
 #include <stdlib.h>
+#include <string.h>
 
 #include "pigen/expression_analysis.h"
 #include "pigen/expression_resolve.h"
@@ -191,12 +192,209 @@ static pigen_expr_id resolve_with_policy(
 	return result;
 }
 
+static int call_is_intrinsic(const pigen_syntax_tree *syntax,
+	pigen_syntax_expr_id expression)
+{
+	const pigen_syntax_expr *call = pigen_syntax_expr_get(
+		&syntax->expressions, expression);
+	const pigen_syntax_expr *callee;
+	const pigen_expanded_token *token;
+	const char *name;
+	size_t length = 0;
+
+	if (!call || call->kind != PIGEN_SYNTAX_EXPR_CALL) return 0;
+	callee = pigen_syntax_expr_get(&syntax->expressions, call->as.call.callee);
+	if (!callee || callee->kind != PIGEN_SYNTAX_EXPR_NAME) return 0;
+	token = pigen_expanded_token_get(syntax->expanded, callee->as.atom.token);
+	name = token ? pigen_expanded_token_text(syntax->expanded, token, &length) :
+		NULL;
+	return name && ((length == 7 && !memcmp(name, "accepts", 7)) ||
+		(length == 5 && !memcmp(name, "valid", 5)) ||
+		(length == 5 && !memcmp(name, "ready", 5)) ||
+		(length == 4 && !memcmp(name, "peek", 4)));
+}
+
+static int contains_intrinsic(const pigen_syntax_tree *syntax,
+	pigen_syntax_expr_id expression)
+{
+	const pigen_syntax_expr *known = pigen_syntax_expr_get(
+		&syntax->expressions, expression);
+
+	if (!known) return 0;
+	if (known->kind == PIGEN_SYNTAX_EXPR_CALL)
+		return call_is_intrinsic(syntax, expression);
+	if (known->kind == PIGEN_SYNTAX_EXPR_GROUP)
+		return contains_intrinsic(syntax, known->as.group.operand);
+	if (known->kind == PIGEN_SYNTAX_EXPR_UNARY)
+		return contains_intrinsic(syntax, known->as.unary.operand);
+	if (known->kind == PIGEN_SYNTAX_EXPR_BINARY)
+		return contains_intrinsic(syntax, known->as.binary.left) ||
+			contains_intrinsic(syntax, known->as.binary.right);
+	if (known->kind == PIGEN_SYNTAX_EXPR_CONDITIONAL)
+		return contains_intrinsic(syntax, known->as.conditional.condition) ||
+			contains_intrinsic(syntax, known->as.conditional.when_true) ||
+			contains_intrinsic(syntax, known->as.conditional.when_false);
+	return 0;
+}
+
+static int resolve_intrinsic(const pigen_syntax_tree *syntax,
+	pigen_semantic_model *model, pigen_scope_id scope,
+	pigen_syntax_expr_id expression, const pigen_resolve_policy *policy,
+	pigen_semantic_error *error, pigen_expr_id *result)
+{
+	const pigen_syntax_expr *call = pigen_syntax_expr_get(
+		&syntax->expressions, expression);
+	const pigen_syntax_expr *callee;
+	const pigen_syntax_expr_id *arguments;
+	const pigen_expanded_token *token;
+	const char *name;
+	size_t name_length = 0;
+
+	if (!call) return 0;
+	if (call->kind != PIGEN_SYNTAX_EXPR_CALL)
+	{
+		if (!contains_intrinsic(syntax, expression))
+			return 0;
+		if (call->kind == PIGEN_SYNTAX_EXPR_GROUP)
+		{
+			pigen_expr_id operand = pigen_resolve_expression(syntax, model,
+				scope, call->as.group.operand, policy, error);
+			*result = operand.index == PIGEN_INVALID_ID ? operand :
+				pigen_expr_add_group(model, operand,
+					call->location.source_span);
+			return 1;
+		}
+		if (call->kind == PIGEN_SYNTAX_EXPR_BINARY)
+		{
+			pigen_expr_id left = pigen_resolve_expression(syntax, model,
+				scope, call->as.binary.left, policy, error);
+			pigen_expr_id right = pigen_resolve_expression(syntax, model,
+				scope, call->as.binary.right, policy, error);
+			pigen_binary_operator operation;
+			pigen_binary_resolution resolution;
+			const pigen_semantic_expr *l = pigen_expr_get(model, left);
+			const pigen_semantic_expr *r = pigen_expr_get(model, right);
+
+			if (!l || !r) { *result = INVALID_ID(pigen_expr_id); return 1; }
+			{
+				static const pigen_binary_operator map[] = {
+					[PIGEN_SYNTAX_OP_LOGICAL_AND] = PIGEN_BINARY_LOGICAL_AND,
+					[PIGEN_SYNTAX_OP_LOGICAL_OR] = PIGEN_BINARY_LOGICAL_OR,
+					[PIGEN_SYNTAX_OP_BITWISE_AND] = PIGEN_BINARY_BITWISE_AND,
+					[PIGEN_SYNTAX_OP_BITWISE_OR] = PIGEN_BINARY_BITWISE_OR,
+					[PIGEN_SYNTAX_OP_BITWISE_XOR] = PIGEN_BINARY_BITWISE_XOR,
+					[PIGEN_SYNTAX_OP_EQUAL] = PIGEN_BINARY_EQUAL,
+					[PIGEN_SYNTAX_OP_NOT_EQUAL] = PIGEN_BINARY_NOT_EQUAL,
+					[PIGEN_SYNTAX_OP_LESS] = PIGEN_BINARY_LESS,
+					[PIGEN_SYNTAX_OP_LESS_EQUAL] = PIGEN_BINARY_LESS_EQUAL,
+					[PIGEN_SYNTAX_OP_GREATER] = PIGEN_BINARY_GREATER,
+					[PIGEN_SYNTAX_OP_GREATER_EQUAL] = PIGEN_BINARY_GREATER_EQUAL,
+					[PIGEN_SYNTAX_OP_ADD] = PIGEN_BINARY_ADD,
+					[PIGEN_SYNTAX_OP_SUBTRACT] = PIGEN_BINARY_SUBTRACT
+				};
+
+				if ((size_t)call->as.binary.operator >=
+					sizeof(map)/sizeof(map[0]) ||
+					map[call->as.binary.operator] == 0)
+					{ *result = INVALID_ID(pigen_expr_id); return 1; }
+				operation = map[call->as.binary.operator];
+			}
+			if (!pigen_data_type_resolve_binary_operation(model, operation,
+				l->data_type, r->data_type, &resolution))
+				*result = INVALID_ID(pigen_expr_id);
+			else
+				*result = pigen_expr_add_binary(model, resolution.operation,
+					left, right, call->location.source_span);
+			return 1;
+		}
+		return 0;
+	}
+	callee = pigen_syntax_expr_get(&syntax->expressions, call->as.call.callee);
+	if (!callee || callee->kind != PIGEN_SYNTAX_EXPR_NAME)
+		return 0;
+	token = pigen_expanded_token_get(syntax->expanded,
+		callee->as.atom.token);
+	name = token ? pigen_expanded_token_text(syntax->expanded, token,
+		&name_length) : NULL;
+	if (!name) return 0;
+	arguments = pigen_syntax_expr_children(&syntax->expressions,
+		call->as.call.first_argument, call->as.call.argument_count);
+	if (!arguments) return 0;
+
+	if (name_length == 7 && !memcmp(name, "accepts", 7) &&
+		call->as.call.argument_count == 2)
+	{
+		pigen_expr_id destination_expression = pigen_resolve_expression(
+			syntax, model, scope, arguments[0], policy, error);
+		pigen_expr_id source = pigen_resolve_expression(syntax, model,
+			scope, arguments[1], policy, error);
+		pigen_lvalue_id destination =
+			pigen_lvalue_resolve(model, destination_expression);
+		const pigen_semantic_expr *source_expression =
+			pigen_expr_get(model, source);
+		pigen_signal_id source_signal = source_expression ?
+			pigen_symbol_signal(model, source_expression->as.symbol) :
+			(pigen_signal_id){PIGEN_INVALID_ID};
+
+		if (source_expression && source_expression->kind ==
+			PIGEN_EXPR_SYMBOL)
+			source_signal = pigen_symbol_signal(model,
+				source_expression->as.symbol);
+		if (destination.index == PIGEN_INVALID_ID ||
+			source_signal.index == PIGEN_INVALID_ID)
+			*result = INVALID_ID(pigen_expr_id);
+		else
+			*result = pigen_expr_add_accepts(model, destination, source,
+				source_signal, call->location.source_span);
+		return 1;
+	}
+	if ((name_length == 5 && !memcmp(name, "valid", 5)) ||
+		(name_length == 5 && !memcmp(name, "ready", 5)))
+	{
+		pigen_expr_id argument;
+		const pigen_semantic_expr *known;
+		pigen_signal_id signal;
+		pigen_semantic_expr_kind kind =
+			name[0] == 'v' ? PIGEN_EXPR_VALID : PIGEN_EXPR_READY;
+
+		if (call->as.call.argument_count != 1)
+			return 0;
+		argument = pigen_resolve_expression(syntax, model, scope,
+			arguments[0], policy, error);
+		known = pigen_expr_get(model, argument);
+		signal = known && known->kind == PIGEN_EXPR_SYMBOL ?
+			pigen_symbol_signal(model, known->as.symbol) :
+			(pigen_signal_id){PIGEN_INVALID_ID};
+		*result = signal.index == PIGEN_INVALID_ID ?
+			INVALID_ID(pigen_expr_id) :
+			pigen_expr_add_control(model, kind, signal,
+				call->location.source_span);
+		return 1;
+	}
+	if (name_length == 4 && !memcmp(name, "peek", 4) &&
+		call->as.call.argument_count == 1)
+	{
+		pigen_expr_id source = pigen_resolve_expression(syntax, model,
+			scope, arguments[0], policy, error);
+
+		*result = pigen_expr_add_peek(model, source,
+			call->location.source_span);
+		return 1;
+	}
+	return 0;
+}
+
 pigen_expr_id pigen_resolve_expression(
 	const pigen_syntax_tree *syntax, pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_syntax_expr_id expression,
 	const pigen_resolve_policy *policy,
 	pigen_semantic_error *error)
 {
+	pigen_expr_id intrinsic = INVALID_ID(pigen_expr_id);
+
+	if (resolve_intrinsic(syntax, model, scope, expression, policy, error,
+		&intrinsic))
+		return intrinsic;
 	return resolve_with_policy(syntax, model, scope, expression, 0,
 		PIGEN_LITERAL_DOMAIN_PIGEN, policy, error);
 }

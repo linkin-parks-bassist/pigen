@@ -1338,6 +1338,24 @@ static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 		return pigen_rtl_expr_add_conversion(rtl, result_type, conversion,
 			operand, origin);
 	}
+	case PIGEN_EXPR_VALID:
+	{
+		if (lowering->lowered_endpoint_count <=
+			owner->as.control.signal.index)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return lowering->lowered_endpoints[
+			owner->as.control.signal.index].valid;
+	}
+	case PIGEN_EXPR_READY:
+	{
+		if (lowering->lowered_endpoint_count <=
+			owner->as.control.signal.index)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		return lowering->lowered_endpoints[
+			owner->as.control.signal.index].ready;
+	}
+	case PIGEN_EXPR_PEEK:
+		return lower_expr(lowering, owner->as.peek.source);
 	case PIGEN_EXPR_ACCEPTS:
 	{
 		const pigen_semantic_lvalue *destination =
