@@ -23,6 +23,8 @@ typedef enum {
 	PIGEN_SYNTAX_FSM_STATE,
 	PIGEN_SYNTAX_GOTO,
 	PIGEN_SYNTAX_INSTANCE,
+	PIGEN_SYNTAX_FABRIC,
+	PIGEN_SYNTAX_FABRIC_CONNECTION,
 	PIGEN_SYNTAX_CONNECTION,
 	PIGEN_SYNTAX_RETAINED,
 	PIGEN_SYNTAX_OPAQUE
@@ -134,6 +136,17 @@ typedef struct {
 			pigen_token_id port;
 			pigen_syntax_expr_id value;
 		} connection;
+		struct {
+			pigen_token_id name;
+		} fabric;
+		struct {
+			pigen_token_id left_instance;
+			pigen_token_id left_port;
+			pigen_token_id right_instance;
+			pigen_token_id right_port;
+			int direct;
+			int tier;
+		} fabric_connection;
 	} as;
 } pigen_syntax_node;
 

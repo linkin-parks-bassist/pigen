@@ -8,6 +8,7 @@
 #include "pigen/rtl_name.h"
 #include "pigen/output.h"
 #include "pigen/sv_emit.h"
+#include "pigen/fabric_lower.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -180,6 +181,19 @@ int pigen_compile_source(pigen_source_manager *sources,
             return -1;
         }
         
+        if (pigen_fabric_lower(&lowering, module, &syntax_tree) != 0)
+        {
+            if (error) { error->origin = (pigen_origin_id){0};
+                error->span = (pigen_source_span){0};
+                error->message = "fabric lowering failed"; }
+            pigen_free_preprocess_result(&preprocess_result);
+            pigen_free_syntax_tree(&syntax_tree);
+            pigen_free_semantic_model(&semantic_model);
+            pigen_rtl_lowering_free(&lowering);
+            pigen_free_tokens(&tokens);
+            if (own_sources) free(sources);
+            return -1;
+        }
         pigen_rtl_module_id rtl_module = pigen_lower_rtl_module(&lowering, module);
         if (rtl_module.index == PIGEN_INVALID_ID) {
             if (error) {

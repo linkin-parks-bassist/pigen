@@ -1118,19 +1118,19 @@ static int emit_module(struct buf *b, const pigen_source_manager *sources,
 		buf_append_str(b, "\n");
 	}
 	buf_append_str(b, ");\n");
+	/* Declarations first so retained module items and records can reference
+	 * every signal regardless of the retained source order. */
 	for (i = 0; i < range.count; i++)
 	{
 		const pigen_output_item *child = &layout->items[range.first + i];
-		const pigen_rtl_object *object;
-		const pigen_rtl_instance *instance;
-		const pigen_rtl_equation *equation;
-		const pigen_rtl_process *process;
-		int is_port;
 
-		switch (child->kind)
+		if (child->kind != PIGEN_OUTPUT_RTL_OBJECT)
+			continue;
 		{
-		case PIGEN_OUTPUT_RTL_OBJECT:
-			object = pigen_rtl_object_get(rtl, child->as.object);
+			const pigen_rtl_object *object = pigen_rtl_object_get(rtl,
+				child->as.object);
+			int is_port;
+
 			if (!object)
 				return -1;
 			is_port = object->direction == PIGEN_SEMANTIC_INPUT ||
@@ -1141,6 +1141,19 @@ static int emit_module(struct buf *b, const pigen_source_manager *sources,
 			if (emit_object(b, rtl, object, 0, 0) != 0)
 				return -1;
 			buf_append_str(b, "\n");
+		}
+	}
+	for (i = 0; i < range.count; i++)
+	{
+		const pigen_output_item *child = &layout->items[range.first + i];
+		const pigen_rtl_instance *instance;
+		const pigen_rtl_equation *equation;
+		const pigen_rtl_process *process;
+
+		switch (child->kind)
+		{
+		case PIGEN_OUTPUT_RTL_OBJECT:
+			/* Emitted in the declaration pre-pass. */
 			break;
 		case PIGEN_OUTPUT_RTL_INSTANCE:
 			instance = pigen_rtl_instance_get(rtl, child->as.instance);

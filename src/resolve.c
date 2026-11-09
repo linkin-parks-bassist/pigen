@@ -1405,17 +1405,19 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		const pigen_syntax_node *connection = pigen_syntax_get(resolver->syntax, child_id);
 		pigen_symbol_id port_symbol;
 		pigen_signal_id port_signal;
+		pigen_source_span port_name = {INVALID_ID(pigen_source_id), 0, 0};
 		const pigen_symbol *port_known;
 		const pigen_semantic_signal *port;
 		pigen_expr_id value = INVALID_ID(pigen_expr_id);
 		pigen_semantic_direction direction;
+		pigen_data_type_id connection_type = INVALID_ID(pigen_data_type_id);
 
 		if (!connection) break;
 		if (connection->kind != PIGEN_SYNTAX_CONNECTION)
 		{ child_id = connection->next_sibling; continue; }
 		if (connection->as.connection.port.index != PIGEN_INVALID_ID)
 		{
-			pigen_source_span port_name = token_spelling(resolver,
+			port_name = token_spelling(resolver,
 				connection->as.connection.port);
 			port_symbol = pigen_symbol_lookup(model, child->scope, port_name);
 		}
@@ -1423,7 +1425,60 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 			&port_signal))
 			return fail_location(resolver, connection->location,
 				"too many positional instance connections");
+		else
+		{
+			const pigen_symbol *positional_symbol = pigen_symbol_get(model,
+				port_symbol);
+			if (positional_symbol)
+				port_name = positional_symbol->name;
+		}
 		positional++;
+		if (port_symbol.index == PIGEN_INVALID_ID)
+		{
+			/* Generated boundary controls: <payload>_valid / <payload>_ready. */
+			size_t length = 0;
+			const char *text = pigen_source_span_text(model->sources,
+				port_name, &length);
+			const char *suffix = NULL;
+			pigen_semantic_direction base_direction;
+			size_t suffix_length = 0;
+
+			if (text && length > 6 && !memcmp(text + length - 6,
+				"_valid", 6))
+				suffix = "_valid", suffix_length = 6;
+			else if (text && length > 6 && !memcmp(text + length - 6,
+				"_ready", 6))
+				suffix = "_ready", suffix_length = 6;
+			if (suffix)
+			{
+				char *base = pigen_resize(NULL,
+					length - suffix_length + 1);
+				pigen_source_span base_span = port_name;
+				memcpy(base, text, length - suffix_length);
+				base[length - suffix_length] = 0;
+				base_span.end = base_span.start + length - suffix_length;
+				port_symbol = pigen_symbol_lookup(model, child->scope,
+					base_span);
+				free(base);
+				if (port_symbol.index != PIGEN_INVALID_ID)
+				{
+					const pigen_symbol *base_symbol =
+						pigen_symbol_get(model, port_symbol);
+					base_direction = pigen_signal_get(model,
+						base_symbol->object.signal)->direction;
+					direction = suffix[1] == 'v' ? base_direction :
+						(base_direction == PIGEN_SEMANTIC_INPUT ?
+							PIGEN_SEMANTIC_OUTPUT :
+							base_direction == PIGEN_SEMANTIC_OUTPUT ?
+								PIGEN_SEMANTIC_INPUT :
+								PIGEN_SEMANTIC_INTERNAL);
+					port_signal = base_symbol->object.signal;
+					connection_type = pigen_data_type_sized_logic(model, 1,
+						PIGEN_SIGN_UNSIGNED);
+					goto port_ready;
+				}
+			}
+		}
 		port_known = pigen_symbol_get(model, port_symbol);
 		if (!port_known || port_known->kind != PIGEN_SYMBOL_SIGNAL)
 			return fail_location(resolver, connection->location,
@@ -1433,6 +1488,8 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		if (!port) return fail_location(resolver, connection->location,
 			"invalid child module port");
 		direction = port->direction;
+		connection_type = port->data_type;
+	port_ready:
 		if (connection->as.connection.value.index != PIGEN_INVALID_ID)
 		{
 			if (direction == PIGEN_SEMANTIC_OUTPUT)
@@ -1450,16 +1507,46 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				value = expression;
 			}
 			else
+			{
 				value = pigen_resolve_assignment_value(resolver->syntax,
 					model, module->scope,
-					connection->as.connection.value, port->data_type,
+					connection->as.connection.value, connection_type,
 					resolver->policy, resolver->error);
+				if (value.index == PIGEN_INVALID_ID)
+				{
+					pigen_expr_id raw = pigen_resolve_expression(
+						resolver->syntax, model, module->scope,
+						connection->as.connection.value, resolver->policy,
+						resolver->error);
+					const pigen_semantic_expr *known =
+						pigen_expr_get(model, raw);
+
+					if (known && known->data_type.index !=
+						PIGEN_INVALID_ID)
+					{
+						pigen_const_expr_id source_width =
+							pigen_data_type_packed_width(model,
+								known->data_type);
+						pigen_const_expr_id target_width =
+							pigen_data_type_packed_width(model,
+								connection_type);
+						uint64_t sw = 0, tw = 0;
+
+						if (pigen_const_expr_evaluate_u64(model,
+							source_width, &sw) &&
+							pigen_const_expr_evaluate_u64(model,
+								target_width, &tw) && sw == tw)
+							value = raw;
+					}
+				}
+			}
 			if (value.index == PIGEN_INVALID_ID)
 				return fail_location(resolver, connection->location,
 					"instance connection requires a compatible expression");
 		}
 		if (!pigen_instance_add_connection(model, instance, port_symbol,
-			port_signal, value, direction, connection->location.source_span))
+			port_signal, port_name, value, direction,
+			connection->location.source_span))
 			return fail_location(resolver, connection->location,
 				"invalid instance connection");
 		child_id = connection->next_sibling;

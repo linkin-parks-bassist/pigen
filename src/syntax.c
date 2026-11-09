@@ -2156,6 +2156,103 @@ static int parse_retained_module_item(syntax_parser *parser,
 	return 1;
 }
 
+static int parse_fabric_block(syntax_parser *parser, pigen_syntax_id module,
+	size_t start, size_t limit, size_t *after_fabric)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id fabric;
+	size_t at = start + 1, endfabric;
+	size_t opaque_start, opaque_end;
+	const pigen_expanded_token *start_tok = token_at(parser, start);
+	const pigen_expanded_token *last_tok;
+
+	if (!identifier(parser, at))
+		return fail(parser, at, "fabric requires a name");
+	node.kind = PIGEN_SYNTAX_FABRIC;
+	node.as.fabric.name = (pigen_token_id){(uint32_t)at};
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	at++;
+	if (at >= limit || !token_is(parser, at, "begin"))
+		return fail(parser, at, "fabric requires `begin`");
+	at++;
+	opaque_start = parser->opaque_byte_cursor;
+	opaque_end = start_tok ? pigen_origin_expansion_span(parser->expanded,
+		start_tok->origin).start : opaque_start;
+	add_opaque_bytes(parser, module, opaque_start, opaque_end);
+	fabric = add_node(parser, node);
+	add_child(parser, module, fabric);
+	while (at < limit && !token_is(parser, at, "endfabric"))
+	{
+		pigen_syntax_node edge = {0};
+		pigen_token_id left_instance, left_port, right_instance, right_port;
+		int direct = 1, tier = 0;
+		size_t arrow;
+
+		if (!identifier(parser, at) || !token_is(parser, at + 1, ".") ||
+			!identifier(parser, at + 2))
+			return fail(parser, at, "fabric endpoint requires instance.port");
+		left_instance = (pigen_token_id){(uint32_t)at};
+		left_port = (pigen_token_id){(uint32_t)(at + 2)};
+		arrow = at + 3;
+		if (token_is(parser, arrow, ">"))
+			arrow++;
+		else if (token_is(parser, arrow, "->"))
+		{
+			direct = 0;
+			tier = 1;
+			arrow++;
+		}
+		else if (token_is(parser, arrow, "-->"))
+		{
+			direct = 0;
+			tier = 2;
+			arrow++;
+		}
+		else
+		{
+			direct = 0;
+			while (token_is(parser, arrow, "-")) { tier++; arrow++; }
+			if (!token_is(parser, arrow, ">"))
+				return fail(parser, arrow,
+					"fabric connection requires `>` or routed `->`");
+			tier++;
+			arrow++;
+		}
+		if (!identifier(parser, arrow) || !token_is(parser, arrow + 1, ".") ||
+			!identifier(parser, arrow + 2) ||
+			!token_is(parser, arrow + 3, ";"))
+			return fail(parser, arrow,
+				"fabric destination requires instance.port;");
+		right_instance = (pigen_token_id){(uint32_t)arrow};
+		right_port = (pigen_token_id){(uint32_t)(arrow + 2)};
+		edge.kind = PIGEN_SYNTAX_FABRIC_CONNECTION;
+		edge.location = range_location(parser, at, arrow + 4);
+		edge.parent = INVALID_SYNTAX;
+		edge.first_child = edge.last_child = edge.next_sibling =
+			INVALID_SYNTAX;
+		edge.as.fabric_connection.left_instance = left_instance;
+		edge.as.fabric_connection.left_port = left_port;
+		edge.as.fabric_connection.right_instance = right_instance;
+		edge.as.fabric_connection.right_port = right_port;
+		edge.as.fabric_connection.direct = direct;
+		edge.as.fabric_connection.tier = tier;
+		add_child(parser, fabric, add_node(parser, edge));
+		at = arrow + 4;
+	}
+	if (at >= limit || !token_is(parser, at, "endfabric"))
+		return fail(parser, at, "fabric requires `endfabric`");
+	endfabric = at;
+	node.location = range_location(parser, start, endfabric + 1);
+	parser->tree->nodes[fabric.index].location = node.location;
+	last_tok = token_at(parser, endfabric);
+	if (last_tok)
+		parser->opaque_byte_cursor = pigen_origin_expansion_span(
+			parser->expanded, last_tok->origin).end;
+	*after_fabric = endfabric + 1;
+	return 1;
+}
+
 static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 	size_t first, size_t after, syntax_cursor *opaque_cursor)
 {
@@ -2183,6 +2280,15 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			if (!parse_retained_module_item(parser, module, at, after,
 				&retained_after)) return 0;
 			at = retained_after;
+			item_start = 1;
+			continue;
+		}
+		if (item_start && token_is(parser, at, "fabric"))
+		{
+			size_t fabric_after;
+			if (!parse_fabric_block(parser, module, at, after,
+				&fabric_after)) return 0;
+			at = fabric_after;
 			item_start = 1;
 			continue;
 		}

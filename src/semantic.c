@@ -2481,8 +2481,9 @@ pigen_instance_id pigen_instance_add(pigen_semantic_model *model,
 
 int pigen_instance_add_connection(pigen_semantic_model *model,
 	pigen_instance_id instance, pigen_symbol_id port_symbol,
-	pigen_signal_id port_signal, pigen_expr_id value,
-	pigen_semantic_direction direction, pigen_source_span span)
+	pigen_signal_id port_signal, pigen_source_span port_name,
+	pigen_expr_id value, pigen_semantic_direction direction,
+	pigen_source_span span)
 {
 	pigen_semantic_instance *owner;
 	pigen_semantic_instance_connection *record;
@@ -2510,6 +2511,7 @@ int pigen_instance_add_connection(pigen_semantic_model *model,
 	*record = (pigen_semantic_instance_connection){0};
 	record->port_symbol = port_symbol;
 	record->port_signal = port_signal;
+	record->port_name = port_name;
 	record->value = value;
 	record->direction = direction;
 	record->span = span;
