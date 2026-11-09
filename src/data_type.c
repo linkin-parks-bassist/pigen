@@ -869,10 +869,12 @@ int pigen_data_type_conversion_is_valid(pigen_semantic_model *model,
 					required, model->constant_expression_count + 1);
 		}
 		case PIGEN_CONVERSION_INTEGER_REINTERPRET:
+			/* Signedness-only changes keep the same numerical
+			 * interpretation, so distinct integral types are enough. */
 			return pigen_data_type_is_integral(model,
 					conversion.source_data_type) &&
 				pigen_data_type_is_integral(model,
-					conversion.target_data_type) && source != target;
+					conversion.target_data_type);
 		case PIGEN_CONVERSION_VECTOR_TO_INTEGER:
 			return data_type_is_raw_vector(model,
 				conversion.source_data_type) &&

@@ -211,7 +211,9 @@ static int call_is_intrinsic(const pigen_syntax_tree *syntax,
 	return name && ((length == 7 && !memcmp(name, "accepts", 7)) ||
 		(length == 5 && !memcmp(name, "valid", 5)) ||
 		(length == 5 && !memcmp(name, "ready", 5)) ||
-		(length == 4 && !memcmp(name, "peek", 4)));
+		(length == 4 && !memcmp(name, "peek", 4)) ||
+		(length == 7 && !memcmp(name, "$signed", 7)) ||
+		(length == 9 && !memcmp(name, "$unsigned", 9)));
 }
 
 static int contains_intrinsic(const pigen_syntax_tree *syntax,
@@ -321,6 +323,36 @@ static int resolve_intrinsic(const pigen_syntax_tree *syntax,
 		call->as.call.first_argument, call->as.call.argument_count);
 	if (!arguments) return 0;
 
+	if ((name_length == 7 && !memcmp(name, "$signed", 7)) ||
+		(name_length == 9 && !memcmp(name, "$unsigned", 9)))
+	{
+		pigen_expr_id operand;
+		const pigen_semantic_expr *known;
+		pigen_const_expr_id width;
+		uint64_t bits = 0;
+		pigen_data_type_id target;
+		pigen_conversion conversion;
+
+		if (call->as.call.argument_count != 1)
+			return 0;
+		operand = pigen_resolve_expression(syntax, model, scope,
+			arguments[0], policy, error);
+		known = pigen_expr_get(model, operand);
+		if (!known) { *result = INVALID_ID(pigen_expr_id); return 1; }
+		width = pigen_data_type_packed_width(model, known->data_type);
+		if (!pigen_const_expr_evaluate_u64(model, width, &bits) ||
+			!bits)
+			{ *result = INVALID_ID(pigen_expr_id); return 1; }
+		target = pigen_data_type_sized_logic(model, (size_t)bits,
+			name_length == 7 ? PIGEN_SIGN_SIGNED : PIGEN_SIGN_UNSIGNED);
+		conversion = (pigen_conversion){PIGEN_CONVERSION_INTEGER_REINTERPRET,
+			known->data_type, target};
+		*result = target.index == PIGEN_INVALID_ID ?
+			INVALID_ID(pigen_expr_id) :
+			pigen_expr_add_conversion(model, conversion, operand,
+				call->location.source_span);
+		return 1;
+	}
 	if (name_length == 7 && !memcmp(name, "accepts", 7) &&
 		call->as.call.argument_count == 2)
 	{

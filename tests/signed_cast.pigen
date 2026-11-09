@@ -1,0 +1,7 @@
+module cast(
+  input logic clk, input logic reset,
+  input bit[8] a,
+  output bit[8] y
+);
+  always_ff @(posedge clk) y <= $signed(a);
+endmodule
