@@ -1246,17 +1246,18 @@ static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 				}
 				if (!pigen_const_expr_evaluate_u64(sem, evaluated,
 					&value))
-					return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+					goto ordinary;
 			}
 			constant_type = pigen_lower_rtl_type(lowering,
 				owner->data_type);
 			if (constant_type.index == PIGEN_INVALID_ID)
-				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				goto ordinary;
 			return pigen_rtl_expr_add_bits(rtl, constant_type, value,
 				(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID},
 					0, 0});
 		}
 	}
+ordinary:
 	result_type = pigen_lower_rtl_type(lowering, owner->data_type);
 	if (result_type.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
@@ -1281,11 +1282,25 @@ static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 		if (symbol->kind == PIGEN_SYMBOL_PARAMETER)
 		{
-			pigen_const_expr_id constant =
-				pigen_expr_constant(sem, expression);
-			if (constant.index == PIGEN_INVALID_ID)
+			pigen_parameter_id parameter = pigen_symbol_parameter(sem,
+				owner->as.symbol);
+			const pigen_semantic_parameter *known =
+				pigen_parameter_get(sem, parameter);
+			pigen_rtl_type_id type = pigen_lower_rtl_type(lowering,
+				symbol->data_type);
+			pigen_const_expr_id constant;
+			uint64_t value = 0;
+			pigen_rtl_literal_word word;
+
+			if (!known || type.index == PIGEN_INVALID_ID)
 				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-			return pigen_lower_rtl_expression(lowering, constant);
+			constant = pigen_expr_constant(sem, known->value);
+			if (constant.index == PIGEN_INVALID_ID ||
+				!pigen_const_expr_evaluate_u64(sem, constant, &value))
+				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			word = (pigen_rtl_literal_word){value, 0, 0};
+			return pigen_rtl_expr_add_literal(lowering->rtl,
+				PIGEN_RTL_EXPR_INTEGER, type, &word, 64, 0, owner->span);
 		}
 		/* A signal symbol lowers to its published payload object expression;
 		 * the declaration endpoint must have been lowered already. */
@@ -1369,6 +1384,19 @@ static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 		const pigen_conversion *conversion = &owner->as.conversion.conversion;
 		pigen_rtl_expr_id operand;
 
+		{
+			pigen_const_expr_id folded = pigen_expr_constant(sem, expression);
+			uint64_t value = 0;
+
+			if (folded.index != PIGEN_INVALID_ID &&
+				pigen_const_expr_evaluate_u64(sem, folded, &value))
+			{
+				pigen_rtl_literal_word word = {value, 0, 0};
+				return pigen_rtl_expr_add_literal(rtl,
+					PIGEN_RTL_EXPR_BITS, result_type, &word, 64, 0,
+					origin);
+			}
+		}
 		operand = lower_expr(lowering, owner->as.conversion.operand);
 		if (operand.index == PIGEN_INVALID_ID)
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};

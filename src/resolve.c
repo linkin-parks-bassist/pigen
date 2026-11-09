@@ -191,10 +191,23 @@ static int add_parameter(resolver *resolver, pigen_module_id module_id,
 	if (!expression)
 		return fail_location(resolver, syntax_node->location,
 			"parameter value requires a supported constant integer expression");
-	declared = pigen_symbol_declare(model, module->scope,
-		PIGEN_SYMBOL_PARAMETER, expression->data_type,
-		token_spelling(resolver, syntax_node->as.parameter.name),
-		syntax_node->location.source_span, &symbol, NULL);
+	{
+		pigen_data_type_id parameter_type = expression->data_type;
+
+		if (syntax_node->as.parameter.has_type)
+		{
+			parameter_type = pigen_resolve_type(resolver->syntax, model,
+				module->scope, syntax_node->as.parameter.data_type,
+				resolver->error);
+			if (parameter_type.index == PIGEN_INVALID_ID)
+				return fail_location(resolver, syntax_node->location,
+					"invalid parameter type");
+		}
+		declared = pigen_symbol_declare(model, module->scope,
+			PIGEN_SYMBOL_PARAMETER, parameter_type,
+			token_spelling(resolver, syntax_node->as.parameter.name),
+			syntax_node->location.source_span, &symbol, NULL);
+	}
 	if (declared == PIGEN_DECLARE_DUPLICATE)
 		return fail_token(resolver, syntax_node->as.parameter.name,
 			"duplicate parameter name");

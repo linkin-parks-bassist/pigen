@@ -85,6 +85,8 @@ typedef struct {
 			pigen_token_id name;
 			pigen_syntax_expr_id value;
 			int is_local;
+			int has_type;
+			pigen_syntax_type_id data_type;
 		} parameter;
 		struct {
 			pigen_token_id name;

@@ -2028,7 +2028,6 @@ pigen_parameter_id pigen_parameter_add(pigen_semantic_model *model,
 		symbol->kind != PIGEN_SYMBOL_PARAMETER ||
 		symbol->object.parameter.index != PIGEN_INVALID_ID ||
 		symbol->scope.index != module->scope.index ||
-		symbol->data_type.index != expression->data_type.index ||
 		!spans_equal(symbol->declaration, span) ||
 		pigen_expr_constant(model, value).index == PIGEN_INVALID_ID ||
 		syntax.index == PIGEN_INVALID_ID || (is_local != 0 && is_local != 1) ||

@@ -950,9 +950,27 @@ static int parse_parameter(syntax_parser *parser, pigen_syntax_id module,
 	size_t name;
 	size_t equals;
 
-	if (!simple_parameter_shape(parser, start, after, has_keyword, &name,
-		&equals))
-		return 0;
+	{
+		size_t at = start + (has_keyword ? 1 : 0);
+		size_t equal = top_level_token(parser, at, after, "=");
+		pigen_syntax_type_id typed = INVALID_ID(pigen_syntax_type_id);
+		size_t typed_name = 0;
+
+		if (equal != after &&
+			pigen_parse_type_prefix(parser->expanded, at, equal,
+				&parser->tree->expressions, &parser->tree->types, &typed,
+				&typed_name, parser->error) &&
+			identifier(parser, typed_name) && typed_name + 1 == equal)
+		{
+			name = typed_name;
+			equals = equal;
+			node.as.parameter.has_type = 1;
+			node.as.parameter.data_type = typed;
+		}
+		else if (!simple_parameter_shape(parser, start, after, has_keyword,
+			&name, &equals))
+			return 0;
+	}
 	add_opaque(parser, module, *opaque_cursor, start);
 	node.kind = PIGEN_SYNTAX_PARAMETER;
 	node.location = range_location(parser, start, after);
@@ -987,9 +1005,11 @@ static int parse_parameter_items(syntax_parser *parser,
 			continuation_is_local;
 		size_t ignored_name;
 		size_t ignored_equals;
-		int shaped = (has_keyword || continuation) &&
-			simple_parameter_shape(parser, at, item_end, has_keyword,
-				&ignored_name, &ignored_equals);
+		int has_equal = top_level_token(parser, at, item_end, "=") !=
+			item_end;
+		int shaped = ((has_keyword && has_equal) ||
+			(continuation && simple_parameter_shape(parser, at, item_end,
+				has_keyword, &ignored_name, &ignored_equals)));
 
 		if (shaped)
 		{
