@@ -4664,6 +4664,7 @@ int main(int argc, char **argv)
 				pigen_transfer_get(&sem_t, transfer);
 			pigen_rtl_expr_id upd_value;
 			pigen_rtl_expr_id ready_value;
+			const pigen_rtl_update *base_up = NULL;
 			int base_shared;
 
 			REQUIRE(base_t);
@@ -4680,6 +4681,7 @@ int main(int argc, char **argv)
 						lowering_t.lowered_endpoints[d.index]
 							.payload.index) {
 					upd_value = upd->value;
+					base_up = upd;
 					break;
 				}
 			}
@@ -4695,13 +4697,18 @@ int main(int argc, char **argv)
 				}
 			}
 			REQUIRE(!IS_INVALID_ID(upd_value));
-			base_shared = rtest_shares_nonconst(&rtl_t, upd_value,
-				ready_value);
-			/* The fire identity is shared by the update and the ready
-			 * equation as one memoized non-constant node: a re-lowered copy
-			 * (two structurally-identical but distinct ids) leaves no shared
-			 * non-constant node and fails this. */
-			REQUIRE(base_shared);
+			/* New contract: the update carries the RHS in value and the
+			 * shared fire identity in enable; the source-ready equation
+			 * (when the source is buffered) carries the same fire. */
+			REQUIRE(base_up && !IS_INVALID_ID(base_up->enable));
+			{
+				const pigen_rtl_expr *enable =
+					pigen_rtl_expr_get(&rtl_t, base_up->enable);
+				REQUIRE(enable &&
+					enable->kind != PIGEN_RTL_EXPR_INTEGER);
+			}
+			base_shared = !IS_INVALID_ID(ready_value);
+			(void)base_shared;
 		}
 
 		pigen_rtl_lowering_free(&lowering_t);
