@@ -220,6 +220,55 @@ static pigen_token_id fsm_action_target_token(const pigen_syntax_node *fsm,
 	return INVALID_ID(pigen_token_id);
 }
 
+/* The first expanded token whose original spelling starts inside SPAN (the
+ * leftmost token of a node's span), or an invalid id when none falls in it.
+ * The standalone seam carries no expression arena, so the action's destination
+ * name token is recovered from the expanded source this way instead of the
+ * tree's expression arena. */
+static pigen_token_id first_token_in_span(const pigen_expanded_source *expanded,
+	pigen_source_span span)
+{
+	size_t i;
+
+	if (!expanded)
+		return INVALID_ID(pigen_token_id);
+	for (i = 0; i < expanded->token_count; i++)
+	{
+		const pigen_expanded_token *tok = &expanded->tokens[i];
+		pigen_source_span tspan = pigen_origin_spelling_span(expanded,
+			tok->origin);
+
+		if (tspan.source.index == span.source.index &&
+			tspan.start >= span.start && tspan.start < span.end)
+			return (pigen_token_id){(uint32_t)i};
+	}
+	return INVALID_ID(pigen_token_id);
+}
+
+/* The action's target name token for the standalone seam (no expression
+ * arena): the first token of the first state body's non-blocking-assignment
+ * node span, or an invalid id when no state body carries an action. The
+ * destination's name is the signal the action drives, recovered by provenance
+ * from the node's own span instead of the tree's expression arena. */
+static pigen_token_id fsm_action_target_token_from_source(
+	const pigen_syntax_node *fsm, pigen_syntax_id syntax,
+	const pigen_expanded_source *expanded,
+	const pigen_syntax_node *const *states_list, size_t state_count)
+{
+	size_t k;
+
+	for (k = 0; k < state_count; k++)
+	{
+		const pigen_syntax_node *assignment = find_nonblocking_node(fsm,
+			syntax, states_list[k]->first_child);
+
+		if (!assignment)
+			continue;
+		return first_token_in_span(expanded, assignment->location.source_span);
+	}
+	return INVALID_ID(pigen_token_id);
+}
+
 /* The state index (into the per-state identity set) of the state whose name
  * token text matches the reference token text, or FSM_MAX when none matches.
  * The reference is the header's `initial` token or a goto's `target` token.
@@ -687,16 +736,21 @@ static int lower_fsm(pigen_rtl_lowering *lowering, pigen_module_id module,
 	 * output of `done <= 1;`), exposed as an RTL object the per-state action
 	 * values are gated onto. Bound, by provenance, to that assignment's target
 	 * signal (the contract pins that the action's destination is an owned
-	 * object bound to the signal the state body assigns to). The standalone
-	 * seam carries no expression arena, so without a tree it keeps the
-	 * original first-output binding. */
+	 * object bound to the signal the state body assigns to). The tree-based
+	 * path reads the destination from the expression arena; the standalone
+	 * seam carries no arena, so it resolves the destination's name token from
+	 * the expanded source (the non-blocking-assignment node span's first
+	 * token) and binds it to the signal the state body assigns. */
 	{
 		const pigen_semantic_signal *action_signal = NULL;
 		pigen_token_id target_token;
 		size_t j;
 
-		target_token = fsm_action_target_token(fsm, syntax, syntax_tree,
-			states_list, state_count);
+		target_token = syntax_tree ?
+			fsm_action_target_token(fsm, syntax, syntax_tree, states_list,
+				state_count) :
+			fsm_action_target_token_from_source(fsm, syntax, expanded,
+				states_list, state_count);
 		if (target_token.index != PIGEN_INVALID_ID)
 		{
 			const pigen_expanded_token *ref = pigen_expanded_token_get(expanded,
@@ -737,9 +791,9 @@ static int lower_fsm(pigen_rtl_lowering *lowering, pigen_module_id module,
 		}
 		if (!action_signal)
 		{
-			/* The standalone seam (no expression arena) or an unresolvable
-			 * target keeps the original binding: the module's first output
-			 * signal. */
+			/* Only an unresolvable target (the assignment's first token names
+			 * no module signal) falls back to the original binding: the
+			 * module's first output signal. */
 			for (j = 0; j < sem->signal_count; j++)
 			{
 				const pigen_semantic_signal *s = &sem->signals[j];
