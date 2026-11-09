@@ -2166,8 +2166,16 @@ int pigen_data_type_resolve_conditional_operation(
 	}
 	else
 	{
-		if (when_true.index != when_false.index) return 0;
-		result = when_true;
+		if (when_true.index == when_false.index)
+			result = when_true;
+		else if (!common_numerical_type(model, when_true, when_false,
+			&effective_true))
+			return 0;
+		else
+		{
+			effective_false = effective_true;
+			result = effective_true;
+		}
 	}
 	if (!pigen_data_type_resolve_assignment_conversion(model, condition,
 		condition, &resolved.condition_conversion) ||

@@ -1,0 +1,3 @@
+module e(input logic clk,input logic reset,input bit[8] buf a,input bit[8] buf b,output bit[8] buf y);
+ always_ff @(posedge clk) y <= a ? b : 8'd0;
+endmodule

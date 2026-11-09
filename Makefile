@@ -4,7 +4,7 @@ LDLIBS		= -lm
 SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-.PHONY: all clean test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-merge-test concat-misaligned-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
+.PHONY: all clean test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-merge-test concat-misaligned-test ternary-literal-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
 
 all: pigen
 
@@ -234,6 +234,13 @@ sv-emit-test:
 
 fabric-test: pigen
 	./tests/fabric_smoke.sh ./pigen
+
+ternary-literal-test: pigen
+	dir=$$(mktemp -d); \
+	./pigen tests/ternary_literal.pigen -o $$dir/ternary.sv && \
+	iverilog -g2012 -s ternary_literal_tb -o $$dir/ternary \
+		rtl/pigen_primitives.sv $$dir/ternary.sv tests/ternary_literal_tb.sv && \
+	vvp $$dir/ternary; status=$$?; rm -rf $$dir; exit $$status
 
 signed-cast-test: pigen
 	dir=$$(mktemp -d); \
