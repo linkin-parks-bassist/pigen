@@ -1817,6 +1817,14 @@ static int resolve_sv_binary_operation(pigen_semantic_model *model,
 		lview = left;
 		rview = right;
 	}
+	else if (left.index == right.index &&
+		operator != PIGEN_BINARY_ADD && operator != PIGEN_BINARY_SUBTRACT &&
+		operator != PIGEN_BINARY_MULTIPLY && operator != PIGEN_BINARY_POWER)
+	{
+		result = left;
+		lview = left;
+		rview = right;
+	}
 	else
 	{
 		lw = pigen_data_type_packed_width(model, lview);
@@ -1853,6 +1861,13 @@ static int resolve_sv_binary_operation(pigen_semantic_model *model,
 	return 1;
 }
 
+static int alias_type(const pigen_semantic_model *model,
+	pigen_data_type_id type)
+{
+	const pigen_data_type *known = data_type_get(model, type);
+	return known && known->constructor == PIGEN_DATA_TYPE_ALIAS;
+}
+
 int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	pigen_binary_operator operator, pigen_data_type_id left,
 	pigen_data_type_id right, pigen_binary_resolution *resolution)
@@ -1867,6 +1882,27 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	if (!model || !resolution || !pigen_binary_operator_is_valid(operator) ||
 		!data_type_get(model, left) || !data_type_get(model, right))
 		return 0;
+	/* Aliased integral types retain their declared identity for comparisons
+	 * and same-type operations instead of widening to a common view. */
+	if (pigen_data_type_is_integral(model, left) &&
+		pigen_data_type_is_integral(model, right) &&
+		(alias_type(model, left) || alias_type(model, right)))
+	{
+		pigen_binary_resolution alias;
+		alias.left_conversion = (pigen_conversion){PIGEN_CONVERSION_IDENTITY,
+			left, left};
+		alias.right_conversion = (pigen_conversion){PIGEN_CONVERSION_IDENTITY,
+			right, right};
+		alias.operation = (pigen_binary_operation){operator, left, right,
+			binary_boolean_result(operator) ? pigen_data_type_boolean(model) :
+				left.index == right.index ? left :
+					INVALID_ID(pigen_data_type_id)};
+		if (alias.operation.result_data_type.index != PIGEN_INVALID_ID)
+		{
+			*resolution = alias;
+			return 1;
+		}
+	}
 	if ((!data_type_is_pigen_integer(model, left) ||
 		!data_type_is_pigen_integer(model, right)) &&
 		resolve_sv_binary_operation(model, operator, left, right, resolution))
