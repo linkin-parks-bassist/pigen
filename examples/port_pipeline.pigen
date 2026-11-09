@@ -3,10 +3,10 @@ module port_pipeline
 		input logic		clk,
 		input logic		reset,
 
-		input buf [7:0]	in_packet
+		input logic [7:0] buf in_packet
 	);
 
-	port [7:0] pulse;
+	logic [7:0] port pulse;
 
 	always_ff @(posedge clk)
 	begin
