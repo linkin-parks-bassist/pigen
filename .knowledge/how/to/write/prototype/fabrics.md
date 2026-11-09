@@ -1,10 +1,8 @@
 ---
 status: green
-revised_at: "2026-11-09T15:23:37+11:00"
+revised_at: "2026-11-09T21:26:24+11:00"
 ---
 
-A fabric implementation remains in the quarantined textual prototype, not in the production structured compiler. src/blocks.c contains parsing, connection checks, balanced topology construction, route calculation and SystemVerilog emission, including two-entry endpoint queues and buffered three-port routers. src/fabric_svg.inc renders topology diagrams. tests/fabric_smoke.sh and its fabric fixtures/testbenches exercise this old route, but the current CLI diagnoses the prototype corpus as migration debt.
+Fabric is not implemented on the structured production path. The quarantined prototype sources (src/blocks.c, src/fabric_svg.inc) still contain top-level fixed-width fabric parsing, balanced topology construction, route calculation, router/skid emission and SVG rendering, but the production `pigen` CLI does not link or call them. A transfer-first `fabric ... endfabric` input is not accepted by the structured parser, and the structured language has no child-instance syntax or resolved instance-port types yet.
 
-The prototype syntax is top-level and fixed-width, for example `fabric command_network #(parameter integer PAYLOAD_W = 32) begin boot.tx.command > controller.rx; cpu.tx.command -> controller.rx.cpu; debugger.tx.command --> controller.rx.debugger; endfabric`. Its emitter produces flattened ready/valid boundaries, route constants and recognized-source constants.
-
-The specified replacement is an inline, parent-module-owned fabric resolving two-component instance.port identities and checking types per connection. It remains an architecture migration gate. Production src/pigen.c calls pigen_compile_source; no prototype fallback is approved. Remove the old fabric parser and lowering when the structured fabric path covers the spec. Topology, routing, labels, layout and diagram naming have focused owners.
+The specified fabric is inline and parent-module-owned: two-component instance.port endpoints, per-connection payload width/signedness checks, exclusive `>` links, routed `->`/`-->` links with round-robin arbitration, balanced three-port relative routing, buffered ready breaks, and one model producing both RTL and SVG. Building it requires child-instance resolution first (what/is/the/plan.md). The prototype is reference material only; it is not a behavioral authority.

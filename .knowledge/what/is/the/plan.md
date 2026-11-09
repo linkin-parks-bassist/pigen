@@ -1,20 +1,18 @@
 ---
 status: green
-revised_at: "2026-11-09T15:44:11+11:00"
+revised_at: "2026-11-10T05:32:59+11:00"
 ---
 
-Remaining approved subsystem work:
+pigen-fork runs a structured-only compiler. Done and verified end-to-end: declarations, abstract inputs, static/buffered transfers with real primitives, clocked processes, module emission, inline pipelines (both stage forms), FSMs with state register/guards/gotos, `if (destination <= source)` transfer-and-branch, and the `accepts`/`valid`/`ready`/`peek` intrinsics. Simulations pass for the buf chain, an arithmetic pipeline, an FSM counter, the README sender FSM and an accepts()-based sender.
 
-1. Build child-instance and fabric support on the structured path, each in its own bounded stage with a discriminating green test manifest. The gates are owned by what/are/the/remaining/architecture/migration/gates.md; the language contract is what/is/the/spec.md. The prototype has no authority as a behavioral reference. No prototype-parity acceptance, validator bridge, fallback, second dialect or per-file choice is approved.
+Remaining work, in order:
+1. Add child-module instance syntax and semantic resolution (module/port binding, width/signedness checks, named connections) and emit named instances with definitions.
+2. Build the inline parent-owned fabric on those instances: exclusive `>` and routed `->`/`-->` links, balanced three-port routers, buffered ready breaks, arbitration, and SVG from the same topology. Delete the quarantined prototype fabric once covered.
+3. Implement the validity actions `validate`, `invalidate` and `flush`.
+4. Complete ordinary-SV expression coverage (aliases, conditionals, remaining conversions).
+5. Rebaseline the nine rtl-lower and two sv-emit sections to the new endpoint/fire/instance contract.
+6. Migrate examples/ to data-first syntax.
 
-2. Complete the remaining frontend forms required by accepted constructs, including parameter/type/aggregate/array/expression forms and macro concatenation/stringification/required arguments, under those migration gates. Diagnose unsupported dependencies at original spans.
+Open questions for David: pipeline yield control surface; retention of fabric manifest/SVG; struct-like child-instantiation grammar (is/struct/like/child/instantiation/specified.md).
 
-Baseline hardware experiment: David requested an isolated project with a copied compiled compiler and a Pigen-native counter to blink a Tang Nano 20K LED. The experiment is /home/david/Projects/pigen-experiments. Its counter is blocked by source-span overlap and missing clocked-process output mapping, detailed in why/does/the/native/counter/fail/sv/emission.md. Compilation, behavioral simulation and hardware build/programming are not complete. This experiment exposes a CLI acceptance gap; focused subsystem completion does not establish end-to-end counter behavior. A CointOS automatic repair cycle is only a discussion proposal, not an approved implementation task.
-
-Deferred to Pigen 1.0 with ready-cycle validation (elastic RTL Task 7): three route contract-level negative witnesses (cycle/self-loop rejection, sizing/signedness/aggregate-law violation, non-isolated foreign-module transfer rejection), none constructible through the public owner APIs. The concatenated/co-slice member-order law remains unobservable through the public API and is pinned per path by emitted SV and golden witnesses (does/the/concatenation/data/type/keying/keep/member/order.md).
-
-Open questions where the spec is silent on prototype-only behavior, for David to decide rather than inherit: whether pipeline yield is the complete pipeline control surface; whether fabric manifest/SVG outputs are retained; whether prototype-only examples/tests/APIs are preserved or retired when textual machinery is deleted. Struct-like child-instantiation grammar remains unsettled (is/struct/like/child/instantiation/specified.md).
-
-Pipeline and FSM subsystem completion evidence belongs in what/is/the/pipeline/parent/module/lowering.md and what/is/the/fsm/parent/module/lowering.md, including their limits on production integration. Elastic RTL stage/manifest completion belongs in the task owners; CLI wiring is owned by does/the/structured/frontend/run/in/production.md. Current behavioral defects remain owned by what/is/broken.md.
-
-Lowering consumes validated identities and backend-neutral realization properties. Stages diagnose and stop without rollback. Ordinary branches and worktrees may isolate bounded work; neither linear history nor direct-to-master work is required.
+Deferred to Pigen 1.0: ready-cycle validation (elastic RTL Task 7) and route negative witnesses. Lowering consumes validated identities and backend-neutral records; stages diagnose and stop without rollback.

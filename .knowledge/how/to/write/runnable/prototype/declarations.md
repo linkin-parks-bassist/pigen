@@ -1,10 +1,12 @@
 ---
 status: green
-revised_at: "2026-10-31T15:51:30+11:00"
+revised_at: "2026-11-09T22:34:25+11:00"
 ---
 
-Production ./pigen uses the structured frontend. Transfer-first prototype declarations such as `buf [7:0] sample;` are rejected with "data type must precede the transfer type". Use data-first syntax, for example `logic [7:0] buf sample;` (tests/owned_signal.pigen). This is not evidence of complete executable semantics: the master CLI can accept declarations and emit plain logic while omitting transfer/storage behavior.
+The structured production compiler accepts data-first declarations: data type, optional transfer annotation, then name. Examples: `bit[8] buf in_packet;`, `int[16] reg coefficient;`, `bit[32] fifo[8] pending;`, `logic [7:0] buf stage;`. wire/reg/logic are statics; buf/port/fifo/skid are elastic storage and lower to `pigen_*` primitives. An unqualified module input is abstract and gains payload, `<name>_valid` input and `<name>_ready` output ports; an explicit input buf/fifo/skid is the same upstream-owned boundary view.
 
-The examples/ and tests/ corpus still contains prototype syntax, including transfer-first ports and inline pipelines. Those files are migration evidence, not a runnable production-language recipe. Consult does/the/structured/frontend/run/in/production.md and what/is/broken.md before relying on them. There is no approved alternate dialect, fallback or per-file compiler choice.
+An inline pipeline goes inside a clocked process: `pipeline add begin int[16] sum, result; stage begin sum <= left + right; end stage begin result <= sum; end yield result; endpipeline` then `out <= add;`. The compiler expands fields and stage assignments into ordinary buf/static signals and transfers; the yield writes the pipeline output. Supported stage syntax is `stage begin ... end` (and `stage name begin ... end`).
 
-For an isolated CLI probe, build a pinned source snapshot outside active worktrees, run `./pigen INPUT.pigen -o OUTPUT.sv`, inspect the emitted behavior, and simulate relevant semantics; successful compilation alone does not establish correctness.
+An FSM is a module item: `fsm send @(posedge clk) reset (reset) initial idle begin state idle: if (start) goto send; state send: begin destination <= source; goto idle; end end`. The compiler creates the state register, resets it to the initial state, gates each state's actions on that state and lower-priority `!reset`, and lowers gotos to guarded state writes. `if (destination <= source)` is currently treated as a payload comparison, not the transfer-and-branch sugar.
+
+Fabric and child instances are not implemented. Transfer-first prototype spellings such as `buf [7:0] sample;` are rejected with "data type must precede the transfer type".
