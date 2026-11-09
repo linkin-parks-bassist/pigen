@@ -53,6 +53,7 @@ void pigen_rtl_lowering_free(pigen_rtl_lowering *lowering)
 	free(lowering->lowered_types);
 	free(lowering->lowered_expressions);
 	free(lowering->lowered_endpoints);
+	free(lowering->storage_drives);
 	*lowering = (pigen_rtl_lowering){0};
 }
 
@@ -1858,6 +1859,102 @@ static pigen_rtl_expr_id offer_identity_for_transfer(
 
 /* Lower validity actions into one equation per controlled storage port, OR-ing
  * every action guard that targets that port. */
+static int flush_storage_drives(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_rtl_module_id rtl_module)
+{
+	pigen_rtl_model *rtl = lowering->rtl;
+	size_t i;
+	int ok = 1;
+
+	(void)module;
+	for (i = 0; i < lowering->storage_drive_count && ok; i++)
+	{
+		size_t j;
+		const pigen_rtl_signal_endpoints *endpoints =
+			&lowering->lowered_endpoints[
+				lowering->storage_drives[i].signal_index];
+		pigen_rtl_expr_id valid = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		pigen_rtl_expr_id payload = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		pigen_rtl_type_id payload_type = endpoints->payload.index ==
+			PIGEN_INVALID_ID ? (pigen_rtl_type_id){PIGEN_INVALID_ID} :
+			pigen_rtl_object_get(rtl, endpoints->payload)->type;
+		pigen_source_span span = lowering->storage_drives[i].span;
+
+		/* Only the first drive for a signal builds the group. */
+		for (j = 0; j < i; j++)
+			if (lowering->storage_drives[j].signal_index ==
+				lowering->storage_drives[i].signal_index)
+				break;
+		if (j < i) continue;
+		for (j = i; j < lowering->storage_drive_count; j++)
+		{
+			const pigen_rtl_storage_drive *drive =
+				&lowering->storage_drives[j];
+
+			if (drive->signal_index !=
+				lowering->storage_drives[i].signal_index)
+				continue;
+			valid = valid.index == PIGEN_INVALID_ID ? drive->fire :
+				fire_or(lowering, valid, drive->fire);
+			if (valid.index == PIGEN_INVALID_ID) { ok = 0; break; }
+			if (payload.index == PIGEN_INVALID_ID)
+				payload = drive->value;
+			else
+			{
+				pigen_conditional_resolution resolution = {0};
+				pigen_rtl_expr_id zero;
+
+				zero = control_literal(lowering, payload_type, 0, span);
+				if (zero.index == PIGEN_INVALID_ID) { ok = 0; break; }
+				resolution.operation.result_data_type =
+					(pigen_data_type_id){PIGEN_INVALID_ID};
+				payload = pigen_rtl_expr_add_conditional(rtl,
+					payload_type, &resolution, drive->fire,
+					drive->value, payload, span);
+				if (payload.index == PIGEN_INVALID_ID) { ok = 0; break; }
+				(void)zero;
+			}
+		}
+		if (!ok) break;
+		/* Build a nested mux in source order: first drive wins when its
+		 * guard fires; otherwise the next. */
+		{
+			pigen_rtl_expr_id mux = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			pigen_rtl_literal_word word = {0, 0, 0};
+
+			for (j = lowering->storage_drive_count; j-- > i; )
+			{
+				const pigen_rtl_storage_drive *drive =
+					&lowering->storage_drives[j];
+				pigen_conditional_resolution resolution = {0};
+
+				if (drive->signal_index !=
+					lowering->storage_drives[i].signal_index)
+					continue;
+				if (mux.index == PIGEN_INVALID_ID)
+					mux = pigen_rtl_expr_add_literal(rtl,
+						PIGEN_RTL_EXPR_INTEGER, payload_type, &word,
+						1, 0, span);
+				if (mux.index == PIGEN_INVALID_ID) { ok = 0; break; }
+				resolution.operation.result_data_type =
+					(pigen_data_type_id){PIGEN_INVALID_ID};
+				mux = pigen_rtl_expr_add_conditional(rtl, payload_type,
+					&resolution, drive->fire, drive->value, mux, span);
+				if (mux.index == PIGEN_INVALID_ID) { ok = 0; break; }
+			}
+			if (ok)
+				ok = pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+					endpoints->input_payload, mux, span).index !=
+					PIGEN_INVALID_ID &&
+					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+						endpoints->input_valid, valid, span).index !=
+						PIGEN_INVALID_ID;
+		}
+	}
+	lowering->storage_drive_count = 0;
+	return ok ? 0 : -1;
+}
+
 static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
 	pigen_rtl_module_id rtl_module)
 {
@@ -2061,13 +2158,21 @@ static int drive_destination(pigen_rtl_lowering *lowering,
 	else
 	{
 		if (dest_endpoints->input_payload.index == PIGEN_INVALID_ID ||
-			dest_endpoints->input_valid.index == PIGEN_INVALID_ID ||
-			pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-				dest_endpoints->input_payload, value, span).index ==
-			PIGEN_INVALID_ID ||
-			pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-				dest_endpoints->input_valid, fire, span).index ==
-			PIGEN_INVALID_ID) return 0;
+			dest_endpoints->input_valid.index == PIGEN_INVALID_ID)
+			return 0;
+		if (lowering->storage_drive_count ==
+			lowering->storage_drive_capacity)
+		{
+			lowering->storage_drive_capacity =
+				lowering->storage_drive_capacity ?
+				lowering->storage_drive_capacity * 2 : 16;
+			lowering->storage_drives = pigen_resize(
+				lowering->storage_drives,
+				lowering->storage_drive_capacity *
+					sizeof(*lowering->storage_drives));
+		}
+		lowering->storage_drives[lowering->storage_drive_count++] =
+			(pigen_rtl_storage_drive){dest_signal.index, value, fire, span};
 	}
 	return 1;
 }
@@ -2258,6 +2363,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 		}
 		free(update_ids);
 	}
+	if (flush_storage_drives(lowering, module, rtl_module)) return -1;
 	if (lower_actions(lowering, module, rtl_module)) return -1;
 	return 0;
 }
