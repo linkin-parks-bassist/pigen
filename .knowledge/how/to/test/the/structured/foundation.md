@@ -1,15 +1,19 @@
 ---
 status: green
-revised_at: "2026-10-21T15:45:41+11:00"
-checked_at: "2026-10-19T17:24:35+11:00"
+revised_at: "2026-11-10T06:05:10+11:00"
+checked_at: '2026-11-10T06:05:31+11:00'
 ---
 
-Run `make source-test preprocess-test transfer-type-test syntax-model-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test rtl-name-test output-model-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test sv-emit-test compile-test`. These twenty C17 warning-as-error targets each compile their artifact in a fresh `mktemp -d` invocation-owned directory, run it, then remove the directory, so a run observes only the binary it just built (the artifact-ownership contract owns the why); the legacy fixed `/tmp/pigen-<name>` path is `rm -f`'d first and no executable is left at it. They exercise the unlinked structured foundation; the prototype's SV, pipeline and waveform targets are separate. `pipeline-identity-test` is the twenty-first such target but is not in this no-argument run: it requires an explicit section, `make pipeline-identity-test T=<section>` for `<section>` in {shape, field-buf, scope, yield}, and with no argument it prints a usage line and exits 2.
+The structured suite is split between green owner tests and two targets whose sections still pin the superseded endpoint/fire/instance contract.
 
-`tests/rtl_lower_test.c` uses the section harness in `tests/check.h`. Each `SECTION("name")` reports `PASS: <name>` or `FAIL: <name> at <file>:<line>: <expr>`; a failing `REQUIRE` ends only its own section, the rest still run, and the run ends with `N passed, M failed` and a nonzero exit if anything failed. Select sections by name prefix with `make rtl-lower-test T="t6-storage t6-boundary"`; `--list` prints the names without running them (run the freshly built binary in its temp directory, or select a prefix to run the matching sections). With no argument a harness target runs every section (e.g. `make rtl-lower-test` alone runs all of them). Sections are named by task: the `t5-*` sections share one semantic/RTL model and are run together (select `t5`), while each `t6-*` section builds its own model and runs alone. `tests/output_test.c`, `tests/route_test.c`, `tests/route_law_test.c`, `tests/route_validity_domain_ownership_test.c`, `tests/route_stall_throughput_test.c` and `tests/sv_emit_test.c` use the same section harness; the remaining targets (source, preprocess, transfer-type, syntax-model, integer, semantic, predicate, expression-resolve, expression-use, resolve, rtl, rtl-name, compile) still use `assert` and stop at their first failure.
+Green and passing with no argument or focused sections: source-test, preprocess-test, transfer-type-test, syntax-model-test, fsm-syntax-test, integer-test, semantic-test, predicate-test, expression-resolve-test, expression-use-test, resolve-test, rtl-test, rtl-name-test, output-model-test, route-test, route-law-test, route-vdo-test, route-stall-test, pipeline-output-test, pipeline-stage-test, pipeline-lower-test, fsm-lower-test, sv-emit-test's t10-skeleton/t10-expr-render, compile-test. These compile each artifact in a fresh `mktemp -d`, run it, and remove the directory; the legacy fixed `/tmp/pigen-<name>` path is removed first.
+
+Still red pending rebaseline: nine `rtl-lower-test` sections pin the old storage-control/invalid-control contract and update-value-equals-fire behavior (t6-boundary, t6-storage-matrix, t6-storage-instances, t6-storage-fifo-depth, t6-storage-counts, t8-module, t8-fire-identity, t8-guard, t8-ownership); two `sv-emit-test` sections pin positional instance text and OPAQUE-must-cover-structured-spans. Do not treat those failures as regressions of the new datapath.
+
+`pipeline-identity-test` is parameterized: `make pipeline-identity-test T=<section>` for `<section>` in {shape, field-buf, scope, yield}; no argument prints usage and exits 2. `tests/rtl_lower_test.c` and the other section-harness files (`output_test.c`, route tests, `sv_emit_test.c`) use `tests/check.h`: each SECTION reports PASS/FAIL, a failure ends only its section, and select sections by name prefix with `T=`. The remaining assert-based targets stop at their first failure.
 
 Proof:
 
 ```bash
-make -s rtl-lower-test T=t6-boundary | grep -qx 'PASS: t6-boundary'
+make -s compile-test | grep -q 'All compile tests passed'
 ```
