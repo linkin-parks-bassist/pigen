@@ -2,13 +2,13 @@ module fixed_point_mac
 	(
 		input logic clk,
 		input logic reset,
-		input buf [15:0] sample,
-		input buf [15:0] coefficient,
-		input buf [15:0] bias,
-		output buf [15:0] result
+		input logic [15:0] buf sample,
+		input logic [15:0] buf coefficient,
+		input logic [15:0] buf bias,
+		output logic [15:0] buf result
 	);
 
-	buf [31:0] product;
+	logic [31:0] buf product;
 
 	always_ff @(posedge clk)
 	begin

@@ -1764,6 +1764,95 @@ static int binary_boolean_result(pigen_binary_operator operator)
 		operator == PIGEN_BINARY_LOGICAL_OR;
 }
 
+static int sv_integer_view(pigen_semantic_model *model,
+	pigen_data_type_id type, pigen_numerical_interpretation interpretation,
+	pigen_data_type_id *view)
+{
+	const pigen_data_type *known = data_type_get(model, type);
+	if (!known) return 0;
+	if (known->constructor == PIGEN_DATA_TYPE_ALIAS ||
+		known->constructor == PIGEN_DATA_TYPE_UNSIZED_INTEGER)
+		return 0;
+	if (interpretation == PIGEN_NUMERICAL_SYSTEMVERILOG &&
+		pigen_data_type_is_integral(model, type))
+	{
+		pigen_const_expr_id width = pigen_data_type_packed_width(model, type);
+		if (width.index == PIGEN_INVALID_ID) return 0;
+		*view = pigen_data_type_signedness(model, type) == PIGEN_SIGN_SIGNED ?
+			pigen_data_type_signed_integer(model, width) :
+			pigen_data_type_unsigned_integer(model, width);
+		return view->index != PIGEN_INVALID_ID;
+	}
+	*view = type;
+	return 1;
+}
+
+static int resolve_sv_binary_operation(pigen_semantic_model *model,
+	pigen_binary_operator operator, pigen_data_type_id left,
+	pigen_data_type_id right, pigen_binary_resolution *resolution)
+{
+	pigen_numerical_interpretation li =
+		pigen_data_type_numerical_interpretation(model, left);
+	pigen_numerical_interpretation ri =
+		pigen_data_type_numerical_interpretation(model, right);
+	pigen_data_type_id lview, rview, result;
+	pigen_const_expr_id lw, rw, maxw;
+	pigen_conversion lconv, rconv;
+	int is_signed;
+
+	if (!pigen_data_type_is_integral(model, left) &&
+		li != PIGEN_NUMERICAL_EXACT_INTEGER) return 0;
+	if (!pigen_data_type_is_integral(model, right) &&
+		ri != PIGEN_NUMERICAL_EXACT_INTEGER) return 0;
+	if (li != PIGEN_NUMERICAL_SYSTEMVERILOG &&
+		ri != PIGEN_NUMERICAL_SYSTEMVERILOG) return 0;
+	if (!sv_integer_view(model, left, li, &lview) ||
+		!sv_integer_view(model, right, ri, &rview))
+		return 0;
+	if (operator == PIGEN_BINARY_DIVIDE || operator == PIGEN_BINARY_MODULO)
+		return 0;
+	if (binary_boolean_result(operator))
+	{
+		result = pigen_data_type_boolean(model);
+		lview = left;
+		rview = right;
+	}
+	else
+	{
+		lw = pigen_data_type_packed_width(model, lview);
+		rw = pigen_data_type_packed_width(model, rview);
+		if (lw.index == PIGEN_INVALID_ID || rw.index == PIGEN_INVALID_ID)
+			return 0;
+		maxw = pigen_const_expr_intern_width_maximum(model,
+			(pigen_const_expr_id[]){lw, rw}, 2);
+		if (maxw.index == PIGEN_INVALID_ID) return 0;
+		is_signed = pigen_data_type_signedness(model, lview) == PIGEN_SIGN_SIGNED ||
+			pigen_data_type_signedness(model, rview) == PIGEN_SIGN_SIGNED;
+		if (operator == PIGEN_BINARY_MULTIPLY)
+			maxw = pigen_const_expr_intern_width_sum(model,
+				(pigen_const_expr_id[]){lw, rw}, 2);
+		else if (operator == PIGEN_BINARY_ADD || operator == PIGEN_BINARY_SUBTRACT)
+			maxw = width_plus_one(model, maxw);
+		if (operator == PIGEN_BINARY_SHIFT_LEFT ||
+			operator == PIGEN_BINARY_SHIFT_RIGHT ||
+			operator == PIGEN_BINARY_ARITH_SHIFT_LEFT ||
+			operator == PIGEN_BINARY_ARITH_SHIFT_RIGHT)
+			result = lview;
+		else
+			result = is_signed ? pigen_data_type_signed_integer(model, maxw) :
+				pigen_data_type_unsigned_integer(model, maxw);
+		if (result.index == PIGEN_INVALID_ID) return 0;
+	}
+	if (!resolve_operand_conversion(model, left, lview, &lconv) ||
+		!resolve_operand_conversion(model, right, rview, &rconv))
+		return 0;
+	resolution->left_conversion = lconv;
+	resolution->right_conversion = rconv;
+	resolution->operation = (pigen_binary_operation){operator,
+		lconv.target_data_type, rconv.target_data_type, result};
+	return 1;
+}
+
 int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	pigen_binary_operator operator, pigen_data_type_id left,
 	pigen_data_type_id right, pigen_binary_resolution *resolution)
@@ -1778,6 +1867,10 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	if (!model || !resolution || !pigen_binary_operator_is_valid(operator) ||
 		!data_type_get(model, left) || !data_type_get(model, right))
 		return 0;
+	if ((!data_type_is_pigen_integer(model, left) ||
+		!data_type_is_pigen_integer(model, right)) &&
+		resolve_sv_binary_operation(model, operator, left, right, resolution))
+		return 1;
 	left_interpretation = pigen_data_type_numerical_interpretation(model, left);
 	right_interpretation = pigen_data_type_numerical_interpretation(model, right);
 	if (left_interpretation == PIGEN_NUMERICAL_EXACT_INTEGER &&
