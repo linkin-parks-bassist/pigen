@@ -2194,6 +2194,11 @@ static int parse_retained_module_item(syntax_parser *parser,
 	const pigen_expanded_token *last_tok;
 
 	if (semicolon == limit) return 0;
+	if (token_is(parser, start, "assign"))
+		for (size_t at = start + 1; at < semicolon; at++)
+			if (token_is(parser, at, "<="))
+				return fail(parser, at,
+					"transfers are allowed only in clocked always blocks");
 	opaque_start = parser->opaque_byte_cursor;
 	opaque_end = start_tok ? pigen_origin_expansion_span(parser->expanded,
 		start_tok->origin).start : opaque_start;
@@ -2360,10 +2365,25 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			}
 			if (parser->pipeline_failed) return 0;
 			if (token_is(parser, at, "always_ff"))
-				return fail(parser, at + 2,
-					"exactly one posedge event control");
-			/* A non-clocked `always` block is ordinary SV retained as-is. */
-			if (token_is(parser, at, "always"))
+			{
+				size_t open = at + 2;
+				size_t close = token_is(parser, at + 1, "@") &&
+					token_is(parser, open, "(") ?
+					matching_parenthesis(parser, open, after) : after;
+
+				if (close == after || close != open + 3 ||
+					!token_is(parser, open + 1, "posedge") ||
+					!identifier(parser, open + 2))
+					return fail(parser, at + 2,
+						"exactly one posedge event control");
+			}
+			/* A non-clocked `always` block is ordinary SV retained as-is.
+			 * A failed edge-clocked block must roll back, not become opaque. */
+			if (token_is(parser, at, "always") &&
+				!(token_is(parser, at + 2, "(") &&
+					(token_is(parser, at + 3, "posedge") ||
+					 token_is(parser, at + 3, "negedge") ||
+					 token_is(parser, at + 3, "edge"))))
 			{
 				size_t retained_after;
 

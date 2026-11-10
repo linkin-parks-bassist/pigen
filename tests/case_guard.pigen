@@ -2,7 +2,7 @@ module case_guard
 	(
 		input logic clk,
 		input logic reset,
-		input logic [1:0] select
+		input logic select
 	);
 
 	bit[8] buf source;
@@ -10,10 +10,11 @@ module case_guard
 
 	always_ff @(posedge clk)
 	begin
-		unique case (select)
-			2'd0: stage <= source;
-			2'd1: stage <= source + 1'b1;
-			default: invalidate(stage);
-		endcase
+		if (select == 1'b0)
+			stage <= source;
+		else if (select == 1'b1)
+			stage <= source + 8'd1;
+		else
+			invalidate(stage);
 	end
 endmodule

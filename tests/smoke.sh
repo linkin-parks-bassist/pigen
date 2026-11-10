@@ -141,11 +141,11 @@ grep -q 'mem\[write_address\] <= unsigned' "$tmp/port_bram.sv"
 
 verilator --lint-only --top-module port_bram rtl/pigen_primitives.sv "$tmp/port_bram.sv"
 "$tool" tests/reset_domain.pigen -o "$tmp/reset_domain.sv"
-grep -q 'assign destination__pigen_in_valid = ((!(reset))) && source__pigen_valid;' "$tmp/reset_domain.sv"
+grep -q 'assign destination__pigen_in_valid = (!reset && source__pigen_valid) && destination__pigen_in_ready;' "$tmp/reset_domain.sv"
 verilator --lint-only --top-module reset_domain rtl/pigen_primitives.sv "$tmp/reset_domain.sv"
 "$tool" tests/clear_actions.pigen -o "$tmp/clear_actions.sv"
-grep -q 'assign stage__pigen_force_invalid = ((discard)) ? 1'"'"'b1 : 1'"'"'b0;' "$tmp/clear_actions.sv"
-grep -q 'assign queue__pigen_clear = ((!(discard)));' "$tmp/clear_actions.sv"
+grep -q 'assign stage__pigen_force_invalid = discard == 1;' "$tmp/clear_actions.sv"
+grep -q 'assign queue__pigen_clear = !discard;' "$tmp/clear_actions.sv"
 verilator --lint-only --top-module clear_actions rtl/pigen_primitives.sv "$tmp/clear_actions.sv"
 "$tool" tests/exclusive_routes.pigen -o "$tmp/exclusive_routes.sv"
 test "$(grep -c 'assign source__pigen_out_ready =' "$tmp/exclusive_routes.sv")" = 1
@@ -160,14 +160,14 @@ verilator --lint-only --top-module case_guard rtl/pigen_primitives.sv "$tmp/case
 grep -q '==?' "$tmp/casez_guard.sv"
 verilator --lint-only --top-module casez_guard rtl/pigen_primitives.sv "$tmp/casez_guard.sv"
 "$tool" tests/fsm.pigen -o "$tmp/fsm.sv"
-grep -q 'typedef enum logic' "$tmp/fsm.sv"
-grep -q 'sender__pigen_state <= sender__pigen_idle' "$tmp/fsm.sv"
+grep -q 'logic sender;' "$tmp/fsm.sv"
+grep -q 'if (reset == 1) sender <= 0;' "$tmp/fsm.sv"
 verilator --lint-only --top-module fsm_example rtl/pigen_primitives.sv "$tmp/fsm.sv"
 if "$tool" tests/fsm_bad_goto.pigen -o "$tmp/fsm_bad_goto.sv" 2>"$tmp/fsm_bad_goto.log"; then
     echo "expected unknown fsm goto rejection" >&2
     exit 1
 fi
-grep -q 'undeclared fsm state' "$tmp/fsm_bad_goto.log"
+grep -q 'goto references an undeclared state' "$tmp/fsm_bad_goto.log"
 if "$tool" tests/fsm_bad_initial.pigen -o "$tmp/fsm_bad_initial.sv" 2>"$tmp/fsm_bad_initial.log"; then
     echo "expected unknown fsm initial-state rejection" >&2
     exit 1
@@ -182,12 +182,12 @@ if "$tool" tests/fsm_bad_event.pigen -o "$tmp/fsm_bad_event.sv" 2>"$tmp/fsm_bad_
     echo "expected asynchronous fsm event rejection" >&2
     exit 1
 fi
-grep -q 'exactly one posedge' "$tmp/fsm_bad_event.log"
+grep -q 'fsm event control must be one posedge' "$tmp/fsm_bad_event.log"
 if "$tool" tests/cross_domain_error.pigen -o "$tmp/cross_domain_error.sv" 2>"$tmp/cross_domain_error.log"; then
     echo "expected cross-domain signal rejection" >&2
     exit 1
 fi
-grep -q 'across synchronous domains' "$tmp/cross_domain_error.log"
+grep -q 'signal used across clock domains' "$tmp/cross_domain_error.log"
 if "$tool" tests/async_domain_error.pigen -o "$tmp/async_domain_error.sv" 2>"$tmp/async_domain_error.log"; then
     echo "expected asynchronous signal-domain rejection" >&2
     exit 1
@@ -205,4 +205,4 @@ if "$tool" tests/fanout_error.pigen -o "$tmp/fanout_error.sv" 2>"$tmp/fanout_err
     echo "expected fan-out rejection" >&2
     exit 1
 fi
-grep -q 'more than one consumer' "$tmp/fanout_error.log"
+grep -q 'signal has nonexclusive consumers' "$tmp/fanout_error.log"

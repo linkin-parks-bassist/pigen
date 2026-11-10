@@ -119,6 +119,8 @@ typedef struct {
 	pigen_rtl_module_id module; /* Invalid until owner resolution publishes it. */
 	char *name; /* Final terminal name owned by the model; NULL falls back to
 	             * the name arena (the t10 emitter contract). */
+	char *shape; /* Rendered unpacked dimensions, e.g. " [0:15]"; ownership
+	              * belongs to the model. */
 } pigen_rtl_object;
 
 /* One instance port connection: a named port bound to an object, or to a
@@ -339,6 +341,8 @@ int pigen_rtl_update_set_enable(pigen_rtl_model *model,
 	pigen_rtl_update_id update, pigen_rtl_expr_id enable);
 int pigen_rtl_update_set_path(pigen_rtl_model *model,
 	pigen_rtl_update_id update, pigen_rtl_expr_id path);
+int pigen_rtl_object_set_shape(pigen_rtl_model *model,
+	pigen_rtl_object_id object, const char *shape);
 pigen_rtl_process_id pigen_rtl_process_add_with_owner(
 	pigen_rtl_model *model, pigen_rtl_module_id module,
 	pigen_rtl_expr_id clock_expression, pigen_semantic_edge edge,

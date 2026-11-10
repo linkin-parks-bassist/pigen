@@ -626,6 +626,55 @@ static int name_object(pigen_rtl_lowering *lowering,
 	return 1;
 }
 
+static char *signal_shape_suffix(pigen_rtl_lowering *lowering,
+	size_t signal_index)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	const pigen_semantic_signal *signal = pigen_signal_get(sem,
+		(pigen_signal_id){(uint32_t)signal_index});
+	const pigen_semantic_shape *shape;
+	const pigen_shape_dimension *dimensions;
+	pigen_string text = {0};
+	size_t i;
+
+	if (!signal || signal->shape.index == PIGEN_INVALID_ID)
+		return NULL;
+	shape = pigen_shape_get(sem, signal->shape);
+	dimensions = shape ? pigen_shape_dimensions(sem, signal->shape) : NULL;
+	if (!shape || !shape->dimension_count || !dimensions)
+		return NULL;
+	for (i = 0; i < shape->dimension_count; i++)
+	{
+		uint64_t left = 0, right = 0;
+
+		if (dimensions[i].form == PIGEN_SHAPE_DIMENSION_RANGE)
+		{
+			if (!pigen_const_expr_evaluate_u64(sem,
+					dimensions[i].as.range.left, &left) ||
+				!pigen_const_expr_evaluate_u64(sem,
+					dimensions[i].as.range.right, &right))
+			{
+				free(text.data);
+				return NULL;
+			}
+		}
+		else
+		{
+			if (!pigen_const_expr_evaluate_u64(sem,
+					dimensions[i].as.count, &left) || left == 0)
+			{
+				free(text.data);
+				return NULL;
+			}
+			right = 0;
+			left -= 1;
+		}
+		pigen_append_format(&text, " [%llu:%llu]",
+			(unsigned long long)left, (unsigned long long)right);
+	}
+	return text.data;
+}
+
 static pigen_rtl_object_id add_named_object(pigen_rtl_lowering *lowering,
 	pigen_rtl_module_id rtl_module, pigen_rtl_type_id type,
 	pigen_semantic_direction direction, size_t signal_index,
@@ -642,6 +691,27 @@ static pigen_rtl_object_id add_named_object(pigen_rtl_lowering *lowering,
 	name = suffix ? name_join(base, suffix) : name_join(base, "");
 	if (!name || !name_object(lowering, object, name))
 		return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	if (!suffix)
+	{
+		const pigen_semantic_signal *signal = pigen_signal_get(
+			lowering->semantics, (pigen_signal_id){(uint32_t)signal_index});
+		const pigen_transfer_type_descriptor *descriptor = signal ?
+			pigen_transfer_type_descriptor_get(signal->transfer_type) : NULL;
+
+		if (descriptor && descriptor->is_static)
+		{
+			char *shape = signal_shape_suffix(lowering, signal_index);
+			if (shape)
+			{
+				if (!pigen_rtl_object_set_shape(rtl, object, shape))
+				{
+					free(shape);
+					return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+				}
+				free(shape);
+			}
+		}
+	}
 	return object;
 }
 
@@ -2255,6 +2325,10 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	processes = pigen_module_processes(sem, module, &process_count);
 	if (!processes && process_count)
 		return -1;
+	pigen_rtl_object_id *ready_targets = NULL;
+	pigen_rtl_expr_id *ready_terms = NULL;
+	size_t ready_group_count = 0;
+
 	for (pi = 0; pi < process_count; pi++)
 	{
 		const pigen_semantic_process *owner_process;
@@ -2531,13 +2605,38 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 				source_endpoints =
 					&lowering->lowered_endpoints[use->signal.index];
 				if (source_endpoints->source_ready.index !=
-					PIGEN_INVALID_ID &&
-					pigen_rtl_equation_add_with_owner(rtl,
-						rtl_module, source_endpoints->source_ready,
-						fire, owner->span).index == PIGEN_INVALID_ID)
+					PIGEN_INVALID_ID)
 				{
-					free(update_ids);
-					return -1;
+					size_t group;
+
+					for (group = 0; group < ready_group_count; group++)
+						if (ready_targets[group].index ==
+							source_endpoints->source_ready.index)
+							break;
+					if (group == ready_group_count)
+					{
+						ready_targets = pigen_resize(ready_targets,
+							(ready_group_count + 1) *
+								sizeof(*ready_targets));
+						ready_terms = pigen_resize(ready_terms,
+							(ready_group_count + 1) *
+								sizeof(*ready_terms));
+						ready_targets[group] =
+							source_endpoints->source_ready;
+						ready_terms[group] = fire;
+						ready_group_count++;
+					}
+					else
+					{
+						ready_terms[group] = fire_or(lowering,
+							ready_terms[group], fire);
+						if (ready_terms[group].index ==
+							PIGEN_INVALID_ID)
+						{
+							free(update_ids);
+							return -1;
+						}
+					}
 				}
 			}
 		}
@@ -2554,6 +2653,18 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 		}
 		free(update_ids);
 	}
+	for (pi = 0; pi < ready_group_count; pi++)
+		if (pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+			ready_targets[pi], ready_terms[pi],
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0})
+			.index == PIGEN_INVALID_ID)
+		{
+			free(ready_targets);
+			free(ready_terms);
+			return -1;
+		}
+	free(ready_targets);
+	free(ready_terms);
 	if (flush_storage_drives(lowering, module, rtl_module)) return -1;
 	if (lower_actions(lowering, module, rtl_module)) return -1;
 	return 0;

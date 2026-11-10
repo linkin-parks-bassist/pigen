@@ -992,6 +992,23 @@ void pigen_rtl_set_name(pigen_rtl_model *model, char **slot, const char *text)
 	*slot = pigen_copy_range(text, strlen(text));
 }
 
+int pigen_rtl_object_set_shape(pigen_rtl_model *model,
+	pigen_rtl_object_id object, const char *shape)
+{
+	pigen_rtl_object *record;
+	char *copy;
+
+	if (!model || object.index == PIGEN_INVALID_ID ||
+		object.index >= model->object_count || !shape)
+		return 0;
+	copy = pigen_resize(NULL, strlen(shape) + 1);
+	memcpy(copy, shape, strlen(shape) + 1);
+	record = &model->objects[object.index];
+	free(record->shape);
+	record->shape = copy;
+	return 1;
+}
+
 void pigen_free_rtl_model(pigen_rtl_model *model)
 {
 	for (size_t i = 0; i < model->type_count; ++i)
@@ -1003,7 +1020,10 @@ void pigen_free_rtl_model(pigen_rtl_model *model)
 	for (size_t i = 0; i < model->connection_count; ++i)
 		free((void *)model->connections[i].port);
 	for (size_t i = 0; i < model->object_count; ++i)
+	{
 		free(model->objects[i].name);
+		free(model->objects[i].shape);
+	}
 	for (size_t i = 0; i < model->instance_count; ++i)
 		free(model->instances[i].name);
 	for (size_t i = 0; i < model->module_count; ++i)

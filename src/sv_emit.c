@@ -793,6 +793,8 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 	}
 	buf_append_str(b, " ");
 	buf_append_str(b, name);
+	if (object->shape)
+		buf_append_str(b, object->shape);
 	if (is_port)
 		buf_append_str(b, comma ? "," : "");
 	else
