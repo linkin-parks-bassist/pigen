@@ -181,6 +181,21 @@ static int structured_type_name_exists(void *context, pigen_token_id name)
 	if (!known && query->scope.index != 0)
 		known = typedef_name_fact_in_scope(query->parser, name,
 			(pigen_syntax_id){0});
+	if (!known)
+	{
+		size_t i = query->parser->typedef_name_fact_count;
+
+		while (i)
+		{
+			const typedef_name_fact *fact =
+				&query->parser->typedef_name_facts[--i];
+			if (tokens_equal(query->parser, fact->name, name))
+			{
+				known = fact;
+				break;
+			}
+		}
+	}
 	return known && known->kind == TYPEDEF_NAME_ELIGIBLE;
 }
 
@@ -1327,6 +1342,13 @@ static int parse_pipeline_field(syntax_parser *parser,
 		fail(parser, has_explicit_transfer ? at : start,
 			"pipeline field declaration requires a data type");
 		return 0;
+	}
+	if (!has_explicit_transfer && identifier(parser, name) &&
+		token_is(parser, name, "buf") && identifier(parser, name + 1))
+	{
+		transfer_at = name;
+		has_explicit_transfer = 1;
+		name++;
 	}
 	if (!identifier(parser, name))
 	{

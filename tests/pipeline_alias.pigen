@@ -1,0 +1,11 @@
+module palias(input logic clk, input logic reset,input logic signed [7:0] buf a,output logic signed [7:0] buf y);
+ typedef logic signed [7:0] octet;
+ always_ff @(posedge clk) begin
+  pipeline p begin
+   octet buf v;
+   stage begin v <= a; end
+   yield v;
+  endpipeline
+  y <= p;
+ end
+endmodule
