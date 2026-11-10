@@ -913,6 +913,35 @@ static char *copy_block_with_replacements(const char *source,
 	return out.data ? out.data : pigen_copy_range("", 0);
 }
 
+static int block_single_guarded(const char *source,
+	const pigen_tokens *tokens, size_t begin, size_t end)
+{
+	size_t open, close, body, body_end;
+
+	if (!token_is_text(source, &tokens->items[begin + 1], "if") ||
+		!token_is_text(source, &tokens->items[begin + 2], "("))
+		return 0;
+	open = begin + 2;
+	close = find_matching(source, tokens, open, "(", ")", tokens->count);
+	if (close == tokens->count) return 0;
+	body = close + 1;
+	if (!token_is_text(source, &tokens->items[body], "begin")) return 0;
+	body_end = body;
+	{
+		size_t depth = 0;
+
+		for (; body_end < tokens->count; body_end++)
+		{
+			if (token_is_text(source, &tokens->items[body_end], "begin"))
+				depth++;
+			else if (token_is_text(source, &tokens->items[body_end], "end") &&
+				!--depth) break;
+		}
+	}
+	if (body_end == tokens->count || body_end + 1 != end) return 0;
+	return 1;
+}
+
 static int block_is_straight(const char *source, const pigen_tokens *tokens,
 	size_t first, size_t last)
 {
@@ -1013,7 +1042,8 @@ static int add_mixed_process_splits(const char *source,
 				 token_is_text(source, &tokens->items[at], ":")))
 				boundary = at + 1;
 		}
-		straight = block_is_straight(source, tokens, begin + 1, end);
+		straight = block_is_straight(source, tokens, begin + 1, end) ||
+			block_single_guarded(source, tokens, begin, end);
 		if (has_task && has_pigen)
 		{
 			*error = "mixed clocked body with a task call cannot be split "
