@@ -2474,6 +2474,43 @@ static int parse_retained_unknown_item(syntax_parser *parser,
 		}
 		if (end == limit) return 0;
 	}
+	else if (token_is(parser, start, "case") || token_is(parser, start, "casex") ||
+		token_is(parser, start, "casez"))
+	{
+		size_t depth = 0;
+		size_t open = start + 1;
+
+		if (!token_is(parser, open, "(")) return 0;
+		open = matching_parenthesis(parser, open, limit);
+		if (open == limit) return 0;
+		for (end = open + 1; end < limit; end++)
+		{
+			if (token_is(parser, end, "case") || token_is(parser, end, "casex") ||
+				token_is(parser, end, "casez")) depth++;
+			else if (token_is(parser, end, "endcase") && !--depth) break;
+		}
+		if (end == limit) return 0;
+	}
+	else if (token_is(parser, start, "if") || token_is(parser, start, "for") ||
+		token_is(parser, start, "while"))
+	{
+		size_t open = start + 1;
+		size_t body_end;
+
+		if (!token_is(parser, open, "(")) return 0;
+		open = matching_parenthesis(parser, open, limit);
+		if (open == limit) return 0;
+		body = open + 1;
+		if (!retained_body_end(parser, body, limit, &body_end)) return 0;
+		if (token_is(parser, start, "if") && token_is(parser, body_end + 1, "else"))
+		{
+			size_t else_body = body_end + 2;
+
+			if (!retained_body_end(parser, else_body, limit, &body_end))
+				return 0;
+		}
+		end = body_end;
+	}
 	else if (token_is(parser, start, "initial") || token_is(parser, start, "final") ||
 		token_is(parser, start, "always_comb") || token_is(parser, start, "always_latch"))
 	{

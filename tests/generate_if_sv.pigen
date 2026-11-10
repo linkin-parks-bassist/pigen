@@ -1,0 +1,7 @@
+module genif(input logic [3:0] a, output logic [3:0] y);
+ if (1) begin : g
+  assign y = a;
+ end else begin : h
+  assign y = 4'd0;
+ end
+endmodule
