@@ -1,14 +1,12 @@
 ---
 status: green
-revised_at: "2026-11-10T10:17:48+11:00"
+revised_at: "2026-11-10T16:01:09+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-The structured C suite is green: source, preprocess, transfer-type, syntax-model, fsm-syntax, integer, semantic, predicate, expression-resolve, expression-use, resolve, rtl, rtl-name, output-model, rtl-lower (24/24), sv-emit (all four sections), route (four), pipeline-output/stage/lower, fsm-lower and compile.
+`make test` and `make verify` are fully green end to end. The suite covers the structured C owners (source, preprocess, transfer-type, syntax-model, fsm-syntax, integer, semantic, predicate, expression-resolve, expression-use, resolve, rtl, rtl-name, output-model, rtl-lower, sv-emit, route, pipeline-output/stage/lower, fsm-lower, compile), the data-first pipeline corpus, fixed-point MAC, text and both migrated biquad examples, FSM and child-instance checks, inline and standalone fabric fairness/router tests, SVG topology, and ordinary-SV preservation witnesses. Emitted designs compile with rtl/pigen_primitives.sv, and waveforms are simulated with bounded timeouts before compilation is treated as correctness.
 
-Behavioural checks that pass with bounded timeouts: the data-first buf chain, compiler/guarded/output/port/skid/fifo/join pipelines, fixed-point MAC, the text/DF1 streaming example (500 clocks, sent=497 received=494), an FSM counter, the README sender FSM, an accepts()-based sender, a standard child instance, a two-leaf inline fabric routed link, and `concat-dest-test`. These emitted designs are compiled with rtl/pigen_primitives.sv. Router/arbitration/SVG behaviour and typed-parameter/mixed-arithmetic lowering are not yet generated.
-
-The aggregate `make test`/`make verify` corpus targets are still red because the remaining legacy examples (`biquad_bank`, `df1_biquad_bandpass`) and fabric-router features are not built. Icarus Verilog 13 is at ~/.local/bin; Verilator 5.020 lint is warnings-fatal. `make clean` removes `pigen`.
+Run `make test` for the fast owner corpus and `make verify` for waveform, lint-sensitive and example gates. Icarus Verilog 13 is at ~/.local/bin; Verilator 5.020 lint is warnings-fatal. `make clean` removes `pigen`. A failure is investigated and repaired rather than rebaselined to a weaker diagnostic unless the old assertion is obsolete by a deliberate semantic change.
 
 Proof:
 

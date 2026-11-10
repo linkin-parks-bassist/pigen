@@ -1,15 +1,16 @@
 ---
 status: green
-revised_at: "2026-11-10T10:17:48+11:00"
+revised_at: "2026-11-10T16:01:03+11:00"
 ---
 
-The structured frontend is the production compiler and lowers datapath, pipeline, FSM, acceptance behavior, buffered inline fabric links, validity actions, grouped storage producers and aligned concatenation destinations, with standard SV compatibility for ordinary module items, but the language is not complete.
+The structured frontend is the production compiler and lowers datapath, pipeline, FSM, acceptance behavior, buffered inline and standalone fabric routing, validity actions, grouped storage producers and concatenation destinations, with broad ordinary-SV preservation. The language is still incomplete.
 
-Working: data-first declarations; abstract inputs with valid/ready ports; static and buffered transfers with real primitives; clocked processes; inline pipelines (both stage forms); FSMs; transfer-and-branch; `accepts`/`valid`/`ready`/`peek`; `validate`/`invalidate`/`flush`; multiple mutually exclusive producers to one storage signal (payload mux + OR-of-fires valid); multiple modules; verbatim ordinary `assign` and standard child instantiations; semantic instance/port metadata; inline fabric endpoint wiring with direct links and skid-buffered routed links; concatenation destinations with per-child conversion. Updates carry RHS in value and fire in enable. Every structured owner test is green, rtl-lower 24/24.
+Working and verified: data-first declarations; abstract inputs with valid/ready ports; static and buffered transfers with real primitives; clocked processes; inline pipelines (both stage forms); FSMs; transfer-and-branch; `accepts`/`valid`/`ready`/`peek`; `validate`/`invalidate`/`flush`; grouped storage producers; multiple modules; ordinary `assign`, child instances, `generate`/`genvar`, `initial`/`final`, `always_comb`/`always_latch`, typedefs and parameters; semantic instance/port metadata; inline direct links and skid-buffered routed links; standalone fabric networks with balanced three-port routers, round-robin arbitration, registered occupancy, path metadata and deterministic SVG; concatenation destinations with `_` placeholders, nested and misaligned slices; typed and integer parameters, `$clog2`, and mixed integer/logic arithmetic. Every owner suite is green, including rtl-lower 24/24, and both biquad examples are migrated and green.
 
 Defects and gaps:
-- **Fabric lacks routing networks.** No balanced three-port router topology, no round-robin arbitration, no SVG manifest; multiple routed links to one destination are rejected.
-- **Expression/lvalue coverage is partial.** Typed parameters and mixed pigen-integer × logic arithmetic do not lower; concatenation needs an aligned RHS (no `_`/misaligned slicing); functions/structs remain incomplete.
-- **Examples are mostly migrated.** Data-first and verified: buf, compiler, guarded, output, port, skid, fifo, join, fixed_point_mac, text. `biquad_bank` and `df1_biquad_bandpass` remain legacy (structs/macros/functions).
+- **Parameterized Pigen children are unsupported.** Modules containing Pigen structured constructs are parsed structurally and emit no header parameter list, so an overridden child instance would keep default port widths. Ordinary SystemVerilog parameterized children and instances already elaborate verbatim.
+- **Mixed structured/retained clocked bodies diagnose.** A clocked body cannot combine Pigen structured constructs with retained function/task calls or other unsupported syntax; it stops with a source-located diagnostic rather than emitting raw Pigen.
+- **Ordinary-SV preservation is audit-driven.** Unrecognized ordinary module items are retained, but directionless/interface-typed ports and other advanced constructs are not yet all represented; unsupported forms must be recovered rather than silently dropped.
+- **Deferred to Pigen 1.0:** semantic ready-cycle validation and route negative witnesses. Verilator lint still exposes combinational loops, and lowering assumes validated identities.
 
 Verilator 5.020 and Icarus 13 are installed; lint stays warnings-fatal. Simulate emitted behavior before treating compilation as correctness.
