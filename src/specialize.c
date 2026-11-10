@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -982,6 +983,7 @@ static char *leaf_if_condition(const char *source,
 typedef struct {
 	size_t begin_token;
 	char *condition;
+	int from_else_if;
 } guard_condition_entry;
 
 static char *leaf_guard_expression(const char *source,
@@ -992,6 +994,7 @@ static char *leaf_guard_expression(const char *source,
 	size_t entry_count = 0;
 	size_t *begins = NULL;
 	size_t depth = 0;
+	size_t ignored_if = SIZE_MAX;
 	pigen_string out = {0};
 
 	*safe = 1;
@@ -1007,7 +1010,8 @@ static char *leaf_guard_expression(const char *source,
 			goto done;
 		}
 		if (token_is_text(source, &tokens->items[at], "if") &&
-			token_is_text(source, &tokens->items[at + 1], "("))
+			token_is_text(source, &tokens->items[at + 1], "(") &&
+			at != ignored_if)
 		{
 			size_t close = find_matching(source, tokens, at + 1, "(", ")",
 				tokens->count);
@@ -1020,12 +1024,14 @@ static char *leaf_guard_expression(const char *source,
 				entries[entry_count].begin_token = close + 1;
 				entries[entry_count].condition =
 					build_tokens(source, tokens, at + 2, close, NULL, 0);
+				entries[entry_count].from_else_if = 0;
 				entry_count++;
 			}
 		}
 		if (token_is_text(source, &tokens->items[at], "else"))
 		{
 			char *negated = NULL;
+			int matched_else_if = 0;
 
 			for (size_t e = 0; e < entry_count; e++)
 			{
@@ -1040,8 +1046,15 @@ static char *leaf_guard_expression(const char *source,
 					pigen_append(&text, entries[e].condition);
 					pigen_append(&text, ")");
 					negated = text.data;
+					matched_else_if = entries[e].from_else_if;
 					break;
 				}
+			}
+			if (negated && matched_else_if)
+			{
+				free(negated);
+				*safe = 0;
+				goto done;
 			}
 			if (negated && token_is_text(source, &tokens->items[at + 1],
 				"begin"))
@@ -1050,7 +1063,42 @@ static char *leaf_guard_expression(const char *source,
 					(entry_count + 1) * sizeof(*entries));
 				entries[entry_count].begin_token = at + 1;
 				entries[entry_count].condition = negated;
+				entries[entry_count].from_else_if = 0;
 				entry_count++;
+			}
+			else if (negated && token_is_text(source, &tokens->items[at + 1],
+				"if") && token_is_text(source, &tokens->items[at + 2], "("))
+			{
+				size_t close = find_matching(source, tokens, at + 2, "(", ")",
+					tokens->count);
+
+				if (close < tokens->count &&
+					token_is_text(source, &tokens->items[close + 1], "begin"))
+				{
+					char *next = build_tokens(source, tokens, at + 3, close,
+						NULL, 0);
+					pigen_string combined = {0};
+
+					pigen_append(&combined, negated);
+					pigen_append(&combined, " && (");
+					pigen_append(&combined, next);
+					pigen_append(&combined, ")");
+					entries = pigen_resize(entries,
+						(entry_count + 1) * sizeof(*entries));
+					entries[entry_count].begin_token = close + 1;
+					entries[entry_count].condition = combined.data;
+					entries[entry_count].from_else_if = 1;
+					entry_count++;
+					ignored_if = at + 1;
+					free(next);
+					free(negated);
+				}
+				else
+				{
+					free(negated);
+					*safe = 0;
+					goto done;
+				}
 			}
 			else
 			{
