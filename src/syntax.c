@@ -242,6 +242,63 @@ static int tokens_equal(const syntax_parser *parser, pigen_token_id left,
 	return left_text && right_text && left_length == right_length &&
 		!memcmp(left_text, right_text, left_length);
 }
+static int module_buffered_name(syntax_parser *parser, pigen_syntax_id module,
+	pigen_token_id name)
+{
+	pigen_syntax_id child;
+
+	for (child = pigen_syntax_get(parser->tree, module)->first_child;
+		child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(parser->tree, child);
+		pigen_syntax_id declarator;
+
+		if (!node) break;
+		if (node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION &&
+			node->as.signal_declaration.has_transfer_type)
+		{
+			pigen_transfer_type transfer =
+				node->as.signal_declaration.transfer_type.transfer_type;
+
+			if (transfer == PIGEN_TRANSFER_TYPE_BUF ||
+				transfer == PIGEN_TRANSFER_TYPE_PORT ||
+				transfer == PIGEN_TRANSFER_TYPE_FIFO ||
+				transfer == PIGEN_TRANSFER_TYPE_SKID)
+				for (declarator = node->first_child;
+					declarator.index != PIGEN_INVALID_ID; )
+				{
+					const pigen_syntax_node *known =
+						pigen_syntax_get(parser->tree, declarator);
+
+					if (!known) break;
+					if (known->kind == PIGEN_SYNTAX_SIGNAL_DECLARATOR &&
+						tokens_equal(parser, known->as.signal_declarator.name,
+							name))
+						return 1;
+					declarator = known->next_sibling;
+				}
+		}
+		child = node->next_sibling;
+	}
+	return 0;
+}
+
+static int process_has_buffered_transfer(syntax_parser *parser,
+	pigen_syntax_id module, size_t start, size_t end)
+{
+	for (size_t at = start + 1; at < end; at++)
+	{
+		const pigen_expanded_token *token = token_at(parser, at);
+
+		if (!token || token->kind != PIGEN_TOKEN_IDENTIFIER) continue;
+		if (module_buffered_name(parser, module,
+			(pigen_token_id){(uint32_t)at}) &&
+			token_is(parser, at + 1, "<="))
+			return 1;
+	}
+	return 0;
+}
+
 
 static const typedef_name_fact *typedef_name_fact_in_scope(
 	const syntax_parser *parser, pigen_token_id name, pigen_syntax_id scope)
@@ -2946,30 +3003,23 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			if (parser->pipeline_failed) return 0;
 			if (token_is(parser, at, "always_ff"))
 			{
-				size_t open = at + 2;
-				size_t close = token_is(parser, at + 1, "@") &&
-					token_is(parser, open, "(") ?
-					matching_parenthesis(parser, open, after) : after;
 				size_t retained_after;
 
-				if (close == after || close != open + 3 ||
-					!token_is(parser, open + 1, "posedge") ||
-					!identifier(parser, open + 2))
+				if (!token_is(parser, at + 1, "@") ||
+					!token_is(parser, at + 2, "("))
 					return fail(parser, at + 2,
 						"exactly one posedge event control");
-				/* Valid-edge ordinary SV that the structured subset does not
-				 * model is preserved verbatim, but it cannot also carry
-				 * Pigen pipeline/FSM/actions that would be emitted raw. */
 				{
 					size_t process_end;
 
 					if (!retained_procedural_end(parser, at, after,
 						&process_end)) return 0;
 					if (retained_process_has_structured(parser, at,
-						process_end))
-						return fail(parser, at,
-							"structured construct in an unsupported clocked "
-							"process is not supported");
+						process_end) ||
+						process_has_buffered_transfer(parser, module, at,
+							process_end))
+						return fail(parser, at + 2,
+							"exactly one posedge event control");
 				}
 				if (!parse_retained_procedural(parser, module, at, after,
 					&retained_after)) return 0;
