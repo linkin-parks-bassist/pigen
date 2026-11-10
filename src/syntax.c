@@ -57,6 +57,9 @@ typedef struct {
 	typedef_name_fact *typedef_name_facts;
 	size_t typedef_name_fact_count;
 	size_t typedef_name_fact_capacity;
+	pigen_token_id *function_names;
+	size_t function_name_count;
+	size_t function_name_capacity;
 	pipeline_scope_stack pipeline_scopes;
 	int pipeline_failed;
 	int fsm_body_failed;
@@ -64,6 +67,11 @@ typedef struct {
 	size_t source_length;
 	size_t opaque_byte_cursor;
 } syntax_parser;
+
+static int node_has_function_call(syntax_parser *parser,
+	pigen_syntax_id node_id, size_t depth);
+static void remember_function_name(syntax_parser *parser, size_t start,
+	size_t end);
 
 typedef struct {
 	const syntax_parser *parser;
@@ -2122,6 +2130,11 @@ static int parse_clocked_process(syntax_parser *parser,
 	}
 	parser->tree->nodes[process.index].location = range_location(parser, start,
 		process_after);
+	if (node_has_function_call(parser, process, 0))
+	{
+		restore_checkpoint(parser, checkpoint);
+		return 0;
+	}
 	add_opaque(parser, module, *opaque_cursor, start);
 	add_child(parser, module, process);
 	advance_opaque_byte_cursor(parser, process_after);
@@ -2274,6 +2287,187 @@ static int parse_retained_module_item(syntax_parser *parser,
 	return 1;
 }
 
+static int parse_retained_procedural(syntax_parser *parser,
+	pigen_syntax_id module, size_t start, size_t limit, size_t *after_item)
+{
+	size_t event_open = start + 2;
+	size_t event_close = matching_parenthesis(parser, event_open, limit);
+	size_t body;
+	size_t end;
+	pigen_syntax_node node = {0};
+	size_t opaque_start, opaque_end;
+	const pigen_expanded_token *start_tok = token_at(parser, start);
+	const pigen_expanded_token *last_tok;
+
+	if (event_close == limit) return 0;
+	body = event_close + 1;
+	if (token_is(parser, body, "begin"))
+	{
+		size_t depth = 0;
+		end = body;
+		while (end < limit)
+		{
+			if (token_is(parser, end, "begin")) depth++;
+			else if (token_is(parser, end, "end") && !--depth) break;
+			end++;
+		}
+		if (end == limit) return 0;
+	}
+	else
+	{
+		end = top_level_token(parser, body, limit, ";");
+		if (end == limit) return 0;
+	}
+	opaque_start = parser->opaque_byte_cursor;
+	opaque_end = start_tok ? pigen_origin_expansion_span(parser->expanded,
+		start_tok->origin).start : opaque_start;
+	add_opaque_bytes(parser, module, opaque_start, opaque_end);
+	node.kind = PIGEN_SYNTAX_RETAINED;
+	node.location = range_location(parser, start, end + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	add_child(parser, module, add_node(parser, node));
+	last_tok = token_at(parser, end);
+	if (last_tok)
+		parser->opaque_byte_cursor = pigen_origin_expansion_span(
+			parser->expanded, last_tok->origin).end;
+	*after_item = end + 1;
+	return 1;
+}
+
+static void remember_function_name(syntax_parser *parser, size_t start,
+	size_t end)
+{
+	size_t at;
+
+	for (at = start; at + 1 < end; at++)
+		if (token_is(parser, at + 1, "(") && identifier(parser, at))
+		{
+			if (parser->function_name_count ==
+				parser->function_name_capacity)
+			{
+				parser->function_name_capacity =
+					parser->function_name_capacity ?
+					parser->function_name_capacity * 2 : 8;
+				parser->function_names = pigen_resize(
+					parser->function_names,
+					parser->function_name_capacity *
+					sizeof(*parser->function_names));
+			}
+			parser->function_names[parser->function_name_count++] =
+				(pigen_token_id){(uint32_t)at};
+			return;
+		}
+}
+
+static int token_is_function_name(syntax_parser *parser, pigen_token_id token)
+{
+	size_t i;
+
+	for (i = 0; i < parser->function_name_count; i++)
+		if (tokens_equal(parser, parser->function_names[i], token)) return 1;
+	return 0;
+}
+
+static int expression_has_function_call(syntax_parser *parser,
+	pigen_syntax_expr_id expression, size_t depth)
+{
+	const pigen_syntax_expr *known = pigen_syntax_expr_get(
+		&parser->tree->expressions, expression);
+	const pigen_syntax_expr_id *children;
+	size_t i;
+
+	if (!known || depth > 64) return 0;
+	switch (known->kind)
+	{
+		case PIGEN_SYNTAX_EXPR_CALL:
+		{
+			const pigen_syntax_expr *callee = pigen_syntax_expr_get(
+				&parser->tree->expressions, known->as.call.callee);
+
+			if (callee && callee->kind == PIGEN_SYNTAX_EXPR_NAME &&
+				token_is_function_name(parser, callee->as.atom.token))
+				return 1;
+			children = pigen_syntax_expr_children(&parser->tree->expressions,
+				known->as.call.first_argument, known->as.call.argument_count);
+			for (i = 0; children && i < known->as.call.argument_count; i++)
+				if (expression_has_function_call(parser, children[i], depth + 1))
+					return 1;
+			return 0;
+		}
+		case PIGEN_SYNTAX_EXPR_GROUP:
+			return expression_has_function_call(parser,
+				known->as.group.operand, depth + 1);
+		case PIGEN_SYNTAX_EXPR_UNARY:
+			return expression_has_function_call(parser,
+				known->as.unary.operand, depth + 1);
+		case PIGEN_SYNTAX_EXPR_BINARY:
+			return expression_has_function_call(parser,
+				known->as.binary.left, depth + 1) ||
+				expression_has_function_call(parser,
+					known->as.binary.right, depth + 1);
+		case PIGEN_SYNTAX_EXPR_CONDITIONAL:
+			return expression_has_function_call(parser,
+				known->as.conditional.condition, depth + 1) ||
+				expression_has_function_call(parser,
+					known->as.conditional.when_true, depth + 1) ||
+				expression_has_function_call(parser,
+					known->as.conditional.when_false, depth + 1);
+		case PIGEN_SYNTAX_EXPR_INDEX:
+			return expression_has_function_call(parser, known->as.index.base,
+				depth + 1) || expression_has_function_call(parser,
+					known->as.index.index, depth + 1);
+		case PIGEN_SYNTAX_EXPR_SELECT:
+			return expression_has_function_call(parser, known->as.select.base,
+				depth + 1) || expression_has_function_call(parser,
+					known->as.select.left, depth + 1) ||
+				expression_has_function_call(parser, known->as.select.right,
+					depth + 1);
+		case PIGEN_SYNTAX_EXPR_MEMBER:
+			return expression_has_function_call(parser, known->as.member.base,
+				depth + 1);
+		case PIGEN_SYNTAX_EXPR_CAST:
+			return expression_has_function_call(parser, known->as.cast.value,
+				depth + 1);
+		case PIGEN_SYNTAX_EXPR_CONCATENATION:
+		case PIGEN_SYNTAX_EXPR_REPLICATION:
+			children = pigen_syntax_expr_children(&parser->tree->expressions,
+				known->as.sequence.first_child,
+				known->as.sequence.child_count);
+			for (i = 0; children && i < known->as.sequence.child_count; i++)
+				if (expression_has_function_call(parser, children[i], depth + 1))
+					return 1;
+			return 0;
+		default:
+			return 0;
+	}
+}
+
+static int node_has_function_call(syntax_parser *parser,
+	pigen_syntax_id node_id, size_t depth)
+{
+	const pigen_syntax_node *node = pigen_syntax_get(parser->tree, node_id);
+	pigen_syntax_id child;
+
+	if (!node || depth > 64) return 0;
+	if (node->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT &&
+		expression_has_function_call(parser,
+			node->as.nonblocking_assignment.value, 0))
+		return 1;
+	if (node->kind == PIGEN_SYNTAX_IF_STATEMENT &&
+		expression_has_function_call(parser, node->as.if_statement.condition, 0))
+		return 1;
+	for (child = node->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *known = pigen_syntax_get(parser->tree, child);
+
+		if (!known) break;
+		if (node_has_function_call(parser, child, depth + 1)) return 1;
+		child = known->next_sibling;
+	}
+	return 0;
+}
+
 static int parse_retained_block_item(syntax_parser *parser,
 	pigen_syntax_id module, size_t start, size_t limit, const char *closer,
 	size_t *after_item)
@@ -2300,6 +2494,8 @@ static int parse_retained_block_item(syntax_parser *parser,
 	if (last_tok)
 		parser->opaque_byte_cursor = pigen_origin_expansion_span(
 			parser->expanded, last_tok->origin).end;
+	if (closer && !strcmp(closer, "endfunction"))
+		remember_function_name(parser, start, end);
 	*after_item = end + 1;
 	return 1;
 }
@@ -2458,12 +2654,20 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 				size_t close = token_is(parser, at + 1, "@") &&
 					token_is(parser, open, "(") ?
 					matching_parenthesis(parser, open, after) : after;
+				size_t retained_after;
 
 				if (close == after || close != open + 3 ||
 					!token_is(parser, open + 1, "posedge") ||
 					!identifier(parser, open + 2))
 					return fail(parser, at + 2,
 						"exactly one posedge event control");
+				/* Valid-edge ordinary SV that the structured subset does not
+				 * model (for example a function call) is preserved verbatim. */
+				if (!parse_retained_procedural(parser, module, at, after,
+					&retained_after)) return 0;
+				at = retained_after;
+				item_start = 1;
+				continue;
 			}
 			/* A non-clocked `always` block is ordinary SV retained as-is.
 			 * A failed edge-clocked block must roll back, not become opaque. */
