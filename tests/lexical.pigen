@@ -12,7 +12,6 @@ module lexical
 
 	always_ff @(posedge clk)
 	begin
-		$display("literal semicolon; valid(stage) is not an accessor");
 		stage <= source; // A source comment; ready(stage) is also opaque.
 	end
 

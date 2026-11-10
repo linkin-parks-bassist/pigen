@@ -1333,8 +1333,10 @@ static int resolve_action(resolver *resolver, pigen_module_id module_id,
 		const pigen_semantic_signal *declared =
 			pigen_signal_get(model, signal);
 
-		if (declared &&
-			declared->transfer_type != PIGEN_TRANSFER_TYPE_BUF)
+		if (declared && pigen_transfer_type_descriptor_get(
+			declared->transfer_type) &&
+			pigen_transfer_type_descriptor_get(declared->transfer_type)
+				->is_static)
 		{
 			if (kind == PIGEN_ACTION_VALIDATE)
 				pigen_warn("validate on an always-valid wire, reg, or "

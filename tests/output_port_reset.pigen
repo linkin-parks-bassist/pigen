@@ -10,7 +10,7 @@ module output_port_reset
 	begin
 		if (reset)
 		begin
-			value <= '0;
+			value <= 8'd0;
 			validate(value);
 		end
 		else

@@ -4,7 +4,7 @@ module fifo_named_port
 	(
 		input logic clk,
 		input logic reset,
-		input fifo packet_t[4] incoming
+		input packet_t fifo[4] incoming
 	);
 
 endmodule

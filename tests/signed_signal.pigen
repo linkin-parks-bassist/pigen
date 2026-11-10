@@ -2,13 +2,13 @@ module signed_signal
     (
         input logic clk,
         input logic reset,
-        input  buf  signed [23:0] input_sample,
-        output buf  signed [23:0] output_sample
+        input  logic signed [23:0] buf input_sample,
+        output logic signed [23:0] buf output_sample
     );
 
-    buf  signed [23:0] stage;
-    fifo signed [23:0][2] history;
-    skid signed [23:0] elastic;
+    logic signed [23:0] buf stage;
+    logic signed [23:0] fifo[2] history;
+    logic signed [23:0] skid elastic;
 
     always_ff @(posedge clk)
     begin

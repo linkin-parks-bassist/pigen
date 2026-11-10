@@ -10,8 +10,8 @@ module accessors
 
 	always_ff @(posedge clk)
 	begin
-	observed_valid = valid ( item );
-	observed_ready = ready ( item );
+	observed_valid <= valid ( item );
+	observed_ready <= ready ( item );
 	end
 
 endmodule

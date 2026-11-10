@@ -5,9 +5,11 @@ module discard_example
         input bit[8] buf source
     );
     bit[8] buf middle;
+    bit[8] buf discarded_product;
+    bit[8] buf discarded_middle;
     always_ff @(posedge clk)
     begin
-        {middle, _} <= {source + 1'b1, source};
-        _ <= middle;
+        {middle, discarded_product} <= {source + 8'd1, source};
+        discarded_middle <= middle;
     end
 endmodule

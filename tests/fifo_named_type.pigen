@@ -6,7 +6,7 @@ module fifo_named_type
 	);
 
 	typedef logic [7:0] packet_t;
-	fifo packet_t[4] queue;
+	packet_t fifo[4] queue;
 
 	always_ff @(posedge clk)
 	begin
