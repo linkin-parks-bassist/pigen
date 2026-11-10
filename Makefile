@@ -304,6 +304,11 @@ clocked-case-error-test: pigen
 		echo 'structured case process unexpectedly compiled' >&2; exit 1; fi
 	grep -q 'structured construct in an unsupported clocked process is not supported' /tmp/case-error.err
 
+parameterized-instance-test: pigen
+	if ./pigen tests/parameterized_instance.pigen -o /tmp/param-inst.sv 2>/tmp/param-inst.err; then \
+		echo 'parameterized child instance unexpectedly compiled' >&2; exit 1; fi
+	grep -q 'parameterized child instances are not supported' /tmp/param-inst.err
+
 parameter-width-test: pigen
 	dir=$$(mktemp -d); \
 	./pigen tests/parameter_width.pigen -o $$dir/param.sv && \

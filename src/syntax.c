@@ -2187,6 +2187,23 @@ static int looks_like_plain_instance(const syntax_parser *parser, size_t at,
 	return close < limit && token_is(parser, close + 1, ";");
 }
 
+static int looks_like_parameterized_instance(const syntax_parser *parser,
+	size_t at, size_t limit)
+{
+	size_t close, after_name;
+
+	if (at + 4 >= limit || !identifier(parser, at) ||
+		!token_is(parser, at + 1, "#") || !token_is(parser, at + 2, "("))
+		return 0;
+	close = matching_parenthesis(parser, at + 2, limit);
+	if (close == limit) return 0;
+	after_name = close + 1;
+	if (!identifier(parser, after_name) ||
+		!token_is(parser, after_name + 1, "(")) return 0;
+	close = matching_parenthesis(parser, after_name + 1, limit);
+	return close < limit && token_is(parser, close + 1, ";");
+}
+
 static int parse_structural_instance(syntax_parser *parser,
 	pigen_syntax_id module, size_t start, size_t limit, size_t *after)
 {
@@ -2699,6 +2716,9 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 
 	while (at < after)
 	{
+		if (item_start && looks_like_parameterized_instance(parser, at, after))
+			return fail(parser, at,
+				"parameterized child instances are not supported");
 		if (item_start && looks_like_plain_instance(parser, at, after))
 		{
 			size_t instance_after;
