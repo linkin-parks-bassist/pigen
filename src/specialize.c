@@ -9,6 +9,7 @@
 typedef struct {
 	char *name;
 	char *expr;
+	char *raw_default;
 } spec_parameter;
 
 typedef struct {
@@ -121,6 +122,7 @@ static void free_parameters(spec_parameter *parameters, size_t count)
 	{
 		free(parameters[i].name);
 		free(parameters[i].expr);
+		free(parameters[i].raw_default);
 	}
 	free(parameters);
 }
@@ -161,6 +163,7 @@ static int parse_module_parameters(const char *source, const pigen_tokens *token
 			char *name = token_text(source, &tokens->items[name_token]);
 			char *expr = build_tokens(source, tokens, equals + 1, end,
 				parameters, count);
+			char *raw = build_tokens(source, tokens, equals + 1, end, NULL, 0);
 			int exists = 0;
 
 			for (size_t k = 0; k < count; k++)
@@ -173,12 +176,13 @@ static int parse_module_parameters(const char *source, const pigen_tokens *token
 					parameters = pigen_resize(parameters,
 						capacity * sizeof(*parameters));
 				}
-				parameters[count++] = (spec_parameter){name, expr};
+				parameters[count++] = (spec_parameter){name, expr, raw};
 			}
 			else
 			{
 				free(name);
 				free(expr);
+				free(raw);
 			}
 		}
 		at = end + 1;
@@ -239,12 +243,6 @@ static int parse_buffered_ports(const char *source, const pigen_tokens *tokens,
 	return 1;
 }
 
-static void append_parameter(spec_parameter **parameters, size_t *count,
-	char *name, char *expr)
-{
-	*parameters = pigen_resize(*parameters, (*count + 1) * sizeof(**parameters));
-	(*parameters)[(*count)++] = (spec_parameter){name, expr};
-}
 
 static void parse_module_localparams(const char *source,
 	const pigen_tokens *tokens, spec_module *module, size_t first, size_t last)
@@ -274,8 +272,15 @@ static void parse_module_localparams(const char *source,
 		{
 			expr = build_tokens(source, tokens, equals + 1, semi,
 				module->parameters, module->parameter_count);
-			append_parameter(&module->parameters, &module->parameter_count,
-				parameter_name, expr);
+			{
+				char *raw = build_tokens(source, tokens, equals + 1, semi,
+					NULL, 0);
+				module->parameters = pigen_resize(module->parameters,
+					(module->parameter_count + 1) *
+					sizeof(*module->parameters));
+				module->parameters[module->parameter_count++] =
+					(spec_parameter){parameter_name, expr, raw};
+			}
 		}
 		at = semi;
 	}
@@ -442,7 +447,7 @@ static int parse_instance_overrides(const char *source,
 			capacity = capacity ? capacity * 2 : 4;
 			out = pigen_resize(out, capacity * sizeof(*out));
 		}
-		out[count++] = (spec_parameter){name, expr};
+		out[count++] = (spec_parameter){name, expr, NULL};
 		at = end + 1;
 	}
 	*overrides = out;
@@ -1267,6 +1272,43 @@ static int add_mixed_process_splits(const char *source,
 	return count;
 }
 
+static char *substitute_text_parameters(const char *text,
+	const spec_parameter *values, size_t value_count, size_t skip)
+{
+	pigen_string out = {0};
+	size_t at = 0;
+
+	while (text && text[at])
+	{
+		size_t start = at;
+
+		if (!pigen_is_identifier_char((unsigned char)text[at]))
+		{
+			pigen_append_range(&out, text + at, 1);
+			at++;
+			continue;
+		}
+		while (text[at] && pigen_is_identifier_char((unsigned char)text[at]))
+			at++;
+		{
+			size_t length = at - start;
+			int substituted = 0;
+
+			for (size_t p = 0; p < value_count; p++)
+				if (p != skip && values[p].name && values[p].expr &&
+					strlen(values[p].name) == length &&
+					!memcmp(values[p].name, text + start, length))
+				{
+					pigen_append(&out, values[p].expr);
+					substituted = 1;
+					break;
+				}
+			if (!substituted) pigen_append_range(&out, text + start, length);
+		}
+	}
+	return out.data ? out.data : pigen_copy_range("", 0);
+}
+
 char *pigen_specialize_parameterized_instances(const char *source, size_t length,
 	const char **error, size_t *error_offset)
 {
@@ -1408,7 +1450,11 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 			char *value = module->parameters[p].expr ?
 				pigen_copy_range(module->parameters[p].expr,
 					strlen(module->parameters[p].expr)) : NULL;
+			char *raw_default = module->parameters[p].raw_default ?
+				pigen_copy_range(module->parameters[p].raw_default,
+					strlen(module->parameters[p].raw_default)) : NULL;
 			size_t positional = 0;
+			int overridden = 0;
 
 			for (size_t o = 0; o < override_count; o++)
 			{
@@ -1421,6 +1467,7 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 						value = overrides[o].expr ?
 							pigen_copy_range(overrides[o].expr,
 								strlen(overrides[o].expr)) : NULL;
+						overridden = 1;
 					}
 				}
 				else if (positional == p)
@@ -1429,15 +1476,32 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 					value = overrides[o].expr ?
 						pigen_copy_range(overrides[o].expr,
 							strlen(overrides[o].expr)) : NULL;
+					overridden = 1;
 					positional++;
 				}
 				else positional++;
 			}
+			if (overridden)
+			{
+				free(raw_default);
+				raw_default = NULL;
+			}
 			values = pigen_resize(values, (value_count + 1) * sizeof(*values));
 			values[value_count++] = (spec_parameter){
 				pigen_copy_range(module->parameters[p].name,
-					strlen(module->parameters[p].name)), value};
+					strlen(module->parameters[p].name)), value, raw_default};
 		}
+		for (size_t iteration = 0; iteration < value_count; iteration++)
+			for (size_t p = 0; p < value_count; p++)
+			{
+				const char *base = values[p].raw_default ?
+					values[p].raw_default : values[p].expr;
+				char *substituted = substitute_text_parameters(base, values,
+					value_count, p);
+
+				free(values[p].expr);
+				values[p].expr = substituted;
+			}
 		clone_name = pigen_copy_range("", 0);
 		free(clone_name);
 		clone_name = NULL;
