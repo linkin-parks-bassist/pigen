@@ -472,6 +472,23 @@ static int buffered_port(const spec_module *module, const char *name)
 	return 0;
 }
 
+static int connection_has_port(const char *source,
+	const pigen_tokens *tokens, size_t open, size_t close, const char *name)
+{
+	for (size_t at = open + 1; at + 2 < close; at++)
+		if (token_is_text(source, &tokens->items[at], ".") &&
+			token_is_identifier(&tokens->items[at + 1]) &&
+			token_is_text(source, &tokens->items[at + 2], "("))
+		{
+			const pigen_token *port = &tokens->items[at + 1];
+
+			if (pigen_is_word(source + port->span.start,
+				port->span.end - port->span.start, name))
+				return 1;
+		}
+	return 0;
+}
+
 static char *build_instance_text(const char *source, const pigen_tokens *tokens,
 	const spec_module *module, const char *clone_name,
 	size_t instance_token, size_t open, size_t close)
@@ -516,16 +533,28 @@ static char *build_instance_text(const char *source, const pigen_tokens *tokens,
 				token_is_identifier(&tokens->items[at + 3]))
 			{
 				char *base = token_text(source, &tokens->items[at + 3]);
+				char valid_name[256], ready_name[256];
 
-				pigen_append(&out, ", .");
-				pigen_append(&out, port);
-				pigen_append(&out, "_valid(");
-				pigen_append(&out, base);
-				pigen_append(&out, "_valid), .");
-				pigen_append(&out, port);
-				pigen_append(&out, "_ready(");
-				pigen_append(&out, base);
-				pigen_append(&out, "_ready)");
+				snprintf(valid_name, sizeof valid_name, "%s_valid", port);
+				snprintf(ready_name, sizeof ready_name, "%s_ready", port);
+				if (!connection_has_port(source, tokens, open, close,
+					valid_name))
+				{
+					pigen_append(&out, ", .");
+					pigen_append(&out, valid_name);
+					pigen_append(&out, "(");
+					pigen_append(&out, base);
+					pigen_append(&out, "_valid)");
+				}
+				if (!connection_has_port(source, tokens, open, close,
+					ready_name))
+				{
+					pigen_append(&out, ", .");
+					pigen_append(&out, ready_name);
+					pigen_append(&out, "(");
+					pigen_append(&out, base);
+					pigen_append(&out, "_ready)");
+				}
 				free(base);
 			}
 			free(port);
