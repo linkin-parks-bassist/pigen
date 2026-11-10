@@ -651,15 +651,15 @@ guarded-waveform: pigen
 	/tmp/pigen-guarded-verilator/Vguarded_pipeline_tb
 
 output-test: pigen
-	./pigen examples/output_pipeline.pigen -o examples/output_pipeline.sv
-	verilator --binary --top-module output_pipeline_tb --Mdir /tmp/pigen-output-verilator rtl/pigen_primitives.sv examples/output_pipeline.sv examples/output_pipeline_tb.sv
-	/tmp/pigen-output-verilator/Voutput_pipeline_tb
+	./pigen examples/output_pipeline.pigen -o /tmp/pigen-output-test.sv
+	verilator --binary --top-module output_pipeline_tb --Mdir /tmp/pigen-output-test-verilator rtl/pigen_primitives.sv /tmp/pigen-output-test.sv examples/output_pipeline_tb.sv
+	/tmp/pigen-output-test-verilator/Voutput_pipeline_tb
 
 output-waveform: pigen
 	truncate -s 0 examples/output_pipeline.vcd
 	./pigen examples/output_pipeline.pigen -o examples/output_pipeline.sv
-	verilator --binary --trace --top-module output_pipeline_tb --Mdir /tmp/pigen-output-verilator rtl/pigen_primitives.sv examples/output_pipeline.sv examples/output_pipeline_tb.sv
-	/tmp/pigen-output-verilator/Voutput_pipeline_tb
+	verilator --binary --trace --top-module output_pipeline_tb --Mdir /tmp/pigen-output-waveform-verilator rtl/pigen_primitives.sv examples/output_pipeline.sv examples/output_pipeline_tb.sv
+	/tmp/pigen-output-waveform-verilator/Voutput_pipeline_tb
 
 compile-test:
 	@dir=$$(mktemp -d); \
