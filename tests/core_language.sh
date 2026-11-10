@@ -19,7 +19,7 @@ if "$pigen" tests/self_feedback_error.pigen -o "$temporary/feedback.sv" \
 	echo 'direct signal self-feedback unexpectedly compiled' >&2
 	exit 1
 fi
-grep -q 'cannot consume its own destination' "$temporary/feedback.err"
+grep -q 'cannot source its destination' "$temporary/feedback.err"
 
 for kind in reg wire logic; do
 	if "$pigen" "tests/${kind}_invalidate_error.pigen" \

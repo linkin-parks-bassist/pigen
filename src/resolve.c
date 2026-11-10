@@ -1329,6 +1329,22 @@ static int resolve_action(resolver *resolver, pigen_module_id module_id,
 	kind = statement->as.action.action == 1 ? PIGEN_ACTION_VALIDATE :
 		statement->as.action.action == 2 ? PIGEN_ACTION_INVALIDATE :
 			PIGEN_ACTION_FLUSH;
+	{
+		const pigen_semantic_signal *declared =
+			pigen_signal_get(model, signal);
+
+		if (declared &&
+			declared->transfer_type != PIGEN_TRANSFER_TYPE_BUF)
+		{
+			if (kind == PIGEN_ACTION_VALIDATE)
+				pigen_warn("validate on an always-valid wire, reg, or "
+					"logic signal has no effect");
+			else if (kind == PIGEN_ACTION_INVALIDATE)
+				return fail_location(resolver, statement->location,
+					"cannot make an always-valid wire, reg, or logic "
+					"signal invalid");
+		}
+	}
 	if (pigen_action_add(model, syntax_id, module_id, process, domain, signal,
 		kind, guard, statement->location.source_span).index ==
 		PIGEN_INVALID_ID)

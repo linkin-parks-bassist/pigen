@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pigen/blocks.h"
 #include "pigen/compile.h"
 #include "pigen/source.h"
 #include "pigen/util.h"
@@ -66,8 +67,29 @@ static char *default_output_path(const char *input)
 
 static void usage(void)
 {
-	fputs("usage: pigen INPUT.pigen [-o OUTPUT.sv]\n", stderr);
+	fputs("usage: pigen INPUT.pigen [-o OUTPUT.sv] [--diagram PATH | --no-diagram]\n",
+		stderr);
 	exit(2);
+}
+
+static int source_has_content(const char *text, size_t length)
+{
+	size_t i;
+	for (i = 0; i < length; i++)
+		if (text[i] != ' ' && text[i] != '\t' && text[i] != '\r' &&
+			text[i] != '\n')
+			return 1;
+	return 0;
+}
+
+static char *diagram_path(const char *output, const char *fabric, int several)
+{
+	pigen_string path = {0};
+	if (several)
+		pigen_append_format(&path, "%s.%s.svg", output, fabric);
+	else
+		pigen_append_format(&path, "%s.svg", output);
+	return path.data;
 }
 
 static int write_file(const char *path, const char *data, size_t length)
@@ -120,9 +142,11 @@ int main(int argc, char **argv)
 {
 	const char *input_path = NULL;
 	const char *output_path = NULL;
+	const char *diagram_option = NULL;
 	char *owned_output_path = NULL;
 	char *source;
 	size_t source_length;
+	int no_diagram = 0;
 
 	if (argc < 2) usage();
 	for (int argument = 1; argument < argc; argument++)
@@ -132,6 +156,13 @@ int main(int argc, char **argv)
 			if (output_path || ++argument == argc) usage();
 			output_path = argv[argument];
 		}
+		else if (!strcmp(argv[argument], "--diagram"))
+		{
+			if (diagram_option || ++argument == argc) usage();
+			diagram_option = argv[argument];
+		}
+		else if (!strcmp(argv[argument], "--no-diagram"))
+			no_diagram = 1;
 		else if (argv[argument][0] == '-' || input_path)
 			usage();
 		else
@@ -147,13 +178,42 @@ int main(int argc, char **argv)
 
 	source = read_file(input_path, &source_length);
 
+	pigen_string generated = {0};
+	pigen_fabric_diagrams diagrams = {0};
+	char *cleaned = pigen_lower_blocks(source, source_length, &generated,
+		no_diagram ? NULL : &diagrams);
+	int has_content = source_has_content(cleaned, strlen(cleaned));
+
 	pigen_source_manager sources = {0};
 	pigen_source_add(&sources, input_path, source, source_length);
 
 	pigen_compile_result result = {0};
 	pigen_compile_error error = {0};
-	int ret = pigen_compile_source(&sources, input_path,
-		source, source_length, NULL, &result, &error);
+	int ret = has_content ? pigen_compile_source(&sources, input_path,
+		cleaned, strlen(cleaned), NULL, &result, &error) : 0;
+	/* Fabric blocks may leave comment-only text behind; there is nothing
+	 * ordinary to lower when naming finds no modules. */
+	if (ret != 0 && generated.length && error.message &&
+		strstr(error.message, "RTL naming failed"))
+	{
+		ret = 0;
+		error = (pigen_compile_error){0};
+	}
+	if (ret == 0 && generated.length)
+	{
+		size_t base = result.length;
+		char *combined = pigen_resize(result.systemverilog,
+			base + generated.length + 2);
+		if (base && combined[base - 1] != '\n')
+			combined[base++] = '\n';
+		memcpy(combined + base, generated.data, generated.length);
+		base += generated.length;
+		combined[base] = 0;
+		result.systemverilog = combined;
+		result.length = base;
+	}
+	free(cleaned);
+	free(generated.data);
 	free(source);
 
 	if (ret != 0)
@@ -176,6 +236,39 @@ int main(int argc, char **argv)
 		free(owned_output_path);
 		return 1;
 	}
+
+	if (!no_diagram && diagrams.count)
+	{
+		if (diagram_option && diagrams.count > 1)
+		{
+			fprintf(stderr,
+				"pigen: --diagram requires exactly one fabric block\n");
+			pigen_free_fabric_diagrams(&diagrams);
+			pigen_free_sources(&sources);
+			pigen_free_compile_result(&result);
+			free(owned_output_path);
+			return 1;
+		}
+		for (size_t i = 0; i < diagrams.count; i++)
+		{
+			char *owned = diagram_option ? NULL :
+				diagram_path(output_path, diagrams.items[i].name,
+					diagrams.count > 1);
+			const char *path = diagram_option ? diagram_option : owned;
+			if (!path || !write_file(path, diagrams.items[i].svg,
+				strlen(diagrams.items[i].svg)))
+			{
+				free(owned);
+				pigen_free_fabric_diagrams(&diagrams);
+				pigen_free_sources(&sources);
+				pigen_free_compile_result(&result);
+				free(owned_output_path);
+				return 1;
+			}
+			free(owned);
+		}
+	}
+	pigen_free_fabric_diagrams(&diagrams);
 
 	pigen_free_sources(&sources);
 	pigen_free_compile_result(&result);
