@@ -728,24 +728,204 @@ static int span_has_identifier(const char *source, const pigen_tokens *tokens,
 }
 
 
+typedef struct {
+	char *name;
+	char *expression;
+} spec_substitution;
+
+static int matching_substitution(const spec_substitution *substitutions,
+	size_t count, const char *source, const pigen_token *token)
+{
+	if (token->kind != PIGEN_TOKEN_IDENTIFIER) return -1;
+	for (size_t i = 0; i < count; i++)
+		if (pigen_is_word(source + token->span.start,
+			token->span.end - token->span.start, substitutions[i].name))
+			return (int)i;
+	return -1;
+}
+
+static char *block_statement_rhs(const char *source,
+	const pigen_tokens *tokens, size_t first, size_t last)
+{
+	size_t equals = last;
+
+	for (size_t i = first; i < last; i++)
+		if (token_is_text(source, &tokens->items[i], "="))
+		{
+			equals = i;
+			break;
+		}
+	if (equals == last || equals + 1 >= last - 1) return NULL;
+	return build_tokens(source, tokens, equals + 1, last - 1, NULL, 0);
+}
+
+static char *block_statement_function(const char *source,
+	const pigen_tokens *tokens, const spec_function_names *functions,
+	size_t first, size_t last)
+{
+	for (size_t i = first; i + 1 < last; i++)
+	{
+		char *name;
+
+		if (!token_is_identifier(&tokens->items[i]) ||
+			!token_is_text(source, &tokens->items[i + 1], "(")) continue;
+		name = token_text(source, &tokens->items[i]);
+		if (has_function_name(functions, name)) return name;
+		free(name);
+	}
+	return NULL;
+}
+
+static int function_is_pure(const char *source, const pigen_tokens *tokens,
+	const char *name)
+{
+	for (size_t i = 0; i + 2 < tokens->count; i++)
+	{
+		size_t open, function_name, header_end, endfunction;
+
+		if (!token_is_text(source, &tokens->items[i], "function")) continue;
+		for (open = i + 1; open < tokens->count; open++)
+			if (token_is_text(source, &tokens->items[open], "(") ||
+				token_is_text(source, &tokens->items[open], ";")) break;
+		if (open == tokens->count) continue;
+		for (function_name = open; function_name > i; function_name--)
+			if (token_is_identifier(&tokens->items[function_name - 1])) break;
+		if (function_name <= i) continue;
+		{
+			char *found = token_text(source,
+				&tokens->items[function_name - 1]);
+
+			if (!text_equals(found, name)) { free(found); continue; }
+			free(found);
+		}
+		for (header_end = open; header_end < tokens->count; header_end++)
+			if (token_is_text(source, &tokens->items[header_end], ";")) break;
+		if (header_end == tokens->count) return 0;
+		for (endfunction = header_end + 1; endfunction < tokens->count;
+			endfunction++)
+			if (token_is_text(source, &tokens->items[endfunction],
+				"endfunction")) break;
+		if (endfunction == tokens->count) return 0;
+		for (size_t at = header_end + 1; at < endfunction; at++)
+		{
+			size_t lhs = endfunction;
+
+			if (!token_is_text(source, &tokens->items[at], "=") &&
+				!token_is_text(source, &tokens->items[at], "<=")) continue;
+			for (size_t k = at; k > header_end; k--)
+				if (token_is_identifier(&tokens->items[k - 1]))
+				{
+					lhs = k - 1;
+					break;
+				}
+			if (lhs < endfunction)
+			{
+				char *written = token_text(source, &tokens->items[lhs]);
+				int pure = text_equals(written, name);
+
+				free(written);
+				if (!pure) return 0;
+			}
+		}
+		return 1;
+	}
+	return 0;
+}
+
+static char *function_return_type(const char *source,
+	const pigen_tokens *tokens, const char *name)
+{
+	for (size_t i = 0; i + 2 < tokens->count; i++)
+	{
+		size_t open, function_name, first_type;
+		pigen_string out = {0};
+
+		if (!token_is_text(source, &tokens->items[i], "function")) continue;
+		for (open = i + 1; open < tokens->count; open++)
+			if (token_is_text(source, &tokens->items[open], "(") ||
+				token_is_text(source, &tokens->items[open], ";")) break;
+		if (open == tokens->count) continue;
+		for (function_name = open; function_name > i; function_name--)
+			if (token_is_identifier(&tokens->items[function_name - 1])) break;
+		if (function_name <= i) continue;
+		{
+			char *found = token_text(source,
+				&tokens->items[function_name - 1]);
+
+			if (!text_equals(found, name)) { free(found); continue; }
+			free(found);
+		}
+		first_type = i + 1;
+		if (token_is_text(source, &tokens->items[first_type], "automatic") ||
+			token_is_text(source, &tokens->items[first_type], "static"))
+			first_type++;
+		for (size_t at = first_type; at + 1 < function_name; at++)
+		{
+			if (out.length) pigen_append(&out, " ");
+			pigen_append_range(&out,
+				source + tokens->items[at].span.start,
+				tokens->items[at].span.end - tokens->items[at].span.start);
+		}
+		return out.data ? out.data : pigen_copy_range("logic", 5);
+	}
+	return pigen_copy_range("logic", 5);
+}
+
 static char *copy_block_with_replacements(const char *source,
 	const pigen_tokens *tokens, size_t first, size_t last,
-	const spec_leaf_statement *leaves, size_t leaf_count, int keep_function)
+	const spec_leaf_statement *leaves, size_t leaf_count, int keep_function,
+	const spec_substitution *substitutions, size_t substitution_count)
 {
 	pigen_string out = {0};
-	size_t block_start = tokens->items[first].span.start;
 	size_t block_end = tokens->items[last].span.end;
-	size_t cursor = block_start;
+	size_t cursor = tokens->items[first].span.start;
+	size_t leaf_index = 0;
 
-	for (size_t i = 0; i < leaf_count; i++)
+	for (size_t at = first; at <= last; at++)
 	{
-		if (leaves[i].function == keep_function) continue;
-		pigen_append_range(&out, source + cursor,
-			tokens->items[leaves[i].first].span.start - cursor);
-		cursor = tokens->items[leaves[i].last - 1].span.end;
+		const pigen_token *token = &tokens->items[at];
+		int substitution;
+
+		if (leaf_index < leaf_count && at == leaves[leaf_index].first &&
+			leaves[leaf_index].function != keep_function)
+		{
+			pigen_append_range(&out, source + cursor,
+				token->span.start - cursor);
+			cursor = tokens->items[leaves[leaf_index].last - 1].span.end;
+			at = leaves[leaf_index].last - 1;
+			leaf_index++;
+			continue;
+		}
+		if (leaf_index < leaf_count && at == leaves[leaf_index].first)
+			leaf_index++;
+		substitution = keep_function ? -1 :
+			matching_substitution(substitutions, substitution_count, source,
+				token);
+		if (substitution >= 0)
+		{
+			pigen_append_range(&out, source + cursor,
+				token->span.start - cursor);
+			pigen_append(&out, substitutions[substitution].expression);
+			cursor = token->span.end;
+		}
 	}
 	pigen_append_range(&out, source + cursor, block_end - cursor);
 	return out.data ? out.data : pigen_copy_range("", 0);
+}
+
+static int block_is_straight(const char *source, const pigen_tokens *tokens,
+	size_t first, size_t last)
+{
+	for (size_t i = first; i < last; i++)
+		if (token_is_text(source, &tokens->items[i], "if") ||
+			token_is_text(source, &tokens->items[i], "case") ||
+			token_is_text(source, &tokens->items[i], "casex") ||
+			token_is_text(source, &tokens->items[i], "casez") ||
+			token_is_text(source, &tokens->items[i], "for") ||
+			token_is_text(source, &tokens->items[i], "while") ||
+			token_is_text(source, &tokens->items[i], "begin"))
+			return 0;
+	return 1;
 }
 
 static int add_mixed_process_splits(const char *source,
@@ -768,6 +948,11 @@ static int add_mixed_process_splits(const char *source,
 		size_t boundary;
 		int parens = 0;
 		int has_function = 0, has_task = 0, has_pigen = 0;
+		spec_substitution *substitutions = NULL;
+		size_t substitution_count = 0;
+		pigen_string prologue = {0};
+		size_t expression_index = 0;
+		int straight;
 
 		if (!token_is_text(source, &tokens->items[i], "always_ff") ||
 			!token_is_text(source, &tokens->items[i + 1], "@") ||
@@ -828,12 +1013,17 @@ static int add_mixed_process_splits(const char *source,
 				 token_is_text(source, &tokens->items[at], ":")))
 				boundary = at + 1;
 		}
+		straight = block_is_straight(source, tokens, begin + 1, end);
 		if (has_task && has_pigen)
 		{
 			*error = "mixed clocked body with a task call cannot be split "
 				"without changing side-effect ordering";
 			*error_offset = tokens->items[boundary].span.start;
 			free(leaves);
+			if (prologue.data) free(prologue.data);
+			for (size_t x = 0; x < substitution_count; x++)
+			{ free(substitutions[x].name); free(substitutions[x].expression); }
+			free(substitutions);
 			for (size_t x = 0; x < functions.count; x++) free(functions.names[x]);
 			for (size_t x = 0; x < tasks.count; x++) free(tasks.names[x]);
 			free(functions.names);
@@ -864,38 +1054,79 @@ static int add_mixed_process_splits(const char *source,
 				}
 				nba = statement_is_nba(source, tokens, leaves[f].first,
 					leaves[f].last);
-				for (size_t p = 0; p < leaf_count; p++)
 				{
-					char *pigen_lhs;
+					int substituted = 0;
 
-					if (leaves[p].function) continue;
-					if (nba)
+					if (!nba && straight)
 					{
-						pigen_lhs = statement_lhs_name(source, tokens,
-							leaves[p].first, leaves[p].last);
-						if (pigen_lhs && text_equals(lhs, pigen_lhs))
+						char *rhs = block_statement_rhs(source, tokens,
+							leaves[f].first, leaves[f].last);
+						char *called = block_statement_function(source, tokens,
+							&functions, leaves[f].first, leaves[f].last);
+
+						if (rhs && called && function_is_pure(source, tokens,
+							called))
 						{
-							free(pigen_lhs);
-							*error = "a function statement and a Pigen statement "
-								"write the same destination; preserving order is "
-								"unsupported";
-							*error_offset =
-								tokens->items[leaves[p].first].span.start;
-							unsafe = 1;
-							break;
+							char helper_name[64];
+							char *type = function_return_type(source, tokens,
+								called);
+
+							snprintf(helper_name, sizeof helper_name,
+								"__pigen_expr_%zu", expression_index++);
+							pigen_append(&prologue, "wire ");
+							pigen_append(&prologue, type);
+							pigen_append(&prologue, " ");
+							pigen_append(&prologue, helper_name);
+							pigen_append(&prologue, "; assign ");
+							pigen_append(&prologue, helper_name);
+							pigen_append(&prologue, " = ");
+							pigen_append(&prologue, rhs);
+							pigen_append(&prologue, ";\n");
+							substitutions = pigen_resize(substitutions,
+								(substitution_count + 1) *
+								sizeof(*substitutions));
+							substitutions[substitution_count++] =
+								(spec_substitution){lhs,
+									pigen_copy_range(helper_name,
+										strlen(helper_name))};
+							lhs = NULL;
+							substituted = 1;
+							free(type);
 						}
-						free(pigen_lhs);
+						free(rhs);
+						free(called);
 					}
-					else if (span_has_identifier(source, tokens,
-						leaves[p].first, leaves[p].last, lhs))
-					{
-						*error = "mixed clocked body reads a value written by "
-							"a blocking function statement; preserving order is "
-							"unsupported";
-						*error_offset = tokens->items[leaves[p].first].span.start;
-						unsafe = 1;
-						break;
-					}
+					if (!substituted)
+						for (size_t p = 0; p < leaf_count; p++)
+						{
+							char *pigen_lhs;
+
+							if (leaves[p].function) continue;
+							pigen_lhs = statement_lhs_name(source, tokens,
+								leaves[p].first, leaves[p].last);
+							if (pigen_lhs && text_equals(lhs, pigen_lhs))
+							{
+								free(pigen_lhs);
+								*error = "a function statement and a Pigen statement "
+									"write the same destination; preserving order is "
+									"unsupported";
+								*error_offset =
+									tokens->items[leaves[p].first].span.start;
+								unsafe = 1;
+								break;
+							}
+							free(pigen_lhs);
+							if (!nba && span_has_identifier(source, tokens,
+								leaves[p].first, leaves[p].last, lhs))
+							{
+								*error = "mixed clocked body reads a value written by "
+									"a blocking function statement; preserving order is "
+									"unsupported";
+								*error_offset = tokens->items[leaves[p].first].span.start;
+								unsafe = 1;
+								break;
+							}
+						}
 				}
 				free(lhs);
 			}
@@ -926,6 +1157,10 @@ static int add_mixed_process_splits(const char *source,
 			if (unsafe)
 			{
 				free(leaves);
+				if (prologue.data) free(prologue.data);
+				for (size_t x = 0; x < substitution_count; x++)
+				{ free(substitutions[x].name); free(substitutions[x].expression); }
+				free(substitutions);
 				for (size_t x = 0; x < functions.count; x++) free(functions.names[x]);
 				for (size_t x = 0; x < tasks.count; x++) free(tasks.names[x]);
 				free(functions.names);
@@ -933,12 +1168,13 @@ static int add_mixed_process_splits(const char *source,
 				return -1;
 			}
 			structured = copy_block_with_replacements(source, tokens, i,
-				end, leaves, leaf_count, 0);
+				end, leaves, leaf_count, 0, substitutions, substitution_count);
 			retained = copy_block_with_replacements(source, tokens, i,
-				end, leaves, leaf_count, 1);
+				end, leaves, leaf_count, 1, NULL, 0);
 			pigen_string text = {0};
 			spec_replacement *grown;
 
+			if (prologue.length) pigen_append(&text, prologue.data);
 			pigen_append(&text, structured);
 			pigen_append(&text, "\n");
 			pigen_append(&text, retained);
@@ -954,6 +1190,13 @@ static int add_mixed_process_splits(const char *source,
 			i = end;
 		}
 		free(leaves);
+		if (prologue.data) free(prologue.data);
+		for (size_t x = 0; x < substitution_count; x++)
+		{
+			free(substitutions[x].name);
+			free(substitutions[x].expression);
+		}
+		free(substitutions);
 	}
 	for (size_t i = 0; i < functions.count; i++) free(functions.names[i]);
 	for (size_t i = 0; i < tasks.count; i++) free(tasks.names[i]);
