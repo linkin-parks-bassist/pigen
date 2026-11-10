@@ -913,49 +913,37 @@ static char *copy_block_with_replacements(const char *source,
 	return out.data ? out.data : pigen_copy_range("", 0);
 }
 
-static int block_single_guarded(const char *source,
-	const pigen_tokens *tokens, size_t begin, size_t end)
-{
-	size_t open, close, body, body_end;
 
-	if (!token_is_text(source, &tokens->items[begin + 1], "if") ||
-		!token_is_text(source, &tokens->items[begin + 2], "("))
-		return 0;
-	open = begin + 2;
-	close = find_matching(source, tokens, open, "(", ")", tokens->count);
-	if (close == tokens->count) return 0;
-	body = close + 1;
-	if (!token_is_text(source, &tokens->items[body], "begin")) return 0;
-	body_end = body;
+static void leaf_guard_range(const char *source, const pigen_tokens *tokens,
+	size_t outer_begin, size_t leaf_first, size_t *guard_start,
+	size_t *guard_end)
+{
+	size_t *stack = NULL;
+	size_t depth = 0;
+	size_t capacity = 0;
+	size_t top = outer_begin;
+
+	for (size_t at = outer_begin + 1; at < leaf_first; at++)
 	{
-		size_t depth = 0;
-
-		for (; body_end < tokens->count; body_end++)
+		if (token_is_text(source, &tokens->items[at], "begin"))
 		{
-			if (token_is_text(source, &tokens->items[body_end], "begin"))
-				depth++;
-			else if (token_is_text(source, &tokens->items[body_end], "end") &&
-				!--depth) break;
+			if (depth == capacity)
+			{
+				capacity = capacity ? capacity * 2 : 8;
+				stack = pigen_resize(stack, capacity * sizeof(*stack));
+			}
+			stack[depth++] = at;
 		}
+		else if (token_is_text(source, &tokens->items[at], "end") && depth)
+			depth--;
 	}
-	if (body_end == tokens->count || body_end + 1 != end) return 0;
-	return 1;
+	if (depth) top = stack[depth - 1];
+	*guard_start = top;
+	*guard_end = find_matching(source, tokens, top, "begin", "end",
+		tokens->count);
+	free(stack);
 }
 
-static int block_is_straight(const char *source, const pigen_tokens *tokens,
-	size_t first, size_t last)
-{
-	for (size_t i = first; i < last; i++)
-		if (token_is_text(source, &tokens->items[i], "if") ||
-			token_is_text(source, &tokens->items[i], "case") ||
-			token_is_text(source, &tokens->items[i], "casex") ||
-			token_is_text(source, &tokens->items[i], "casez") ||
-			token_is_text(source, &tokens->items[i], "for") ||
-			token_is_text(source, &tokens->items[i], "while") ||
-			token_is_text(source, &tokens->items[i], "begin"))
-			return 0;
-	return 1;
-}
 
 static int add_mixed_process_splits(const char *source,
 	const pigen_tokens *tokens, spec_module *modules, size_t module_count,
@@ -981,7 +969,6 @@ static int add_mixed_process_splits(const char *source,
 		size_t substitution_count = 0;
 		pigen_string prologue = {0};
 		size_t expression_index = 0;
-		int straight;
 
 		if (!token_is_text(source, &tokens->items[i], "always_ff") ||
 			!token_is_text(source, &tokens->items[i + 1], "@") ||
@@ -1042,8 +1029,6 @@ static int add_mixed_process_splits(const char *source,
 				 token_is_text(source, &tokens->items[at], ":")))
 				boundary = at + 1;
 		}
-		straight = block_is_straight(source, tokens, begin + 1, end) ||
-			block_single_guarded(source, tokens, begin, end);
 		if (has_task && has_pigen)
 		{
 			*error = "mixed clocked body with a task call cannot be split "
@@ -1087,7 +1072,7 @@ static int add_mixed_process_splits(const char *source,
 				{
 					int substituted = 0;
 
-					if (!nba && straight)
+					if (!nba)
 					{
 						char *rhs = block_statement_rhs(source, tokens,
 							leaves[f].first, leaves[f].last);
@@ -1097,6 +1082,23 @@ static int add_mixed_process_splits(const char *source,
 						if (rhs && called && function_is_pure(source, tokens,
 							called))
 						{
+							size_t guard_start, guard_end;
+							int covered = 1;
+
+							leaf_guard_range(source, tokens, begin,
+								leaves[f].first, &guard_start, &guard_end);
+							for (size_t p = 0; p < leaf_count; p++)
+								if (!leaves[p].function &&
+									span_has_identifier(source, tokens,
+										leaves[p].first, leaves[p].last, lhs) &&
+									(leaves[p].first <= guard_start ||
+									 leaves[p].first >= guard_end))
+									covered = 0;
+							if (!covered)
+							{
+								rhs = NULL;
+								goto no_guarded_substitution;
+							}
 							char helper_name[64];
 							char *type = function_return_type(source, tokens,
 								called);
@@ -1123,6 +1125,7 @@ static int add_mixed_process_splits(const char *source,
 							substituted = 1;
 							free(type);
 						}
+					no_guarded_substitution:
 						free(rhs);
 						free(called);
 					}
