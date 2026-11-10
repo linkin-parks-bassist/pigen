@@ -267,17 +267,18 @@ static int collect_modules(const char *source, const pigen_tokens *tokens,
 			if (token_is_text(source, &tokens->items[endmodule], "endmodule"))
 				break;
 		if (endmodule == tokens->count) continue;
-		if (module_has_pigen(source, tokens, at, endmodule))
 		{
 			size_t port_open = name + 1;
 			int parameterized = name + 2 < header_end &&
 				token_is_text(source, &tokens->items[name + 1], "#") &&
 				token_is_text(source, &tokens->items[name + 2], "(");
+			int pigen = module_has_pigen(source, tokens, at, endmodule);
 
+			if (!parameterized && !pigen) continue;
 			module.module_token = at;
 			module.name_token = name;
 			module.endmodule_token = endmodule;
-			module.pigen = 1;
+			module.pigen = pigen;
 			if (parameterized)
 			{
 				size_t close = find_matching(source, tokens, name + 2, "(", ")",
@@ -289,7 +290,8 @@ static int collect_modules(const char *source, const pigen_tokens *tokens,
 				port_open = close + 1;
 				parse_module_parameters(source, tokens, &module);
 			}
-			if (token_is_text(source, &tokens->items[port_open], "("))
+			if (module.pigen &&
+				token_is_text(source, &tokens->items[port_open], "("))
 			{
 				size_t port_close = find_matching(source, tokens, port_open,
 					"(", ")", header_end);
@@ -361,6 +363,7 @@ static char *build_specialized_module(const char *source,
 
 static int parse_instance_overrides(const char *source,
 	const pigen_tokens *tokens, size_t first, size_t last,
+	const spec_parameter *parent_parameters, size_t parent_parameter_count,
 	spec_parameter **overrides, size_t *override_count)
 {
 	spec_parameter *out = NULL;
@@ -383,10 +386,12 @@ static int parse_instance_overrides(const char *source,
 			size_t close = find_matching(source, tokens, at + 2, "(", ")", end);
 
 			name = token_text(source, &tokens->items[at + 1]);
-			expr = build_tokens(source, tokens, at + 3, close, NULL, 0);
+			expr = build_tokens(source, tokens, at + 3, close,
+				parent_parameters, parent_parameter_count);
 		}
 		else
-			expr = build_tokens(source, tokens, at, end, NULL, 0);
+			expr = build_tokens(source, tokens, at, end,
+				parent_parameters, parent_parameter_count);
 		if (count == capacity)
 		{
 			capacity = capacity ? capacity * 2 : 4;
@@ -398,6 +403,20 @@ static int parse_instance_overrides(const char *source,
 	*overrides = out;
 	*override_count = count;
 	return 1;
+}
+
+static spec_module *module_containing(spec_module *modules, size_t count,
+	size_t token)
+{
+	spec_module *best = NULL;
+
+	for (size_t i = 0; i < count; i++)
+		if (modules[i].pigen || modules[i].parameter_count)
+			if (token >= modules[i].module_token &&
+				token <= modules[i].endmodule_token)
+				if (!best || modules[i].module_token > best->module_token)
+					best = &modules[i];
+	return best;
 }
 
 static int buffered_port(const spec_module *module, const char *name)
@@ -502,6 +521,7 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 		spec_parameter *values = NULL;
 		size_t value_count = 0;
 		char *clone_name = NULL;
+		spec_module *parent = module_containing(modules, module_count, i);
 
 		if (token_is_identifier(token) && i + 3 < tokens.count &&
 			!token_is_text(source, token, "module") &&
@@ -579,6 +599,8 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 		if (!module) { free(module_name); continue; }
 		free(module_name);
 		parse_instance_overrides(source, &tokens, i + 3, close,
+			parent ? parent->parameters : NULL,
+			parent ? parent->parameter_count : 0,
 			&overrides, &override_count);
 		for (size_t p = 0; p < module->parameter_count; p++)
 		{

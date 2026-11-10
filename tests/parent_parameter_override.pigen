@@ -1,0 +1,6 @@
+module pchild #(parameter W = 8)(input logic clk, input bit[W] buf i, output bit[W] buf o);
+ always_ff @(posedge clk) o <= i;
+endmodule
+module top #(parameter PW = 16)(input logic clk, input bit[PW] buf a, output bit[PW] buf y);
+ pchild #(.W(PW)) c(.clk(clk), .i(a), .o(y));
+endmodule
