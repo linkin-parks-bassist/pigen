@@ -585,8 +585,28 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 		}
 		case PIGEN_SYNTAX_EXPR_NAME:
 		{
-			pigen_symbol_id symbol = pigen_symbol_lookup(analyzer->model,
-				analyzer->scope, token_spelling(analyzer, syntax->as.atom.token));
+			const pigen_expanded_token *name_token =
+				pigen_expanded_token_get(analyzer->syntax->expanded,
+					syntax->as.atom.token);
+			pigen_source_span spelling = token_spelling(analyzer,
+				syntax->as.atom.token);
+			pigen_source_span origin_spelling = name_token ?
+				pigen_origin_spelling_span(analyzer->syntax->expanded,
+					name_token->origin) : spelling;
+			size_t name_length = 0;
+			const char *name_text = name_token ?
+				pigen_expanded_token_text(analyzer->syntax->expanded,
+					name_token, &name_length) : NULL;
+			size_t origin_length = 0;
+			const char *origin_text = pigen_source_span_text(
+				analyzer->model->sources, origin_spelling, &origin_length);
+			pigen_symbol_id symbol = name_text && origin_text &&
+				(name_length != origin_length ||
+				 memcmp(name_text, origin_text, name_length)) ?
+				pigen_symbol_lookup_text(analyzer->model, analyzer->scope,
+					name_text, name_length) :
+				pigen_symbol_lookup(analyzer->model, analyzer->scope,
+					spelling);
 			const pigen_symbol *known = pigen_symbol_get(analyzer->model, symbol);
 			const pigen_semantic_signal *signal;
 

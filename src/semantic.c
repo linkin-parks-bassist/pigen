@@ -2099,6 +2099,31 @@ pigen_symbol_id pigen_symbol_lookup(const pigen_semantic_model *model,
 	return INVALID_ID(pigen_symbol_id);
 }
 
+pigen_symbol_id pigen_symbol_lookup_text(pigen_semantic_model *model,
+	pigen_scope_id scope, const char *text, size_t length)
+{
+	while (model && pigen_scope_get(model, scope))
+	{
+		size_t i = model->symbol_count;
+
+		while (i--)
+		{
+			const pigen_symbol *symbol = &model->symbols[i];
+			size_t name_length = 0;
+			const char *name;
+
+			if (symbol->scope.index != scope.index) continue;
+			name = pigen_source_span_text(model->sources, symbol->name,
+				&name_length);
+			if (name && name_length == length &&
+				!memcmp(name, text, length))
+				return (pigen_symbol_id){(uint32_t)i};
+		}
+		scope = model->scopes[scope.index].parent;
+	}
+	return INVALID_ID(pigen_symbol_id);
+}
+
 const pigen_symbol *pigen_symbol_get(const pigen_semantic_model *model,
 	pigen_symbol_id symbol)
 {

@@ -1,0 +1,8 @@
+`define CAT(a, b) a``b
+module mref(input logic clk, input logic reset, input bit[8] buf a, output bit[8] buf y);
+  bit[8] buf foobar;
+  always_ff @(posedge clk) begin
+    foobar <= a;
+    y <= `CAT(foo, bar);
+  end
+endmodule

@@ -646,6 +646,8 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 	pigen_symbol_id *declared, pigen_symbol_id *shadowed);
 pigen_symbol_id pigen_symbol_lookup(const pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_source_span name);
+pigen_symbol_id pigen_symbol_lookup_text(pigen_semantic_model *model,
+	pigen_scope_id scope, const char *text, size_t length);
 const pigen_symbol *pigen_symbol_get(const pigen_semantic_model *model,
 	pigen_symbol_id symbol);
 pigen_module_id pigen_module_add(pigen_semantic_model *model,
