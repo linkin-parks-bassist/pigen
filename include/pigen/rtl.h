@@ -154,6 +154,7 @@ typedef struct {
 	pigen_rtl_object_id destination;
 	pigen_rtl_expr_id value;
 	pigen_rtl_expr_id enable; /* Invalid means unconditional. */
+	pigen_rtl_expr_id path; /* Selected/indexed destination when valid. */
 	pigen_rtl_module_id module; /* Invalid until owner resolution publishes it. */
 } pigen_rtl_update;
 
@@ -336,6 +337,8 @@ pigen_rtl_update_id pigen_rtl_update_add_with_owner(pigen_rtl_model *model,
 	pigen_rtl_expr_id value, pigen_source_span span);
 int pigen_rtl_update_set_enable(pigen_rtl_model *model,
 	pigen_rtl_update_id update, pigen_rtl_expr_id enable);
+int pigen_rtl_update_set_path(pigen_rtl_model *model,
+	pigen_rtl_update_id update, pigen_rtl_expr_id path);
 pigen_rtl_process_id pigen_rtl_process_add_with_owner(
 	pigen_rtl_model *model, pigen_rtl_module_id module,
 	pigen_rtl_expr_id clock_expression, pigen_semantic_edge edge,

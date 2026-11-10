@@ -1049,7 +1049,13 @@ static int emit_process(struct buf *b, const pigen_rtl_model *rtl,
 				return -1;
 			buf_append_str(b, ") ");
 		}
-		buf_append_str(b, dest_name);
+		if (updates[i].path.index != PIGEN_INVALID_ID)
+		{
+			if (emit_expr(b, rtl, updates[i].path) != 0)
+				return -1;
+		}
+		else
+			buf_append_str(b, dest_name);
 		buf_append_str(b, " <= ");
 		if (emit_expr(b, rtl, updates[i].value) != 0)
 			return -1;
@@ -1328,6 +1334,10 @@ static int validate_record(const pigen_source_manager *sources,
 			if (!dest)
 				return -1;
 			if (!object_name(rtl, dest))
+				return -1;
+			if (update->path.index != PIGEN_INVALID_ID &&
+				validate_expr(rtl,
+					pigen_rtl_expr_get(rtl, update->path)) != 0)
 				return -1;
 			value = pigen_rtl_expr_get(rtl, update->value);
 			if (!value)

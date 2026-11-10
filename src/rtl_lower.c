@@ -2177,11 +2177,34 @@ static int drive_destination(pigen_rtl_lowering *lowering,
 	}
 	else if (dest_realization == PIGEN_TRANSFER_REALIZATION_PROCEDURAL_VARIABLE)
 	{
-		pigen_rtl_update_id update_id = pigen_rtl_update_add_with_owner(rtl,
-			rtl_module, dest_endpoints->payload, value, span);
+		const pigen_semantic_expr *path_shape = lval->expression.index !=
+			PIGEN_INVALID_ID ? pigen_expr_get(sem, lval->expression) : NULL;
+		pigen_rtl_update_id update_id;
 
-		if (update_id.index == PIGEN_INVALID_ID ||
-			!pigen_rtl_update_set_enable(rtl, update_id, fire)) return 0;
+		while (path_shape && path_shape->kind == PIGEN_EXPR_GROUP)
+			path_shape = pigen_expr_get(sem,
+				path_shape->as.group.operand);
+		if (path_shape && (path_shape->kind == PIGEN_EXPR_INDEX ||
+			path_shape->kind == PIGEN_EXPR_SELECT))
+		{
+			pigen_rtl_expr_id path = lower_expr(lowering, lval->expression);
+
+			if (path.index == PIGEN_INVALID_ID) return 0;
+			update_id = pigen_rtl_update_add_with_owner(rtl, rtl_module,
+				dest_endpoints->payload, value, span);
+			if (update_id.index == PIGEN_INVALID_ID ||
+				!pigen_rtl_update_set_path(rtl, update_id, path) ||
+				!pigen_rtl_update_set_enable(rtl, update_id, fire))
+				return 0;
+		}
+		else
+		{
+			update_id = pigen_rtl_update_add_with_owner(rtl, rtl_module,
+				dest_endpoints->payload, value, span);
+			if (update_id.index == PIGEN_INVALID_ID ||
+				!pigen_rtl_update_set_enable(rtl, update_id, fire))
+				return 0;
+		}
 		updates[(*update_count)++] = update_id;
 	}
 	else

@@ -849,6 +849,7 @@ pigen_rtl_update_id pigen_rtl_update_add_with_owner(pigen_rtl_model *model,
 	record = &model->updates[model->update_count++];
 	*record = (pigen_rtl_update){0};
 	record->enable = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	record->path = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	record->origin = span;
 	record->destination = destination;
 	record->value = value;
@@ -867,6 +868,21 @@ int pigen_rtl_update_set_enable(pigen_rtl_model *model,
 	model->updates[update.index].enable = enable;
 	return 1;
 }
+
+int pigen_rtl_update_set_path(pigen_rtl_model *model,
+	pigen_rtl_update_id update, pigen_rtl_expr_id path)
+{
+	pigen_rtl_update *record;
+
+	if (!model || update.index == PIGEN_INVALID_ID ||
+		update.index >= model->update_count ||
+		!pigen_rtl_expr_get(model, path))
+		return 0;
+	record = &model->updates[update.index];
+	record->path = path;
+	return 1;
+}
+
 
 pigen_rtl_process_id pigen_rtl_process_add_with_owner(
 	pigen_rtl_model *model, pigen_rtl_module_id module,

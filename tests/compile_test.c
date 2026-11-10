@@ -54,10 +54,10 @@ static void test_skeleton_fails_all(void)
     int ret = pigen_compile_source(&sources, "tests/basic.pigen",
                                    source_text, source_length,
                                    NULL, &result, &error);
-    /* Skeleton stub always returns -1 (failure) */
-    assert(ret == -1);
-    assert(result.systemverilog == NULL);
-    assert(result.length == 0);
+    /* The structured compiler now lowers the data-first skeleton. */
+    assert(ret == 0);
+    assert(result.systemverilog != NULL);
+    assert(result.length > 0);
 
     free(source_text);
     pigen_free_sources(&sources);

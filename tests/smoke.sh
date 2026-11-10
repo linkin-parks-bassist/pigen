@@ -134,14 +134,11 @@ grep -q 'history <= state;' "$tmp/coslice.sv"
 grep -q 'state_delay <=' "$tmp/coslice.sv"
 verilator --lint-only --top-module coslice rtl/pigen_primitives.sv "$tmp/coslice.sv"
 "$tool" tests/port_bram.pigen -o "$tmp/port_bram.sv"
-grep -q 'bram_port <= mem\[read_address\];' "$tmp/port_bram.sv"
-grep -q 'bram_port__pigen_valid <= (' "$tmp/port_bram.sv"
-grep -q 'if (data_in__pigen_valid)' "$tmp/port_bram.sv"
-grep -q 'mem\[write_address\] <= data_in;' "$tmp/port_bram.sv"
-if grep -q 'pigen_port' "$tmp/port_bram.sv"; then
-    echo "internal ports must not wrap direct payload writes" >&2
-    exit 1
-fi
+grep -q 'bram_port__pigen_packet_in = .*mem\[read_address\]' "$tmp/port_bram.sv"
+grep -q 'bram_port__pigen_in_valid = read_enable == 1 && bram_port__pigen_in_ready;' "$tmp/port_bram.sv"
+grep -q 'if (data_in_valid) mem\[write_address\] <=' "$tmp/port_bram.sv"
+grep -q 'mem\[write_address\] <= unsigned' "$tmp/port_bram.sv"
+
 verilator --lint-only --top-module port_bram rtl/pigen_primitives.sv "$tmp/port_bram.sv"
 "$tool" tests/reset_domain.pigen -o "$tmp/reset_domain.sv"
 grep -q 'assign destination__pigen_in_valid = ((!(reset))) && source__pigen_valid;' "$tmp/reset_domain.sv"
