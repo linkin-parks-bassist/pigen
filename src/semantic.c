@@ -901,6 +901,51 @@ static int evaluate_u64(pigen_semantic_model *model,
 					if (right && left > UINT64_MAX / right) return 0;
 					*value = left * right;
 					return 1;
+				case PIGEN_BINARY_DIVIDE:
+					if (right == 0) return 0;
+					*value = left / right;
+					return 1;
+				case PIGEN_BINARY_MODULO:
+					if (right == 0) return 0;
+					*value = left % right;
+					return 1;
+				case PIGEN_BINARY_SHIFT_LEFT:
+				case PIGEN_BINARY_ARITH_SHIFT_LEFT:
+					if (right >= 64) return 0;
+					*value = left << right;
+					return 1;
+				case PIGEN_BINARY_SHIFT_RIGHT:
+				case PIGEN_BINARY_ARITH_SHIFT_RIGHT:
+					*value = right >= 64 ? 0 : left >> right;
+					return 1;
+				case PIGEN_BINARY_LESS:
+					*value = left < right; return 1;
+				case PIGEN_BINARY_LESS_EQUAL:
+					*value = left <= right; return 1;
+				case PIGEN_BINARY_GREATER:
+					*value = left > right; return 1;
+				case PIGEN_BINARY_GREATER_EQUAL:
+					*value = left >= right; return 1;
+				case PIGEN_BINARY_EQUAL:
+				case PIGEN_BINARY_CASE_EQUAL:
+				case PIGEN_BINARY_WILDCARD_EQUAL:
+					*value = left == right; return 1;
+				case PIGEN_BINARY_NOT_EQUAL:
+				case PIGEN_BINARY_CASE_NOT_EQUAL:
+				case PIGEN_BINARY_WILDCARD_NOT_EQUAL:
+					*value = left != right; return 1;
+				case PIGEN_BINARY_BITWISE_AND:
+					*value = left & right; return 1;
+				case PIGEN_BINARY_BITWISE_XOR:
+					*value = left ^ right; return 1;
+				case PIGEN_BINARY_BITWISE_XNOR:
+					*value = ~(left ^ right); return 1;
+				case PIGEN_BINARY_BITWISE_OR:
+					*value = left | right; return 1;
+				case PIGEN_BINARY_LOGICAL_AND:
+					*value = left && right; return 1;
+				case PIGEN_BINARY_LOGICAL_OR:
+					*value = left || right; return 1;
 				case PIGEN_BINARY_POWER:
 					result = 1;
 					while (right)

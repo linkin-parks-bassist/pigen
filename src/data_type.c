@@ -1888,6 +1888,8 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	 * and same-type operations instead of widening to a common view. */
 	if (pigen_data_type_is_integral(model, left) &&
 		pigen_data_type_is_integral(model, right) &&
+		operator != PIGEN_BINARY_ADD && operator != PIGEN_BINARY_SUBTRACT &&
+		operator != PIGEN_BINARY_MULTIPLY && operator != PIGEN_BINARY_POWER &&
 		(alias_type(model, left) || alias_type(model, right)))
 	{
 		pigen_binary_resolution alias;
@@ -2073,6 +2075,33 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	{
 		pigen_data_type_id common;
 
+		/* Exact-exact division has a single compile-time result. */
+		if (pigen_data_type_numerical_interpretation(model, left) ==
+				PIGEN_NUMERICAL_EXACT_INTEGER &&
+			pigen_data_type_numerical_interpretation(model, right) ==
+				PIGEN_NUMERICAL_EXACT_INTEGER &&
+			(operator == PIGEN_BINARY_DIVIDE ||
+			 operator == PIGEN_BINARY_MODULO))
+		{
+			uint64_t dividend = 0, divisor = 0, quotient;
+			pigen_integer_id exact;
+
+			if (!pigen_integer_to_u64(model,
+					pigen_data_type_exact_value(model, left), &dividend) ||
+				!pigen_integer_to_u64(model,
+					pigen_data_type_exact_value(model, right), &divisor) ||
+				divisor == 0)
+				return 0;
+			quotient = operator == PIGEN_BINARY_DIVIDE ?
+				dividend / divisor : dividend % divisor;
+			exact = pigen_integer_intern_u64(model, quotient);
+			result = exact.index == PIGEN_INVALID_ID ?
+				INVALID_ID(pigen_data_type_id) :
+				pigen_data_type_exact_integer(model, exact);
+			effective_left = left;
+			effective_right = right;
+			goto operands_resolved;
+		}
 		if ((!pigen_data_type_is_integral(model, left) &&
 				pigen_data_type_numerical_interpretation(model, left) !=
 					PIGEN_NUMERICAL_EXACT_INTEGER) ||
@@ -2086,8 +2115,6 @@ int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 			!binary_bitwise_operator(operator) &&
 			!binary_logical_operator(operator) &&
 			!binary_shift_operator(operator))
-			return 0;
-		if (operator == PIGEN_BINARY_DIVIDE || operator == PIGEN_BINARY_MODULO)
 			return 0;
 		if (left.index == right.index)
 		{
