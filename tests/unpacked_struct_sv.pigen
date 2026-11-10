@@ -1,0 +1,6 @@
+module structplain(input logic clk, input logic [7:0] d, output logic [7:0] q);
+ typedef struct { logic [7:0] data; logic valid; } s_t;
+ s_t s;
+ always_ff @(posedge clk) s.data <= d;
+ assign q = s.data;
+endmodule

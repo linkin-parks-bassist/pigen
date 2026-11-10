@@ -3258,6 +3258,29 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 	return 1;
 }
 
+static int module_has_unpacked_struct(const syntax_parser *parser, size_t start)
+{
+	size_t header_end, endmodule, at;
+	size_t paren_depth = 0;
+
+	for (header_end = start + 2;
+		header_end < parser->expanded->token_count; header_end++)
+	{
+		if (token_is(parser, header_end, "(")) paren_depth++;
+		else if (token_is(parser, header_end, ")") && paren_depth) paren_depth--;
+		else if (!paren_depth && token_is(parser, header_end, ";")) break;
+	}
+	if (header_end == parser->expanded->token_count) return 0;
+	for (endmodule = header_end + 1;
+		endmodule < parser->expanded->token_count; endmodule++)
+		if (token_is(parser, endmodule, "endmodule")) break;
+	if (endmodule == parser->expanded->token_count) return 0;
+	for (at = start + 1; at < endmodule; at++)
+		if (token_is(parser, at, "struct") &&
+			!token_is(parser, at + 1, "packed")) return 1;
+	return 0;
+}
+
 static int module_has_union(const syntax_parser *parser, size_t start)
 {
 	size_t header_end, endmodule, at;
@@ -3546,7 +3569,8 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 		add_opaque(&parser, root, opaque_cursor, at);
 		if ((parameterized_module(&parser, at) ||
 			module_header_has_directionless_port(&parser, at) ||
-			module_has_enum(&parser, at) || module_has_union(&parser, at)) &&
+			module_has_enum(&parser, at) || module_has_union(&parser, at) ||
+			module_has_unpacked_struct(&parser, at)) &&
 			!parameterized_module_has_pigen(&parser, at))
 		{
 			if (!parse_parameterized_module_opaque(&parser, root, at, &at))
