@@ -584,6 +584,44 @@ typedef struct {
 	int pigen;
 } spec_leaf_statement;
 
+static char *statement_lhs_name(const char *source,
+	const pigen_tokens *tokens, size_t first, size_t last)
+{
+	size_t assign = last;
+	size_t lhs = last;
+
+	for (size_t i = first; i < last; i++)
+		if (token_is_text(source, &tokens->items[i], "<="))
+		{
+			assign = i;
+			break;
+		}
+	if (assign == last) return NULL;
+	for (size_t i = first; i < assign; i++)
+		if (token_is_identifier(&tokens->items[i])) lhs = i;
+	return lhs < assign ? token_text(source, &tokens->items[lhs]) : NULL;
+}
+
+static int span_has_identifier(const char *source, const pigen_tokens *tokens,
+	size_t first, size_t last, const char *name)
+{
+	for (size_t i = first; i < last; i++)
+		if (token_is_identifier(&tokens->items[i]) &&
+			pigen_is_word(source + tokens->items[i].span.start,
+				tokens->items[i].span.end - tokens->items[i].span.start,
+				name))
+			return 1;
+	return 0;
+}
+
+static int span_has_blocking_assignment(const char *source,
+	const pigen_tokens *tokens, size_t first, size_t last)
+{
+	for (size_t i = first; i < last; i++)
+		if (token_is_text(source, &tokens->items[i], "=")) return 1;
+	return 0;
+}
+
 static char *copy_block_with_replacements(const char *source,
 	const pigen_tokens *tokens, size_t first, size_t last,
 	const spec_leaf_statement *leaves, size_t leaf_count, int keep_function)
@@ -606,7 +644,8 @@ static char *copy_block_with_replacements(const char *source,
 
 static int add_mixed_process_splits(const char *source,
 	const pigen_tokens *tokens, spec_module *modules, size_t module_count,
-	spec_replacement **replacements, size_t *replacement_count)
+	spec_replacement **replacements, size_t *replacement_count,
+	const char **error, size_t *error_offset)
 {
 	spec_function_names functions = {0};
 	size_t count = 0;
@@ -680,9 +719,78 @@ static int add_mixed_process_splits(const char *source,
 		}
 		if (has_function && has_pigen)
 		{
-			char *structured = copy_block_with_replacements(source, tokens, i,
+			char *structured;
+			char *retained;
+			int unsafe = 0;
+
+			for (size_t f = 0; f < leaf_count && !unsafe; f++)
+			{
+				char *lhs;
+
+				if (!leaves[f].function) continue;
+				if (span_has_blocking_assignment(source, tokens,
+					leaves[f].first, leaves[f].last))
+				{
+					*error = "mixed clocked body with a blocking assignment "
+						"cannot be split without changing ordering";
+					*error_offset = tokens->items[leaves[f].first].span.start;
+					unsafe = 1;
+					break;
+				}
+				lhs = statement_lhs_name(source, tokens, leaves[f].first,
+					leaves[f].last);
+				if (!lhs)
+				{
+					*error = "mixed clocked body with a task or bare call "
+						"cannot be split without changing ordering";
+					*error_offset = tokens->items[leaves[f].first].span.start;
+					unsafe = 1;
+					break;
+				}
+				for (size_t p = 0; p < leaf_count; p++)
+					if (!leaves[p].function &&
+						span_has_identifier(source, tokens, leaves[p].first,
+							leaves[p].last, lhs))
+					{
+						*error = "mixed clocked body reads a value written by "
+							"a function statement; preserving order is unsupported";
+						*error_offset = tokens->items[leaves[p].first].span.start;
+						unsafe = 1;
+						break;
+					}
+				free(lhs);
+			}
+			for (size_t p = 0; p < leaf_count && !unsafe; p++)
+			{
+				char *lhs;
+
+				if (leaves[p].function) continue;
+				lhs = statement_lhs_name(source, tokens, leaves[p].first,
+					leaves[p].last);
+				if (!lhs) continue;
+				for (size_t f = 0; f < leaf_count; f++)
+					if (leaves[f].function &&
+						span_has_identifier(source, tokens, leaves[f].first,
+							leaves[f].last, lhs))
+					{
+						*error = "a function statement reads a value written by "
+							"a Pigen statement; preserving order is unsupported";
+						*error_offset = tokens->items[leaves[f].first].span.start;
+						unsafe = 1;
+						break;
+					}
+				free(lhs);
+			}
+			if (unsafe)
+			{
+				free(leaves);
+				for (size_t x = 0; x < functions.count; x++) free(functions.names[x]);
+				free(functions.names);
+				return -1;
+			}
+			structured = copy_block_with_replacements(source, tokens, i,
 				end, leaves, leaf_count, 0);
-			char *retained = copy_block_with_replacements(source, tokens, i,
+			retained = copy_block_with_replacements(source, tokens, i,
 				end, leaves, leaf_count, 1);
 			pigen_string text = {0};
 			spec_replacement *grown;
@@ -708,7 +816,8 @@ static int add_mixed_process_splits(const char *source,
 	return count;
 }
 
-char *pigen_specialize_parameterized_instances(const char *source, size_t length)
+char *pigen_specialize_parameterized_instances(const char *source, size_t length,
+	const char **error, size_t *error_offset)
 {
 	pigen_tokens tokens = {0};
 	spec_module *modules = NULL;
@@ -723,13 +832,34 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 	int changed = 0;
 
 	if (!source || !length) return NULL;
+	if (error) *error = NULL;
+	if (error_offset) *error_offset = 0;
 	pigen_lex_source(source, length, &tokens);
 	collect_modules(source, &tokens, &modules, &module_count);
-	if (add_mixed_process_splits(source, &tokens, modules, module_count,
-		&replacements, &replacement_count))
-		changed = 1;
-	else
-		changed = 0;
+	{
+		int split = add_mixed_process_splits(source, &tokens, modules,
+			module_count, &replacements, &replacement_count, error,
+			error_offset);
+
+		if (split < 0)
+		{
+			for (size_t i = 0; i < replacement_count; i++)
+				free(replacements[i].replacement);
+			free(replacements);
+			for (size_t i = 0; i < module_count; i++)
+			{
+				for (size_t p = 0; p < modules[i].buffered_port_count; p++)
+					free(modules[i].buffered_ports[p].name);
+				free(modules[i].buffered_ports);
+				free_parameters(modules[i].parameters,
+					modules[i].parameter_count);
+			}
+			free(modules);
+			pigen_free_tokens(&tokens);
+			return NULL;
+		}
+		changed = split > 0;
+	}
 	for (size_t i = 0; i < tokens.count; i++)
 	{
 		const pigen_token *token = &tokens.items[i];

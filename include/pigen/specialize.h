@@ -7,6 +7,6 @@
  * module copies. Returns a malloc-owned replacement source, or NULL when the
  * source needs no specialization. */
 char *pigen_specialize_parameterized_instances(const char *source,
-	size_t length);
+	size_t length, const char **error, size_t *error_offset);
 
 #endif
