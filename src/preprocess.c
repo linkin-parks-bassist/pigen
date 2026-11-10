@@ -634,6 +634,50 @@ static int expand_tokens(preprocessor *preprocessor, expansion_output *output,
 		{
 			pigen_source_span name = pigen_origin_spelling_span(result,
 				tokens[i + 1].origin);
+			static const char *const preserved[] = {
+				"default_nettype", "timescale", "resetall", "celldefine",
+				"endcelldefine", "unconnected_drive", "nounconnected_drive",
+				"begin_keywords", "end_keywords", "line", "pragma",
+			};
+			int preserve = 0;
+
+			{
+				size_t length = 0;
+				const char *text = pigen_source_span_text(result->sources,
+					name, &length);
+
+				for (size_t k = 0; k < sizeof preserved / sizeof *preserved;
+					k++)
+					if (text && length == strlen(preserved[k]) &&
+						!memcmp(text, preserved[k], length))
+						preserve = 1;
+			}
+			if (preserve)
+			{
+				size_t j = i;
+
+				while (j < count)
+				{
+					append_token(output, tokens[j]);
+					if (j + 1 < count)
+					{
+						pigen_source_span current = pigen_origin_expansion_span(
+							result, tokens[j].origin);
+						pigen_source_span next = pigen_origin_expansion_span(
+							result, tokens[j + 1].origin);
+
+						if (pigen_source_locate(result->sources, current).line !=
+							pigen_source_locate(result->sources, next).line)
+						{
+							i = j;
+							break;
+						}
+					}
+					j++;
+				}
+				if (j == count) i = count - 1;
+				continue;
+			}
 			pigen_macro_id macro = find_macro(result, name);
 			const pigen_macro_definition *definition;
 			if (macro.index == PIGEN_INVALID_ID)

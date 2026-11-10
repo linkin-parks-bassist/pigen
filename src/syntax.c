@@ -3595,8 +3595,7 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 			PIGEN_INVALID_ID ? NULL :
 			&parser.tree->nodes[parser.tree->nodes[0].last_child.index];
 
-		if (last && last->kind == PIGEN_SYNTAX_MODULE)
-			owner = parser.tree->nodes[0].last_child;
+		(void)last;
 		add_opaque_bytes(&parser, owner, parser.opaque_byte_cursor,
 			parser.source_length);
 	}

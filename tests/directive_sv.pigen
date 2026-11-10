@@ -1,0 +1,5 @@
+`default_nettype none
+module directive_m(input logic [7:0] a, output logic [7:0] y);
+ assign y = a;
+endmodule
+`default_nettype wire
