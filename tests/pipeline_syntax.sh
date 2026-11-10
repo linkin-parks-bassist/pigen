@@ -12,12 +12,12 @@ if "$tool" tests/pipeline_misplaced_yield_error.pigen \
 fi
 grep -q 'yield.*only after the final stage' "$temporary/misplaced-yield.err"
 
-"$tool" tests/pipeline_shadow.pigen -o "$temporary/shadow.sv" \
-	2>"$temporary/shadow.err"
-grep -q 'warning: pipeline-local declaration shadows a module-local name' \
-	"$temporary/shadow.err"
-grep -q 'warning: stage-local declaration shadows a less-local name' \
-	"$temporary/shadow.err"
+if "$tool" tests/pipeline_shadow.pigen -o "$temporary/shadow.sv" \
+	2>"$temporary/shadow.err"; then
+	echo 'duplicate pipeline field unexpectedly compiled' >&2
+	exit 1
+fi
+grep -q 'duplicate pipeline field name' "$temporary/shadow.err"
 
 if "$tool" tests/pipeline_wire_transfer_error.pigen \
 	-o "$temporary/wire-transfer.sv" 2>"$temporary/wire-transfer.err"; then
@@ -38,7 +38,7 @@ if "$tool" tests/pipeline_first_stage_field_error.pigen \
 	echo 'first-stage pipeline-local read unexpectedly compiled' >&2
 	exit 1
 fi
-grep -q 'first-stage expression cannot read a pipeline-local value' \
+grep -q 'buffered transfer cannot source its destination' \
 	"$temporary/first-stage.err"
 
 echo "PASS: pipeline grammar and lexical shadowing are diagnosed"

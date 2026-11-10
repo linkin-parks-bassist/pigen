@@ -1517,6 +1517,9 @@ static int parse_pipeline_stage_item(syntax_parser *parser,
 		*after_item = semicolon + 1;
 		return 1;
 	}
+	if (token_is(parser, start, "yield"))
+		return fail(parser, start,
+			"yield is only after the final stage");
 	at = start;
 	direction = parse_direction(parser, &at);
 	if (!pigen_parse_type_prefix(parser->expanded, at, semicolon,
@@ -1649,6 +1652,13 @@ static int parse_pipeline(syntax_parser *parser, pigen_syntax_id parent,
 				saw_yield = 1;
 				body_at = semicolon + 1;
 				continue;
+			}
+			if (token_is(parser, body_at, "export"))
+			{
+				fail(parser, body_at,
+					"export is reserved but not yet supported");
+				ok = 0;
+				break;
 			}
 			{
 				size_t semicolon = top_level_token(parser, body_at, endpipeline, ";");

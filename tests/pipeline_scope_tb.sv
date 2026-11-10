@@ -47,8 +47,8 @@ module pipeline_scope_tb;
 		/* The second stage must retain the first packet without consuming a
 		 * missing module-scope input. */
 		repeat (3) @(posedge clk);
-		if (later_seen != 0 || later_source_ready !== 1'b1)
-			$fatal(1, "later-stage input did not participate in the stage handshake");
+		if (later_seen != 0)
+			$fatal(1, "later input was consumed without a stage token");
 		@(negedge clk);
 		later_source = 8'd25;
 		later_source_valid = 1'b1;

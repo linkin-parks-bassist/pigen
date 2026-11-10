@@ -3,9 +3,9 @@ module pipeline_misplaced_yield_error(
 	input bit[8] buf source,
 	output bit[8] buf destination
 );
-	always @(posedge clk) begin
+	always_ff @(posedge clk) begin
 		pipeline misplaced_yield begin
-			logic [7:0] value;
+			bit[8] value;
 			stage begin
 				value <= source;
 				yield value;

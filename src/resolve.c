@@ -25,6 +25,7 @@ typedef struct {
 	pigen_data_type_id fsm_state_type;
 	const pigen_source_span *fsm_state_names;
 	size_t fsm_state_count;
+	int in_pipeline_stage;
 } resolver;
 
 static int fail(resolver *resolver, pigen_source_span span, const char *message)
@@ -677,12 +678,15 @@ static int resolve_pipeline(resolver *resolver, pigen_module_id module_id,
 			if (node->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT)
 			{
 				resolver->expression_scope = stage_scope;
+				resolver->in_pipeline_stage = 1;
 				if (!resolve_assignment(resolver, module_id, process,
 					domain, item, node, guard))
 				{
+					resolver->in_pipeline_stage = 0;
 					ok = 0;
 					break;
 				}
+				resolver->in_pipeline_stage = 0;
 			}
 			item = node->next_sibling;
 		}
@@ -1134,8 +1138,27 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 		return fail_location(resolver, assignment->location,
 			"transfer destination requires a supported lvalue");
 	if (!lvalue_is_assignable(model, destination))
+	{
+		const pigen_semantic_lvalue *lvalue = pigen_lvalue_get(model,
+			destination);
+		const pigen_semantic_signal *destination_signal = NULL;
+		const pigen_transfer_type_descriptor *descriptor = NULL;
+
+		if (lvalue && lvalue->kind == PIGEN_LVALUE_PROJECTION)
+			destination_signal = pigen_signal_get(model,
+				lvalue->as.projection.signal);
+		if (destination_signal)
+			descriptor = pigen_transfer_type_descriptor_get(
+				destination_signal->transfer_type);
+		if (resolver->in_pipeline_stage && destination_signal &&
+			descriptor && descriptor->is_static &&
+			(destination_signal->direction == PIGEN_SEMANTIC_INPUT ||
+			 destination_signal->transfer_type == PIGEN_TRANSFER_TYPE_WIRE))
+			return fail_location(resolver, assignment->location,
+				"wire is not a transfer destination");
 		return fail_location(resolver, assignment->location,
 			"transfer destination is not a writable variable or signal");
+	}
 	destination_value = pigen_expr_get(model, destination_expression);
 	if (!destination_value)
 		return fail_location(resolver, assignment->location,
@@ -1770,7 +1793,7 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	resolver resolver = {syntax, model, policy, error,
 		(pigen_scope_id){PIGEN_INVALID_ID},
 		INVALID_ID(pigen_expr_id), INVALID_ID(pigen_data_type_id),
-		NULL, 0};
+		NULL, 0, 0};
 	const pigen_syntax_node *root;
 	pigen_syntax_id child;
 	pigen_source_span root_span;

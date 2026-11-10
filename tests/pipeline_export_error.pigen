@@ -4,9 +4,9 @@ module pipeline_export_error(
 	output bit[8] buf destination
 );
 	typedef logic [7:0] octet;
-	always @(posedge clk) begin
+	always_ff @(posedge clk) begin
 		pipeline invalid begin
-			octet value;
+			bit[8] value;
 			stage begin
 				value <= source;
 			end

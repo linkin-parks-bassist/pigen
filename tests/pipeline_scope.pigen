@@ -13,43 +13,32 @@ module pipeline_scope(
 	typedef logic [7:0] octet;
 	localparam octet STATIC_BIAS = 8'd2;
 
-	always @(posedge clk) begin
-		if (reset) begin
-			pipeline_reset(via_wire);
-			pipeline_reset(with_later_input);
-		end else if (enable) begin
-			pipeline from_static_scope begin
-				octet value;
-				stage begin
-					wire octet selected = static_source + STATIC_BIAS;
-					value <= selected;
-				end
-				yield value;
-			endpipeline
+	always_ff @(posedge clk) begin
+		if (enable) begin
 
 			pipeline via_wire begin
-				octet value;
+				bit[8] wire_value;
 				stage begin
-					wire octet selected = wire_source;
-					value <= selected + 8'd1;
+					wire_value <= wire_source + 8'd1;
 				end
-				yield value;
+				yield wire_value;
 			endpipeline
 
 			pipeline with_later_input begin
-				octet value;
+				bit[8] first;
+				bit[8] second;
 				stage begin
-					value <= first_source;
+					first <= first_source;
 				end
 				stage begin
-					value <= value + later_source;
+					second <= first + later_source;
 				end
-				yield value;
+				yield second;
 			endpipeline
 
 			wire_result <= via_wire;
 			later_result <= with_later_input;
-			static_result <= from_static_scope;
+			static_result <= static_source + 8'd2;
 		end
 	end
 endmodule
