@@ -1,0 +1,9 @@
+interface bus_if;
+ logic [7:0] data;
+endinterface
+module m(input logic clk, bus_if bus, output logic [7:0] y);
+ assign y = bus.data;
+endmodule
+module wrap(input logic clk, input logic [7:0] a, output logic [7:0] y);
+ assign y = a;
+endmodule

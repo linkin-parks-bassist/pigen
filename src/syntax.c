@@ -3073,6 +3073,38 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 	return 1;
 }
 
+static int module_header_has_directionless_port(const syntax_parser *parser,
+	size_t start)
+{
+	size_t header_end, at, close, item;
+	size_t paren_depth = 0;
+
+	for (header_end = start + 2;
+		header_end < parser->expanded->token_count; header_end++)
+	{
+		if (token_is(parser, header_end, "(")) paren_depth++;
+		else if (token_is(parser, header_end, ")") && paren_depth) paren_depth--;
+		else if (!paren_depth && token_is(parser, header_end, ";")) break;
+	}
+	if (header_end == parser->expanded->token_count) return 0;
+	for (at = start + 2; at < header_end; at++)
+		if (token_is(parser, at, "(")) break;
+	if (at == header_end) return 0;
+	close = matching_parenthesis(parser, at, header_end);
+	if (close == header_end) return 0;
+	for (item = at + 1; item < close; )
+	{
+		size_t next = item;
+
+		while (next < close && !token_is(parser, next, ",")) next++;
+		if (item < next && !token_is(parser, item, "input") &&
+			!token_is(parser, item, "output") && !token_is(parser, item, "inout"))
+			return 1;
+		item = next + 1;
+	}
+	return 0;
+}
+
 static int parameterized_module(const syntax_parser *parser, size_t start)
 {
 	return token_is(parser, start, "module") &&
@@ -3101,7 +3133,7 @@ static int parameterized_module_has_pigen(const syntax_parser *parser,
 		endmodule < parser->expanded->token_count; endmodule++)
 		if (token_is(parser, endmodule, "endmodule")) break;
 	if (endmodule == parser->expanded->token_count) return 0;
-	for (at = header_end + 1; at < endmodule; at++)
+	for (at = start; at < endmodule; at++)
 		for (size_t k = 0; k < sizeof pigen_words / sizeof *pigen_words; k++)
 			if (token_is(parser, at, pigen_words[k])) return 1;
 	return 0;
@@ -3128,7 +3160,6 @@ static int parse_parameterized_module_opaque(syntax_parser *parser,
 		if (token_is(parser, endmodule, "endmodule")) break;
 	if (endmodule == parser->expanded->token_count)
 		return fail(parser, start, "module requires `endmodule`");
-	add_opaque(parser, root, parser->opaque_byte_cursor, start);
 	node.kind = PIGEN_SYNTAX_RETAINED;
 	node.location = range_location(parser, start, endmodule + 1);
 	node.parent = INVALID_SYNTAX;
@@ -3283,7 +3314,8 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 		}
 		if (!token_is(&parser, at, "module")) { at++; continue; }
 		add_opaque(&parser, root, opaque_cursor, at);
-		if (parameterized_module(&parser, at) &&
+		if ((parameterized_module(&parser, at) ||
+			module_header_has_directionless_port(&parser, at)) &&
 			!parameterized_module_has_pigen(&parser, at))
 		{
 			if (!parse_parameterized_module_opaque(&parser, root, at, &at))
