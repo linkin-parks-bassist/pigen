@@ -621,7 +621,8 @@ static char *statement_lhs_name(const char *source,
 	size_t lhs = last;
 
 	for (size_t i = first; i < last; i++)
-		if (token_is_text(source, &tokens->items[i], "<="))
+		if (token_is_text(source, &tokens->items[i], "<=") ||
+			token_is_text(source, &tokens->items[i], "="))
 		{
 			assign = i;
 			break;
@@ -644,13 +645,6 @@ static int span_has_identifier(const char *source, const pigen_tokens *tokens,
 	return 0;
 }
 
-static int span_has_blocking_assignment(const char *source,
-	const pigen_tokens *tokens, size_t first, size_t last)
-{
-	for (size_t i = first; i < last; i++)
-		if (token_is_text(source, &tokens->items[i], "=")) return 1;
-	return 0;
-}
 
 static char *copy_block_with_replacements(const char *source,
 	const pigen_tokens *tokens, size_t first, size_t last,
@@ -775,15 +769,6 @@ static int add_mixed_process_splits(const char *source,
 				char *lhs;
 
 				if (!leaves[f].function) continue;
-				if (span_has_blocking_assignment(source, tokens,
-					leaves[f].first, leaves[f].last))
-				{
-					*error = "mixed clocked body with a blocking assignment "
-						"cannot be split without changing ordering";
-					*error_offset = tokens->items[leaves[f].first].span.start;
-					unsafe = 1;
-					break;
-				}
 				lhs = statement_lhs_name(source, tokens, leaves[f].first,
 					leaves[f].last);
 				if (!lhs)
