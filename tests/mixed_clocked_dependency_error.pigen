@@ -4,7 +4,7 @@ module mixed_clocked_dependency_error(input logic clk, input logic en, input bit
  endfunction
  always_ff @(posedge clk) begin
   if (en) begin
-   temp <= inc(i);
+   temp = inc(i);
    o <= temp;
   end
  end

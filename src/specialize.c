@@ -677,6 +677,14 @@ static char *statement_lhs_name(const char *source,
 	return lhs < assign ? token_text(source, &tokens->items[lhs]) : NULL;
 }
 
+static int statement_is_nba(const char *source, const pigen_tokens *tokens,
+	size_t first, size_t last)
+{
+	for (size_t i = first; i < last; i++)
+		if (token_is_text(source, &tokens->items[i], "<=")) return 1;
+	return 0;
+}
+
 static int span_has_identifier(const char *source, const pigen_tokens *tokens,
 	size_t first, size_t last, const char *name)
 {
@@ -811,6 +819,7 @@ static int add_mixed_process_splits(const char *source,
 			for (size_t f = 0; f < leaf_count && !unsafe; f++)
 			{
 				char *lhs;
+				int nba;
 
 				if (!leaves[f].function) continue;
 				lhs = statement_lhs_name(source, tokens, leaves[f].first,
@@ -823,17 +832,41 @@ static int add_mixed_process_splits(const char *source,
 					unsafe = 1;
 					break;
 				}
+				nba = statement_is_nba(source, tokens, leaves[f].first,
+					leaves[f].last);
 				for (size_t p = 0; p < leaf_count; p++)
-					if (!leaves[p].function &&
-						span_has_identifier(source, tokens, leaves[p].first,
-							leaves[p].last, lhs))
+				{
+					char *pigen_lhs;
+
+					if (leaves[p].function) continue;
+					if (nba)
+					{
+						pigen_lhs = statement_lhs_name(source, tokens,
+							leaves[p].first, leaves[p].last);
+						if (pigen_lhs && text_equals(lhs, pigen_lhs))
+						{
+							free(pigen_lhs);
+							*error = "a function statement and a Pigen statement "
+								"write the same destination; preserving order is "
+								"unsupported";
+							*error_offset =
+								tokens->items[leaves[p].first].span.start;
+							unsafe = 1;
+							break;
+						}
+						free(pigen_lhs);
+					}
+					else if (span_has_identifier(source, tokens,
+						leaves[p].first, leaves[p].last, lhs))
 					{
 						*error = "mixed clocked body reads a value written by "
-							"a function statement; preserving order is unsupported";
+							"a blocking function statement; preserving order is "
+							"unsupported";
 						*error_offset = tokens->items[leaves[p].first].span.start;
 						unsafe = 1;
 						break;
 					}
+				}
 				free(lhs);
 			}
 			for (size_t p = 0; p < leaf_count && !unsafe; p++)
@@ -846,11 +879,14 @@ static int add_mixed_process_splits(const char *source,
 				if (!lhs) continue;
 				for (size_t f = 0; f < leaf_count; f++)
 					if (leaves[f].function &&
+						!statement_is_nba(source, tokens, leaves[f].first,
+							leaves[f].last) &&
 						span_has_identifier(source, tokens, leaves[f].first,
 							leaves[f].last, lhs))
 					{
-						*error = "a function statement reads a value written by "
-							"a Pigen statement; preserving order is unsupported";
+						*error = "a blocking function statement reads a value "
+							"written by a Pigen statement; preserving order is "
+							"unsupported";
 						*error_offset = tokens->items[leaves[f].first].span.start;
 						unsafe = 1;
 						break;

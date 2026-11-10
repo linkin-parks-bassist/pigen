@@ -1,0 +1,9 @@
+module mixed_nba_dep(input logic clk, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ always_ff @(posedge clk) begin
+  temp <= inc(i);
+  o <= temp;
+ end
+endmodule
