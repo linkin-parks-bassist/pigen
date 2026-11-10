@@ -1,0 +1,5 @@
+`define CAT(a, b) a``b
+module macro_paste(input logic clk, input bit[8] buf a, output bit[8] buf y);
+  localparam integer W = `CAT(0, 3);
+  always_ff @(posedge clk) y <= a >> W;
+endmodule

@@ -33,6 +33,7 @@ typedef struct {
 typedef struct {
 	pigen_token_kind kind;
 	pigen_origin_id origin;
+	char *text;
 } pigen_expanded_token;
 
 typedef struct {

@@ -1,3 +1,4 @@
+#include <ctype.h>
 /* Token preprocessing with explicit macro-expansion provenance. */
 #include <stdlib.h>
 #include <string.h>
@@ -365,6 +366,29 @@ static void append_local_token(pigen_expanded_token **tokens, size_t *count,
 	(*tokens)[(*count)++] = token;
 }
 
+static int merge_adjacent_tokens(pigen_expanded_source *result,
+	pigen_expanded_token *previous, pigen_expanded_token next)
+{
+	size_t left_length = 0, right_length = 0;
+	const char *left = pigen_expanded_token_text(result, previous, &left_length);
+	const char *right = pigen_expanded_token_text(result, &next, &right_length);
+	char *merged;
+	char first;
+
+	if (!left || !right) return 0;
+	merged = pigen_resize(NULL, left_length + right_length + 1);
+	memcpy(merged, left, left_length);
+	memcpy(merged + left_length, right, right_length);
+	merged[left_length + right_length] = 0;
+	free(previous->text);
+	previous->text = merged;
+	first = merged[0];
+	previous->kind = (isalpha((unsigned char)first) || first == '_' || first == '$') ?
+		PIGEN_TOKEN_IDENTIFIER : isdigit((unsigned char)first) ?
+		PIGEN_TOKEN_NUMBER : PIGEN_TOKEN_SYMBOL;
+	return 1;
+}
+
 static int expand_macro(preprocessor *preprocessor, expansion_output *output,
 	pigen_macro_id macro_id, pigen_origin_id invocation,
 	const macro_argument *arguments)
@@ -375,6 +399,7 @@ static int expand_macro(preprocessor *preprocessor, expansion_output *output,
 	size_t expanded_count = 0;
 	size_t expanded_capacity = 0;
 	size_t i;
+	int paste = 0;
 	int ok;
 
 	if (macro_on_stack(preprocessor, macro_id))
@@ -384,8 +409,19 @@ static int expand_macro(preprocessor *preprocessor, expansion_output *output,
 	{
 		pigen_expanded_token replacement =
 			result->replacement_tokens[macro->first_replacement + i];
-		size_t parameter = parameter_index(result, macro, &replacement);
+		size_t parameter;
 
+		if (token_text_is(result, &replacement, "`") &&
+			i + 1 < macro->replacement_count &&
+			token_text_is(result,
+				&result->replacement_tokens[macro->first_replacement + i + 1],
+				"`"))
+		{
+			paste = 1;
+			i++;
+			continue;
+		}
+		parameter = parameter_index(result, macro, &replacement);
 		if (parameter != SIZE_MAX)
 		{
 			const pigen_macro_parameter *formal =
@@ -398,16 +434,36 @@ static int expand_macro(preprocessor *preprocessor, expansion_output *output,
 					arguments[parameter].tokens[argument_at];
 				token.origin = add_argument_origin(result, invocation,
 					formal->origin, token.origin, macro_id);
-				append_local_token(&expanded, &expanded_count,
-					&expanded_capacity, token);
+				if (paste && expanded_count)
+				{
+					if (!merge_adjacent_tokens(result,
+						&expanded[expanded_count - 1], token)) return 0;
+					paste = 0;
+				}
+				else
+				{
+					append_local_token(&expanded, &expanded_count,
+						&expanded_capacity, token);
+					paste = 0;
+				}
 			}
 		}
 		else
 		{
 			replacement.origin = add_replacement_origin(result, invocation,
 				replacement.origin, macro_id);
-			append_local_token(&expanded, &expanded_count, &expanded_capacity,
-				replacement);
+			if (paste && expanded_count)
+			{
+				if (!merge_adjacent_tokens(result,
+					&expanded[expanded_count - 1], replacement)) return 0;
+				paste = 0;
+			}
+			else
+			{
+				append_local_token(&expanded, &expanded_count,
+					&expanded_capacity, replacement);
+				paste = 0;
+			}
 		}
 	}
 	push_macro(preprocessor, macro_id);
@@ -843,7 +899,7 @@ static int define_macro(preprocessor *preprocessor, pigen_source_id source,
 		size_t replacement = logical.indices[replacement_at];
 		pigen_expanded_token token = {raw->items[replacement].kind,
 			add_source_origin(preprocessor->result,
-				raw_span(source, &raw->items[replacement]))};
+				raw_span(source, &raw->items[replacement])), NULL};
 		append_replacement_token(preprocessor->result, token);
 	}
 	add_macro(preprocessor->result, macro);
@@ -982,7 +1038,7 @@ static int include_source(preprocessor *preprocessor, pigen_source_id source,
 	for (i = 0; i < input_count; i++)
 		input[i] = (pigen_expanded_token){raw->items[path_at + i].kind,
 			add_source_origin(preprocessor->result,
-				raw_span(source, &raw->items[path_at + i]))};
+				raw_span(source, &raw->items[path_at + i])), NULL};
 	if (!expand_tokens(preprocessor, &output, input, input_count))
 	{
 		free(input);
@@ -1122,7 +1178,7 @@ static int preprocess_source(preprocessor *preprocessor,
 			for (at = 0; at < segment_count; at++)
 				segment[at] = (pigen_expanded_token){raw.items[i + at].kind,
 					add_source_origin(preprocessor->result,
-						raw_span(source, &raw.items[i + at]))};
+						raw_span(source, &raw.items[i + at])), NULL};
 			if (!expand_tokens(preprocessor, &output, segment, segment_count))
 			{
 				free(segment);
@@ -1223,6 +1279,11 @@ const char *pigen_expanded_token_text(
 	pigen_source_span spelling;
 	if (length) *length = 0;
 	if (!source || !token) return NULL;
+	if (token->text)
+	{
+		if (length) *length = strlen(token->text);
+		return token->text;
+	}
 	spelling = pigen_origin_spelling_span(source, token->origin);
 	return pigen_source_span_text(source->sources, spelling, length);
 }
@@ -1237,6 +1298,10 @@ void pigen_free_preprocess_result(pigen_preprocess_result *result)
 	free(result->written.files);
 	free(result->written.includes);
 	expanded = &result->expanded;
+	for (i = 0; i < expanded->token_count; i++)
+		free(expanded->tokens[i].text);
+	for (i = 0; i < expanded->replacement_token_count; i++)
+		free(expanded->replacement_tokens[i].text);
 	free(expanded->tokens);
 	free(expanded->origins);
 	free(expanded->macros);
