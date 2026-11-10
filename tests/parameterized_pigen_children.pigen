@@ -1,0 +1,9 @@
+module pchild #(parameter W = 8)(input logic clk, input logic [W-1:0] in, output logic [W-1:0] out);
+ bit[W] port b;
+ always_ff @(posedge clk) b <= in;
+ assign out = b;
+endmodule
+module top(input logic clk, input logic [7:0] a8, output logic [7:0] y8, input logic [15:0] a16, output logic [15:0] y16);
+ pchild #(.W(8)) c8(.clk(clk), .in(a8), .out(y8));
+ pchild #(.W(16)) c16(.clk(clk), .in(a16), .out(y16));
+endmodule

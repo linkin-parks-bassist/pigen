@@ -2397,8 +2397,8 @@ static int parse_retained_unknown_item(syntax_parser *parser,
 	pigen_syntax_id module, size_t start, size_t limit, size_t *after_item)
 {
 	static const char *const pigen_words[] = {
-		"buf", "pipeline", "fsm", "transfer", "validate", "invalidate",
-		"flush", "peek", "pipeline_reset",
+		"buf", "port", "fifo", "skid", "pipeline", "fsm", "transfer",
+		"validate", "invalidate", "flush", "peek", "pipeline_reset",
 	};
 	size_t end, body;
 	pigen_syntax_node node = {0};
@@ -3211,8 +3211,8 @@ static int parameterized_module_has_pigen(const syntax_parser *parser,
 	size_t start)
 {
 	static const char *const pigen_words[] = {
-		"buf", "pipeline", "fsm", "transfer", "validate", "invalidate",
-		"flush", "peek", "pipeline_reset",
+		"buf", "port", "fifo", "skid", "pipeline", "fsm", "transfer",
+		"validate", "invalidate", "flush", "peek", "pipeline_reset",
 	};
 	size_t header_end, endmodule, at;
 	size_t paren_depth = 0;

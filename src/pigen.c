@@ -12,6 +12,7 @@
 
 #include "pigen/blocks.h"
 #include "pigen/compile.h"
+#include "pigen/specialize.h"
 #include "pigen/source.h"
 #include "pigen/util.h"
 
@@ -182,6 +183,13 @@ int main(int argc, char **argv)
 	pigen_fabric_diagrams diagrams = {0};
 	char *cleaned = pigen_lower_blocks(source, source_length, &generated,
 		no_diagram ? NULL : &diagrams);
+	char *specialized = pigen_specialize_parameterized_instances(cleaned,
+		strlen(cleaned));
+	if (specialized)
+	{
+		free(cleaned);
+		cleaned = specialized;
+	}
 	int has_content = source_has_content(cleaned, strlen(cleaned));
 
 	pigen_source_manager sources = {0};
