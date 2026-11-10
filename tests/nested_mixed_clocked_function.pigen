@@ -1,0 +1,11 @@
+module nested_mixed_clocked_function(input logic clk, input logic en, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ always_ff @(posedge clk) begin
+  if (en) begin
+   o <= i;
+   temp <= inc(i);
+  end
+ end
+endmodule
