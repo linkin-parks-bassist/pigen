@@ -1,0 +1,6 @@
+module union_m(input logic clk, input logic [7:0] d, output logic [7:0] q);
+ typedef union packed { logic [7:0] byte_v; logic [1:0][3:0] nibbles; } u_t;
+ u_t u;
+ always_ff @(posedge clk) u.byte_v <= d;
+ assign q = u.byte_v;
+endmodule
