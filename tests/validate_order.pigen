@@ -1,0 +1,11 @@
+module order(input logic clk, input logic reset, input logic seed,
+ output bit[8] buf v1, output bit[8] buf v2);
+ always_ff @(posedge clk) begin
+  if (seed) begin
+   invalidate(v1);
+   validate(v1);
+   validate(v2);
+   invalidate(v2);
+  end
+ end
+endmodule

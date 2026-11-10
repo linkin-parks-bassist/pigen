@@ -2165,47 +2165,58 @@ static int drive_concat_rtl_value(pigen_rtl_lowering *lowering,
 	return remaining == 0;
 }
 
+static pigen_rtl_expr_id action_conditional(pigen_rtl_lowering *lowering,
+	pigen_rtl_type_id type, pigen_rtl_expr_id condition,
+	pigen_rtl_expr_id when_true, pigen_rtl_expr_id when_false,
+	pigen_source_span span)
+{
+	pigen_conditional_resolution resolution = {0};
+
+	return pigen_rtl_expr_add_conditional(lowering->rtl, type, &resolution,
+		condition, when_true, when_false, span);
+}
+
 static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
 	pigen_rtl_module_id rtl_module)
 {
 	pigen_semantic_model *sem = lowering->semantics;
 	pigen_rtl_model *rtl = lowering->rtl;
-	struct group { pigen_rtl_object_id object; pigen_rtl_expr_id guard; };
-	struct group *groups = NULL;
-	size_t group_count = 0;
+	struct action_state {
+		size_t signal;
+		pigen_rtl_expr_id valid, invalid, clear;
+	};
+	struct action_state *states = NULL;
+	size_t state_count = 0;
+	pigen_data_type_id logic_one = pigen_data_type_sized_logic(sem, 1,
+		PIGEN_SIGN_UNSIGNED);
+	pigen_rtl_type_id control_type = pigen_lower_rtl_type(lowering, logic_one);
+	pigen_source_span no_span = {(pigen_source_id){PIGEN_INVALID_ID}, 0, 0};
 	size_t i;
-	int ok = 1;
+	int ok = control_type.index != PIGEN_INVALID_ID;
 
+	if (!ok) return -1;
 	for (i = 0; i < sem->action_count && ok; i++)
 	{
 		const pigen_semantic_action *action = &sem->actions[i];
 		const pigen_predicate *predicate;
 		const pigen_predicate_atom *atoms;
+		struct action_state *state = NULL;
 		pigen_rtl_expr_id guard = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-		pigen_rtl_object_id targets[2];
-		size_t target_count = 0;
+		pigen_rtl_expr_id zero = control_literal(lowering, control_type, 0,
+			no_span);
+		pigen_rtl_expr_id one = control_literal(lowering, control_type, 1,
+			no_span);
 		size_t j;
 
 		if (action->module.index != module.index) continue;
 		if (lowering->lowered_endpoint_count <= action->signal.index) continue;
-		{
-			const pigen_rtl_signal_endpoints *endpoints =
-				&lowering->lowered_endpoints[action->signal.index];
-
-			if (action->action == PIGEN_ACTION_VALIDATE)
-			{
-				targets[target_count++] = endpoints->force_valid;
-				targets[target_count++] = endpoints->force_after_transfer;
-			}
-			else if (action->action == PIGEN_ACTION_INVALIDATE)
-				/* A transfer in the same cycle wins over invalidate. */
-				targets[target_count++] = endpoints->force_invalid;
-			else
-				targets[target_count++] = endpoints->clear;
-		}
-		if (targets[0].index == PIGEN_INVALID_ID) continue;
 		predicate = pigen_predicate_get(sem, action->guard);
-		if (!predicate) { ok = 0; break; }
+		if (!predicate || zero.index == PIGEN_INVALID_ID ||
+			one.index == PIGEN_INVALID_ID)
+		{
+			ok = 0;
+			break;
+		}
 		atoms = predicate->atom_count ?
 			pigen_predicate_atoms(sem, action->guard) : NULL;
 		for (j = 0; j < predicate->atom_count; j++)
@@ -2221,37 +2232,60 @@ static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
 		if (guard.index == PIGEN_INVALID_ID)
 			guard = fire_bits_one(lowering);
 		if (guard.index == PIGEN_INVALID_ID) { ok = 0; break; }
-		for (j = 0; j < target_count && ok; j++)
-		{
-			size_t g;
-			int found = 0;
-
-			for (g = 0; g < group_count; g++)
-				if (groups[g].object.index == targets[j].index)
-				{
-					groups[g].guard = fire_or(lowering, groups[g].guard,
-						guard);
-					found = groups[g].guard.index != PIGEN_INVALID_ID;
-					if (!found) ok = 0;
-					break;
-				}
-			if (!ok) break;
-			if (!found)
+		for (j = 0; j < state_count; j++)
+			if (states[j].signal == action->signal.index)
 			{
-				groups = pigen_resize(groups,
-					(group_count + 1) * sizeof(*groups));
-				groups[group_count++] =
-					(struct group){targets[j], guard};
+				state = &states[j];
+				break;
 			}
+		if (!state)
+		{
+			states = pigen_resize(states,
+				(state_count + 1) * sizeof(*states));
+			states[state_count] = (struct action_state){
+				action->signal.index, zero, zero, zero};
+			state = &states[state_count++];
 		}
+		if (action->action == PIGEN_ACTION_VALIDATE)
+		{
+			state->valid = action_conditional(lowering, control_type, guard,
+				one, state->valid, no_span);
+			state->invalid = action_conditional(lowering, control_type, guard,
+				zero, state->invalid, no_span);
+		}
+		else if (action->action == PIGEN_ACTION_INVALIDATE)
+		{
+			state->valid = action_conditional(lowering, control_type, guard,
+				zero, state->valid, no_span);
+			state->invalid = action_conditional(lowering, control_type, guard,
+				one, state->invalid, no_span);
+		}
+		else
+			state->clear = action_conditional(lowering, control_type, guard,
+				one, state->clear, no_span);
+		if (state->valid.index == PIGEN_INVALID_ID ||
+			state->invalid.index == PIGEN_INVALID_ID ||
+			state->clear.index == PIGEN_INVALID_ID)
+			ok = 0;
 	}
-	for (i = 0; ok && i < group_count; i++)
-		ok = pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-			groups[i].object, groups[i].guard,
-			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0}
-			).index != PIGEN_INVALID_ID;
-	/* Undriven action controls default to zero so the primitive sees a defined
-	 * disable instead of X/Z. */
+	for (i = 0; ok && i < state_count; i++)
+	{
+		const pigen_rtl_signal_endpoints *endpoints =
+			&lowering->lowered_endpoints[states[i].signal];
+		pigen_rtl_object_id controls[3] = {
+			endpoints->force_valid, endpoints->force_invalid,
+			endpoints->clear};
+		pigen_rtl_expr_id values[3] = {
+			states[i].valid, states[i].invalid, states[i].clear};
+		size_t c;
+
+		for (c = 0; c < 3; c++)
+			if (controls[c].index != PIGEN_INVALID_ID &&
+				pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+					controls[c], values[c], no_span).index ==
+					PIGEN_INVALID_ID)
+				ok = 0;
+	}
 	for (i = 0; ok && i < sem->signal_count; i++)
 	{
 		const pigen_rtl_signal_endpoints *endpoints;
@@ -2267,38 +2301,28 @@ static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
 		controls[3] = endpoints->force_after_transfer;
 		for (c = 0; c < 4 && ok; c++)
 		{
-			size_t g;
+			size_t s;
 			int driven = controls[c].index == PIGEN_INVALID_ID;
 
 			if (driven) continue;
-			for (g = 0; g < group_count; g++)
-				if (groups[g].object.index == controls[c].index)
-				{ driven = 1; break; }
+			if (c < 3)
+				for (s = 0; s < state_count; s++)
+					if (states[s].signal == i)
+					{ driven = 1; break; }
 			if (!driven)
 			{
-				pigen_data_type_id logic_one = pigen_data_type_sized_logic(
-					sem, 1, PIGEN_SIGN_UNSIGNED);
-				pigen_rtl_type_id control =
-					pigen_lower_rtl_type(lowering, logic_one);
-				pigen_rtl_literal_word word = {0, 0, 0};
-				pigen_rtl_expr_id zero;
+				pigen_rtl_expr_id zero = control_literal(lowering,
+					control_type, 0, no_span);
 
-				if (control.index == PIGEN_INVALID_ID) { ok = 0; break; }
-				zero = pigen_rtl_expr_add_literal(rtl,
-					PIGEN_RTL_EXPR_INTEGER, control, &word, 1, 0,
-					(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID},
-						0, 0});
 				if (zero.index == PIGEN_INVALID_ID ||
 					pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-						controls[c], zero,
-						(pigen_source_span){
-							(pigen_source_id){PIGEN_INVALID_ID}, 0, 0}
-						).index == PIGEN_INVALID_ID)
+						controls[c], zero, no_span).index ==
+						PIGEN_INVALID_ID)
 					ok = 0;
 			}
 		}
 	}
-	free(groups);
+	free(states);
 	return ok ? 0 : -1;
 }
 

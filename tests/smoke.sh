@@ -144,8 +144,8 @@ verilator --lint-only --top-module port_bram rtl/pigen_primitives.sv "$tmp/port_
 grep -q 'assign destination__pigen_in_valid = (!reset && source__pigen_valid) && destination__pigen_in_ready;' "$tmp/reset_domain.sv"
 verilator --lint-only --top-module reset_domain rtl/pigen_primitives.sv "$tmp/reset_domain.sv"
 "$tool" tests/clear_actions.pigen -o "$tmp/clear_actions.sv"
-grep -q 'assign stage__pigen_force_invalid = discard == 1;' "$tmp/clear_actions.sv"
-grep -q 'assign queue__pigen_clear = !discard;' "$tmp/clear_actions.sv"
+grep -q 'assign stage__pigen_force_invalid = discard == 1 ? 1 : 0;' "$tmp/clear_actions.sv"
+grep -q 'assign queue__pigen_clear = !discard ? 1 : 0;' "$tmp/clear_actions.sv"
 verilator --lint-only --top-module clear_actions rtl/pigen_primitives.sv "$tmp/clear_actions.sv"
 "$tool" tests/exclusive_routes.pigen -o "$tmp/exclusive_routes.sv"
 test "$(grep -c 'assign source__pigen_out_ready =' "$tmp/exclusive_routes.sv")" = 1
