@@ -1,8 +1,0 @@
-module child #(parameter W = 8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
- always_ff @(posedge clk) begin
-  if (i_valid) o <= i;
- end
-endmodule
-module top(input logic clk, input logic reset, input bit[8] buf a, output bit[8] buf y);
- child #(.W(16)) c(.clk(clk), .reset(reset), .i(a), .o(y));
-endmodule
