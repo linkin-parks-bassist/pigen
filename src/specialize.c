@@ -703,13 +703,18 @@ static int statement_is_pigen(const char *source, const pigen_tokens *tokens,
 		for (size_t k = 0; k < sizeof words / sizeof *words; k++)
 			if (token_is_text(source, &tokens->items[i], words[k])) return 1;
 	}
-	if (module && first < last && token_is_identifier(&tokens->items[first]))
+	if (module)
 	{
-		char *name = token_text(source, &tokens->items[first]);
-		int found = buffered_port(module, name);
+		for (size_t i = first; i + 1 < last; i++)
+			if (token_is_identifier(&tokens->items[i]) &&
+				token_is_text(source, &tokens->items[i + 1], "<="))
+			{
+				char *name = token_text(source, &tokens->items[i]);
+				int found = buffered_port(module, name);
 
-		free(name);
-		if (found) return 1;
+				free(name);
+				if (found) return 1;
+			}
 	}
 	return 0;
 }
@@ -948,6 +953,17 @@ static char *copy_block_with_replacements(const char *source,
 }
 
 
+static int leaf_starts_control(const char *source,
+	const pigen_tokens *tokens, size_t first)
+{
+	return token_is_text(source, &tokens->items[first], "if") ||
+		token_is_text(source, &tokens->items[first], "for") ||
+		token_is_text(source, &tokens->items[first], "while") ||
+		token_is_text(source, &tokens->items[first], "case") ||
+		token_is_text(source, &tokens->items[first], "casex") ||
+		token_is_text(source, &tokens->items[first], "casez");
+}
+
 static void leaf_guard_range(const char *source, const pigen_tokens *tokens,
 	size_t outer_begin, size_t leaf_first, size_t *guard_start,
 	size_t *guard_end)
@@ -1121,12 +1137,17 @@ static int add_mixed_process_splits(const char *source,
 
 							leaf_guard_range(source, tokens, begin,
 								leaves[f].first, &guard_start, &guard_end);
+							if (leaf_starts_control(source, tokens,
+								leaves[f].first))
+								covered = 0;
 							for (size_t p = 0; p < leaf_count; p++)
 								if (!leaves[p].function &&
 									span_has_identifier(source, tokens,
 										leaves[p].first, leaves[p].last, lhs) &&
 									(leaves[p].first <= guard_start ||
-									 leaves[p].first >= guard_end))
+									 leaves[p].first >= guard_end ||
+									 leaf_starts_control(source, tokens,
+										leaves[p].first)))
 									covered = 0;
 							if (!covered)
 							{

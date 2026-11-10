@@ -1,0 +1,9 @@
+module mixed_guardless_bad(input logic clk, input logic en1, input logic en2, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ always_ff @(posedge clk) begin
+  if (en1) temp = inc(i);
+  if (en2) o <= temp;
+ end
+endmodule
