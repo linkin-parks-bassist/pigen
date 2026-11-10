@@ -305,9 +305,13 @@ clocked-case-error-test: pigen
 	grep -q 'structured construct in an unsupported clocked process is not supported' /tmp/case-error.err
 
 parameterized-instance-test: pigen
-	if ./pigen tests/parameterized_instance.pigen -o /tmp/param-inst.sv 2>/tmp/param-inst.err; then \
-		echo 'parameterized child instance unexpectedly compiled' >&2; exit 1; fi
-	grep -q 'parameterized child instances are not supported' /tmp/param-inst.err
+	dir=$$(mktemp -d); \
+	./pigen tests/parameterized_instance.pigen -o $$dir/param-inst.sv && \
+	grep -Fq 'child #(.WIDTH(16)) c' $$dir/param-inst.sv && \
+	iverilog -g2012 -s parameterized_instance_tb -o $$dir/param-inst \
+		rtl/pigen_primitives.sv tests/parameterized_instance_tb.sv $$dir/param-inst.sv && \
+	vvp $$dir/param-inst | grep -Fq 'PASS parameterized child instance'; \
+	status=$$?; rm -rf $$dir; exit $$status
 
 parameter-width-test: pigen
 	dir=$$(mktemp -d); \

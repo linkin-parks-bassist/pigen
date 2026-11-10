@@ -2717,8 +2717,15 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 	while (at < after)
 	{
 		if (item_start && looks_like_parameterized_instance(parser, at, after))
-			return fail(parser, at,
-				"parameterized child instances are not supported");
+		{
+			size_t retained_after;
+
+			if (!parse_retained_module_item(parser, module, at, after,
+				&retained_after)) return 0;
+			at = retained_after;
+			item_start = 1;
+			continue;
+		}
 		if (item_start && looks_like_plain_instance(parser, at, after))
 		{
 			size_t instance_after;
@@ -2948,6 +2955,72 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 	return 1;
 }
 
+static int parameterized_module(const syntax_parser *parser, size_t start)
+{
+	return token_is(parser, start, "module") &&
+		identifier(parser, start + 1) && token_is(parser, start + 2, "#");
+}
+
+static int parameterized_module_has_pigen(const syntax_parser *parser,
+	size_t start)
+{
+	static const char *const pigen_words[] = {
+		"buf", "pipeline", "fsm", "transfer", "validate", "invalidate",
+		"flush", "peek", "pipeline_reset",
+	};
+	size_t header_end, endmodule, at;
+	size_t paren_depth = 0;
+
+	for (header_end = start + 2;
+		header_end < parser->expanded->token_count; header_end++)
+	{
+		if (token_is(parser, header_end, "(")) paren_depth++;
+		else if (token_is(parser, header_end, ")") && paren_depth) paren_depth--;
+		else if (!paren_depth && token_is(parser, header_end, ";")) break;
+	}
+	if (header_end == parser->expanded->token_count) return 0;
+	for (endmodule = header_end + 1;
+		endmodule < parser->expanded->token_count; endmodule++)
+		if (token_is(parser, endmodule, "endmodule")) break;
+	if (endmodule == parser->expanded->token_count) return 0;
+	for (at = header_end + 1; at < endmodule; at++)
+		for (size_t k = 0; k < sizeof pigen_words / sizeof *pigen_words; k++)
+			if (token_is(parser, at, pigen_words[k])) return 1;
+	return 0;
+}
+
+static int parse_parameterized_module_opaque(syntax_parser *parser,
+	pigen_syntax_id root, size_t start, size_t *after_module)
+{
+	size_t header_end, endmodule;
+	pigen_syntax_node node = {0};
+	size_t paren_depth = 0;
+
+	for (header_end = start + 2;
+		header_end < parser->expanded->token_count; header_end++)
+	{
+		if (token_is(parser, header_end, "(")) paren_depth++;
+		else if (token_is(parser, header_end, ")") && paren_depth) paren_depth--;
+		else if (!paren_depth && token_is(parser, header_end, ";")) break;
+	}
+	if (header_end == parser->expanded->token_count)
+		return fail(parser, start, "unterminated module header");
+	for (endmodule = header_end + 1;
+		endmodule < parser->expanded->token_count; endmodule++)
+		if (token_is(parser, endmodule, "endmodule")) break;
+	if (endmodule == parser->expanded->token_count)
+		return fail(parser, start, "module requires `endmodule`");
+	add_opaque(parser, root, parser->opaque_byte_cursor, start);
+	node.kind = PIGEN_SYNTAX_RETAINED;
+	node.location = range_location(parser, start, endmodule + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	add_child(parser, root, add_node(parser, node));
+	advance_opaque_byte_cursor(parser, endmodule + 1);
+	*after_module = endmodule + 1;
+	return 1;
+}
+
 static int parse_module(syntax_parser *parser, pigen_syntax_id root,
 	size_t start, size_t *after_module)
 {
@@ -3092,7 +3165,16 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 		}
 		if (!token_is(&parser, at, "module")) { at++; continue; }
 		add_opaque(&parser, root, opaque_cursor, at);
-		if (!parse_module(&parser, root, at, &at))
+		if (parameterized_module(&parser, at) &&
+			!parameterized_module_has_pigen(&parser, at))
+		{
+			if (!parse_parameterized_module_opaque(&parser, root, at, &at))
+			{
+				free(parser.typedef_name_facts);
+				return 0;
+			}
+		}
+		else if (!parse_module(&parser, root, at, &at))
 		{
 			free(parser.typedef_name_facts);
 			return 0;

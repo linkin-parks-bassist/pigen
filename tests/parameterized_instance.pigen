@@ -1,7 +1,7 @@
 module child #(parameter WIDTH = 8)(input logic clk, input logic [WIDTH-1:0] d, output logic [WIDTH-1:0] q);
  always_ff @(posedge clk) q <= d;
 endmodule
-module top(input logic clk, input bit[16] buf a, output bit[16] buf y);
+module top(input logic clk, input bit[16] buf a, output logic[15:0] y);
  logic [15:0] cq;
  child #(.WIDTH(16)) c(.clk(clk), .d(a), .q(cq));
  assign y = cq;
