@@ -3494,6 +3494,11 @@ static int parse_module(syntax_parser *parser, pigen_syntax_id root,
 		if (token_is(parser, endmodule, "endmodule")) break;
 	if (endmodule == parser->expanded->token_count)
 		return fail(parser, start, "module requires `endmodule`");
+	for (header_at = name + 1; header_at < endmodule; header_at++)
+		if (token_is(parser, header_at, "uint") &&
+			!token_is(parser, header_at + 1, "["))
+			return fail(parser, header_at,
+				"Pigen uint requires a width argument");
 	node.kind = PIGEN_SYNTAX_MODULE;
 	node.location = range_location(parser, start, endmodule + 1);
 	node.parent = INVALID_SYNTAX;

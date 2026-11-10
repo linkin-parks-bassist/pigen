@@ -1,0 +1,3 @@
+module inuint(input uint a, output uint y);
+ assign y = a;
+endmodule
