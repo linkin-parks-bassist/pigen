@@ -511,6 +511,34 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 		}
 		for (edge = node->first_child; edge.index != PIGEN_INVALID_ID; )
 		{
+			const pigen_syntax_node *first = pigen_syntax_get(syntax, edge);
+			pigen_syntax_id other;
+
+			if (!first) break;
+			if (first->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
+				first->as.fabric_connection.direct)
+				for (other = first->next_sibling;
+					other.index != PIGEN_INVALID_ID; )
+				{
+					const pigen_syntax_node *second = pigen_syntax_get(syntax,
+						other);
+
+					if (!second) break;
+					if (second->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
+						token_equal(syntax,
+							first->as.fabric_connection.right_instance,
+							second->as.fabric_connection.right_instance) &&
+						token_equal(syntax,
+							first->as.fabric_connection.right_port,
+							second->as.fabric_connection.right_port))
+						pigen_fail("direct fabric destination cannot appear in "
+							"another connection");
+					other = second->next_sibling;
+				}
+			edge = first->next_sibling;
+		}
+		for (edge = node->first_child; edge.index != PIGEN_INVALID_ID; )
+		{
 			const pigen_syntax_node *connection = pigen_syntax_get(syntax,
 				edge);
 			const pigen_semantic_instance *source;

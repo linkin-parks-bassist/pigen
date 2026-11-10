@@ -4,7 +4,7 @@ LDLIBS		= -lm
 SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-.PHONY: all clean test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test clocked-case-error-test pipeline-reset-after-test pipeline-reset-conditional-test sv-integer-keywords-test integer-signal-test byte-type-test two-state-test validate-input-error-test peek-test validate-order-test macro-paste-decl-test macro-stringify-test macro-paste-ref-test macro-paste-test clog2-test pipeline-reset-test function-retain-test concat-placeholder-test struct-write-test pipeline-alias-test fabric-merge-test fabric-merge3-test concat-misaligned-test ternary-literal-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
+.PHONY: all clean test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-direct-duplicate-error-test clocked-case-error-test pipeline-reset-after-test pipeline-reset-conditional-test sv-integer-keywords-test integer-signal-test byte-type-test two-state-test validate-input-error-test peek-test validate-order-test macro-paste-decl-test macro-stringify-test macro-paste-ref-test macro-paste-test clog2-test pipeline-reset-test function-retain-test concat-placeholder-test struct-write-test pipeline-alias-test fabric-merge-test fabric-merge3-test concat-misaligned-test ternary-literal-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
 
 all: pigen
 
@@ -293,6 +293,11 @@ pipeline-scope-test: pigen
 	./pigen tests/pipeline_scope.pigen -o /tmp/pigen-pipeline-scope.sv
 	iverilog -g2012 -o /tmp/pigen-pipeline-scope-vvp rtl/pigen_primitives.sv /tmp/pigen-pipeline-scope.sv tests/pipeline_scope_tb.sv
 	vvp /tmp/pigen-pipeline-scope-vvp
+
+fabric-direct-duplicate-error-test: pigen
+	if ./pigen tests/fabric_direct_duplicate_error.pigen -o /tmp/fabric-ddup.sv 2>/tmp/fabric-ddup.err; then \
+		echo 'duplicate inline direct fabric destination unexpectedly compiled' >&2; exit 1; fi
+	grep -q 'direct fabric destination cannot appear in another connection' /tmp/fabric-ddup.err
 
 clocked-case-error-test: pigen
 	if ./pigen tests/clocked_case_error.pigen -o /tmp/case-error.sv 2>/tmp/case-error.err; then \
