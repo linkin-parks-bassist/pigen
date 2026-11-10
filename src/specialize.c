@@ -13,6 +13,7 @@ typedef struct {
 
 typedef struct {
 	char *name;
+	int buffered;
 } spec_buffered_port;
 
 typedef struct {
@@ -218,20 +219,20 @@ static int parse_buffered_ports(const char *source, const pigen_tokens *tokens,
 			for (size_t t = 0; t < sizeof transfers / sizeof *transfers; t++)
 				if (token_is_text(source, &tokens->items[k], transfers[t]))
 					buffered = 1;
-		if (buffered)
-			for (size_t k = end; k > at; k--)
-				if (token_is_identifier(&tokens->items[k - 1]))
-				{
-					name = k - 1;
-					break;
-				}
-		if (buffered && name < end)
+		for (size_t k = end; k > at; k--)
+			if (token_is_identifier(&tokens->items[k - 1]))
+			{
+				name = k - 1;
+				break;
+			}
+		if (name < end)
 		{
 			module->buffered_ports = pigen_resize(module->buffered_ports,
 				(module->buffered_port_count + 1) *
 				sizeof(*module->buffered_ports));
-			module->buffered_ports[module->buffered_port_count++].name =
-				token_text(source, &tokens->items[name]);
+			module->buffered_ports[module->buffered_port_count++] =
+				(spec_buffered_port){token_text(source,
+					&tokens->items[name]), buffered};
 		}
 		at = end + 1;
 	}
@@ -466,7 +467,8 @@ static spec_module *module_containing(spec_module *modules, size_t count,
 static int buffered_port(const spec_module *module, const char *name)
 {
 	for (size_t i = 0; i < module->buffered_port_count; i++)
-		if (text_equals(module->buffered_ports[i].name, name)) return 1;
+		if (module->buffered_ports[i].buffered &&
+			text_equals(module->buffered_ports[i].name, name)) return 1;
 	return 0;
 }
 
@@ -476,6 +478,7 @@ static char *build_instance_text(const char *source, const pigen_tokens *tokens,
 {
 	pigen_string out = {0};
 	size_t at = open + 1;
+	size_t positional_index = 0;
 
 	pigen_append(&out, clone_name);
 	pigen_append(&out, " ");
@@ -528,9 +531,36 @@ static char *build_instance_text(const char *source, const pigen_tokens *tokens,
 			free(port);
 		}
 		else
+		{
+			const spec_buffered_port *port =
+				positional_index < module->buffered_port_count ?
+				&module->buffered_ports[positional_index] : NULL;
+
+			pigen_append(&out, ".");
+			if (port) pigen_append(&out, port->name);
+			pigen_append(&out, "(");
 			pigen_append_range(&out, source + tokens->items[at].span.start,
 				tokens->items[end - 1].span.end -
 				tokens->items[at].span.start);
+			pigen_append(&out, ")");
+			if (port && port->buffered && end == at + 1 &&
+				token_is_identifier(&tokens->items[at]))
+			{
+				char *base = token_text(source, &tokens->items[at]);
+
+				pigen_append(&out, ", .");
+				pigen_append(&out, port->name);
+				pigen_append(&out, "_valid(");
+				pigen_append(&out, base);
+				pigen_append(&out, "_valid), .");
+				pigen_append(&out, port->name);
+				pigen_append(&out, "_ready(");
+				pigen_append(&out, base);
+				pigen_append(&out, "_ready)");
+				free(base);
+			}
+			positional_index++;
+		}
 		at = end + 1;
 	}
 	pigen_append(&out, ");");
