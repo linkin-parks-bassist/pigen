@@ -1,0 +1,29 @@
+module leaf3(
+  input logic clk, input logic reset,
+  input bit[8] buf in, output bit[8] buf out
+);
+  always_ff @(posedge clk) out <= in;
+endmodule
+
+module top3(
+  input logic clk, input logic reset,
+  input bit[8] buf s1, input bit[8] buf s2, input bit[8] buf s3,
+  input logic dst_ready, output logic [7:0] dst
+);
+  logic [7:0] a, b, c, m;
+  logic av, ar, bv, br, cv, cr, dv, dr, mv, mr;
+  logic sv1, sr1, sv2, sr2, sv3, sr3;
+  leaf3 x(.clk(clk), .reset(reset), .in(s1), .in_valid(sv1), .in_ready(sr1), .out(a), .out_valid(av), .out_ready(ar));
+  leaf3 z(.clk(clk), .reset(reset), .in(s2), .in_valid(sv2), .in_ready(sr2), .out(b), .out_valid(bv), .out_ready(br));
+  leaf3 w(.clk(clk), .reset(reset), .in(s3), .in_valid(sv3), .in_ready(sr3), .out(c), .out_valid(cv), .out_ready(cr));
+  leaf3 y(.clk(clk), .reset(reset), .in(m), .in_valid(mv), .in_ready(mr), .out(dst), .out_valid(dv), .out_ready(dr));
+  assign sv1 = s1_valid; assign s1_ready = sr1;
+  assign sv2 = s2_valid; assign s2_ready = sr2;
+  assign sv3 = s3_valid; assign s3_ready = sr3;
+  assign dr = dst_ready;
+  fabric f3 begin
+    x.out -> y.in;
+    z.out -> y.in;
+    w.out -> y.in;
+  endfabric
+endmodule

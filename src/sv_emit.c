@@ -847,6 +847,7 @@ static const char *primitive_name(pigen_rtl_primitive primitive)
 	case PIGEN_RTL_PRIMITIVE_FIFO: return "pigen_fifo";
 	case PIGEN_RTL_PRIMITIVE_SKID: return "pigen_skid";
 	case PIGEN_RTL_PRIMITIVE_MERGE2: return "pigen_merge2";
+	case PIGEN_RTL_PRIMITIVE_MERGE: return "pigen_merge";
 	default: return NULL;
 	}
 }
@@ -940,9 +941,12 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 				buf_append_str(b, first_parameter ? "" : ", ");
 				if (instance->primitive == PIGEN_RTL_PRIMITIVE_FIFO)
 					buf_append_str(b, ".DEPTH(");
+				else if (instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE)
+					buf_append_str(b, ".N(");
 				if (emit_expr(b, rtl, parameters[i]) != 0)
 					return -1;
-				if (instance->primitive == PIGEN_RTL_PRIMITIVE_FIFO)
+				if (instance->primitive == PIGEN_RTL_PRIMITIVE_FIFO ||
+					instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE)
 					buf_append_str(b, ")");
 				first_parameter = 0;
 			}

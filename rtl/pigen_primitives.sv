@@ -321,3 +321,42 @@ module pigen_merge2 #(parameter type PAYLOAD_T = logic) (
 		else if (fire) last <= grant1;
 	end
 endmodule
+
+module pigen_merge #(parameter type PAYLOAD_T = logic, parameter integer N = 2) (
+	input  logic clk,
+	input  logic reset,
+	input  logic [N-1:0] in_valid,
+	output logic [N-1:0] in_ready,
+	input  logic [N*$bits(PAYLOAD_T)-1:0] packet_in,
+	output logic out_valid,
+	input  logic out_ready,
+	output PAYLOAD_T packet_out
+);
+	localparam integer W = $bits(PAYLOAD_T);
+	localparam integer IW = (N <= 1) ? 1 : $clog2(N);
+	logic [IW-1:0] last;
+	logic [IW-1:0] chosen;
+	logic [N-1:0] grant;
+	always @* begin
+		integer k;
+		chosen = '0;
+		out_valid = 1'b0;
+		grant = '0;
+		packet_out = '0;
+		for (k = 0; k < N; k = k + 1) begin
+			integer idx;
+			idx = (last + 1 + k) % N;
+			if (!out_valid && in_valid[idx]) begin
+				out_valid = 1'b1;
+				chosen = idx;
+				packet_out = packet_in[idx*W +: W];
+				grant[idx] = 1'b1;
+			end
+		end
+	end
+	assign in_ready = grant & {N{out_ready}};
+	always_ff @(posedge clk) begin
+		if (reset) last <= '0;
+		else if (out_valid && out_ready) last <= chosen;
+	end
+endmodule
