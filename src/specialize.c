@@ -964,6 +964,21 @@ static int leaf_starts_control(const char *source,
 		token_is_text(source, &tokens->items[first], "casez");
 }
 
+static char *leaf_if_condition(const char *source,
+	const pigen_tokens *tokens, size_t first, size_t count)
+{
+	size_t open, close;
+
+	if (!token_is_text(source, &tokens->items[first], "if") ||
+		first + 2 >= count ||
+		!token_is_text(source, &tokens->items[first + 1], "("))
+		return NULL;
+	open = first + 1;
+	close = find_matching(source, tokens, open, "(", ")", tokens->count);
+	if (close == tokens->count) return NULL;
+	return build_tokens(source, tokens, open + 1, close, NULL, 0);
+}
+
 static void leaf_guard_range(const char *source, const pigen_tokens *tokens,
 	size_t outer_begin, size_t leaf_first, size_t *guard_start,
 	size_t *guard_end)
@@ -1135,20 +1150,37 @@ static int add_mixed_process_splits(const char *source,
 							size_t guard_start, guard_end;
 							int covered = 1;
 
+							char *function_condition = leaf_if_condition(source,
+								tokens, leaves[f].first, leaves[f].last);
+
 							leaf_guard_range(source, tokens, begin,
 								leaves[f].first, &guard_start, &guard_end);
-							if (leaf_starts_control(source, tokens,
-								leaves[f].first))
-								covered = 0;
 							for (size_t p = 0; p < leaf_count; p++)
-								if (!leaves[p].function &&
-									span_has_identifier(source, tokens,
-										leaves[p].first, leaves[p].last, lhs) &&
-									(leaves[p].first <= guard_start ||
-									 leaves[p].first >= guard_end ||
-									 leaf_starts_control(source, tokens,
-										leaves[p].first)))
+							{
+								if (leaves[p].function ||
+									!span_has_identifier(source, tokens,
+										leaves[p].first, leaves[p].last, lhs))
+									continue;
+								if (function_condition)
+								{
+									char *condition = leaf_if_condition(source,
+										tokens, leaves[p].first, leaves[p].last);
+
+									if (leaves[p].first <= guard_start ||
+										leaves[p].first >= guard_end ||
+										!condition ||
+										!text_equals(function_condition, condition))
+										covered = 0;
+									free(condition);
+								}
+								else if (leaves[p].first <= guard_start ||
+									leaves[p].first >= guard_end ||
+									(leaf_starts_control(source, tokens,
+										leaves[p].first) &&
+									 guard_start != begin))
 									covered = 0;
+							}
+							free(function_condition);
 							if (!covered)
 							{
 								rhs = NULL;
