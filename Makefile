@@ -309,6 +309,8 @@ ordinary-sv-preserve-test: pigen
 	./pigen tests/ordinary_sv_preserve.pigen -o $$dir/ordinary.sv && \
 	grep -Fq 'generate' $$dir/ordinary.sv && \
 	grep -Fq 'always_comb' $$dir/ordinary.sv && \
+	grep -Fq 'typedef logic [3:0] nibble_t' $$dir/ordinary.sv && \
+	grep -Fq 'localparam nibble_t MASK' $$dir/ordinary.sv && \
 	iverilog -g2012 -s ordinary_sv_preserve_tb -o $$dir/ordinary \
 		tests/ordinary_sv_preserve_tb.sv $$dir/ordinary.sv && \
 	vvp $$dir/ordinary | grep -Fq 'PASS ordinary SV preserved'; \

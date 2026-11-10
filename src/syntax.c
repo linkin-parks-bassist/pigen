@@ -2377,6 +2377,18 @@ static int parse_retained_unknown_item(syntax_parser *parser,
 	return 1;
 }
 
+static void add_retained_range(syntax_parser *parser, pigen_syntax_id module,
+	size_t start, size_t after)
+{
+	pigen_syntax_node node = {0};
+
+	node.kind = PIGEN_SYNTAX_RETAINED;
+	node.location = range_location(parser, start, after);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	add_child(parser, module, add_node(parser, node));
+}
+
 static int parse_retained_module_item(syntax_parser *parser,
 	pigen_syntax_id module, size_t start, size_t limit, size_t *after_item)
 {
@@ -2931,6 +2943,7 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 				return fail(parser, at, "unterminated parameter declaration");
 			if (!parse_parameter_items(parser, module, at, semicolon,
 				opaque_cursor)) return 0;
+			add_retained_range(parser, module, at, semicolon + 1);
 			at = semicolon + 1;
 			item_start = 1;
 			continue;
@@ -2961,6 +2974,7 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			}
 			result = parse_typedef(parser, module, at, semicolon, opaque_cursor);
 			if (result == DECLARATION_INVALID) return 0;
+			add_retained_range(parser, module, at, semicolon + 1);
 			at = semicolon + 1;
 			item_start = 1;
 			continue;
