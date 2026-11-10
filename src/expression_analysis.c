@@ -668,6 +668,47 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 			node.as.select.kind = PIGEN_SEMANTIC_SELECT_RANGE;
 			return append_node(analyzer, node);
 		}
+		case PIGEN_SYNTAX_EXPR_CALL:
+		{
+			const pigen_syntax_expr *callee = pigen_syntax_expr_get(
+				&analyzer->syntax->expressions, syntax->as.call.callee);
+			const pigen_syntax_expr_id *arguments;
+			size_t name_length = 0;
+			const char *name;
+
+			if (!callee || callee->kind != PIGEN_SYNTAX_EXPR_NAME)
+				return INVALID_ID(pigen_analyzed_expr_id);
+			name = token_text(analyzer, callee, &name_length);
+			if (!name || name_length != 6 || memcmp(name, "$clog2", 6))
+				return INVALID_ID(pigen_analyzed_expr_id);
+			arguments = pigen_syntax_expr_children(
+				&analyzer->syntax->expressions,
+				syntax->as.call.first_argument,
+				syntax->as.call.argument_count);
+			if (!arguments || syntax->as.call.argument_count != 1)
+				return INVALID_ID(pigen_analyzed_expr_id);
+			{
+				pigen_analyzed_expr_id argument = analyze(analyzer,
+					arguments[0]);
+				const pigen_analyzed_expr *known = pigen_analyzed_expr_get(
+					analyzer->arena, argument);
+				uint64_t value = 0;
+				uint64_t bits = 0;
+
+				if (!known || known->constant.index == PIGEN_INVALID_ID ||
+					!pigen_const_expr_evaluate_u64(analyzer->model,
+						known->constant, &value))
+					return INVALID_ID(pigen_analyzed_expr_id);
+				value = value > 0 ? value - 1 : 0;
+				while (value && (bits < 64))
+				{
+					value >>= 1;
+					bits++;
+				}
+				return append_integer_literal(analyzer, bits,
+					syntax->location.source_span);
+			}
+		}
 		case PIGEN_SYNTAX_EXPR_GROUP:
 			operand = analyze(analyzer, syntax->as.group.operand);
 			if (operand.index == PIGEN_INVALID_ID) return operand;

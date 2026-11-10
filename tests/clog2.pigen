@@ -1,0 +1,4 @@
+module cl4(input logic clk, input bit[8] buf a, output bit[8] buf y);
+  localparam integer WIDTH = $clog2(9);
+  always_ff @(posedge clk) y <= a >> WIDTH;
+endmodule
