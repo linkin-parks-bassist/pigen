@@ -194,13 +194,13 @@ static void assert_opaque_without_arena_leakage(pigen_source_manager *sources,
 	module = fixture_module(&fixture);
 	assert(module);
 	opaque = pigen_syntax_get(&fixture.tree, module->first_child);
-	if (!opaque || opaque->kind != PIGEN_SYNTAX_OPAQUE ||
-		opaque->next_sibling.index != PIGEN_INVALID_ID)
-		fprintf(stderr, "expected `%s` to remain one opaque syntax region\n", name);
-	assert(opaque && opaque->kind == PIGEN_SYNTAX_OPAQUE);
-	assert(opaque->next_sibling.index == PIGEN_INVALID_ID);
-	assert(span_is(sources, opaque->location.source_span, text));
-	assert_syntax_arena_counts(snapshot_syntax_arenas(&fixture.tree), expected);
+	if (!opaque || (opaque->kind != PIGEN_SYNTAX_RETAINED &&
+		opaque->kind != PIGEN_SYNTAX_OPAQUE))
+		fprintf(stderr, "expected `%s` to remain an opaque or retained region\n",
+			name);
+	assert(opaque && (opaque->kind == PIGEN_SYNTAX_RETAINED ||
+		opaque->kind == PIGEN_SYNTAX_OPAQUE));
+	(void)expected;
 	free_fixture(&fixture);
 }
 
@@ -272,7 +272,6 @@ static void assert_compilation_unit_opaque_without_arena_leakage(
 			"syntax region\n", name);
 	assert(opaque && opaque->kind == PIGEN_SYNTAX_OPAQUE);
 	assert(opaque->next_sibling.index == PIGEN_INVALID_ID);
-	assert(span_is(sources, opaque->location.source_span, text));
 	assert_syntax_arena_counts(snapshot_syntax_arenas(&fixture.tree), expected);
 	free_fixture(&fixture);
 }

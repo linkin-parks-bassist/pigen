@@ -1,0 +1,10 @@
+module ordinary_sv_preserve(input logic clk, input logic [3:0] a, output logic [3:0] y, output logic [3:0] z);
+ genvar i;
+ generate
+  for (i = 0; i < 4; i = i + 1) begin : bits
+   assign y[i] = a[i];
+  end
+ endgenerate
+ always_comb z = a ^ 4'hf;
+ initial $display("ordinary SV preserved");
+endmodule

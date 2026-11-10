@@ -2295,6 +2295,88 @@ static int parse_structural_instance(syntax_parser *parser,
 	return 1;
 }
 
+static int retained_body_end(syntax_parser *parser, size_t body, size_t limit,
+	size_t *end_out)
+{
+	size_t end;
+
+	if (token_is(parser, body, "begin"))
+	{
+		size_t depth = 0;
+
+		for (end = body; end < limit; end++)
+		{
+			if (token_is(parser, end, "begin")) depth++;
+			else if (token_is(parser, end, "end") && !--depth) break;
+		}
+		if (end == limit) return 0;
+	}
+	else
+	{
+		end = top_level_token(parser, body, limit, ";");
+		if (end == limit) return 0;
+	}
+	*end_out = end;
+	return 1;
+}
+
+static int parse_retained_unknown_item(syntax_parser *parser,
+	pigen_syntax_id module, size_t start, size_t limit, size_t *after_item)
+{
+	static const char *const pigen_words[] = {
+		"buf", "pipeline", "fsm", "transfer", "validate", "invalidate",
+		"flush", "peek", "pipeline_reset",
+	};
+	size_t end, body;
+	pigen_syntax_node node = {0};
+	size_t opaque_start, opaque_end;
+	const pigen_expanded_token *start_tok = token_at(parser, start);
+	const pigen_expanded_token *last_tok;
+
+	if (token_is(parser, start, "generate"))
+	{
+		size_t depth = 0;
+
+		for (end = start; end < limit; end++)
+		{
+			if (token_is(parser, end, "generate")) depth++;
+			else if (token_is(parser, end, "endgenerate") && !--depth) break;
+		}
+		if (end == limit) return 0;
+	}
+	else if (token_is(parser, start, "initial") || token_is(parser, start, "final") ||
+		token_is(parser, start, "always_comb") || token_is(parser, start, "always_latch"))
+	{
+		body = start + 1;
+		if (!retained_body_end(parser, body, limit, &end)) return 0;
+	}
+	else
+	{
+		end = top_level_token(parser, start, limit, ";");
+		if (end == limit) return 0;
+	}
+	for (size_t at = start; at <= end; at++)
+		for (size_t k = 0; k < sizeof pigen_words / sizeof *pigen_words; k++)
+			if (token_is(parser, at, pigen_words[k]))
+				return fail(parser, at,
+					"structured construct in an unsupported module item is not supported");
+	opaque_start = parser->opaque_byte_cursor;
+	opaque_end = start_tok ? pigen_origin_expansion_span(parser->expanded,
+		start_tok->origin).start : opaque_start;
+	add_opaque_bytes(parser, module, opaque_start, opaque_end);
+	node.kind = PIGEN_SYNTAX_RETAINED;
+	node.location = range_location(parser, start, end + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	add_child(parser, module, add_node(parser, node));
+	last_tok = token_at(parser, end);
+	if (last_tok)
+		parser->opaque_byte_cursor = pigen_origin_expansion_span(
+			parser->expanded, last_tok->origin).end;
+	*after_item = end + 1;
+	return 1;
+}
+
 static int parse_retained_module_item(syntax_parser *parser,
 	pigen_syntax_id module, size_t start, size_t limit, size_t *after_item)
 {
@@ -2716,7 +2798,15 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 
 	while (at < after)
 	{
-		if (item_start && looks_like_parameterized_instance(parser, at, after))
+		int retained_keyword = token_is(parser, at, "initial") ||
+			token_is(parser, at, "final") ||
+			token_is(parser, at, "generate") ||
+			token_is(parser, at, "genvar") ||
+			token_is(parser, at, "always_comb") ||
+			token_is(parser, at, "always_latch");
+
+		if (item_start && !retained_keyword &&
+			looks_like_parameterized_instance(parser, at, after))
 		{
 			size_t retained_after;
 
@@ -2726,7 +2816,8 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			item_start = 1;
 			continue;
 		}
-		if (item_start && looks_like_plain_instance(parser, at, after))
+		if (item_start && !retained_keyword &&
+			looks_like_plain_instance(parser, at, after))
 		{
 			size_t instance_after;
 
@@ -2937,6 +3028,19 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 						"signal declaration requires `;`");
 				}
 				restore_checkpoint(parser, checkpoint);
+			}
+		}
+		if (item_start && !token_is(parser, at, "always") &&
+			!token_is(parser, at, "always_ff"))
+		{
+			size_t retained_after;
+
+			if (parse_retained_unknown_item(parser, module, at, after,
+				&retained_after))
+			{
+				at = retained_after;
+				item_start = 1;
+				continue;
 			}
 		}
 		if (token_is(parser, at, "{")) brace_depth++;
