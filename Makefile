@@ -275,7 +275,7 @@ core-language-test: pigen
 
 pipeline-test: pigen
 	./pigen tests/pipeline.pigen -o /tmp/pigen-pipeline.sv
-	grep -q 'if ((reset)) begin pipe__s0_valid' /tmp/pigen-pipeline.sv
+	grep -q 'value__pigen_packet_in = ((enable == 1 && source_valid)' /tmp/pigen-pipeline.sv
 	iverilog -g2012 -o /tmp/pigen-pipeline-vvp rtl/pigen_primitives.sv /tmp/pigen-pipeline.sv tests/pipeline_tb.sv
 	vvp /tmp/pigen-pipeline-vvp
 

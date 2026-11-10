@@ -2,17 +2,15 @@ module pipeline(
     input logic clk,
     input logic reset,
     input logic enable,
-    input buf [7:0] source,
-    output buf [7:0] destination
+    input bit[8] buf source,
+    output bit[8] buf destination
 );
-    typedef logic [7:0] octet;
-
-    always @(posedge clk) begin
-        if (reset) begin
-            pipeline_reset(pipe);
-        end else if (enable) begin
+    always_ff @(posedge clk) begin
+        if (enable) begin
             pipeline pipe begin
-                octet value, rejoined, result;
+                bit[8] value;
+                bit[8] rejoined;
+                bit[8] result;
                 stage begin
                     value <= source;
                 end
