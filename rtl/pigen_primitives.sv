@@ -292,3 +292,32 @@ module pigen_port #(
 	end
 
 endmodule
+
+module pigen_merge2 #(parameter type PAYLOAD_T = logic) (
+	input  logic clk,
+	input  logic reset,
+	input  logic i0_valid,
+	output logic i0_ready,
+	input  PAYLOAD_T packet_in0,
+	input  logic i1_valid,
+	output logic i1_ready,
+	input  PAYLOAD_T packet_in1,
+	output logic out_valid,
+	input  logic out_ready,
+	output PAYLOAD_T packet_out
+);
+	logic last;
+	wire grant0 = i0_valid && (last || !i1_valid);
+	wire grant1 = i1_valid && (!last || !i0_valid);
+	wire fire = out_valid && out_ready;
+
+	assign out_valid = i0_valid || i1_valid;
+	assign packet_out = grant0 ? packet_in0 : packet_in1;
+	assign i0_ready = grant0 && out_ready;
+	assign i1_ready = grant1 && out_ready;
+
+	always_ff @(posedge clk) begin
+		if (reset) last <= 1'b0;
+		else if (fire) last <= grant1;
+	end
+endmodule

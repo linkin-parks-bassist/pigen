@@ -268,7 +268,10 @@ fabric-merge-test: pigen
 	./pigen tests/fabric_merge.pigen -o $$dir/merge.sv && \
 	iverilog -g2012 -s fabric_merge_tb -o $$dir/merge \
 		rtl/pigen_primitives.sv $$dir/merge.sv tests/fabric_merge_tb.sv && \
-	vvp $$dir/merge; status=$$?; rm -rf $$dir; exit $$status
+	vvp $$dir/merge && \
+	iverilog -g2012 -s fabric_merge_fair_tb -o $$dir/merge-fair \
+		rtl/pigen_primitives.sv $$dir/merge.sv tests/fabric_merge_fair_tb.sv && \
+	vvp $$dir/merge-fair; status=$$?; rm -rf $$dir; exit $$status
 
 core-language-test: pigen
 	./tests/core_language.sh ./pigen

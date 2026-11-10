@@ -12,6 +12,7 @@ module top2(
   input logic reset,
   input bit[8] buf s1,
   input bit[8] buf s2,
+  input logic dst_ready,
   output logic [7:0] dst
 );
   logic [7:0] a, b, m;
@@ -24,7 +25,7 @@ module top2(
   assign s1_ready = sr1;
   assign sv2 = s2_valid;
   assign s2_ready = sr2;
-  assign dr = 1;
+  assign dr = dst_ready;
   fabric f begin
     x.out -> y.in;
     z.out -> y.in;

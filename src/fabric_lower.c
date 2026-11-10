@@ -103,6 +103,9 @@ static pigen_rtl_object_id connection_payload(pigen_rtl_lowering *lowering,
 	if (!connection || connection->value.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_object_id){PIGEN_INVALID_ID};
 	value = pigen_expr_get(lowering->semantics, connection->value);
+	while (value && value->kind == PIGEN_EXPR_CONVERSION)
+		value = pigen_expr_get(lowering->semantics,
+			value->as.conversion.operand);
 	if (!value || value->kind != PIGEN_EXPR_SYMBOL)
 		return (pigen_rtl_object_id){PIGEN_INVALID_ID};
 	{
@@ -261,6 +264,65 @@ static int route_through_skid(pigen_rtl_lowering *lowering,
 	return 1;
 }
 
+static int route_through_merge2(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_rtl_module_id rtl_module,
+	pigen_rtl_object_id p0, pigen_rtl_object_id v0, pigen_rtl_object_id r0,
+	pigen_rtl_object_id p1, pigen_rtl_object_id v1, pigen_rtl_object_id r1,
+	pigen_rtl_object_id dp, pigen_rtl_object_id dv, pigen_rtl_object_id dr,
+	pigen_source_span span)
+{
+	pigen_semantic_model *model = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_signal_id clk = module_input_named(model, module, "clk");
+	pigen_signal_id reset = module_input_named(model, module, "reset");
+	const pigen_rtl_object *payload;
+	pigen_rtl_instance_id instance;
+	pigen_rtl_connection connections[11];
+	size_t count = 0;
+	pigen_rtl_record_range range;
+	pigen_data_type_id logic_one;
+	pigen_rtl_type_id control_type;
+	pigen_rtl_expr_id zero;
+	char name[64];
+	int written;
+
+	if (clk.index == PIGEN_INVALID_ID ||
+		lowering->lowered_endpoint_count <= clk.index)
+		return 0;
+	payload = pigen_rtl_object_get(rtl, dp);
+	if (!payload) return 0;
+	logic_one = pigen_data_type_sized_logic(model, 1, PIGEN_SIGN_UNSIGNED);
+	control_type = pigen_lower_rtl_type(lowering, logic_one);
+	zero = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
+		control_type, &(pigen_rtl_literal_word){0, 0, 0}, 1, 0, span);
+	if (control_type.index == PIGEN_INVALID_ID || zero.index == PIGEN_INVALID_ID)
+		return 0;
+	instance = pigen_rtl_instance_add_with_owner(rtl, rtl_module, module,
+		NULL, 0, NULL, 0, span);
+	if (instance.index == PIGEN_INVALID_ID) return 0;
+#define PORT(p, o) connections[count++] = (pigen_rtl_connection){(p), (o), (pigen_rtl_expr_id){PIGEN_INVALID_ID}}
+#define VAL(p, v) connections[count++] = (pigen_rtl_connection){(p), (pigen_rtl_object_id){PIGEN_INVALID_ID}, (v)}
+	PORT("clk", lowering->lowered_endpoints[clk.index].payload);
+	if (reset.index != PIGEN_INVALID_ID &&
+		lowering->lowered_endpoint_count > reset.index)
+		PORT("reset", lowering->lowered_endpoints[reset.index].payload);
+	else
+		VAL("reset", zero);
+	PORT("i0_valid", v0); PORT("i0_ready", r0); PORT("packet_in0", p0);
+	PORT("i1_valid", v1); PORT("i1_ready", r1); PORT("packet_in1", p1);
+	PORT("out_valid", dv); PORT("out_ready", dr); PORT("packet_out", dp);
+#undef PORT
+#undef VAL
+	range = pigen_rtl_connection_range_add(rtl, connections, count);
+	if (range.first == (size_t)PIGEN_INVALID_ID) return 0;
+	if (!pigen_rtl_instance_set_primitive(rtl, instance,
+		PIGEN_RTL_PRIMITIVE_MERGE2, payload->type, range)) return 0;
+	written = snprintf(name, sizeof(name), "fabric_merge_%u", instance.index);
+	if (written > 0 && (size_t)written < sizeof(name))
+		pigen_rtl_set_name(rtl, &rtl->instances[instance.index].name, name);
+	return 1;
+}
+
 int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 	const pigen_syntax_tree *syntax)
 {
@@ -399,6 +461,61 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 					if (!route_through_skid(lowering, module, rtl_module,
 						sp_obj, sv_obj, sr_obj, dp_obj, dv_obj, dr_obj,
 						span))
+						return -1;
+				}
+				else if (group_count == 2)
+				{
+					size_t c = 0;
+
+					for (scan = edge; scan.index != PIGEN_INVALID_ID &&
+						c < group_count; )
+					{
+						const pigen_syntax_node *q = pigen_syntax_get(syntax,
+							scan);
+						const pigen_semantic_instance *sinst;
+						const pigen_semantic_instance_connection *qp, *qv, *qr;
+						pigen_rtl_object_id lsp, lsv, lsr;
+
+						if (!q) break;
+						if (q->kind != PIGEN_SYNTAX_FABRIC_CONNECTION ||
+							q->as.fabric_connection.direct ||
+							!token_equal(syntax,
+								q->as.fabric_connection.right_instance,
+								connection->as.fabric_connection.right_instance) ||
+							!token_equal(syntax,
+								q->as.fabric_connection.right_port,
+								connection->as.fabric_connection.right_port))
+						{
+							scan = q->next_sibling;
+							continue;
+						}
+						sinst = find_instance(model, module, syntax,
+							q->as.fabric_connection.left_instance);
+						if (!sinst) return -1;
+						qp = find_port(model, sinst, syntax,
+							q->as.fabric_connection.left_port, NULL);
+						qv = find_port(model, sinst, syntax,
+							q->as.fabric_connection.left_port, "_valid");
+						qr = find_port(model, sinst, syntax,
+							q->as.fabric_connection.left_port, "_ready");
+						lsp = connection_payload(lowering, qp);
+						lsv = connection_payload(lowering, qv);
+						lsr = connection_payload(lowering, qr);
+						if (lsp.index == PIGEN_INVALID_ID ||
+							lsv.index == PIGEN_INVALID_ID ||
+							lsr.index == PIGEN_INVALID_ID)
+							return -1;
+						sources_p[c] = lsp;
+						sources_v[c] = lsv;
+						sources_r[c] = lsr;
+						c++;
+						scan = q->next_sibling;
+					}
+					if (c != group_count) return -1;
+					if (!route_through_merge2(lowering, module, rtl_module,
+						sources_p[0], sources_v[0], sources_r[0],
+						sources_p[1], sources_v[1], sources_r[1],
+						dp_obj, dv_obj, dr_obj, span))
 						return -1;
 				}
 				else

@@ -6,7 +6,7 @@ module fabric_merge_tb;
   logic s1_valid=1, s1_ready, s2_valid=0, s2_ready;
   int got=0, got2=0;
   top2 dut(.clk(clk), .reset(reset), .s1(s1), .s1_valid(s1_valid), .s1_ready(s1_ready),
-    .s2(s2), .s2_valid(s2_valid), .s2_ready(s2_ready), .dst(dst));
+    .s2(s2), .s2_valid(s2_valid), .s2_ready(s2_ready), .dst_ready(dst_ready), .dst(dst));
   always #5 clk = ~clk;
   always_ff @(posedge clk) if (!reset && dut.mv && dut.mr) begin
     got <= got + 1;

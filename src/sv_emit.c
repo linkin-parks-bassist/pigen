@@ -846,6 +846,7 @@ static const char *primitive_name(pigen_rtl_primitive primitive)
 	case PIGEN_RTL_PRIMITIVE_PORT: return "pigen_port";
 	case PIGEN_RTL_PRIMITIVE_FIFO: return "pigen_fifo";
 	case PIGEN_RTL_PRIMITIVE_SKID: return "pigen_skid";
+	case PIGEN_RTL_PRIMITIVE_MERGE2: return "pigen_merge2";
 	default: return NULL;
 	}
 }
