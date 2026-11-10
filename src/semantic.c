@@ -19,6 +19,16 @@ static int span_contains(pigen_source_span outer, pigen_source_span inner)
 		outer.start <= inner.start && inner.end <= outer.end;
 }
 
+static int macro_name_allowed(const pigen_semantic_model *model,
+	pigen_source_span declaration, pigen_source_span name)
+{
+	const pigen_source_file *file;
+
+	if (span_contains(declaration, name)) return 1;
+	file = pigen_source_get(model->sources, name.source);
+	return file && file->path && !strncmp(file->path, "<pigen-macro>", 13);
+}
+
 static int spans_equal(pigen_source_span left, pigen_source_span right)
 {
 	return left.source.index == right.source.index && left.start == right.start &&
@@ -2026,7 +2036,7 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 		kind < PIGEN_SYMBOL_SIGNAL || kind > PIGEN_SYMBOL_INSTANCE ||
 		!pigen_source_span_valid(model->sources, name) || name.start == name.end ||
 		!pigen_source_span_valid(model->sources, declaration) ||
-		!span_contains(declaration, name) || !id_capacity_available(model->symbol_count))
+		!macro_name_allowed(model, declaration, name) || !id_capacity_available(model->symbol_count))
 		return PIGEN_DECLARE_INVALID;
 	existing = lookup_local(model, scope, name);
 	if (existing.index != PIGEN_INVALID_ID)

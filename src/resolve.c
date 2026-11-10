@@ -48,6 +48,36 @@ static pigen_source_span token_spelling(const resolver *resolver,
 		known->origin) : (pigen_source_span){INVALID_ID(pigen_source_id), 0, 0};
 }
 
+static pigen_source_span declaration_name_span(resolver *resolver,
+	pigen_token_id token)
+{
+	const pigen_expanded_token *known = pigen_expanded_token_get(
+		resolver->syntax->expanded, token);
+	pigen_source_span spelling = token_spelling(resolver, token);
+	size_t expanded_length = 0, origin_length = 0;
+	const char *expanded_text;
+	const char *origin_text;
+
+	if (!known) return spelling;
+	expanded_text = pigen_expanded_token_text(resolver->syntax->expanded,
+		known, &expanded_length);
+	origin_text = pigen_source_span_text(resolver->model->sources, spelling,
+		&origin_length);
+	if (!expanded_text || !origin_text ||
+		(expanded_length == origin_length &&
+		 !memcmp(expanded_text, origin_text, expanded_length)))
+		return spelling;
+	{
+		pigen_source_id source = pigen_source_add(
+			(pigen_source_manager *)resolver->model->sources, "<pigen-macro>",
+			expanded_text, expanded_length);
+
+		if (source.index != PIGEN_INVALID_ID)
+			return (pigen_source_span){source, 0, expanded_length};
+	}
+	return spelling;
+}
+
 static pigen_source_span token_expansion(const resolver *resolver,
 	pigen_token_id token)
 {
@@ -385,7 +415,8 @@ static int add_signal_declaration_in_scope(resolver *resolver,
 		if (shape.index == PIGEN_INVALID_ID) return 0;
 		declared = pigen_symbol_declare(model, scope,
 			PIGEN_SYMBOL_SIGNAL, data_type,
-			token_spelling(resolver, declarator->as.signal_declarator.name),
+			declaration_name_span(resolver,
+				declarator->as.signal_declarator.name),
 			syntax_node->location.source_span, &symbol, NULL);
 		if (declared == PIGEN_DECLARE_DUPLICATE)
 			return fail_token(resolver, declarator->as.signal_declarator.name,

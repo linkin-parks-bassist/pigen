@@ -1,0 +1,8 @@
+`define CAT(a, b) a``b
+module mpaste(input logic clk, input logic reset, input bit[8] buf a, output bit[8] buf y);
+  bit[8] buf `CAT(my, sig);
+  always_ff @(posedge clk) begin
+    `CAT(my, sig) <= a;
+    y <= `CAT(my, sig);
+  end
+endmodule
