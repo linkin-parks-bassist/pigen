@@ -3067,6 +3067,29 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			/* A non-clocked `always` block is ordinary SV retained as-is.
 			 * A failed edge-clocked block must roll back, not become opaque. */
 			if (token_is(parser, at, "always") &&
+				token_is(parser, at + 1, "@") &&
+				token_is(parser, at + 2, "(") &&
+				(token_is(parser, at + 3, "posedge") ||
+				 token_is(parser, at + 3, "negedge") ||
+				 token_is(parser, at + 3, "edge")))
+			{
+				size_t process_end;
+				size_t retained_after;
+
+				if (!retained_procedural_end(parser, at, after,
+					&process_end)) return 0;
+				if (!retained_process_has_structured(parser, at, process_end) &&
+					!process_has_buffered_transfer(parser, module, at,
+						process_end))
+				{
+					if (!parse_retained_procedural(parser, module, at, after,
+						&retained_after)) return 0;
+					at = retained_after;
+					item_start = 1;
+					continue;
+				}
+			}
+			if (token_is(parser, at, "always") &&
 				!(token_is(parser, at + 2, "(") &&
 					(token_is(parser, at + 3, "posedge") ||
 					 token_is(parser, at + 3, "negedge") ||

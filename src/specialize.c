@@ -1035,7 +1035,8 @@ static int add_mixed_process_splits(const char *source,
 		pigen_string prologue = {0};
 		size_t expression_index = 0;
 
-		if (!token_is_text(source, &tokens->items[i], "always_ff") ||
+		if (!(token_is_text(source, &tokens->items[i], "always_ff") ||
+			token_is_text(source, &tokens->items[i], "always")) ||
 			!token_is_text(source, &tokens->items[i + 1], "@") ||
 			!token_is_text(source, &tokens->items[i + 2], "(")) continue;
 		event_open = i + 2;
