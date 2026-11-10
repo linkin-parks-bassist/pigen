@@ -23,6 +23,15 @@ typedef struct {
 } pending_pipeline_reset;
 
 typedef struct {
+	pigen_module_id module;
+	pigen_process_id process;
+	pigen_clock_domain_id domain;
+	pigen_source_span name;
+	pigen_source_span span;
+	pigen_signal_id output;
+} resolved_pipeline_reset;
+
+typedef struct {
 	const pigen_syntax_tree *syntax;
 	pigen_semantic_model *model;
 	const pigen_resolve_policy *policy;
@@ -39,6 +48,9 @@ typedef struct {
 	pending_pipeline_reset *reset_bindings;
 	size_t reset_binding_count;
 	size_t reset_binding_capacity;
+	resolved_pipeline_reset *pipelines;
+	size_t pipeline_count;
+	size_t pipeline_capacity;
 } resolver;
 
 static int fail(resolver *resolver, pigen_source_span span, const char *message)
@@ -708,6 +720,34 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
  * stage assignments become transfers in the enclosing process; the yield
  * writes the established pipeline output signal. The shared transfer and
  * storage lowering then produces the hardware. */
+static int apply_pipeline_reset(resolver *resolver,
+	pigen_module_id module_id, pigen_process_id process,
+	pigen_clock_domain_id domain, const pending_pipeline_reset *reset,
+	pigen_signal_id output, pigen_source_span pipeline_span)
+{
+	pigen_semantic_model *model = resolver->model;
+	size_t signal_index;
+
+	if (pigen_action_add(model, INVALID_ID(pigen_syntax_id), module_id,
+		process, domain, output, PIGEN_ACTION_FLUSH, reset->guard,
+		reset->span).index == PIGEN_INVALID_ID)
+		return 0;
+	for (signal_index = 0; signal_index < model->signal_count; signal_index++)
+	{
+		const pigen_semantic_signal *field = &model->signals[signal_index];
+
+		if (field->module.index == module_id.index &&
+			field->span.start >= pipeline_span.start &&
+			field->span.end <= pipeline_span.end &&
+			pigen_action_add(model, INVALID_ID(pigen_syntax_id), module_id,
+				process, domain, (pigen_signal_id){(uint32_t)signal_index},
+				PIGEN_ACTION_FLUSH, reset->guard,
+				reset->span).index == PIGEN_INVALID_ID)
+			return 0;
+	}
+	return 1;
+}
+
 static int resolve_pipeline(resolver *resolver, pigen_module_id module_id,
 	pigen_process_id process, pigen_clock_domain_id domain,
 	pigen_syntax_id pipeline_id, const pigen_syntax_node *pipeline,
@@ -749,7 +789,8 @@ static int resolve_pipeline(resolver *resolver, pigen_module_id module_id,
 	}
 	if (!ok) return 0;
 
-	/* Apply any pipeline_reset bindings already seen for this pipeline. */
+	/* Apply any pipeline_reset bindings already seen for this pipeline, and
+	 * remember the resolved pipeline so later reset statements can bind too. */
 	{
 		pigen_source_span pipeline_name = token_spelling(resolver,
 			pipeline->as.pipeline.name);
@@ -758,36 +799,28 @@ static int resolve_pipeline(resolver *resolver, pigen_module_id module_id,
 		for (r = 0; r < resolver->reset_binding_count; r++)
 		{
 			pending_pipeline_reset *reset = &resolver->reset_bindings[r];
-			size_t signal_index;
 
 			if (reset->consumed ||
 				reset->module.index != module_id.index ||
 				reset->process.index != process.index ||
 				!spelling_text_equal(resolver, reset->name, pipeline_name))
 				continue;
-			if (pigen_action_add(model, pipeline_id, module_id, process,
-				domain, ident.signal, PIGEN_ACTION_FLUSH, reset->guard,
-				reset->span).index == PIGEN_INVALID_ID)
+			if (!apply_pipeline_reset(resolver, module_id, process, domain,
+				reset, ident.signal, pipeline->location.source_span))
 				return fail_location(resolver, pipeline->location,
 					"invalid pipeline reset binding");
-			for (signal_index = 0; signal_index < model->signal_count;
-				signal_index++)
-			{
-				const pigen_semantic_signal *field = &model->signals[
-					signal_index];
-
-				if (field->module.index == module_id.index &&
-					field->span.start >= pipeline->location.source_span.start &&
-					field->span.end <= pipeline->location.source_span.end &&
-					pigen_action_add(model, pipeline_id, module_id, process,
-						domain, (pigen_signal_id){(uint32_t)signal_index},
-						PIGEN_ACTION_FLUSH, reset->guard,
-						reset->span).index == PIGEN_INVALID_ID)
-					return fail_location(resolver, pipeline->location,
-						"invalid pipeline field reset binding");
-			}
 			reset->consumed = 1;
 		}
+		if (resolver->pipeline_count == resolver->pipeline_capacity)
+		{
+			resolver->pipeline_capacity = resolver->pipeline_capacity ?
+				resolver->pipeline_capacity * 2 : 8;
+			resolver->pipelines = pigen_resize(resolver->pipelines,
+				resolver->pipeline_capacity * sizeof(*resolver->pipelines));
+		}
+		resolver->pipelines[resolver->pipeline_count++] =
+			(resolved_pipeline_reset){module_id, process, domain,
+				pipeline_name, pipeline->location.source_span, ident.signal};
 	}
 
 	/* Stage-local declarations live in a nested scope; stage assignments are
@@ -1701,6 +1734,24 @@ static int resolve_action(resolver *resolver, pigen_module_id module_id,
 	if (!module) return 0;
 	if (statement->as.action.action == 4)
 	{
+		size_t p;
+
+		for (p = 0; p < resolver->pipeline_count; p++)
+		{
+			resolved_pipeline_reset *pipeline = &resolver->pipelines[p];
+			pending_pipeline_reset immediate = {module_id, process, domain,
+				target, guard, statement->location.source_span, 0};
+
+			if (pipeline->module.index != module_id.index ||
+				pipeline->process.index != process.index ||
+				!spelling_text_equal(resolver, pipeline->name, target))
+				continue;
+			if (!apply_pipeline_reset(resolver, module_id, process, domain,
+				&immediate, pipeline->output, pipeline->span))
+				return fail_location(resolver, statement->location,
+					"invalid pipeline reset binding");
+			return 1;
+		}
 		if (resolver->reset_binding_count ==
 			resolver->reset_binding_capacity)
 		{
@@ -2174,7 +2225,7 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	resolver resolver = {syntax, model, policy, error,
 		(pigen_scope_id){PIGEN_INVALID_ID},
 		INVALID_ID(pigen_expr_id), INVALID_ID(pigen_data_type_id),
-		NULL, 0, 0, NULL, 0, 0};
+		NULL, 0, 0, NULL, 0, 0, NULL, 0, 0};
 	const pigen_syntax_node *root;
 	pigen_syntax_id child;
 	pigen_source_span root_span;
