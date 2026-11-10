@@ -1,0 +1,9 @@
+module mixed_write_conflict(input logic clk, input bit[8] buf i, output bit[8] buf o);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ always_ff @(posedge clk) begin
+  o <= inc(i);
+  o <= i;
+ end
+endmodule

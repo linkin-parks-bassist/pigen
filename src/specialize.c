@@ -1310,6 +1310,41 @@ static int add_mixed_process_splits(const char *source,
 				 token_is_text(source, &tokens->items[at], ":")))
 				boundary = at + 1;
 		}
+		for (size_t f = 0; f < leaf_count; f++)
+		{
+			char *function_lhs;
+
+			if (!leaves[f].function) continue;
+			function_lhs = statement_lhs_name(source, tokens, leaves[f].first,
+				leaves[f].last);
+			if (!function_lhs) continue;
+			for (size_t p = 0; p < leaf_count; p++)
+			{
+				char *pigen_lhs;
+
+				if (leaves[p].function) continue;
+				pigen_lhs = statement_lhs_name(source, tokens, leaves[p].first,
+					leaves[p].last);
+				if (pigen_lhs && text_equals(function_lhs, pigen_lhs))
+				{
+					*error = "a function statement and a Pigen statement write "
+						"the same destination";
+					*error_offset = tokens->items[leaves[p].first].span.start;
+					free(pigen_lhs);
+					free(function_lhs);
+					free(leaves);
+					for (size_t x = 0; x < functions.count; x++)
+						free(functions.names[x]);
+					for (size_t x = 0; x < tasks.count; x++)
+						free(tasks.names[x]);
+					free(functions.names);
+					free(tasks.names);
+					return -1;
+				}
+				free(pigen_lhs);
+			}
+			free(function_lhs);
+		}
 		if (has_task && has_pigen)
 		{
 			*error = "mixed clocked body with a task call cannot be split "
