@@ -1966,6 +1966,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		pigen_expr_id value = INVALID_ID(pigen_expr_id);
 		pigen_semantic_direction direction;
 		pigen_data_type_id connection_type = INVALID_ID(pigen_data_type_id);
+		int generated_control = 0;
 
 		if (!connection) break;
 		if (connection->kind != PIGEN_SYNTAX_CONNECTION)
@@ -2030,6 +2031,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 					port_signal = base_symbol->object.signal;
 					connection_type = pigen_data_type_sized_logic(model, 1,
 						PIGEN_SIGN_UNSIGNED);
+					generated_control = 1;
 					goto port_ready;
 				}
 			}
@@ -2045,6 +2047,8 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		direction = port->direction;
 		connection_type = port->data_type;
 	port_ready:
+		if (generated_control)
+			goto add_connection;
 		if (connection->as.connection.value.index != PIGEN_INVALID_ID)
 		{
 			if (direction == PIGEN_SEMANTIC_OUTPUT)
@@ -2099,6 +2103,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				return fail_location(resolver, connection->location,
 					"instance connection requires a compatible expression");
 		}
+	add_connection:
 		if (!pigen_instance_add_connection(model, instance, port_symbol,
 			port_signal, port_name, value, direction,
 			connection->location.source_span))

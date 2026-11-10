@@ -778,6 +778,61 @@ static size_t module_input_named(pigen_rtl_lowering *lowering,
 
 /* A concrete buffered module input is an upstream-owned boundary view: the
  * module exposes payload, valid and ready ports and owns no storage. */
+/* Whether a resolved connection expression reads a particular signal symbol.
+ * Instance connections are emitted textually today, so this use marker only
+ * prevents the unused-input ready tie from conflicting with the child drive. */
+static int expr_references_symbol(const pigen_semantic_model *model,
+	pigen_expr_id expression, pigen_symbol_id symbol)
+{
+	const pigen_semantic_expr *expr;
+
+	if (expression.index == PIGEN_INVALID_ID) return 0;
+	expr = pigen_expr_get(model, expression);
+	if (!expr) return 0;
+	switch (expr->kind)
+	{
+	case PIGEN_EXPR_SYMBOL:
+		return expr->as.symbol.index == symbol.index;
+	case PIGEN_EXPR_GROUP:
+		return expr_references_symbol(model, expr->as.group.operand, symbol);
+	case PIGEN_EXPR_UNARY:
+		return expr_references_symbol(model, expr->as.unary.operand, symbol);
+	case PIGEN_EXPR_BINARY:
+		return expr_references_symbol(model, expr->as.binary.left, symbol) ||
+			expr_references_symbol(model, expr->as.binary.right, symbol);
+	case PIGEN_EXPR_CONDITIONAL:
+		return expr_references_symbol(model, expr->as.conditional.condition,
+			symbol) ||
+			expr_references_symbol(model, expr->as.conditional.when_true,
+				symbol) ||
+			expr_references_symbol(model, expr->as.conditional.when_false,
+				symbol);
+	case PIGEN_EXPR_CONVERSION:
+		return expr_references_symbol(model, expr->as.conversion.operand,
+			symbol);
+	case PIGEN_EXPR_INDEX:
+		return expr_references_symbol(model, expr->as.index.base, symbol) ||
+			expr_references_symbol(model, expr->as.index.index, symbol);
+	case PIGEN_EXPR_SELECT:
+		return expr_references_symbol(model, expr->as.select.base, symbol) ||
+			expr_references_symbol(model, expr->as.select.left, symbol) ||
+			expr_references_symbol(model, expr->as.select.right, symbol);
+	case PIGEN_EXPR_CONCATENATION:
+	{
+		const pigen_expr_id *children = pigen_expr_children(model,
+			expr->as.sequence.first_child, expr->as.sequence.child_count);
+
+		for (size_t i = 0; children && i < expr->as.sequence.child_count; i++)
+			if (expr_references_symbol(model, children[i], symbol)) return 1;
+		return 0;
+	}
+	case PIGEN_EXPR_PEEK:
+		return expr_references_symbol(model, expr->as.peek.source, symbol);
+	default:
+		return 0;
+	}
+}
+
 static int boundary_endpoints(pigen_rtl_lowering *lowering,
 	const pigen_semantic_signal *owner_signal, size_t signal_index,
 	pigen_rtl_module_id rtl_module, pigen_rtl_signal_endpoints *out)
@@ -2859,6 +2914,10 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			for (group = 0; group < ready_group_count; group++)
 				if (ready_targets[group].index ==
 					endpoints->source_ready.index)
+				{ driven = 1; break; }
+			for (size_t c = 0; c < sem->instance_connection_count; c++)
+				if (expr_references_symbol(sem,
+					sem->instance_connections[c].value, signal->symbol))
 				{ driven = 1; break; }
 			if (!driven &&
 				pigen_rtl_equation_add_with_owner(rtl, rtl_module,
