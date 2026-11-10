@@ -389,6 +389,77 @@ static int merge_adjacent_tokens(pigen_expanded_source *result,
 	return 1;
 }
 
+static int stringify_argument(pigen_expanded_source *result,
+	const pigen_macro_definition *macro, const macro_argument *arguments,
+	const pigen_expanded_token *replacement, pigen_origin_id invocation,
+	pigen_macro_id macro_id, pigen_expanded_token *out, int *matched)
+{
+	size_t length = 0;
+	const char *text = pigen_expanded_token_text(result, replacement, &length);
+	size_t parameter;
+	pigen_string value = {0};
+	size_t i;
+
+	*matched = 0;
+	if (!text || length < 4 || text[0] != '"' || text[length - 1] != '"' ||
+		text[length - 2] != '`')
+		return 1;
+	for (parameter = 0; parameter < macro->parameter_count; parameter++)
+	{
+		const pigen_macro_parameter *formal =
+			&result->macro_parameters[macro->first_parameter + parameter];
+		size_t name_length = 0;
+		const char *name = pigen_source_span_text(result->sources,
+			formal->name, &name_length);
+
+		if (name && name_length == length - 3 &&
+			!memcmp(name, text + 1, name_length))
+			break;
+	}
+	if (parameter == macro->parameter_count)
+		return 1;
+	for (i = 0; i < arguments[parameter].count; i++)
+	{
+		size_t part_length = 0;
+		const char *part = pigen_expanded_token_text(result,
+			&arguments[parameter].tokens[i], &part_length);
+
+		if (!part) continue;
+		if (value.length) pigen_append(&value, " ");
+		pigen_append_range(&value, part, part_length);
+	}
+	{
+		pigen_string quoted = {0};
+
+		pigen_append(&quoted, "\"");
+		if (value.data)
+		{
+			for (i = 0; value.data[i]; i++)
+			{
+				if (value.data[i] == '"' || value.data[i] == '\\')
+					pigen_append(&quoted, "\\");
+				pigen_append_range(&quoted, &value.data[i], 1);
+			}
+		}
+		pigen_append(&quoted, "\"");
+		*out = *replacement;
+		out->kind = PIGEN_TOKEN_STRING;
+		out->text = quoted.data;
+		if (arguments[parameter].count)
+		{
+			const pigen_macro_parameter *formal =
+				&result->macro_parameters[macro->first_parameter + parameter];
+
+			out->origin = add_argument_origin(result, invocation,
+				formal->origin, arguments[parameter].tokens[0].origin,
+				macro_id);
+		}
+	}
+	free(value.data);
+	*matched = 1;
+	return 1;
+}
+
 static int expand_macro(preprocessor *preprocessor, expansion_output *output,
 	pigen_macro_id macro_id, pigen_origin_id invocation,
 	const macro_argument *arguments)
@@ -411,6 +482,26 @@ static int expand_macro(preprocessor *preprocessor, expansion_output *output,
 			result->replacement_tokens[macro->first_replacement + i];
 		size_t parameter;
 
+		if (token_text_is(result, &replacement, "`") &&
+			i + 1 < macro->replacement_count)
+		{
+			const pigen_expanded_token *next =
+				&result->replacement_tokens[macro->first_replacement + i + 1];
+			int matched = 0;
+			pigen_expanded_token stringified;
+
+			if (next->kind == PIGEN_TOKEN_STRING &&
+				!stringify_argument(result, macro, arguments, next,
+					invocation, macro_id, &stringified, &matched) )
+				return 0;
+			if (matched)
+			{
+				append_local_token(&expanded, &expanded_count,
+					&expanded_capacity, stringified);
+				i++;
+				continue;
+			}
+		}
 		if (token_text_is(result, &replacement, "`") &&
 			i + 1 < macro->replacement_count &&
 			token_text_is(result,

@@ -1,0 +1,4 @@
+`define STR(x) `"x`"
+module strmacro(input logic clk);
+  always_ff @(posedge clk) $display(`STR(hello_world));
+endmodule
