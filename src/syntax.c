@@ -2248,6 +2248,36 @@ static int parse_retained_module_item(syntax_parser *parser,
 	return 1;
 }
 
+static int parse_retained_block_item(syntax_parser *parser,
+	pigen_syntax_id module, size_t start, size_t limit, const char *closer,
+	size_t *after_item)
+{
+	size_t end = start;
+	pigen_syntax_node node = {0};
+	size_t opaque_start;
+	size_t opaque_end;
+	const pigen_expanded_token *start_tok = token_at(parser, start);
+	const pigen_expanded_token *last_tok;
+
+	while (end < limit && !token_is(parser, end, closer)) end++;
+	if (end == limit) return 0;
+	opaque_start = parser->opaque_byte_cursor;
+	opaque_end = start_tok ? pigen_origin_expansion_span(parser->expanded,
+		start_tok->origin).start : opaque_start;
+	add_opaque_bytes(parser, module, opaque_start, opaque_end);
+	node.kind = PIGEN_SYNTAX_RETAINED;
+	node.location = range_location(parser, start, end + 1);
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	add_child(parser, module, add_node(parser, node));
+	last_tok = token_at(parser, end);
+	if (last_tok)
+		parser->opaque_byte_cursor = pigen_origin_expansion_span(
+			parser->expanded, last_tok->origin).end;
+	*after_item = end + 1;
+	return 1;
+}
+
 static int parse_fabric_block(syntax_parser *parser, pigen_syntax_id module,
 	size_t start, size_t limit, size_t *after_fabric)
 {
@@ -2450,6 +2480,19 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			if (!parse_parameter_items(parser, module, at, semicolon,
 				opaque_cursor)) return 0;
 			at = semicolon + 1;
+			item_start = 1;
+			continue;
+		}
+		if (item_start && (token_is(parser, at, "function") ||
+			token_is(parser, at, "task")))
+		{
+			size_t retained_after;
+			const char *closer = token_is(parser, at, "function") ?
+				"endfunction" : "endtask";
+
+			if (!parse_retained_block_item(parser, module, at, after, closer,
+				&retained_after)) return 0;
+			at = retained_after;
 			item_start = 1;
 			continue;
 		}
