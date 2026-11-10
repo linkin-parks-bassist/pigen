@@ -3045,6 +3045,30 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 					continue;
 				}
 			}
+			if (token_is(parser, at, "always") &&
+				token_is(parser, at + 2, "(") &&
+				(token_is(parser, at + 3, "posedge") ||
+				 token_is(parser, at + 3, "negedge") ||
+				 token_is(parser, at + 3, "edge")) &&
+				matching_parenthesis(parser, at + 2, after) > at + 5)
+			{
+				size_t process_end;
+				size_t retained_after;
+
+				if (!retained_procedural_end(parser, at, after,
+					&process_end)) return 0;
+				if (retained_process_has_structured(parser, at, process_end) ||
+					process_has_buffered_transfer(parser, module, at,
+						process_end))
+					return fail(parser, at + 2,
+						"structured construct in an unsupported clocked "
+						"process is not supported");
+				if (!parse_retained_procedural(parser, module, at, after,
+					&retained_after)) return 0;
+				at = retained_after;
+				item_start = 1;
+				continue;
+			}
 		}
 		if (item_start && token_is(parser, at, "fsm"))
 		{
