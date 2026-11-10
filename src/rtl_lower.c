@@ -2054,6 +2054,95 @@ static int flush_storage_drives(pigen_rtl_lowering *lowering,
 	return ok ? 0 : -1;
 }
 
+static int drive_destination(pigen_rtl_lowering *lowering,
+	pigen_rtl_module_id rtl_module, const pigen_semantic_lvalue *lval,
+	pigen_rtl_expr_id value, const pigen_semantic_expr *value_expr,
+	pigen_rtl_expr_id fire, pigen_source_span span,
+	pigen_rtl_update_id *updates, size_t *update_count);
+
+static int drive_concat_rtl_value(pigen_rtl_lowering *lowering,
+	pigen_rtl_module_id rtl_module, const pigen_semantic_lvalue *lval,
+	pigen_rtl_expr_id value, pigen_data_type_id value_type,
+	pigen_rtl_type_id value_rtl_type, pigen_rtl_expr_id fire,
+	pigen_source_span span, pigen_rtl_update_id *updates,
+	size_t *update_count)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	const pigen_lvalue_id *children;
+	pigen_const_expr_id width_expr;
+	uint64_t remaining = 0;
+	pigen_data_type_id index_data;
+	pigen_rtl_type_id index_type;
+	size_t i;
+
+	if (lval->kind != PIGEN_LVALUE_CONCATENATION)
+		return drive_destination(lowering, rtl_module, lval, value, NULL,
+			fire, span, updates, update_count);
+	children = pigen_lvalue_children(sem, lval->as.sequence.first_child,
+		lval->as.sequence.child_count);
+	width_expr = pigen_data_type_packed_width(sem, value_type);
+	if (!children || !pigen_const_expr_evaluate_u64(sem, width_expr,
+		&remaining) || remaining == 0)
+		return 0;
+	index_data = pigen_data_type_sized_logic(sem, 32, PIGEN_SIGN_UNSIGNED);
+	index_type = pigen_lower_rtl_type(lowering, index_data);
+	if (index_type.index == PIGEN_INVALID_ID) return 0;
+	for (i = 0; i < lval->as.sequence.child_count; i++)
+	{
+		const pigen_semantic_lvalue *child = pigen_lvalue_get(sem,
+			children[i]);
+		pigen_const_expr_id child_width_expr;
+		pigen_data_type_id child_data_type;
+		uint64_t width = 0;
+		pigen_rtl_type_id child_type;
+		pigen_rtl_literal_word low_word;
+		pigen_rtl_expr_id low, shifted, slice;
+		pigen_binary_resolution shift;
+		pigen_conversion conversion;
+
+		if (!child) return 0;
+		child_data_type = child->data_type;
+		child_width_expr = pigen_data_type_packed_width(sem,
+			child_data_type);
+		if (!pigen_const_expr_evaluate_u64(sem, child_width_expr, &width) ||
+			width == 0 || width > remaining)
+			return 0;
+		child_type = pigen_lower_rtl_type(lowering, child_data_type);
+		low_word = (pigen_rtl_literal_word){remaining - width, 0, 0};
+		low = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
+			index_type, &low_word, 64, 0, span);
+		shift = (pigen_binary_resolution){
+			{PIGEN_CONVERSION_IDENTITY, value_type, value_type},
+			{PIGEN_CONVERSION_IDENTITY, index_data, index_data},
+			{PIGEN_BINARY_SHIFT_RIGHT, value_type, index_data,
+				value_type}};
+		shifted = pigen_rtl_expr_add_binary(rtl, value_rtl_type, &shift,
+			value, low, span);
+		if (child_type.index == PIGEN_INVALID_ID ||
+			shifted.index == PIGEN_INVALID_ID ||
+			!pigen_data_type_resolve_assignment_conversion(sem, value_type,
+				child_data_type, &conversion))
+			return 0;
+		slice = pigen_rtl_expr_add_conversion(rtl, child_type, &conversion,
+			shifted, span);
+		if (slice.index == PIGEN_INVALID_ID)
+			return 0;
+		if (child->kind == PIGEN_LVALUE_CONCATENATION)
+		{
+			if (!drive_concat_rtl_value(lowering, rtl_module, child, slice,
+				child_data_type, child_type, fire, span, updates,
+				update_count))
+				return 0;
+		}
+		else if (!drive_destination(lowering, rtl_module, child, slice,
+			NULL, fire, span, updates, update_count))
+			return 0;
+		remaining -= width;
+	}
+	return remaining == 0;
+}
+
 static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
 	pigen_rtl_module_id rtl_module)
 {
@@ -2480,7 +2569,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 					{
 						const pigen_semantic_lvalue *child =
 							pigen_lvalue_get(sem, dest_children[c]);
-						const pigen_semantic_signal *child_signal;
+						pigen_data_type_id child_data_type;
 						pigen_const_expr_id child_width;
 						uint64_t width = 0;
 						pigen_rtl_type_id child_type;
@@ -2489,21 +2578,14 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 						pigen_binary_resolution shift;
 						pigen_conversion conversion;
 
-						if (!child || child->kind !=
-							PIGEN_LVALUE_PROJECTION)
+						if (!child)
 						{
 							free(update_ids);
 							return -1;
 						}
-						child_signal = pigen_signal_get(sem,
-							child->as.projection.signal);
-						if (!child_signal)
-						{
-							free(update_ids);
-							return -1;
-						}
+						child_data_type = child->data_type;
 						child_width = pigen_data_type_packed_width(sem,
-							child_signal->data_type);
+							child_data_type);
 						if (!pigen_const_expr_evaluate_u64(sem,
 							child_width, &width) || width == 0 ||
 							width > remaining)
@@ -2512,7 +2594,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 							return -1;
 						}
 						child_type = pigen_lower_rtl_type(lowering,
-							child_signal->data_type);
+							child_data_type);
 						low_word = (pigen_rtl_literal_word){
 							remaining - width, 0, 0};
 						low = pigen_rtl_expr_add_literal(rtl,
@@ -2538,7 +2620,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 						if (shifted.index == PIGEN_INVALID_ID ||
 							!pigen_data_type_resolve_assignment_conversion(
 								sem, value_expr->data_type,
-								child_signal->data_type, &conversion))
+								child_data_type, &conversion))
 						{
 							free(update_ids);
 							return -1;
@@ -2546,9 +2628,14 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 						slice = pigen_rtl_expr_add_conversion(rtl,
 							child_type, &conversion, shifted, owner->span);
 						if (slice.index == PIGEN_INVALID_ID ||
-							!drive_destination(lowering, rtl_module, child,
-								slice, NULL, fire, owner->span, update_ids,
-								&update_count))
+							(child->kind == PIGEN_LVALUE_CONCATENATION ?
+								!drive_concat_rtl_value(lowering, rtl_module,
+									child, slice, child->data_type, child_type,
+									fire, owner->span, update_ids,
+									&update_count) :
+								!drive_destination(lowering, rtl_module, child,
+									slice, NULL, fire, owner->span, update_ids,
+									&update_count)))
 						{
 							free(update_ids);
 							return -1;

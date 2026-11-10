@@ -64,6 +64,44 @@ pigen_data_type_id pigen_resolve_type(const pigen_syntax_tree *syntax,
 
 	if (!syntax || !model || !syntax_type)
 		return INVALID_ID(pigen_data_type_id);
+	if (syntax_type->is_packed_struct)
+	{
+		const pigen_syntax_struct_member *members =
+			pigen_syntax_type_members(&syntax->types,
+				syntax_type->first_member, syntax_type->member_count);
+		pigen_const_expr_id *widths;
+		pigen_const_expr_id width;
+		pigen_data_type_id flat;
+
+		if (syntax_type->member_count && !members)
+			return INVALID_ID(pigen_data_type_id);
+		widths = pigen_resize(NULL,
+			syntax_type->member_count * sizeof(*widths));
+		for (i = 0; i < syntax_type->member_count; i++)
+		{
+			pigen_data_type_id member_type = pigen_resolve_type(syntax,
+				model, scope, members[i].type, error);
+
+			if (member_type.index == PIGEN_INVALID_ID)
+			{
+				free(widths);
+				return INVALID_ID(pigen_data_type_id);
+			}
+			widths[i] = pigen_data_type_packed_width(model, member_type);
+			if (widths[i].index == PIGEN_INVALID_ID)
+			{
+				free(widths);
+				return INVALID_ID(pigen_data_type_id);
+			}
+		}
+		width = pigen_const_expr_intern_width_sum(model, widths,
+			syntax_type->member_count);
+		free(widths);
+		if (width.index == PIGEN_INVALID_ID)
+			return INVALID_ID(pigen_data_type_id);
+		flat = pigen_data_type_unsigned_integer(model, width);
+		return flat;
+	}
 	signedness = syntax_type->signedness == PIGEN_SYNTAX_SIGN_SIGNED ?
 		PIGEN_SIGN_SIGNED : syntax_type->signedness == PIGEN_SYNTAX_SIGN_UNSIGNED ?
 		PIGEN_SIGN_UNSIGNED : PIGEN_SIGN_IMPLICIT;

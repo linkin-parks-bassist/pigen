@@ -10,7 +10,7 @@ module signal_syntax_tb;
 	logic source_indexed_valid = 1'b0, source_indexed_ready;
 	logic [7:0] source_branch = 8'h39;
 	logic source_branch_valid = 1'b0, source_branch_ready;
-	syntax_packet_t source_struct = 16'hda61;
+	logic [15:0] source_struct = 16'hda61;
 	logic source_struct_valid = 1'b0, source_struct_ready;
 	logic [15:0] source_variable = 16'hd62b;
 	logic source_variable_valid = 1'b0, source_variable_ready;

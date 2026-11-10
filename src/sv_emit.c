@@ -321,6 +321,17 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 		value = (int64_t)words[0].value;
 		if (expr->literal_negative)
 			value = -value;
+		if (expr->kind == PIGEN_RTL_EXPR_BITS)
+		{
+			const pigen_rtl_type *type = pigen_rtl_type_get(rtl,
+				expr->type);
+
+			if (type && type->width)
+			{
+				buf_append_ull(b, type->width);
+				buf_append_str(b, "'d");
+			}
+		}
 		buf_append_int(b, value);
 		return 0;
 	}
@@ -611,12 +622,20 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 		render(b, rtl, left);
 		if (b->failed)
 			return -1;
-		if (kind == PIGEN_SEMANTIC_SELECT_RANGE ||
-			kind == PIGEN_SEMANTIC_SELECT_INDEXED_UP)
-		{
-			/* A range and an indexed-up select are both a [left:right]
-			 * span; only an indexed-down select is a single bound. */
+		if (kind == PIGEN_SEMANTIC_SELECT_RANGE)
 			buf_append_str(b, ":");
+		else if (kind == PIGEN_SEMANTIC_SELECT_INDEXED_UP)
+			buf_append_str(b, " +: ");
+		else
+			buf_append_str(b, " -: ");
+		if (kind != PIGEN_SEMANTIC_SELECT_RANGE)
+		{
+			render(b, rtl, right);
+			if (b->failed)
+				return -1;
+		}
+		else
+		{
 			render(b, rtl, right);
 			if (b->failed)
 				return -1;

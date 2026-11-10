@@ -57,6 +57,37 @@ static size_t matching_bracket(const pigen_expanded_source *source,
 	return limit;
 }
 
+static size_t matching_brace(const pigen_expanded_source *source,
+	size_t open, size_t limit)
+{
+	size_t depth = 0;
+	size_t at;
+
+	for (at = open; at < limit; at++)
+	{
+		if (token_is(source, at, "{")) depth++;
+		else if (token_is(source, at, "}") && !--depth) return at;
+	}
+	return limit;
+}
+
+static int append_struct_member(pigen_syntax_type_arena *arena,
+	pigen_token_id name, pigen_syntax_type_id type)
+{
+	if (!arena || arena->member_count >= PIGEN_INVALID_ID)
+		return 0;
+	if (arena->member_count == arena->member_capacity)
+	{
+		arena->member_capacity = arena->member_capacity ?
+			arena->member_capacity * 2 : 8;
+		arena->members = pigen_resize(arena->members,
+			arena->member_capacity * sizeof(*arena->members));
+	}
+	arena->members[arena->member_count++] =
+		(pigen_syntax_struct_member){name, type};
+	return 1;
+}
+
 static size_t top_level_colon(const pigen_expanded_source *source,
 	size_t first, size_t after)
 {
@@ -128,6 +159,55 @@ int pigen_parse_type_prefix(const pigen_expanded_source *source,
 		return 0;
 	original_expression_count = expressions->node_count;
 	original_child_count = expressions->child_count;
+	size_t original_member_count = types->member_count;
+	{
+		if (token_is(source, at, "struct") &&
+			token_is(source, at + 1, "packed") &&
+			token_is(source, at + 2, "{"))
+		{
+			size_t open = at + 2;
+			size_t close = matching_brace(source, open, limit);
+			size_t member_at = open + 1;
+			size_t first_member = types->member_count;
+
+			if (close == limit)
+			{
+				fail(source, open, error, "unterminated packed struct");
+				goto done;
+			}
+			while (member_at < close)
+			{
+				pigen_syntax_type_id member_type;
+				size_t name_at;
+
+				if (!pigen_parse_type_prefix(source, member_at, close,
+					expressions, types, &member_type, &name_at, error))
+					goto done;
+				if (name_at >= close ||
+					token_at(source, name_at)->kind != PIGEN_TOKEN_IDENTIFIER ||
+					name_at + 1 >= close || !token_is(source, name_at + 1, ";"))
+				{
+					fail(source, name_at, error,
+						"packed struct member requires a name and semicolon");
+					goto done;
+				}
+				if (!append_struct_member(types,
+					(pigen_token_id){(uint32_t)name_at}, member_type))
+					goto done;
+				member_at = name_at + 2;
+			}
+			parsed.base = (pigen_token_id){(uint32_t)at};
+			parsed.is_packed_struct = 1;
+			parsed.first_member = first_member;
+			parsed.member_count = types->member_count - first_member;
+			parsed.location = pigen_syntax_location_from_extent(source,
+				first, close + 1);
+			if (!append_type(types, parsed, NULL, 0, type)) goto done;
+			*after = close + 1;
+			free(arguments);
+			return 1;
+		}
+	}
 	parsed.base = INVALID_ID(pigen_token_id);
 	parsed.signedness = PIGEN_SYNTAX_SIGN_IMPLICIT;
 	if (token_is(source, at, "signed"))
@@ -209,6 +289,7 @@ done:
 	{
 		expressions->node_count = original_expression_count;
 		expressions->child_count = original_child_count;
+		types->member_count = original_member_count;
 	}
 	free(arguments);
 	return ok;
@@ -224,6 +305,7 @@ pigen_syntax_type_ownership pigen_syntax_type_declaration_ownership(
 	size_t i;
 
 	if (!source || !known) return PIGEN_SYNTAX_TYPE_UNOWNED;
+	if (known->is_packed_struct) return PIGEN_SYNTAX_TYPE_SYSTEMVERILOG;
 	arguments = pigen_syntax_type_arguments(arena, known->first_argument,
 		known->argument_count);
 	if (known->argument_count && !arguments)
@@ -262,10 +344,20 @@ const pigen_syntax_type_argument *pigen_syntax_type_arguments(
 	return arena->arguments + first;
 }
 
+const pigen_syntax_struct_member *pigen_syntax_type_members(
+	const pigen_syntax_type_arena *arena, size_t first, size_t count)
+{
+	if (!arena || first > arena->member_count ||
+		count > arena->member_count - first)
+		return NULL;
+	return arena->members + first;
+}
+
 void pigen_free_syntax_type_arena(pigen_syntax_type_arena *arena)
 {
 	if (!arena) return;
 	free(arena->nodes);
 	free(arena->arguments);
+	free(arena->members);
 	*arena = (pigen_syntax_type_arena){0};
 }

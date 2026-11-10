@@ -492,6 +492,22 @@ static pigen_const_expr_id converted_constant(expression_analyzer *analyzer,
 		constant);
 }
 
+static pigen_analyzed_expr_id append_integer_literal(expression_analyzer *analyzer,
+	uint64_t value, pigen_source_span span)
+{
+	pigen_analyzed_expr node = {0};
+
+	node.kind = PIGEN_SYNTAX_EXPR_LITERAL;
+	node.literal_kind = PIGEN_ANALYZED_LITERAL_INTEGER;
+	node.span = span;
+	node.data_type = pigen_data_type_unsized_integer(analyzer->model);
+	node.shape = pigen_semantic_scalar_shape(analyzer->model);
+	node.as.integer = value;
+	node.constant = pigen_const_expr_intern_integer(analyzer->model, value,
+		node.data_type);
+	return append_node(analyzer, node);
+}
+
 static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 	pigen_syntax_expr_id syntax_id)
 {
@@ -596,6 +612,60 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 				node.constant.index == PIGEN_INVALID_ID)
 				return fail(analyzer, syntax->location,
 					"invalid constant symbol");
+			return append_node(analyzer, node);
+		}
+		case PIGEN_SYNTAX_EXPR_MEMBER:
+		{
+			pigen_analyzed_expr_id base = analyze(analyzer,
+				syntax->as.member.base);
+			const pigen_analyzed_expr *base_known = pigen_analyzed_expr_get(
+				analyzer->arena, base);
+			pigen_symbol_id alias;
+			const pigen_semantic_struct_member *member;
+			uint64_t high;
+			uint64_t low;
+			pigen_analyzed_expr_id left;
+			pigen_analyzed_expr_id right;
+
+			if (base.index == PIGEN_INVALID_ID || !base_known)
+				return INVALID_ID(pigen_analyzed_expr_id);
+			alias = pigen_data_type_alias_symbol(analyzer->model,
+				base_known->data_type);
+			if (alias.index == PIGEN_INVALID_ID)
+				return fail(analyzer, syntax->location,
+					"member access requires a struct value");
+			member = pigen_struct_member_find(analyzer->model, alias,
+				token_spelling(analyzer, syntax->as.member.member));
+			if (!member)
+				return fail(analyzer, syntax->location,
+					"unknown struct member");
+			high = member->offset + (uint64_t)0;
+			{
+				pigen_const_expr_id width = pigen_data_type_packed_width(
+					analyzer->model, member->data_type);
+				uint64_t bits = 0;
+
+				if (!pigen_const_expr_evaluate_u64(analyzer->model, width,
+					&bits) || bits == 0)
+					return fail(analyzer, syntax->location,
+						"invalid struct member width");
+				high = member->offset + bits - 1;
+				low = member->offset;
+			}
+			left = append_integer_literal(analyzer, high,
+				syntax->location.source_span);
+			right = append_integer_literal(analyzer, low,
+				syntax->location.source_span);
+			if (left.index == PIGEN_INVALID_ID ||
+				right.index == PIGEN_INVALID_ID)
+				return INVALID_ID(pigen_analyzed_expr_id);
+			node.kind = PIGEN_SYNTAX_EXPR_SELECT;
+			node.data_type = member->data_type;
+			node.shape = base_known->shape;
+			node.as.select.base = base;
+			node.as.select.left = left;
+			node.as.select.right = right;
+			node.as.select.kind = PIGEN_SEMANTIC_SELECT_RANGE;
 			return append_node(analyzer, node);
 		}
 		case PIGEN_SYNTAX_EXPR_GROUP:

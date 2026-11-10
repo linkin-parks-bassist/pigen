@@ -20,17 +20,12 @@ iverilog -g2012 -o "$temporary/sv_generated" \
 vvp "$temporary/sv_generated" >"$temporary/sv_generated.out"
 cmp "$temporary/sv_original.out" "$temporary/sv_generated.out"
 
-"$tool" tests/slice_width_error.pigen -o "$temporary/slice_width_error.sv"
-iverilog -g2012 -s slice_width_error -o "$temporary/slice_width_error" \
-	rtl/pigen_primitives.sv "$temporary/slice_width_error.sv" \
-	>"$temporary/width.out" 2>"$temporary/width.err"
-if vvp "$temporary/slice_width_error" >>"$temporary/width.out" \
-	2>>"$temporary/width.err"; then
-	echo "expected sliced signal width mismatch to fail elaboration/simulation" >&2
+if "$tool" tests/slice_width_error.pigen -o "$temporary/slice_width_error.sv" \
+	2>"$temporary/width.err"; then
+	echo "expected sliced signal width mismatch to fail" >&2
 	exit 1
 fi
-grep -q 'Pigen transfer aggregate width mismatch' \
-	"$temporary/width.out" "$temporary/width.err"
+grep -q 'Pigen transfer aggregate width mismatch' "$temporary/width.err"
 
 if "$tool" tests/projected_buffer_destination_error.pigen \
 	-o "$temporary/projected_buffer_destination_error.sv" \
@@ -46,7 +41,7 @@ if "$tool" tests/slice_fanout_error.pigen -o "$temporary/slice_fanout_error.sv" 
 	echo "expected separate slices of one buffered source to fail ownership checking" >&2
 	exit 1
 fi
-grep -q 'buffered signal value has more than one consumer' "$temporary/fanout.err"
+grep -q 'signal has nonexclusive consumers' "$temporary/fanout.err"
 
 if "$tool" tests/wire_transfer_destination_error.pigen \
 	-o "$temporary/wire_transfer_destination_error.sv" 2>"$temporary/wire.err"; then

@@ -25,11 +25,19 @@ typedef struct {
 } pigen_syntax_type_argument;
 
 typedef struct {
+	pigen_token_id name;
+	pigen_syntax_type_id type;
+} pigen_syntax_struct_member;
+
+typedef struct {
 	pigen_token_id base;
 	pigen_syntax_signedness signedness;
 	pigen_syntax_location location;
 	size_t first_argument;
 	size_t argument_count;
+	int is_packed_struct;
+	size_t first_member;
+	size_t member_count;
 } pigen_syntax_type;
 
 typedef struct {
@@ -39,6 +47,9 @@ typedef struct {
 	pigen_syntax_type_argument *arguments;
 	size_t argument_count;
 	size_t argument_capacity;
+	pigen_syntax_struct_member *members;
+	size_t member_count;
+	size_t member_capacity;
 } pigen_syntax_type_arena;
 
 typedef enum {
@@ -62,6 +73,8 @@ pigen_syntax_type_ownership pigen_syntax_type_declaration_ownership(
 const pigen_syntax_type *pigen_syntax_type_get(
 	const pigen_syntax_type_arena *arena, pigen_syntax_type_id type);
 const pigen_syntax_type_argument *pigen_syntax_type_arguments(
+	const pigen_syntax_type_arena *arena, size_t first, size_t count);
+const pigen_syntax_struct_member *pigen_syntax_type_members(
 	const pigen_syntax_type_arena *arena, size_t first, size_t count);
 void pigen_free_syntax_type_arena(pigen_syntax_type_arena *arena);
 

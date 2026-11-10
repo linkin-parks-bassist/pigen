@@ -342,7 +342,7 @@ int main(int argc, char **argv)
 			expr = pigen_rtl_expr_add_select(&rtl, t, base, lo, hi,
 				PIGEN_SEMANTIC_SELECT_INDEXED_UP, span);
 			REQUIRE(expr_is_valid(&rtl, expr));
-			render_is(&rtl, expr, "1[2:3]");
+			render_is(&rtl, expr, "1[2 +: 3]");
 		}
 
 		/* CONCATENATION: `{a,b,...}` in first_child/child_count order as

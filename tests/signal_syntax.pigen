@@ -13,7 +13,7 @@ module signal_syntax
 		input bit[16] buf source_nested,
 		input bit[8] buf source_indexed,
 		input bit[8] buf source_branch,
-		input buf syntax_packet_t source_struct,
+		input syntax_packet_t buf source_struct,
 		input bit[16] buf source_variable,
 		input logic [3:0] variable_base,
 		input bit[8] buf source_scalar_lvalue,

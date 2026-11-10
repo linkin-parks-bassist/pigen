@@ -287,6 +287,13 @@ typedef struct {
 } pigen_semantic_parameter;
 
 typedef struct {
+	pigen_symbol_id owner;
+	pigen_source_span name;
+	pigen_data_type_id data_type;
+	size_t offset;
+} pigen_semantic_struct_member;
+
+typedef struct {
 	pigen_syntax_id syntax;
 	pigen_module_id module;
 	pigen_symbol_id symbol;
@@ -432,6 +439,9 @@ struct pigen_semantic_model {
 	pigen_predicate_atom *predicate_atoms;
 	size_t predicate_atom_count;
 	size_t predicate_atom_capacity;
+	pigen_semantic_struct_member *struct_members;
+	size_t struct_member_count;
+	size_t struct_member_capacity;
 	pigen_semantic_lvalue *lvalues;
 	size_t lvalue_count;
 	size_t lvalue_capacity;
@@ -610,6 +620,12 @@ pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 	pigen_expr_id expression);
 const pigen_semantic_lvalue *pigen_lvalue_get(
 	const pigen_semantic_model *model, pigen_lvalue_id lvalue);
+int pigen_struct_member_add(pigen_semantic_model *model,
+	pigen_symbol_id owner, pigen_source_span name,
+	pigen_data_type_id data_type, size_t offset);
+const pigen_semantic_struct_member *pigen_struct_member_find(
+	const pigen_semantic_model *model, pigen_symbol_id owner,
+	pigen_source_span name);
 const pigen_lvalue_id *pigen_lvalue_children(
 	const pigen_semantic_model *model, size_t first, size_t count);
 pigen_scope_id pigen_scope_add(pigen_semantic_model *model,

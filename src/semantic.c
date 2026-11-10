@@ -1854,6 +1854,49 @@ pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 	return add_lvalue(model, lvalue);
 }
 
+int pigen_struct_member_add(pigen_semantic_model *model,
+	pigen_symbol_id owner, pigen_source_span name,
+	pigen_data_type_id data_type, size_t offset)
+{
+	if (!model || owner.index == PIGEN_INVALID_ID ||
+		data_type.index == PIGEN_INVALID_ID ||
+		!pigen_source_span_valid(model->sources, name))
+		return 0;
+	if (model->struct_member_count == model->struct_member_capacity)
+	{
+		model->struct_member_capacity = model->struct_member_capacity ?
+			model->struct_member_capacity * 2 : 8;
+		model->struct_members = pigen_resize(model->struct_members,
+			model->struct_member_capacity * sizeof(*model->struct_members));
+	}
+	model->struct_members[model->struct_member_count++] =
+		(pigen_semantic_struct_member){owner, name, data_type, offset};
+	return 1;
+}
+
+const pigen_semantic_struct_member *pigen_struct_member_find(
+	const pigen_semantic_model *model, pigen_symbol_id owner,
+	pigen_source_span name)
+{
+	size_t i;
+
+	if (!model) return NULL;
+	for (i = model->struct_member_count; i-- > 0; )
+	{
+		const pigen_semantic_struct_member *member =
+			&model->struct_members[i];
+		size_t a = 0, b = 0;
+		const char *at = pigen_source_span_text(model->sources,
+			member->name, &a);
+		const char *bt = pigen_source_span_text(model->sources, name, &b);
+
+		if (member->owner.index == owner.index && at && bt &&
+			a == b && !memcmp(at, bt, a))
+			return member;
+	}
+	return NULL;
+}
+
 const pigen_semantic_lvalue *pigen_lvalue_get(
 	const pigen_semantic_model *model, pigen_lvalue_id lvalue)
 {
@@ -2649,6 +2692,7 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->literal_states);
 	free(model->predicates);
 	free(model->predicate_atoms);
+	free(model->struct_members);
 	free(model->lvalues);
 	free(model->lvalue_children);
 	free(model->modules);

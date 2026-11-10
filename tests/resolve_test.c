@@ -1016,7 +1016,7 @@ int main(void)
 	expect_resolve_error(
 		"module bad(input logic clk); wire x; logic y; "
 		"always @(posedge clk) x <= y; endmodule\n",
-		"not a writable");
+		"wire cannot be a procedural signal destination");
 	expect_resolve_error(
 		"module bad(input logic clk, input logic [7:0] buf x); "
 		"always @(posedge clk) x <= 8'h0; endmodule\n",

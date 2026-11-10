@@ -435,6 +435,63 @@ static int add_typedef(resolver *resolver, pigen_scope_id scope,
 	if (declared != PIGEN_DECLARE_OK)
 		return fail_location(resolver, syntax_node->location,
 			"invalid typedef declaration");
+	{
+		const pigen_syntax_type *type = pigen_syntax_type_get(
+			&resolver->syntax->types, syntax_node->as.type_definition.type);
+
+		if (type && type->is_packed_struct)
+		{
+			const pigen_syntax_struct_member *members =
+				pigen_syntax_type_members(&resolver->syntax->types,
+					type->first_member, type->member_count);
+			pigen_data_type_id *types;
+			uint64_t *widths;
+			uint64_t total = 0;
+			size_t i;
+
+			if (type->member_count && !members) return 0;
+			types = pigen_resize(NULL,
+				type->member_count * sizeof(*types));
+			widths = pigen_resize(NULL,
+				type->member_count * sizeof(*widths));
+			for (i = 0; i < type->member_count; i++)
+			{
+				pigen_const_expr_id width;
+
+				types[i] = pigen_resolve_type(resolver->syntax,
+					resolver->model, scope, members[i].type,
+					resolver->error);
+				if (types[i].index == PIGEN_INVALID_ID)
+					goto struct_members_done;
+				width = pigen_data_type_packed_width(resolver->model,
+					types[i]);
+				if (!pigen_const_expr_evaluate_u64(resolver->model,
+					width, &widths[i]) || widths[i] == 0)
+					goto struct_members_done;
+				total += widths[i];
+			}
+			{
+				uint64_t offset = total;
+
+				for (i = 0; i < type->member_count; i++)
+				{
+					offset -= widths[i];
+					if (!pigen_struct_member_add(resolver->model,
+						symbol, token_spelling(resolver,
+							members[i].name), types[i],
+						(size_t)offset))
+						goto struct_members_done;
+				}
+			}
+			free(types);
+			free(widths);
+			return 1;
+struct_members_done:
+			free(types);
+			free(widths);
+			return 0;
+		}
+	}
 	return 1;
 }
 
@@ -1156,6 +1213,10 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 			 destination_signal->transfer_type == PIGEN_TRANSFER_TYPE_WIRE))
 			return fail_location(resolver, assignment->location,
 				"wire is not a transfer destination");
+		if (destination_signal && descriptor && descriptor->is_static &&
+			destination_signal->transfer_type == PIGEN_TRANSFER_TYPE_WIRE)
+			return fail_location(resolver, assignment->location,
+				"wire cannot be a procedural signal destination");
 		return fail_location(resolver, assignment->location,
 			"transfer destination is not a writable variable or signal");
 	}
@@ -1163,6 +1224,31 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	if (!destination_value)
 		return fail_location(resolver, assignment->location,
 			"transfer destination requires a supported expression");
+	{
+		const pigen_semantic_expr *dest_shape = destination_value;
+		const pigen_semantic_lvalue *dest_lvalue =
+			pigen_lvalue_get(model, destination);
+
+		while (dest_shape && dest_shape->kind == PIGEN_EXPR_GROUP)
+			dest_shape = pigen_expr_get(model,
+				dest_shape->as.group.operand);
+		if (dest_lvalue && dest_lvalue->kind == PIGEN_LVALUE_PROJECTION &&
+			dest_shape && (dest_shape->kind == PIGEN_EXPR_SELECT ||
+				dest_shape->kind == PIGEN_EXPR_INDEX))
+		{
+			const pigen_semantic_signal *dest_signal = pigen_signal_get(
+				model, dest_lvalue->as.projection.signal);
+			const pigen_transfer_type_descriptor *descriptor = dest_signal ?
+				pigen_transfer_type_descriptor_get(
+					dest_signal->transfer_type) : NULL;
+
+			if (descriptor && !descriptor->is_static)
+				return fail_location(resolver, assignment->location,
+					"buffered signal destination must be written as a "
+					"complete value");
+		}
+	}
+
 	{
 		const pigen_semantic_lvalue *dest_lvalue =
 			pigen_lvalue_get(model, destination);
@@ -1183,6 +1269,41 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 		return fail_location(resolver, assignment->location,
 			"transfer value requires a compatible expression");
 	source_value = pigen_expr_get(model, value);
+	{
+		const pigen_semantic_expr *slice_value = source_value;
+
+		while (slice_value &&
+			slice_value->kind == PIGEN_EXPR_CONVERSION)
+			slice_value = pigen_expr_get(model,
+				slice_value->as.conversion.operand);
+		if (destination.index != PIGEN_INVALID_ID && slice_value &&
+			(slice_value->kind == PIGEN_EXPR_SELECT ||
+			 slice_value->kind == PIGEN_EXPR_INDEX))
+	{
+		const pigen_semantic_lvalue *dest = pigen_lvalue_get(model,
+			destination);
+		const pigen_semantic_signal *dest_signal = dest &&
+			dest->kind == PIGEN_LVALUE_PROJECTION ? pigen_signal_get(model,
+				dest->as.projection.signal) : NULL;
+		const pigen_transfer_type_descriptor *descriptor = dest_signal ?
+			pigen_transfer_type_descriptor_get(dest_signal->transfer_type) :
+			NULL;
+
+		if (dest_signal && descriptor && !descriptor->is_static)
+		{
+			pigen_const_expr_id dw = pigen_data_type_packed_width(model,
+				destination_value->data_type);
+			pigen_const_expr_id vw = pigen_data_type_packed_width(model,
+				slice_value->data_type);
+			uint64_t d = 0, v = 0;
+
+			if (pigen_const_expr_evaluate_u64(model, dw, &d) &&
+				pigen_const_expr_evaluate_u64(model, vw, &v) && d != v)
+				return fail_location(resolver, assignment->location,
+					"Pigen transfer aggregate width mismatch");
+		}
+		}
+	}
 	if (!destination_value || !source_value ||
 		destination_value->shape.index != source_value->shape.index)
 		return fail_location(resolver, assignment->location,

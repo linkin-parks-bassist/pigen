@@ -13,7 +13,7 @@ if grep -q '__pigen_ready' "$tmp/out.sv"; then
 	exit 1
 fi
 "$tool" tests/no_reset.pigen -o "$tmp/no_reset.sv"
-grep -q '.reset(0)' "$tmp/no_reset.sv"
+grep -q ".reset(1'b0)" "$tmp/no_reset.sv"
 verilator --lint-only --top-module no_reset rtl/pigen_primitives.sv "$tmp/no_reset.sv"
 "$tool" tests/always_block.pigen -o "$tmp/always_block.sv"
 grep -q 'assign destination__pigen_in_valid = (enable == 1 && source__pigen_valid) && destination__pigen_in_ready;' "$tmp/always_block.sv"

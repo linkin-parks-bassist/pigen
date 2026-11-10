@@ -231,6 +231,28 @@ static void assert_instantiation_preserved(pigen_source_manager *sources,
 	free_fixture(&fixture);
 }
 
+static void assert_packed_struct_typedef(pigen_source_manager *sources,
+	const char *name, const char *text)
+{
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *root;
+	const pigen_syntax_node *node;
+	const pigen_syntax_type *type;
+
+	assert(parse_fixture(sources, name, text, &fixture));
+	assert(!fixture.error.message);
+	root = pigen_syntax_get(&fixture.tree, (pigen_syntax_id){0});
+	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
+	node = pigen_syntax_get(&fixture.tree, root->first_child);
+	assert(node && node->kind == PIGEN_SYNTAX_TYPEDEF);
+	assert(node->next_sibling.index == PIGEN_INVALID_ID);
+	assert(span_is(sources, node->location.source_span, text));
+	type = pigen_syntax_type_get(&fixture.tree.types,
+		node->as.type_definition.type);
+	assert(type && type->is_packed_struct && type->member_count == 2);
+	free_fixture(&fixture);
+}
+
 static void assert_compilation_unit_opaque_without_arena_leakage(
 	pigen_source_manager *sources, const char *name, const char *text)
 {
@@ -731,8 +753,7 @@ static void test_transactional_typedef_ownership(
 	assert_opaque_without_arena_leakage(sources,
 		"module_byte_typedef.sv",
 		"module module_byte_typedef; typedef byte byte_t; endmodule");
-	assert_compilation_unit_opaque_without_arena_leakage(sources,
-		"ordinary_aggregate_typedef.sv",
+	assert_packed_struct_typedef(sources, "ordinary_aggregate_typedef.sv",
 		"typedef struct packed { logic [3:0] tag; logic flag; } packet_t;");
 	assert_compilation_unit_opaque_without_arena_leakage(sources,
 		"ordinary_array_typedef.sv",
