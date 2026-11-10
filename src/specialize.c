@@ -493,6 +493,202 @@ static char *build_instance_text(const char *source, const pigen_tokens *tokens,
 	return out.data ? out.data : pigen_copy_range("", 0);
 }
 
+typedef struct {
+	char **names;
+	size_t count;
+	size_t capacity;
+} spec_function_names;
+
+static int has_function_name(const spec_function_names *functions,
+	const char *name)
+{
+	for (size_t i = 0; i < functions->count; i++)
+		if (text_equals(functions->names[i], name)) return 1;
+	return 0;
+}
+
+static void collect_function_names(const char *source,
+	const pigen_tokens *tokens, spec_function_names *functions)
+{
+	for (size_t i = 0; i + 2 < tokens->count; i++)
+	{
+		size_t open, name;
+
+		if (!token_is_text(source, &tokens->items[i], "function")) continue;
+		for (open = i + 1; open < tokens->count; open++)
+			if (token_is_text(source, &tokens->items[open], "(")) break;
+		if (open == tokens->count) continue;
+		for (name = open; name > i; name--)
+			if (token_is_identifier(&tokens->items[name - 1])) break;
+		if (name <= i) continue;
+		if (functions->count == functions->capacity)
+		{
+			functions->capacity = functions->capacity ?
+				functions->capacity * 2 : 8;
+			functions->names = pigen_resize(functions->names,
+				functions->capacity * sizeof(*functions->names));
+		}
+		functions->names[functions->count++] = token_text(source,
+			&tokens->items[name - 1]);
+	}
+}
+
+static int statement_has_function(const char *source, const pigen_tokens *tokens,
+	const spec_function_names *functions, size_t first, size_t last)
+{
+	for (size_t i = first; i + 1 < last; i++)
+	{
+		char *name;
+
+		if (!token_is_identifier(&tokens->items[i]) ||
+			!token_is_text(source, &tokens->items[i + 1], "(")) continue;
+		name = token_text(source, &tokens->items[i]);
+		{
+			int found = has_function_name(functions, name);
+
+			free(name);
+			if (found) return 1;
+		}
+	}
+	return 0;
+}
+
+static int statement_is_pigen(const char *source, const pigen_tokens *tokens,
+	const spec_module *module, size_t first, size_t last)
+{
+	static const char *const words[] = {
+		"buf", "port", "fifo", "skid", "pipeline", "fsm", "transfer",
+		"validate", "invalidate", "flush", "peek", "pipeline_reset",
+	};
+
+	for (size_t i = first; i < last; i++)
+	{
+		for (size_t k = 0; k < sizeof words / sizeof *words; k++)
+			if (token_is_text(source, &tokens->items[i], words[k])) return 1;
+	}
+	if (module && first < last && token_is_identifier(&tokens->items[first]))
+	{
+		char *name = token_text(source, &tokens->items[first]);
+		int found = buffered_port(module, name);
+
+		free(name);
+		if (found) return 1;
+	}
+	return 0;
+}
+
+static int add_mixed_process_splits(const char *source,
+	const pigen_tokens *tokens, spec_module *modules, size_t module_count,
+	spec_replacement **replacements, size_t *replacement_count)
+{
+	spec_function_names functions = {0};
+	size_t count = 0;
+
+	collect_function_names(source, tokens, &functions);
+	for (size_t i = 0; i + 4 < tokens->count; i++)
+	{
+		size_t event_open, event_close, begin, end, at, stmt;
+		spec_module *module = module_containing(modules, module_count, i);
+		pigen_string structured = {0}, retained = {0};
+		int state = 0; /* 0 none, 1 saw function, 2 saw pigen */
+
+		if (!token_is_text(source, &tokens->items[i], "always_ff") ||
+			!token_is_text(source, &tokens->items[i + 1], "@") ||
+			!token_is_text(source, &tokens->items[i + 2], "(")) continue;
+		event_open = i + 2;
+		event_close = find_matching(source, tokens, event_open, "(", ")",
+			tokens->count);
+		if (event_close == tokens->count ||
+			!token_is_text(source, &tokens->items[event_close + 1], "begin"))
+			continue;
+		begin = event_close + 1;
+		end = begin + 1;
+		{
+			size_t depth = 0;
+
+			for (; end < tokens->count; end++)
+			{
+				if (token_is_text(source, &tokens->items[end], "begin")) depth++;
+				else if (token_is_text(source, &tokens->items[end], "end") &&
+					!depth) break;
+				else if (token_is_text(source, &tokens->items[end], "end") &&
+					depth) depth--;
+			}
+		}
+		if (end == tokens->count) continue;
+		for (at = begin + 1; at < end; at = stmt)
+		{
+			size_t depth = 0;
+			int function;
+
+			stmt = at;
+			for (; stmt < end; stmt++)
+			{
+				if (token_is_text(source, &tokens->items[stmt], "begin")) depth++;
+				else if (token_is_text(source, &tokens->items[stmt], "end") &&
+					depth) depth--;
+				else if (!depth &&
+					token_is_text(source, &tokens->items[stmt], ";")) break;
+			}
+			if (stmt == end) break;
+			stmt++;
+			function = statement_has_function(source, tokens, &functions, at,
+				stmt);
+			if (function) state |= 1;
+			else if (statement_is_pigen(source, tokens, module, at, stmt))
+				state |= 2;
+			if (function)
+			{
+				pigen_append_range(&retained,
+					source + tokens->items[at].span.start,
+					tokens->items[stmt - 1].span.end -
+					tokens->items[at].span.start);
+				pigen_append(&retained, "\n");
+			}
+			else
+			{
+				pigen_append_range(&structured,
+					source + tokens->items[at].span.start,
+					tokens->items[stmt - 1].span.end -
+					tokens->items[at].span.start);
+				pigen_append(&structured, "\n");
+			}
+		}
+		if (state == 3 && structured.length && retained.length)
+		{
+			pigen_string text = {0};
+			size_t prefix_end = tokens->items[begin].span.end;
+
+			pigen_append_range(&text, source + tokens->items[i].span.start,
+				prefix_end - tokens->items[i].span.start);
+			pigen_append(&text, "\n");
+			pigen_append_range(&text, structured.data, structured.length);
+			pigen_append(&text, "end\n");
+			pigen_append_range(&text, source + tokens->items[i].span.start,
+				prefix_end - tokens->items[i].span.start);
+			pigen_append(&text, "\n");
+			pigen_append_range(&text, retained.data, retained.length);
+			pigen_append(&text, "end");
+			{
+				spec_replacement *grown = pigen_resize(*replacements,
+					(*replacement_count + 1) * sizeof(**replacements));
+
+				*replacements = grown;
+				(*replacements)[(*replacement_count)++] = (spec_replacement){
+					tokens->items[i].span.start,
+					tokens->items[end].span.end, text.data};
+			}
+			count++;
+			i = end;
+		}
+		if (structured.data) free(structured.data);
+		if (retained.data) free(retained.data);
+	}
+	for (size_t i = 0; i < functions.count; i++) free(functions.names[i]);
+	free(functions.names);
+	return count;
+}
+
 char *pigen_specialize_parameterized_instances(const char *source, size_t length)
 {
 	pigen_tokens tokens = {0};
@@ -510,6 +706,11 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 	if (!source || !length) return NULL;
 	pigen_lex_source(source, length, &tokens);
 	collect_modules(source, &tokens, &modules, &module_count);
+	if (add_mixed_process_splits(source, &tokens, modules, module_count,
+		&replacements, &replacement_count))
+		changed = 1;
+	else
+		changed = 0;
 	for (size_t i = 0; i < tokens.count; i++)
 	{
 		const pigen_token *token = &tokens.items[i];
@@ -688,6 +889,14 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 	}
 	if (changed)
 	{
+		for (size_t i = 0; i + 1 < replacement_count; i++)
+			for (size_t j = i + 1; j < replacement_count; j++)
+				if (replacements[j].start < replacements[i].start)
+				{
+					spec_replacement swap = replacements[i];
+					replacements[i] = replacements[j];
+					replacements[j] = swap;
+				}
 		if (clones.length)
 		{
 			pigen_append_range(&output, clones.data, clones.length);
