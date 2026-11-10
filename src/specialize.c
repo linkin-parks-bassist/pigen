@@ -238,6 +238,48 @@ static int parse_buffered_ports(const char *source, const pigen_tokens *tokens,
 	return 1;
 }
 
+static void append_parameter(spec_parameter **parameters, size_t *count,
+	char *name, char *expr)
+{
+	*parameters = pigen_resize(*parameters, (*count + 1) * sizeof(**parameters));
+	(*parameters)[(*count)++] = (spec_parameter){name, expr};
+}
+
+static void parse_module_localparams(const char *source,
+	const pigen_tokens *tokens, spec_module *module, size_t first, size_t last)
+{
+	for (size_t at = first; at < last; at++)
+	{
+		size_t semi, equals, name;
+		char *parameter_name, *expr;
+		int exists = 0;
+
+		if (!token_is_text(source, &tokens->items[at], "localparam")) continue;
+		for (semi = at + 1; semi < last; semi++)
+			if (token_is_text(source, &tokens->items[semi], ";")) break;
+		if (semi == last) break;
+		for (equals = at + 1; equals < semi; equals++)
+			if (token_is_text(source, &tokens->items[equals], "=")) break;
+		if (equals == semi) { at = semi; continue; }
+		for (name = equals; name > at; name--)
+			if (token_is_identifier(&tokens->items[name - 1])) break;
+		if (name <= at) { at = semi; continue; }
+		parameter_name = token_text(source, &tokens->items[name - 1]);
+		for (size_t p = 0; p < module->parameter_count; p++)
+			if (text_equals(module->parameters[p].name, parameter_name))
+				exists = 1;
+		if (exists) free(parameter_name);
+		else
+		{
+			expr = build_tokens(source, tokens, equals + 1, semi,
+				module->parameters, module->parameter_count);
+			append_parameter(&module->parameters, &module->parameter_count,
+				parameter_name, expr);
+		}
+		at = semi;
+	}
+}
+
 static int collect_modules(const char *source, const pigen_tokens *tokens,
 	spec_module **modules, size_t *module_count)
 {
@@ -300,6 +342,8 @@ static int collect_modules(const char *source, const pigen_tokens *tokens,
 					parse_buffered_ports(source, tokens, &module, port_open,
 						port_close);
 			}
+			parse_module_localparams(source, tokens, &module, header_end + 1,
+				endmodule);
 			if (count == capacity)
 			{
 				capacity = capacity ? capacity * 2 : 4;
