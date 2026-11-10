@@ -28,6 +28,9 @@ vvp "$temporary/fabric-skid"
 iverilog -g2012 -s fabric_router_tb -o "$temporary/router" \
 	"$temporary/fabric.sv" tests/fabric_router_tb.sv
 vvp "$temporary/router"
+iverilog -g2012 -s fabric_router_fair_tb -o "$temporary/router-fair" \
+	"$temporary/fabric.sv" tests/fabric_router_fair_tb.sv
+vvp "$temporary/router-fair"
 
 "$pigen" tests/fabric_block.pigen -o "$temporary/fabric-repeat.sv"
 cmp "$temporary/fabric.sv.svg" "$temporary/fabric-repeat.sv.svg"
