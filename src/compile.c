@@ -258,10 +258,13 @@ int pigen_compile_source(pigen_source_manager *sources,
         }
     }
     
-    pigen_rtl_name_id naming_result = pigen_rtl_assign_names(&rtl_model, sources, name_requests, name_request_count);
+    pigen_rtl_name_id naming_result = {0};
+    if (name_request_count > 0)
+        naming_result = pigen_rtl_assign_names(&rtl_model, sources, name_requests,
+            name_request_count);
     if (name_requests) free(name_requests);
     
-    if (naming_result.index == PIGEN_INVALID_ID) {
+    if (name_request_count > 0 && naming_result.index == PIGEN_INVALID_ID) {
         if (error) {
             error->origin = (pigen_origin_id){0};
             error->span = (pigen_source_span){0};

@@ -1,0 +1,6 @@
+module m(input logic clk, input logic en, output logic [1:0] y);
+ typedef enum logic [1:0] {IDLE, RUN, STOP} state_t;
+ state_t s;
+ always_ff @(posedge clk) if (en) s <= RUN;
+ assign y = s;
+endmodule
