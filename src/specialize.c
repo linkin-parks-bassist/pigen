@@ -979,6 +979,96 @@ static char *leaf_if_condition(const char *source,
 	return build_tokens(source, tokens, open + 1, close, NULL, 0);
 }
 
+typedef struct {
+	size_t begin_token;
+	char *condition;
+} guard_condition_entry;
+
+static char *leaf_guard_expression(const char *source,
+	const pigen_tokens *tokens, size_t outer_begin, size_t leaf_first,
+	size_t leaf_last, int *safe)
+{
+	guard_condition_entry *entries = NULL;
+	size_t entry_count = 0;
+	size_t *begins = NULL;
+	size_t depth = 0;
+	pigen_string out = {0};
+
+	*safe = 1;
+	for (size_t at = outer_begin + 1; at < leaf_first; at++)
+	{
+		if (token_is_text(source, &tokens->items[at], "else") ||
+			token_is_text(source, &tokens->items[at], "for") ||
+			token_is_text(source, &tokens->items[at], "while") ||
+			token_is_text(source, &tokens->items[at], "case") ||
+			token_is_text(source, &tokens->items[at], "casex") ||
+			token_is_text(source, &tokens->items[at], "casez"))
+		{
+			*safe = 0;
+			goto done;
+		}
+		if (token_is_text(source, &tokens->items[at], "if") &&
+			token_is_text(source, &tokens->items[at + 1], "("))
+		{
+			size_t close = find_matching(source, tokens, at + 1, "(", ")",
+				tokens->count);
+
+			if (close < tokens->count &&
+				token_is_text(source, &tokens->items[close + 1], "begin"))
+			{
+				entries = pigen_resize(entries,
+					(entry_count + 1) * sizeof(*entries));
+				entries[entry_count].begin_token = close + 1;
+				entries[entry_count].condition =
+					build_tokens(source, tokens, at + 2, close, NULL, 0);
+				entry_count++;
+			}
+		}
+	}
+	for (size_t at = outer_begin + 1; at < leaf_first; at++)
+	{
+		if (token_is_text(source, &tokens->items[at], "begin"))
+		{
+			begins = pigen_resize(begins, (depth + 1) * sizeof(*begins));
+			begins[depth++] = at;
+		}
+		else if (token_is_text(source, &tokens->items[at], "end") && depth)
+			depth--;
+	}
+	for (size_t level = 0; level < depth; level++)
+		for (size_t e = 0; e < entry_count; e++)
+			if (entries[e].begin_token == begins[level])
+			{
+				if (out.length) pigen_append(&out, " && ");
+				pigen_append(&out, "(");
+				pigen_append(&out, entries[e].condition);
+				pigen_append(&out, ")");
+			}
+	{
+		char *leaf_condition = leaf_if_condition(source, tokens, leaf_first,
+			leaf_last);
+
+		if (leaf_condition)
+		{
+			if (out.length) pigen_append(&out, " && ");
+			pigen_append(&out, "(");
+			pigen_append(&out, leaf_condition);
+			pigen_append(&out, ")");
+			free(leaf_condition);
+		}
+	}
+done:
+	for (size_t e = 0; e < entry_count; e++) free(entries[e].condition);
+	free(entries);
+	free(begins);
+	if (!*safe)
+	{
+		if (out.data) free(out.data);
+		return NULL;
+	}
+	return out.data ? out.data : pigen_copy_range("", 0);
+}
+
 static void leaf_guard_range(const char *source, const pigen_tokens *tokens,
 	size_t outer_begin, size_t leaf_first, size_t *guard_start,
 	size_t *guard_end)
@@ -1150,9 +1240,10 @@ static int add_mixed_process_splits(const char *source,
 						{
 							size_t guard_start, guard_end;
 							int covered = 1;
-
-							char *function_condition = leaf_if_condition(source,
-								tokens, leaves[f].first, leaves[f].last);
+							int guard_safe = 0;
+							char *guard_expression = leaf_guard_expression(
+								source, tokens, begin, leaves[f].first,
+								leaves[f].last, &guard_safe);
 
 							for (size_t other = 0; other < leaf_count; other++)
 							{
@@ -1174,7 +1265,7 @@ static int add_mixed_process_splits(const char *source,
 									!span_has_identifier(source, tokens,
 										leaves[p].first, leaves[p].last, lhs))
 									continue;
-								if (function_condition)
+								if (guard_safe)
 								{
 									if (leaves[p].first < leaves[f].last)
 										covered = 0;
@@ -1186,7 +1277,6 @@ static int add_mixed_process_splits(const char *source,
 									 guard_start != begin))
 									covered = 0;
 							}
-							free(function_condition);
 							if (!covered)
 							{
 								rhs = NULL;
@@ -1205,21 +1295,16 @@ static int add_mixed_process_splits(const char *source,
 							pigen_append(&prologue, "; assign ");
 							pigen_append(&prologue, helper_name);
 							pigen_append(&prologue, " = ");
+							if (guard_expression && guard_expression[0])
 							{
-								char *condition = leaf_if_condition(source, tokens,
-									leaves[f].first, leaves[f].last);
-
-								if (condition)
-								{
-									pigen_append(&prologue, condition);
-									pigen_append(&prologue, " ? ");
-									pigen_append(&prologue, rhs);
-									pigen_append(&prologue, " : ");
-									pigen_append(&prologue, lhs);
-									free(condition);
-								}
-								else pigen_append(&prologue, rhs);
+								pigen_append(&prologue, guard_expression);
+								pigen_append(&prologue, " ? ");
+								pigen_append(&prologue, rhs);
+								pigen_append(&prologue, " : ");
+								pigen_append(&prologue, lhs);
 							}
+							else pigen_append(&prologue, rhs);
+							free(guard_expression);
 							pigen_append(&prologue, ";\n");
 							substitutions = pigen_resize(substitutions,
 								(substitution_count + 1) *
