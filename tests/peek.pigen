@@ -1,0 +1,3 @@
+module peekm(input logic clk, input logic reset, input bit[8] buf source, output bit[8] buf dest);
+ always_ff @(posedge clk) dest <= peek(source);
+endmodule

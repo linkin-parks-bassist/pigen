@@ -2825,6 +2825,52 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			free(ready_terms);
 			return -1;
 		}
+	{
+		pigen_data_type_id logic_one = pigen_data_type_sized_logic(sem, 1,
+			PIGEN_SIGN_UNSIGNED);
+		pigen_rtl_type_id control_type = pigen_lower_rtl_type(lowering,
+			logic_one);
+		pigen_rtl_expr_id zero = control_literal(lowering, control_type, 0,
+			(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID}, 0, 0});
+
+		if (control_type.index == PIGEN_INVALID_ID ||
+			zero.index == PIGEN_INVALID_ID)
+		{
+			free(ready_targets);
+			free(ready_terms);
+			return -1;
+		}
+		for (size_t signal_index = 0; signal_index < sem->signal_count;
+			signal_index++)
+		{
+			const pigen_semantic_signal *signal = &sem->signals[signal_index];
+			const pigen_rtl_signal_endpoints *endpoints;
+			size_t group;
+			int driven = 0;
+
+			if (signal->module.index != module.index ||
+				signal->direction != PIGEN_SEMANTIC_INPUT ||
+				lowering->lowered_endpoint_count <= signal_index)
+				continue;
+			endpoints = &lowering->lowered_endpoints[signal_index];
+			if (endpoints->source_ready.index == PIGEN_INVALID_ID)
+				continue;
+			for (group = 0; group < ready_group_count; group++)
+				if (ready_targets[group].index ==
+					endpoints->source_ready.index)
+				{ driven = 1; break; }
+			if (!driven &&
+				pigen_rtl_equation_add_with_owner(rtl, rtl_module,
+					endpoints->source_ready, zero,
+					(pigen_source_span){(pigen_source_id){PIGEN_INVALID_ID},
+						0, 0}).index == PIGEN_INVALID_ID)
+			{
+				free(ready_targets);
+				free(ready_terms);
+				return -1;
+			}
+		}
+	}
 	free(ready_targets);
 	free(ready_terms);
 	if (flush_storage_drives(lowering, module, rtl_module)) return -1;
