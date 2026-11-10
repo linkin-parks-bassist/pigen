@@ -1,0 +1,6 @@
+module inact(input logic clk, input logic reset, input bit[8] buf source);
+ always_ff @(posedge clk) begin
+  invalidate(source);
+  validate(source);
+ end
+endmodule

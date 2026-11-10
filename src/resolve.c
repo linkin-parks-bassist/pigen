@@ -1648,6 +1648,10 @@ static int resolve_action(resolver *resolver, pigen_module_id module_id,
 		const pigen_semantic_signal *declared =
 			pigen_signal_get(model, signal);
 
+		if (declared && (declared->direction == PIGEN_SEMANTIC_INPUT ||
+			declared->direction == PIGEN_SEMANTIC_INOUT))
+			return fail_location(resolver, statement->location,
+				"cannot modify validity of a module input");
 		if (declared && pigen_transfer_type_descriptor_get(
 			declared->transfer_type) &&
 			pigen_transfer_type_descriptor_get(declared->transfer_type)
