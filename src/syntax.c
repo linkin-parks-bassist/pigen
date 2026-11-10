@@ -72,6 +72,10 @@ static int node_has_function_call(syntax_parser *parser,
 	pigen_syntax_id node_id, size_t depth);
 static int node_has_structured_construct(syntax_parser *parser,
 	pigen_syntax_id node_id, size_t depth);
+static int retained_procedural_end(syntax_parser *parser, size_t start,
+	size_t limit, size_t *end_out);
+static int retained_process_has_structured(syntax_parser *parser,
+	size_t start, size_t end);
 static void remember_function_name(syntax_parser *parser, size_t start,
 	size_t end);
 
@@ -2307,6 +2311,52 @@ static int parse_retained_module_item(syntax_parser *parser,
 	return 1;
 }
 
+static int retained_procedural_end(syntax_parser *parser, size_t start,
+	size_t limit, size_t *end_out)
+{
+	size_t event_close = matching_parenthesis(parser, start + 2, limit);
+	size_t body, end;
+
+	if (event_close == limit) return 0;
+	body = event_close + 1;
+	if (token_is(parser, body, "begin"))
+	{
+		size_t depth = 0;
+		end = body;
+		while (end < limit)
+		{
+			if (token_is(parser, end, "begin")) depth++;
+			else if (token_is(parser, end, "end") && !--depth) break;
+			end++;
+		}
+		if (end == limit) return 0;
+	}
+	else
+	{
+		end = top_level_token(parser, body, limit, ";");
+		if (end == limit) return 0;
+	}
+	*end_out = end;
+	return 1;
+}
+
+static int retained_process_has_structured(syntax_parser *parser,
+	size_t start, size_t end)
+{
+	size_t at;
+
+	for (at = start; at <= end; at++)
+		if (token_is(parser, at, "pipeline") ||
+			token_is(parser, at, "fsm") ||
+			token_is(parser, at, "validate") ||
+			token_is(parser, at, "invalidate") ||
+			token_is(parser, at, "flush") ||
+			token_is(parser, at, "pipeline_reset") ||
+			token_is(parser, at, "pipe_reset"))
+			return 1;
+	return 0;
+}
+
 static int parse_retained_procedural(syntax_parser *parser,
 	pigen_syntax_id module, size_t start, size_t limit, size_t *after_item)
 {
@@ -2704,7 +2754,19 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 					return fail(parser, at + 2,
 						"exactly one posedge event control");
 				/* Valid-edge ordinary SV that the structured subset does not
-				 * model (for example a function call) is preserved verbatim. */
+				 * model is preserved verbatim, but it cannot also carry
+				 * Pigen pipeline/FSM/actions that would be emitted raw. */
+				{
+					size_t process_end;
+
+					if (!retained_procedural_end(parser, at, after,
+						&process_end)) return 0;
+					if (retained_process_has_structured(parser, at,
+						process_end))
+						return fail(parser, at,
+							"structured construct in an unsupported clocked "
+							"process is not supported");
+				}
 				if (!parse_retained_procedural(parser, module, at, after,
 					&retained_after)) return 0;
 				at = retained_after;

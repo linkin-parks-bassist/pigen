@@ -1,0 +1,8 @@
+module casem(input logic clk, input logic reset, input logic sel, input bit[8] buf source, output bit[8] buf destination);
+ always_ff @(posedge clk) begin
+  case (sel)
+   1'b0: destination <= source;
+   default: invalidate(destination);
+  endcase
+ end
+endmodule
