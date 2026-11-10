@@ -1,13 +1,13 @@
 ---
 status: green
-revised_at: "2026-11-10T11:42:43+11:00"
+revised_at: "2026-11-10T11:49:45+11:00"
 ---
 
-pigen-fork runs a structured-only compiler. Done and verified end-to-end: declarations, abstract inputs, static/buffered transfers with real primitives, clocked processes including static updates and indexed/selected destination paths, module emission, inline pipelines (both stage forms), FSMs, transfer-and-branch, `accepts`/`valid`/`ready`/`peek`, validity actions with static-signal diagnostics, grouped mutually exclusive storage producers, multi-module sources, retained ordinary-SV `assign`/instances/non-clocked `always` items, standard child instantiations, semantic instance/port metadata, inline fabric endpoint wiring plus standalone fabric block synthesis (routers, skid hops, path metadata, deterministic SVG), priority/router arbitration, typed and `integer`/`int` parameters, constant operator evaluation, aligned/misaligned concatenation destinations, signedness reinterpretation, `$signed`/`$unsigned`, mixed-integral conditionals, aliased arithmetic widening, and rejection of multi-edge always_ff. Ten examples are migrated. `make test` passes through pipeline-test; the smoke suite now reaches port_bram and stops because an unpacked memory object loses its array shape when emitted.
+pigen-fork runs a structured-only compiler. `make test` now completes end to end. Done and verified: declarations, abstract inputs, static/buffered transfers with real primitives, clocked processes with static updates and indexed/selected destinations, unpacked memory shapes, combined exclusive source-ready equations, module emission, inline pipelines both stage forms, FSMs, transfer-and-branch, accessors, validity actions with static diagnostics, grouped storage producers, multi-module sources, retained ordinary-SV items, child instantiations, inline fabric plus standalone fabric synthesis (routers, skid hops, path metadata, SVG), typed/integer parameters, constant operator evaluation, concatenation destinations aligned and misaligned, signedness reinterpretation, `$signed`/`$unsigned`, mixed-integral conditionals, aliased arithmetic widening, and multi-edge always_ff rejection. resolve/expression/semantic/rtl/sv-emit/compile/fabric/core-language/pipeline suites and the smoke corpus pass.
 
 Remaining work, in order:
-1. Carry unpacked array shape into RTL objects and emit it (`logic [7:0] mem [0:15]`), so `port_bram`'s indexed reads/writes lint cleanly; then finish the remaining smoke fixtures and diagnostics.
-2. Aggregate/function/struct forms (including function calls and saturation helpers), then migrate `biquad_bank` and `df1_biquad_bandpass`.
+1. Run `make verify` and take its failures in order: migrate the remaining legacy example/waveform fixtures (`biquad_bank`, `df1_biquad_bandpass`, and any stale smoke-era targets) and rebaseline only where the structured emitter intentionally differs.
+2. Aggregate/function/struct forms (function calls and saturation helpers) required by the two biquad examples.
 3. Complete remaining ordinary-SV expression coverage (aliases, macro forms, `_` concatenation placeholder).
 
 Open questions for David: pipeline yield control surface; retention of fabric manifest/SVG; struct-like child-instantiation grammar (is/struct/like/child/instantiation/specified.md).
