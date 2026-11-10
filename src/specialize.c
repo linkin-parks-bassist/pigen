@@ -983,7 +983,7 @@ static char *leaf_if_condition(const char *source,
 typedef struct {
 	size_t begin_token;
 	char *condition;
-	int from_else_if;
+	char *else_guard;
 } guard_condition_entry;
 
 static char *leaf_guard_expression(const char *source,
@@ -1019,19 +1019,24 @@ static char *leaf_guard_expression(const char *source,
 			if (close < tokens->count &&
 				token_is_text(source, &tokens->items[close + 1], "begin"))
 			{
+				char *condition = build_tokens(source, tokens, at + 2, close,
+					NULL, 0);
+				pigen_string otherwise = {0};
+
+				pigen_append(&otherwise, "!(");
+				pigen_append(&otherwise, condition);
+				pigen_append(&otherwise, ")");
 				entries = pigen_resize(entries,
 					(entry_count + 1) * sizeof(*entries));
 				entries[entry_count].begin_token = close + 1;
-				entries[entry_count].condition =
-					build_tokens(source, tokens, at + 2, close, NULL, 0);
-				entries[entry_count].from_else_if = 0;
+				entries[entry_count].condition = condition;
+				entries[entry_count].else_guard = otherwise.data;
 				entry_count++;
 			}
 		}
 		if (token_is_text(source, &tokens->items[at], "else"))
 		{
-			char *negated = NULL;
-			int matched_else_if = 0;
+			char *else_guard = NULL;
 
 			for (size_t e = 0; e < entry_count; e++)
 			{
@@ -1040,33 +1045,23 @@ static char *leaf_guard_expression(const char *source,
 
 				if (begin_end + 1 == at)
 				{
-					pigen_string text = {0};
-
-					pigen_append(&text, "!(");
-					pigen_append(&text, entries[e].condition);
-					pigen_append(&text, ")");
-					negated = text.data;
-					matched_else_if = entries[e].from_else_if;
+					else_guard = entries[e].else_guard ?
+						pigen_copy_range(entries[e].else_guard,
+							strlen(entries[e].else_guard)) : NULL;
 					break;
 				}
 			}
-			if (negated && matched_else_if)
-			{
-				free(negated);
-				*safe = 0;
-				goto done;
-			}
-			if (negated && token_is_text(source, &tokens->items[at + 1],
+			if (else_guard && token_is_text(source, &tokens->items[at + 1],
 				"begin"))
 			{
 				entries = pigen_resize(entries,
 					(entry_count + 1) * sizeof(*entries));
 				entries[entry_count].begin_token = at + 1;
-				entries[entry_count].condition = negated;
-				entries[entry_count].from_else_if = 0;
+				entries[entry_count].condition = else_guard;
+				entries[entry_count].else_guard = NULL;
 				entry_count++;
 			}
-			else if (negated && token_is_text(source, &tokens->items[at + 1],
+			else if (else_guard && token_is_text(source, &tokens->items[at + 1],
 				"if") && token_is_text(source, &tokens->items[at + 2], "("))
 			{
 				size_t close = find_matching(source, tokens, at + 2, "(", ")",
@@ -1077,32 +1072,37 @@ static char *leaf_guard_expression(const char *source,
 				{
 					char *next = build_tokens(source, tokens, at + 3, close,
 						NULL, 0);
-					pigen_string combined = {0};
+					pigen_string condition = {0};
+					pigen_string otherwise = {0};
 
-					pigen_append(&combined, negated);
-					pigen_append(&combined, " && (");
-					pigen_append(&combined, next);
-					pigen_append(&combined, ")");
+					pigen_append(&condition, else_guard);
+					pigen_append(&condition, " && (");
+					pigen_append(&condition, next);
+					pigen_append(&condition, ")");
+					pigen_append(&otherwise, else_guard);
+					pigen_append(&otherwise, " && !(");
+					pigen_append(&otherwise, next);
+					pigen_append(&otherwise, ")");
 					entries = pigen_resize(entries,
 						(entry_count + 1) * sizeof(*entries));
 					entries[entry_count].begin_token = close + 1;
-					entries[entry_count].condition = combined.data;
-					entries[entry_count].from_else_if = 1;
+					entries[entry_count].condition = condition.data;
+					entries[entry_count].else_guard = otherwise.data;
 					entry_count++;
 					ignored_if = at + 1;
 					free(next);
-					free(negated);
+					free(else_guard);
 				}
 				else
 				{
-					free(negated);
+					free(else_guard);
 					*safe = 0;
 					goto done;
 				}
 			}
 			else
 			{
-				free(negated);
+				free(else_guard);
 				*safe = 0;
 				goto done;
 			}
@@ -1141,7 +1141,11 @@ static char *leaf_guard_expression(const char *source,
 		}
 	}
 done:
-	for (size_t e = 0; e < entry_count; e++) free(entries[e].condition);
+	for (size_t e = 0; e < entry_count; e++)
+	{
+		free(entries[e].condition);
+		free(entries[e].else_guard);
+	}
 	free(entries);
 	free(begins);
 	if (!*safe)

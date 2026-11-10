@@ -1,0 +1,13 @@
+module mixed_final_else(input logic clk, input logic a, input logic b, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ always_ff @(posedge clk) begin
+  if (a) begin
+  end else if (b) begin
+  end else begin
+   temp = inc(i);
+  end
+  o <= temp;
+ end
+endmodule
