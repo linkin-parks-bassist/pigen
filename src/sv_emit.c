@@ -802,6 +802,8 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 	}
 	if (type->is_byte)
 		buf_append_str(b, "byte");
+	else if (type->is_integer_keyword)
+		buf_append_str(b, "integer");
 	else
 	{
 		const char *base = type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
@@ -811,7 +813,7 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 		if (type->signedness == PIGEN_SIGN_SIGNED)
 			buf_append_str(b, " signed");
 	}
-	if (width > 1 && !type->is_byte)
+	if (width > 1 && !type->is_byte && !type->is_integer_keyword)
 	{
 		buf_append_str(b, " ");
 		if (emit_range(b, type) != 0)
@@ -836,6 +838,8 @@ static int emit_type(const struct buf *unused, struct buf *b,
 	(void)unused;
 	if (type->is_byte)
 		buf_append_str(b, "byte");
+	else if (type->is_integer_keyword)
+		buf_append_str(b, "integer");
 	else
 	{
 		buf_append_str(b, type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
@@ -843,7 +847,7 @@ static int emit_type(const struct buf *unused, struct buf *b,
 		if (type->signedness == PIGEN_SIGN_SIGNED)
 			buf_append_str(b, " signed");
 	}
-	if (type->width > 1 && !type->is_byte)
+	if (type->width > 1 && !type->is_byte && !type->is_integer_keyword)
 	{
 		buf_append_str(b, " ");
 		if (emit_range(b, type) != 0)

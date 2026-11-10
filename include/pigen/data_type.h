@@ -141,6 +141,8 @@ pigen_numerical_interpretation pigen_data_type_numerical_interpretation(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
 int pigen_data_type_is_byte(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
+int pigen_data_type_is_integer_keyword(
+	const pigen_semantic_model *model, pigen_data_type_id data_type);
 int pigen_data_type_is_integral(const pigen_semantic_model *model,
 	pigen_data_type_id type);
 pigen_state_domain pigen_data_type_state_domain(

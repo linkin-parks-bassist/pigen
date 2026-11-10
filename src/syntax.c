@@ -631,7 +631,8 @@ static declaration_parse_result parse_systemverilog_static_declaration(
 	int has_prefix_transfer = systemverilog_prefix_transfer_type_at(parser, at,
 		&prefix_transfer_type);
 	int has_static_prefix = has_prefix_transfer || token_is(parser, at, "logic") ||
-		token_is(parser, at, "bit") || token_is(parser, at, "signed") ||
+		token_is(parser, at, "bit") || token_is(parser, at, "byte") ||
+		token_is(parser, at, "integer") || token_is(parser, at, "signed") ||
 		token_is(parser, at, "unsigned") || token_is(parser, at, "[") ||
 		(direction != PIGEN_DIRECTION_INTERNAL &&
 			declarator_candidate(parser, at, limit));

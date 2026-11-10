@@ -38,6 +38,7 @@ typedef struct {
 	const pigen_rtl_packed_dimension *dimensions;
 	size_t dimension_count;
 	int is_byte;
+	int is_integer_keyword;
 } pigen_rtl_type;
 
 typedef enum {

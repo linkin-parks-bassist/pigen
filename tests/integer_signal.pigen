@@ -1,0 +1,3 @@
+module integer_signal(input logic clk, input logic reset, input integer a, output integer y);
+ always_ff @(posedge clk) y <= a;
+endmodule

@@ -817,8 +817,6 @@ static void test_transactional_and_clean_break_syntax(
 		const char *source;
 	} opaque_case;
 	static const opaque_case opaque_cases[] = {
-		{"ordinary_byte.sv",
-			"module ordinary_byte; byte ordinary_value; endmodule"},
 		{"ordinary_interface_port.sv",
 			"module ordinary_interface_port(input bus_if.master endpoint); "
 			"endmodule"},

@@ -12,6 +12,7 @@ typedef enum {
 	PIGEN_DATA_TYPE_LOGIC,
 	PIGEN_DATA_TYPE_BIT,
 	PIGEN_DATA_TYPE_BYTE,
+	PIGEN_DATA_TYPE_INTEGER,
 	PIGEN_DATA_TYPE_UNSIZED_INTEGER,
 	PIGEN_DATA_TYPE_SIGNED_INTEGER,
 	PIGEN_DATA_TYPE_UNSIGNED_INTEGER,
@@ -37,6 +38,8 @@ static const primitive_data_type_descriptor primitive_data_types[] = {
 	{PIGEN_DATA_TYPE_BIT, "bit", 1, PIGEN_DATA_TYPE_STATE_TWO,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
 	{PIGEN_DATA_TYPE_BYTE, "byte", 8, PIGEN_DATA_TYPE_STATE_TWO,
+		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
+	{PIGEN_DATA_TYPE_INTEGER, "integer", 32, PIGEN_DATA_TYPE_STATE_FOUR,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
 	{PIGEN_DATA_TYPE_UNSIZED_INTEGER, NULL, 32, PIGEN_DATA_TYPE_STATE_FOUR,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
@@ -298,7 +301,8 @@ pigen_signedness pigen_data_type_signedness(
 		const pigen_data_type *known = data_type_get(model, data_type);
 
 		if (!known) return PIGEN_SIGN_INVALID;
-		if (known->constructor == PIGEN_DATA_TYPE_BYTE &&
+		if ((known->constructor == PIGEN_DATA_TYPE_BYTE ||
+			 known->constructor == PIGEN_DATA_TYPE_INTEGER) &&
 			known->signedness == PIGEN_SIGN_IMPLICIT)
 			return PIGEN_SIGN_SIGNED;
 		if (known->signedness != PIGEN_SIGN_IMPLICIT ||
@@ -479,7 +483,8 @@ pigen_type_spelling_domain pigen_data_type_spelling_domain(
 	if (spelling_is(model, spelling, "int") ||
 		spelling_is(model, spelling, "uint"))
 		return PIGEN_TYPE_SPELLING_PIGEN;
-	if (spelling_is(model, spelling, "byte"))
+	if (spelling_is(model, spelling, "byte") ||
+		spelling_is(model, spelling, "integer"))
 		return PIGEN_TYPE_SPELLING_SYSTEMVERILOG;
 	return primitive_from_spelling(model, spelling) ?
 		PIGEN_TYPE_SPELLING_SYSTEMVERILOG : PIGEN_TYPE_SPELLING_UNKNOWN;
@@ -659,6 +664,7 @@ pigen_data_type_unqualified_transfer_policy(
 				PIGEN_UNQUALIFIED_TRANSFER_STATIC;
 		case PIGEN_DATA_TYPE_LOGIC:
 		case PIGEN_DATA_TYPE_BYTE:
+		case PIGEN_DATA_TYPE_INTEGER:
 		case PIGEN_DATA_TYPE_UNSIZED_INTEGER:
 			return PIGEN_UNQUALIFIED_TRANSFER_STATIC;
 		default:
@@ -686,6 +692,15 @@ int pigen_data_type_is_byte(const pigen_semantic_model *model,
 		underlying_data_type(model, type));
 
 	return known && known->constructor == PIGEN_DATA_TYPE_BYTE;
+}
+
+int pigen_data_type_is_integer_keyword(const pigen_semantic_model *model,
+	pigen_data_type_id type)
+{
+	const pigen_data_type *known = data_type_get(model,
+		underlying_data_type(model, type));
+
+	return known && known->constructor == PIGEN_DATA_TYPE_INTEGER;
 }
 
 int pigen_data_type_is_integral(const pigen_semantic_model *model,
