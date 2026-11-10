@@ -1,0 +1,9 @@
+module mixed_task(input logic clk, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ task automatic bump;
+  temp = temp + 8'd1;
+ endtask
+ always_ff @(posedge clk) begin
+  bump;
+  o <= i;
+ end
+endmodule

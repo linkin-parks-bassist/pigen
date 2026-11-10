@@ -516,7 +516,35 @@ static void collect_function_names(const char *source,
 
 		if (!token_is_text(source, &tokens->items[i], "function")) continue;
 		for (open = i + 1; open < tokens->count; open++)
-			if (token_is_text(source, &tokens->items[open], "(")) break;
+			if (token_is_text(source, &tokens->items[open], "(") ||
+				token_is_text(source, &tokens->items[open], ";")) break;
+		if (open == tokens->count) continue;
+		for (name = open; name > i; name--)
+			if (token_is_identifier(&tokens->items[name - 1])) break;
+		if (name <= i) continue;
+		if (functions->count == functions->capacity)
+		{
+			functions->capacity = functions->capacity ?
+				functions->capacity * 2 : 8;
+			functions->names = pigen_resize(functions->names,
+				functions->capacity * sizeof(*functions->names));
+		}
+		functions->names[functions->count++] = token_text(source,
+			&tokens->items[name - 1]);
+	}
+}
+
+static void collect_task_names(const char *source,
+	const pigen_tokens *tokens, spec_function_names *functions)
+{
+	for (size_t i = 0; i + 2 < tokens->count; i++)
+	{
+		size_t open, name;
+
+		if (!token_is_text(source, &tokens->items[i], "task")) continue;
+		for (open = i + 1; open < tokens->count; open++)
+			if (token_is_text(source, &tokens->items[open], "(") ||
+				token_is_text(source, &tokens->items[open], ";")) break;
 		if (open == tokens->count) continue;
 		for (name = open; name > i; name--)
 			if (token_is_identifier(&tokens->items[name - 1])) break;
@@ -541,7 +569,8 @@ static int statement_has_function(const char *source, const pigen_tokens *tokens
 		char *name;
 
 		if (!token_is_identifier(&tokens->items[i]) ||
-			!token_is_text(source, &tokens->items[i + 1], "(")) continue;
+			(!token_is_text(source, &tokens->items[i + 1], "(") && i != first))
+			continue;
 		name = token_text(source, &tokens->items[i]);
 		{
 			int found = has_function_name(functions, name);
@@ -581,6 +610,7 @@ typedef struct {
 	size_t first;
 	size_t last;
 	int function;
+	int task;
 	int pigen;
 } spec_leaf_statement;
 
@@ -648,9 +678,11 @@ static int add_mixed_process_splits(const char *source,
 	const char **error, size_t *error_offset)
 {
 	spec_function_names functions = {0};
+	spec_function_names tasks = {0};
 	size_t count = 0;
 
 	collect_function_names(source, tokens, &functions);
+	collect_task_names(source, tokens, &tasks);
 	for (size_t i = 0; i + 4 < tokens->count; i++)
 	{
 		size_t event_open, event_close, begin, end, at;
@@ -659,7 +691,7 @@ static int add_mixed_process_splits(const char *source,
 		size_t leaf_count = 0;
 		size_t boundary;
 		int parens = 0;
-		int has_function = 0, has_pigen = 0;
+		int has_function = 0, has_task = 0, has_pigen = 0;
 
 		if (!token_is_text(source, &tokens->items[i], "always_ff") ||
 			!token_is_text(source, &tokens->items[i + 1], "@") ||
@@ -700,13 +732,16 @@ static int add_mixed_process_splits(const char *source,
 					leaf.last = at + 1;
 					leaf.function = statement_has_function(source, tokens,
 						&functions, boundary, at + 1);
+					leaf.task = statement_has_function(source, tokens, &tasks,
+						boundary, at + 1);
 					leaf.pigen = statement_is_pigen(source, tokens, module,
 						boundary, at + 1);
 					leaves = pigen_resize(leaves,
 						(leaf_count + 1) * sizeof(*leaves));
 					leaves[leaf_count++] = leaf;
 					if (leaf.function) has_function = 1;
-					else if (leaf.pigen) has_pigen = 1;
+					if (leaf.task) has_task = 1;
+					if (leaf.pigen) has_pigen = 1;
 				}
 				boundary = at + 1;
 			}
@@ -716,6 +751,18 @@ static int add_mixed_process_splits(const char *source,
 				 token_is_text(source, &tokens->items[at], "else") ||
 				 token_is_text(source, &tokens->items[at], ":")))
 				boundary = at + 1;
+		}
+		if (has_task && has_pigen)
+		{
+			*error = "mixed clocked body with a task call cannot be split "
+				"without changing side-effect ordering";
+			*error_offset = tokens->items[boundary].span.start;
+			free(leaves);
+			for (size_t x = 0; x < functions.count; x++) free(functions.names[x]);
+			for (size_t x = 0; x < tasks.count; x++) free(tasks.names[x]);
+			free(functions.names);
+			free(tasks.names);
+			return -1;
 		}
 		if (has_function && has_pigen)
 		{
@@ -785,7 +832,9 @@ static int add_mixed_process_splits(const char *source,
 			{
 				free(leaves);
 				for (size_t x = 0; x < functions.count; x++) free(functions.names[x]);
+				for (size_t x = 0; x < tasks.count; x++) free(tasks.names[x]);
 				free(functions.names);
+				free(tasks.names);
 				return -1;
 			}
 			structured = copy_block_with_replacements(source, tokens, i,
@@ -812,7 +861,9 @@ static int add_mixed_process_splits(const char *source,
 		free(leaves);
 	}
 	for (size_t i = 0; i < functions.count; i++) free(functions.names[i]);
+	for (size_t i = 0; i < tasks.count; i++) free(tasks.names[i]);
 	free(functions.names);
+	free(tasks.names);
 	return count;
 }
 
