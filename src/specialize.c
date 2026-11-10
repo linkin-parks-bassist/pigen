@@ -997,8 +997,7 @@ static char *leaf_guard_expression(const char *source,
 	*safe = 1;
 	for (size_t at = outer_begin + 1; at < leaf_first; at++)
 	{
-		if (token_is_text(source, &tokens->items[at], "else") ||
-			token_is_text(source, &tokens->items[at], "for") ||
+		if (token_is_text(source, &tokens->items[at], "for") ||
 			token_is_text(source, &tokens->items[at], "while") ||
 			token_is_text(source, &tokens->items[at], "case") ||
 			token_is_text(source, &tokens->items[at], "casex") ||
@@ -1022,6 +1021,42 @@ static char *leaf_guard_expression(const char *source,
 				entries[entry_count].condition =
 					build_tokens(source, tokens, at + 2, close, NULL, 0);
 				entry_count++;
+			}
+		}
+		if (token_is_text(source, &tokens->items[at], "else"))
+		{
+			char *negated = NULL;
+
+			for (size_t e = 0; e < entry_count; e++)
+			{
+				size_t begin_end = find_matching(source, tokens,
+					entries[e].begin_token, "begin", "end", tokens->count);
+
+				if (begin_end + 1 == at)
+				{
+					pigen_string text = {0};
+
+					pigen_append(&text, "!(");
+					pigen_append(&text, entries[e].condition);
+					pigen_append(&text, ")");
+					negated = text.data;
+					break;
+				}
+			}
+			if (negated && token_is_text(source, &tokens->items[at + 1],
+				"begin"))
+			{
+				entries = pigen_resize(entries,
+					(entry_count + 1) * sizeof(*entries));
+				entries[entry_count].begin_token = at + 1;
+				entries[entry_count].condition = negated;
+				entry_count++;
+			}
+			else
+			{
+				free(negated);
+				*safe = 0;
+				goto done;
 			}
 		}
 	}
