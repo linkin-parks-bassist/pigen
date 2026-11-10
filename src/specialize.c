@@ -784,6 +784,43 @@ static int matching_substitution(const spec_substitution *substitutions,
 	return -1;
 }
 
+static char *substitute_text_substitutions(const char *text,
+	const spec_substitution *substitutions, size_t count)
+{
+	pigen_string out = {0};
+	size_t at = 0;
+
+	while (text && text[at])
+	{
+		size_t start = at;
+
+		if (!pigen_is_identifier_char((unsigned char)text[at]))
+		{
+			pigen_append_range(&out, text + at, 1);
+			at++;
+			continue;
+		}
+		while (text[at] && pigen_is_identifier_char((unsigned char)text[at]))
+			at++;
+		{
+			size_t length = at - start;
+			int replaced = 0;
+
+			for (size_t i = 0; i < count; i++)
+				if (substitutions[i].name && substitutions[i].expression &&
+					strlen(substitutions[i].name) == length &&
+					!memcmp(substitutions[i].name, text + start, length))
+				{
+					pigen_append(&out, substitutions[i].expression);
+					replaced = 1;
+					break;
+				}
+			if (!replaced) pigen_append_range(&out, text + start, length);
+		}
+	}
+	return out.data ? out.data : pigen_copy_range("", 0);
+}
+
 static char *block_statement_rhs(const char *source,
 	const pigen_tokens *tokens, size_t first, size_t last)
 {
@@ -1187,21 +1224,6 @@ static void leaf_guard_range(const char *source, const pigen_tokens *tokens,
 }
 
 
-static int statement_rhs_has_identifier(const char *source,
-	const pigen_tokens *tokens, size_t first, size_t last, const char *name)
-{
-	size_t equals = last;
-
-	for (size_t i = first; i < last; i++)
-		if (token_is_text(source, &tokens->items[i], "=") ||
-			token_is_text(source, &tokens->items[i], "<="))
-		{
-			equals = i + 1;
-			break;
-		}
-	return equals < last &&
-		span_has_identifier(source, tokens, equals, last, name);
-}
 
 static int add_mixed_process_splits(const char *source,
 	const pigen_tokens *tokens, spec_module *modules, size_t module_count,
@@ -1361,11 +1383,7 @@ static int add_mixed_process_splits(const char *source,
 									if (other != f && leaves[other].last >
 										last_writer_last)
 										last_writer_last = leaves[other].last;
-									if (other != f &&
-										statement_rhs_has_identifier(source,
-											tokens, leaves[other].first,
-											leaves[other].last, lhs))
-										covered = 0;
+
 								}
 								free(other_lhs);
 							}
@@ -1407,15 +1425,32 @@ static int add_mixed_process_splits(const char *source,
 							pigen_append(&prologue, "; assign ");
 							pigen_append(&prologue, helper_name);
 							pigen_append(&prologue, " = ");
-							if (guard_expression && guard_expression[0])
 							{
-								pigen_append(&prologue, guard_expression);
-								pigen_append(&prologue, " ? ");
-								pigen_append(&prologue, rhs);
-								pigen_append(&prologue, " : ");
-								pigen_append(&prologue, lhs);
+								char *rhs_sub = substitute_text_substitutions(rhs,
+									substitutions, substitution_count);
+								char *previous = pigen_copy_range(lhs, strlen(lhs));
+
+								for (size_t sub = 0; sub < substitution_count; sub++)
+									if (text_equals(substitutions[sub].name, lhs))
+									{
+										free(previous);
+										previous = pigen_copy_range(
+											substitutions[sub].expression,
+											strlen(substitutions[sub].expression));
+										break;
+									}
+								if (guard_expression && guard_expression[0])
+								{
+									pigen_append(&prologue, guard_expression);
+									pigen_append(&prologue, " ? ");
+									pigen_append(&prologue, rhs_sub);
+									pigen_append(&prologue, " : ");
+									pigen_append(&prologue, previous);
+								}
+								else pigen_append(&prologue, rhs_sub);
+								free(rhs_sub);
+								free(previous);
 							}
-							else pigen_append(&prologue, rhs);
 							free(guard_expression);
 							pigen_append(&prologue, ";\n");
 							{
