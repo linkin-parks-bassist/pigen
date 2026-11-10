@@ -1,7 +1,9 @@
-module fn(input logic clk, input logic [7:0] a, output logic [7:0] y, output logic [7:0] z);
+`define INC(x) ((x) + 8'd1)
+module fn(input logic clk, input logic [7:0] a, output logic [7:0] y, output logic [7:0] z, output logic [7:0] w);
   function automatic logic [7:0] inc(input logic [7:0] v);
     inc = v + 8'd1;
   endfunction
   assign y = inc(a);
+  assign w = `INC(a);
   always_ff @(posedge clk) z <= inc(a);
 endmodule

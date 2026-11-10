@@ -1242,11 +1242,12 @@ static int emit_module(struct buf *b, const pigen_source_manager *sources,
 		case PIGEN_OUTPUT_RETAINED:
 		{
 			size_t length = 0;
-			const char *text = pigen_source_span_text(sources,
-				child->as.span, &length);
+			const char *text = child->text ? child->text :
+				pigen_source_span_text(sources, child->as.span, &length);
 
 			if (!text)
 				return -1;
+			if (child->text) length = strlen(text);
 			buf_append_str(b, "  ");
 			buf_append(b, text, length);
 			buf_append_str(b, "\n");

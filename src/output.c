@@ -402,6 +402,45 @@ static int emit_module_records(pigen_output_model *model,
 	return 0;
 }
 
+static char *expanded_span_text(const pigen_syntax_tree *syntax,
+	pigen_source_span span)
+{
+	const pigen_expanded_source *expanded = syntax ? syntax->expanded : NULL;
+	pigen_string text = {0};
+	size_t i;
+	int has_macro = 0;
+
+	if (!expanded) return NULL;
+	for (i = 0; i < expanded->token_count; i++)
+	{
+		const pigen_expanded_token *token = &expanded->tokens[i];
+		pigen_source_span token_span = pigen_origin_expansion_span(expanded,
+			token->origin);
+		size_t length = 0;
+		const char *word = pigen_expanded_token_text(expanded, token,
+			&length);
+
+		if (!word || !length || token_span.source.index != span.source.index ||
+			token_span.start < span.start || token_span.end > span.end)
+			continue;
+		{
+			const pigen_token_origin *origin = pigen_origin_get(expanded,
+				token->origin);
+
+			if (!origin || origin->kind != PIGEN_ORIGIN_SOURCE)
+				has_macro = 1;
+		}
+		if (text.length) pigen_append(&text, " ");
+		pigen_append_range(&text, word, length);
+	}
+	if (!text.length || !has_macro)
+	{
+		free(text.data);
+		return NULL;
+	}
+	return text.data;
+}
+
 static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, uint32_t node_index,
 	pigen_rtl_module_id module, int in_module, pigen_output_error *error);
@@ -439,6 +478,7 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	{
 		item.kind = PIGEN_OUTPUT_RETAINED;
 		item.as.span = node->location.source_span;
+		item.text = expanded_span_text(syntax, item.as.span);
 		if (in_module)
 			return pigen_output_item_add_child(model, module, item) ==
 				PIGEN_INVALID_ID ? -1 : 0;
@@ -449,6 +489,7 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	{
 		item.kind = PIGEN_OUTPUT_RETAINED;
 		item.as.span = node->location.source_span;
+		item.text = expanded_span_text(syntax, item.as.span);
 		if (in_module)
 			return pigen_output_item_add_child(model, module, item) ==
 				PIGEN_INVALID_ID ? -1 : 0;
@@ -534,8 +575,12 @@ int pigen_build_output_model(pigen_output_model *model,
 
 void pigen_free_output_model(pigen_output_model *model)
 {
+	size_t i;
+
 	if (!model)
 		return;
+	for (i = 0; i < model->item_count; i++)
+		free(model->items[i].text);
 	free(model->items);
 	free(model->nested_layouts);
 	*model = (pigen_output_model){0};

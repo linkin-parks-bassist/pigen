@@ -47,6 +47,7 @@ typedef struct {
 		pigen_rtl_process_id process;
 	} as;
 	pigen_rtl_record_range layout;
+	char *text; /* Owned macro-expanded text for retained items. */
 } pigen_output_item;
 
 /* The ordered output model. It owns items (the ordered slot array) and the
