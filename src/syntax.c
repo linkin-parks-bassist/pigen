@@ -960,7 +960,8 @@ static int parse_parameter(syntax_parser *parser, pigen_syntax_id module,
 			pigen_parse_type_prefix(parser->expanded, at, equal,
 				&parser->tree->expressions, &parser->tree->types, &typed,
 				&typed_name, parser->error) &&
-			identifier(parser, typed_name) && typed_name + 1 == equal)
+			identifier(parser, typed_name) && typed_name > at &&
+			typed_name + 1 == equal)
 		{
 			name = typed_name;
 			equals = equal;

@@ -682,16 +682,22 @@ int main(void)
 		size_t expression_count = model.expression_count;
 		const pigen_syntax_expr *invalid_syntax = pigen_syntax_expr_get(
 			&syntax.expressions, invalid_mixed_syntax);
+		/* Mixed based-literal/ordinary arithmetic is supported now, so
+		 * this expression resolves to a binary operation instead of an
+		 * error. */
 		semantic_error = (pigen_semantic_error){0};
-		assert(pigen_resolve_expression(&syntax, &model, scope,
-			invalid_mixed_syntax, &policy, &semantic_error).index ==
-			PIGEN_INVALID_ID);
-		assert(model.expression_count == expression_count);
+		{
+			pigen_expr_id mixed = pigen_resolve_expression(&syntax, &model,
+				scope, invalid_mixed_syntax, &policy, &semantic_error);
+			const pigen_semantic_expr *mixed_known = pigen_expr_get(&model,
+				mixed);
+
+			assert(mixed.index != PIGEN_INVALID_ID);
+			assert(mixed_known && mixed_known->kind == PIGEN_EXPR_BINARY);
+			assert(mixed_known->data_type.index != PIGEN_INVALID_ID);
+		}
+		assert(model.expression_count >= expression_count);
 		assert(invalid_syntax);
-		assert(semantic_error.span.start ==
-			invalid_syntax->as.binary.operator_location.source_span.start);
-		assert(semantic_error.span.end ==
-			invalid_syntax->as.binary.operator_location.source_span.end);
 	}
 
 	runtime = pigen_resolve_expression(&syntax, &model, scope,
