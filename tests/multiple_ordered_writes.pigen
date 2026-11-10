@@ -1,0 +1,13 @@
+module mixed_multi(input logic clk, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ function automatic logic [7:0] dec(input logic [7:0] x);
+  dec = x - 8'd2;
+ endfunction
+ always_ff @(posedge clk) begin
+  temp = inc(i);
+  temp = dec(i);
+  o <= temp;
+ end
+endmodule

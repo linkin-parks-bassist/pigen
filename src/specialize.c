@@ -1187,6 +1187,22 @@ static void leaf_guard_range(const char *source, const pigen_tokens *tokens,
 }
 
 
+static int statement_rhs_has_identifier(const char *source,
+	const pigen_tokens *tokens, size_t first, size_t last, const char *name)
+{
+	size_t equals = last;
+
+	for (size_t i = first; i < last; i++)
+		if (token_is_text(source, &tokens->items[i], "=") ||
+			token_is_text(source, &tokens->items[i], "<="))
+		{
+			equals = i + 1;
+			break;
+		}
+	return equals < last &&
+		span_has_identifier(source, tokens, equals, last, name);
+}
+
 static int add_mixed_process_splits(const char *source,
 	const pigen_tokens *tokens, spec_module *modules, size_t module_count,
 	spec_replacement **replacements, size_t *replacement_count,
@@ -1332,16 +1348,25 @@ static int add_mixed_process_splits(const char *source,
 								source, tokens, begin, leaves[f].first,
 								leaves[f].last, &guard_safe);
 
+							size_t last_writer_last = leaves[f].last;
 							for (size_t other = 0; other < leaf_count; other++)
 							{
 								char *other_lhs;
 
-								if (other == f || !leaves[other].function)
-									continue;
+								if (!leaves[other].function) continue;
 								other_lhs = statement_lhs_name(source, tokens,
 									leaves[other].first, leaves[other].last);
 								if (other_lhs && text_equals(lhs, other_lhs))
-									covered = 0;
+								{
+									if (other != f && leaves[other].last >
+										last_writer_last)
+										last_writer_last = leaves[other].last;
+									if (other != f &&
+										statement_rhs_has_identifier(source,
+											tokens, leaves[other].first,
+											leaves[other].last, lhs))
+										covered = 0;
+								}
 								free(other_lhs);
 							}
 							leaf_guard_range(source, tokens, begin,
@@ -1354,7 +1379,7 @@ static int add_mixed_process_splits(const char *source,
 									continue;
 								if (guard_safe)
 								{
-									if (leaves[p].first < leaves[f].last)
+									if (leaves[p].first < last_writer_last)
 										covered = 0;
 								}
 								else if (leaves[p].first <= guard_start ||
@@ -1393,13 +1418,28 @@ static int add_mixed_process_splits(const char *source,
 							else pigen_append(&prologue, rhs);
 							free(guard_expression);
 							pigen_append(&prologue, ";\n");
-							substitutions = pigen_resize(substitutions,
-								(substitution_count + 1) *
-								sizeof(*substitutions));
-							substitutions[substitution_count++] =
-								(spec_substitution){lhs,
-									pigen_copy_range(helper_name,
-										strlen(helper_name))};
+							{
+								int replaced = 0;
+								char *helper_copy = pigen_copy_range(helper_name,
+									strlen(helper_name));
+
+								for (size_t sub = 0; sub < substitution_count; sub++)
+									if (text_equals(substitutions[sub].name, lhs))
+									{
+										free(substitutions[sub].expression);
+										substitutions[sub].expression = helper_copy;
+										replaced = 1;
+										break;
+									}
+								if (!replaced)
+								{
+									substitutions = pigen_resize(substitutions,
+										(substitution_count + 1) *
+										sizeof(*substitutions));
+									substitutions[substitution_count++] =
+										(spec_substitution){lhs, helper_copy};
+								}
+							}
 							lhs = NULL;
 							substituted = 1;
 							free(type);
