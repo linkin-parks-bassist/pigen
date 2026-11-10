@@ -1,0 +1,14 @@
+module prcond(input logic clk, input logic reset, input logic clear, input bit[8] buf source, output bit[8] buf destination);
+ always_ff @(posedge clk) begin
+  if (clear) begin
+   pipeline_reset(pipe);
+  end else begin
+   pipeline pipe begin
+    bit[8] value;
+    stage begin value <= source; end
+    yield value;
+   endpipeline
+   destination <= pipe;
+  end
+ end
+endmodule

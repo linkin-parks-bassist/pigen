@@ -13,6 +13,16 @@
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
 
 typedef struct {
+	pigen_module_id module;
+	pigen_process_id process;
+	pigen_clock_domain_id domain;
+	pigen_source_span name;
+	pigen_predicate_id guard;
+	pigen_source_span span;
+	int consumed;
+} pending_pipeline_reset;
+
+typedef struct {
 	const pigen_syntax_tree *syntax;
 	pigen_semantic_model *model;
 	const pigen_resolve_policy *policy;
@@ -26,6 +36,9 @@ typedef struct {
 	const pigen_source_span *fsm_state_names;
 	size_t fsm_state_count;
 	int in_pipeline_stage;
+	pending_pipeline_reset *reset_bindings;
+	size_t reset_binding_count;
+	size_t reset_binding_capacity;
 } resolver;
 
 static int fail(resolver *resolver, pigen_source_span span, const char *message)
@@ -85,6 +98,19 @@ static pigen_source_span token_expansion(const resolver *resolver,
 		resolver->syntax->expanded, token);
 	return known ? pigen_origin_expansion_span(resolver->syntax->expanded,
 		known->origin) : (pigen_source_span){INVALID_ID(pigen_source_id), 0, 0};
+}
+
+static int spelling_text_equal(resolver *resolver, pigen_source_span left,
+	pigen_source_span right)
+{
+	size_t left_length = 0, right_length = 0;
+	const char *left_text = pigen_source_span_text(resolver->model->sources,
+		left, &left_length);
+	const char *right_text = pigen_source_span_text(resolver->model->sources,
+		right, &right_length);
+
+	return left_text && right_text && left_length == right_length &&
+		!memcmp(left_text, right_text, left_length);
 }
 
 static int fail_token(resolver *resolver, pigen_token_id token,
@@ -722,6 +748,47 @@ static int resolve_pipeline(resolver *resolver, pigen_module_id module_id,
 		child = node->next_sibling;
 	}
 	if (!ok) return 0;
+
+	/* Apply any pipeline_reset bindings already seen for this pipeline. */
+	{
+		pigen_source_span pipeline_name = token_spelling(resolver,
+			pipeline->as.pipeline.name);
+		size_t r;
+
+		for (r = 0; r < resolver->reset_binding_count; r++)
+		{
+			pending_pipeline_reset *reset = &resolver->reset_bindings[r];
+			size_t signal_index;
+
+			if (reset->consumed ||
+				reset->module.index != module_id.index ||
+				reset->process.index != process.index ||
+				!spelling_text_equal(resolver, reset->name, pipeline_name))
+				continue;
+			if (pigen_action_add(model, pipeline_id, module_id, process,
+				domain, ident.signal, PIGEN_ACTION_FLUSH, reset->guard,
+				reset->span).index == PIGEN_INVALID_ID)
+				return fail_location(resolver, pipeline->location,
+					"invalid pipeline reset binding");
+			for (signal_index = 0; signal_index < model->signal_count;
+				signal_index++)
+			{
+				const pigen_semantic_signal *field = &model->signals[
+					signal_index];
+
+				if (field->module.index == module_id.index &&
+					field->span.start >= pipeline->location.source_span.start &&
+					field->span.end <= pipeline->location.source_span.end &&
+					pigen_action_add(model, pipeline_id, module_id, process,
+						domain, (pigen_signal_id){(uint32_t)signal_index},
+						PIGEN_ACTION_FLUSH, reset->guard,
+						reset->span).index == PIGEN_INVALID_ID)
+					return fail_location(resolver, pipeline->location,
+						"invalid pipeline field reset binding");
+			}
+			reset->consumed = 1;
+		}
+	}
 
 	/* Stage-local declarations live in a nested scope; stage assignments are
 	 * transfers resolved in that scope. */
@@ -1632,6 +1699,24 @@ static int resolve_action(resolver *resolver, pigen_module_id module_id,
 
 	(void)syntax_id;
 	if (!module) return 0;
+	if (statement->as.action.action == 4)
+	{
+		if (resolver->reset_binding_count ==
+			resolver->reset_binding_capacity)
+		{
+			resolver->reset_binding_capacity =
+				resolver->reset_binding_capacity ?
+				resolver->reset_binding_capacity * 2 : 8;
+			resolver->reset_bindings = pigen_resize(
+				resolver->reset_bindings,
+				resolver->reset_binding_capacity *
+				sizeof(*resolver->reset_bindings));
+		}
+		resolver->reset_bindings[resolver->reset_binding_count++] =
+			(pending_pipeline_reset){module_id, process, domain, target,
+				guard, statement->location.source_span, 0};
+		return 1;
+	}
 	symbol = pigen_symbol_lookup(model, module->scope, target);
 	known = pigen_symbol_get(model, symbol);
 	if (!known || known->kind != PIGEN_SYMBOL_SIGNAL)
@@ -2089,7 +2174,7 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	resolver resolver = {syntax, model, policy, error,
 		(pigen_scope_id){PIGEN_INVALID_ID},
 		INVALID_ID(pigen_expr_id), INVALID_ID(pigen_data_type_id),
-		NULL, 0, 0};
+		NULL, 0, 0, NULL, 0, 0};
 	const pigen_syntax_node *root;
 	pigen_syntax_id child;
 	pigen_source_span root_span;

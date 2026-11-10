@@ -1178,6 +1178,17 @@ static int parse_pipeline_reset(syntax_parser *parser,
 	if (!token_is(parser, start + 1, "(") || !identifier(parser, start + 2) ||
 		!token_is(parser, start + 3, ")") || !token_is(parser, start + 4, ";"))
 		return 0;
+	{
+		pigen_syntax_node node = {0};
+
+		node.kind = PIGEN_SYNTAX_ACTION;
+		node.location = range_location(parser, start, start + 5);
+		node.parent = INVALID_SYNTAX;
+		node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+		node.as.action.action = 4;
+		node.as.action.target = (pigen_token_id){(uint32_t)(start + 2)};
+		add_child(parser, parent, add_node(parser, node));
+	}
 	*after = start + 5;
 	(*assignment_count)++;
 	return 1;
