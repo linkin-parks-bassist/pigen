@@ -800,10 +800,14 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 			buf_append_str(b, " ");
 		buf_append_str(b, " ");
 	}
-	if (type->signedness == PIGEN_SIGN_SIGNED)
-		buf_append_str(b, "logic signed");
-	else
-		buf_append_str(b, "logic");
+	{
+		const char *base = type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
+			"bit" : "logic";
+
+		buf_append_str(b, base);
+		if (type->signedness == PIGEN_SIGN_SIGNED)
+			buf_append_str(b, " signed");
+	}
 	if (width > 1)
 	{
 		buf_append_str(b, " ");
@@ -827,8 +831,10 @@ static int emit_type(const struct buf *unused, struct buf *b,
 	const pigen_rtl_type *type)
 {
 	(void)unused;
-	buf_append_str(b, type->signedness == PIGEN_SIGN_SIGNED ?
-		"logic signed" : "logic");
+	buf_append_str(b, type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
+		"bit" : "logic");
+	if (type->signedness == PIGEN_SIGN_SIGNED)
+		buf_append_str(b, " signed");
 	if (type->width > 1)
 	{
 		buf_append_str(b, " ");

@@ -24,10 +24,10 @@ grep -q 'assign source_ready = (source_valid && high__pigen_in_ready) && low__pi
 test "$(grep -c 'assign source_ready =' "$tmp/transfer_block.sv")" = 1
 verilator --lint-only --top-module transfer_block rtl/pigen_primitives.sv "$tmp/transfer_block.sv"
 "$tool" tests/ports.pigen -o "$tmp/ports.sv"
-grep -q 'input  logic \[7:0\] incoming' "$tmp/ports.sv"
+grep -q 'input  bit \[7:0\] incoming' "$tmp/ports.sv"
 grep -q 'input  logic incoming_valid' "$tmp/ports.sv"
 grep -q 'output logic incoming_ready' "$tmp/ports.sv"
-grep -q 'output logic \[7:0\] outgoing' "$tmp/ports.sv"
+grep -q 'output bit \[7:0\] outgoing' "$tmp/ports.sv"
 grep -q 'output logic outgoing_valid' "$tmp/ports.sv"
 grep -q 'input  logic outgoing_ready' "$tmp/ports.sv"
 cp tests/basic.pigen "$tmp/default-name.pigen"

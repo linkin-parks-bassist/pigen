@@ -1,0 +1,13 @@
+module two_state(
+	input logic clk,
+	input int[16] buf a,
+	input uint[16] buf b,
+	output int[16] buf y,
+	output uint[16] buf z
+);
+	always_ff @(posedge clk)
+	begin
+		y <= a;
+		z <= b;
+	end
+endmodule
