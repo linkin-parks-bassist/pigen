@@ -1,0 +1,15 @@
+module mixed_case(input logic clk, input logic [1:0] sel, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ always_ff @(posedge clk) begin
+  case (sel)
+   2'd1: begin
+    temp = inc(i);
+   end
+   default: begin
+   end
+  endcase
+  o <= temp;
+ end
+endmodule

@@ -1345,6 +1345,24 @@ static int add_mixed_process_splits(const char *source,
 			}
 			free(function_lhs);
 		}
+		if (has_function && has_pigen)
+			for (size_t at = begin + 1; at < end; at++)
+				if (token_is_text(source, &tokens->items[at], "case") ||
+					token_is_text(source, &tokens->items[at], "casex") ||
+					token_is_text(source, &tokens->items[at], "casez"))
+				{
+					*error = "case-guarded mixed clocked bodies require "
+						"sequential lowering, which is not yet supported";
+					*error_offset = tokens->items[at].span.start;
+					free(leaves);
+					for (size_t x = 0; x < functions.count; x++)
+						free(functions.names[x]);
+					for (size_t x = 0; x < tasks.count; x++)
+						free(tasks.names[x]);
+					free(functions.names);
+					free(tasks.names);
+					return -1;
+				}
 		if (has_task && has_pigen)
 		{
 			*error = "mixed clocked body with a task call cannot be split "
