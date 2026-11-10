@@ -1,14 +1,15 @@
 ---
 status: green
-revised_at: "2026-11-10T12:29:10+11:00"
+revised_at: "2026-11-10T12:58:29+11:00"
 ---
 
-pigen-fork runs a structured-only compiler. `make test` is fully green. `make verify` passes every gate except the two biquad examples. Done and verified: declarations, abstract inputs, static/buffered transfers with primitives, clocked processes with static/indexed destinations and unpacked memory shapes, combined exclusive readies, module emission, pipelines with structured diagnostics, FSMs, transfer-and-branch, accessors, validity actions, concatenation and scalar-RHS co-slicing, packed struct typedefs with member reads, inline and standalone fabric synthesis with routers/SVG, parameters, constant operators, signedness reinterpretation, `$signed`/`$unsigned`, mixed conditionals, aliased widening, sized literal concat members, indexed part-selects, sized one-bit primitive ties, and edge/destination diagnostics.
+pigen-fork runs a structured-only compiler. `make test` and `make verify` are both fully green, including both biquad examples, all waveform gates, fabric synthesis and the smoke corpus. Done and verified: declarations, abstract inputs, static/buffered transfers with primitives, clocked processes with static/indexed destinations and unpacked memory shapes, combined exclusive readies, pipelines with structured diagnostics, FSMs, transfer-and-branch, accessors, validity actions, concatenation and scalar-RHS co-slicing, nested concatenation destinations, packed struct typedefs with member reads, inline and standalone fabric synthesis, typed/integer parameters, constant operators, signedness reinterpretation, `$signed`/`$unsigned`, mixed conditionals, aliased widening and signedness, sized literal concat members, indexed part-selects, one-bit primitive ties, and edge/destination diagnostics.
 
-Remaining work, in order:
-1. Migrate `examples/biquad_bank.pigen` to data-first structured form (ports are still transfer-first; transfer blocks, macro-heavy arrays and pipeline-local wires remain) and take `biquad-bank-test` green.
-2. Migrate `examples/df1_biquad_bandpass.pigen`, adding the function-call/saturation-helper support it needs, then take `biquad-waveform` green.
-3. Complete remaining ordinary-SV expression coverage (macro forms, `_` concatenation placeholder).
+Remaining known spec gaps to audit and close:
+1. Packed struct member writes and function declarations/calls (only reads are implemented; examples avoid them by rewriting).
+2. `_` discard placeholder in concatenation destinations.
+3. Macro concatenation/stringification/required-argument forms beyond current object-like defines.
+4. Run a fresh requirement-by-requirement acceptance audit against `what/is/the/spec.md`, adding failing witnesses before implementation.
 
 Open questions for David: pipeline yield control surface; retention of fabric manifest/SVG; struct-like child-instantiation grammar (is/struct/like/child/instantiation/specified.md).
 
