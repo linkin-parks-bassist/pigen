@@ -59,7 +59,7 @@ integer-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-integer-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-integer-test tests/integer_test.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-integer-test tests/integer_test.c src/predicate.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-integer-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 

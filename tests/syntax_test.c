@@ -204,6 +204,33 @@ static void assert_opaque_without_arena_leakage(pigen_source_manager *sources,
 	free_fixture(&fixture);
 }
 
+static void assert_instantiation_preserved(pigen_source_manager *sources,
+	const char *name, const char *text)
+{
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const pigen_syntax_node *opaque;
+	const pigen_syntax_node *instance;
+	size_t statement = strlen("module ordinary_buf_gate; ");
+	size_t end = statement + strlen(
+		"buf gate_instance(output_signal, input_signal);");
+
+	assert(parse_fixture(sources, name, text, &fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	opaque = pigen_syntax_get(&fixture.tree, module->first_child);
+	assert(opaque && opaque->kind == PIGEN_SYNTAX_OPAQUE);
+	instance = pigen_syntax_get(&fixture.tree, opaque->next_sibling);
+	assert(instance && instance->kind == PIGEN_SYNTAX_INSTANCE);
+	assert(instance->location.source_span.start == statement);
+	assert(instance->location.source_span.end == end);
+	opaque = pigen_syntax_get(&fixture.tree, instance->next_sibling);
+	assert(opaque && opaque->kind == PIGEN_SYNTAX_OPAQUE);
+	assert(opaque->next_sibling.index == PIGEN_INVALID_ID);
+	free_fixture(&fixture);
+}
+
 static void assert_compilation_unit_opaque_without_arena_leakage(
 	pigen_source_manager *sources, const char *name, const char *text)
 {
@@ -607,7 +634,9 @@ static void test_contextual_leading_transfer_spelling(
 	const pigen_syntax_node *module;
 	const pigen_syntax_node *declaration;
 
-	assert_opaque_without_arena_leakage(sources, "ordinary_buf_gate.sv",
+	/* Instantiation-like `buf name(...)` is now a structured instance
+	 * rather than an opaque region. */
+	assert_instantiation_preserved(sources, "ordinary_buf_gate.sv",
 		"module ordinary_buf_gate; "
 		"buf gate_instance(output_signal, input_signal); endmodule");
 	assert_syntax_failure(sources, (syntax_failure){
