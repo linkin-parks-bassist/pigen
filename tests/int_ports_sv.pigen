@@ -1,0 +1,3 @@
+module int_ports(input int a, output int y);
+ assign y = a + 1;
+endmodule
