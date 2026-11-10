@@ -502,6 +502,7 @@ static int lvalue_is_assignable(const pigen_semantic_model *model,
 	size_t i;
 
 	if (!lvalue) return 0;
+	if (lvalue->kind == PIGEN_LVALUE_PLACEHOLDER) return 1;
 	if (lvalue->kind == PIGEN_LVALUE_CONCATENATION)
 	{
 		const pigen_lvalue_id *children = pigen_lvalue_children(model,
@@ -1172,12 +1173,150 @@ static int resolve_procedural_statement(resolver *resolver,
 	pigen_clock_domain_id domain, pigen_syntax_id statement_id,
 	pigen_predicate_id guard);
 
+static int syntax_is_placeholder(resolver *resolver,
+	pigen_syntax_expr_id expression)
+{
+	const pigen_syntax_expr *known = pigen_syntax_expr_get(
+		&resolver->syntax->expressions, expression);
+	pigen_source_span spelling;
+	size_t length = 0;
+	const char *text;
+
+	if (!known || known->kind != PIGEN_SYNTAX_EXPR_NAME) return 0;
+	spelling = token_spelling(resolver, known->as.atom.token);
+	text = pigen_source_span_text(resolver->model->sources, spelling, &length);
+	return text && length == 1 && text[0] == '_';
+}
+
+static int resolve_placeholder_assignment(resolver *resolver,
+	pigen_module_id module_id, pigen_process_id process,
+	pigen_clock_domain_id domain, pigen_syntax_id assignment_id,
+	const pigen_syntax_node *assignment,
+	pigen_predicate_id guard, pigen_expr_id value)
+{
+	pigen_semantic_model *model = resolver->model;
+	const pigen_semantic_expr *value_expr = pigen_expr_get(model, value);
+	const pigen_syntax_expr *destination = pigen_syntax_expr_get(
+		&resolver->syntax->expressions,
+		assignment->as.nonblocking_assignment.destination);
+	const pigen_syntax_expr_id *dest_children;
+	const pigen_expr_id *value_children;
+	pigen_lvalue_id *children;
+	pigen_lvalue_id destination_lvalue;
+	pigen_transfer_signal_use *signal_uses = NULL;
+	size_t signal_use_count = 0;
+	size_t i;
+	int ok = 1;
+
+	if (!destination || destination->kind != PIGEN_SYNTAX_EXPR_CONCATENATION ||
+		!value_expr || value_expr->kind != PIGEN_EXPR_CONCATENATION ||
+		destination->as.sequence.child_count !=
+			value_expr->as.sequence.child_count)
+		return fail_location(resolver, assignment->location,
+			"placeholder destination requires a matching concatenation");
+	dest_children = pigen_syntax_expr_children(&resolver->syntax->expressions,
+		destination->as.sequence.first_child,
+		destination->as.sequence.child_count);
+	value_children = pigen_expr_children(model,
+		value_expr->as.sequence.first_child,
+		value_expr->as.sequence.child_count);
+	if (!dest_children || !value_children) return 0;
+	children = pigen_resize(NULL,
+		destination->as.sequence.child_count * sizeof(*children));
+	for (i = 0; i < destination->as.sequence.child_count && ok; i++)
+	{
+		if (syntax_is_placeholder(resolver, dest_children[i]))
+		{
+			const pigen_semantic_expr *rhs = pigen_expr_get(model,
+				value_children[i]);
+
+			if (!rhs) ok = 0;
+			else children[i] = pigen_lvalue_add_placeholder(model,
+				rhs->data_type, assignment->location.source_span);
+			if (ok && children[i].index == PIGEN_INVALID_ID) ok = 0;
+		}
+		else
+		{
+			pigen_expr_id child_expression = pigen_resolve_expression(
+				resolver->syntax, model, resolver->expression_scope,
+				dest_children[i], resolver->policy, resolver->error);
+
+			if (child_expression.index == PIGEN_INVALID_ID)
+			{
+				ok = 0;
+				break;
+			}
+			children[i] = pigen_lvalue_resolve(model, child_expression);
+			if (children[i].index == PIGEN_INVALID_ID ||
+				!lvalue_is_assignable(model, children[i]))
+				ok = 0;
+		}
+	}
+	destination_lvalue = ok ? pigen_lvalue_add_concatenation(model, children,
+		destination->as.sequence.child_count, value_expr->data_type,
+		assignment->location.source_span) :
+		INVALID_ID(pigen_lvalue_id);
+	free(children);
+	if (!ok || destination_lvalue.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, assignment->location,
+			"invalid placeholder destination");
+	if (!analyze_transfer(resolver, destination_lvalue, value, guard, domain,
+		assignment->location.source_span, &signal_uses,
+		&signal_use_count))
+		return 0;
+	{
+		pigen_transfer_id transfer = pigen_transfer_add(model, assignment_id,
+			module_id, process, destination_lvalue, value, guard, domain,
+			signal_uses, signal_use_count,
+			assignment->location.source_span);
+		free(signal_uses);
+		if (transfer.index == PIGEN_INVALID_ID)
+			return fail_location(resolver, assignment->location,
+				"invalid transfer semantic object");
+	}
+	return 1;
+}
+
 static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	pigen_process_id process, pigen_clock_domain_id domain,
 	pigen_syntax_id assignment_id, const pigen_syntax_node *assignment,
 	pigen_predicate_id guard)
 {
 	pigen_semantic_model *model = resolver->model;
+	{
+		const pigen_syntax_expr *destination_syntax = pigen_syntax_expr_get(
+			&resolver->syntax->expressions,
+			assignment->as.nonblocking_assignment.destination);
+
+		if (destination_syntax &&
+			destination_syntax->kind == PIGEN_SYNTAX_EXPR_CONCATENATION)
+		{
+			const pigen_syntax_expr_id *syntax_children =
+				pigen_syntax_expr_children(&resolver->syntax->expressions,
+					destination_syntax->as.sequence.first_child,
+					destination_syntax->as.sequence.child_count);
+			size_t placeholder_index;
+
+			for (placeholder_index = 0; syntax_children &&
+				placeholder_index < destination_syntax->as.sequence.child_count;
+				placeholder_index++)
+				if (syntax_is_placeholder(resolver,
+					syntax_children[placeholder_index]))
+					break;
+			if (syntax_children && placeholder_index <
+				destination_syntax->as.sequence.child_count)
+			{
+				pigen_expr_id placeholder_value = pigen_resolve_expression(
+					resolver->syntax, model, resolver->expression_scope,
+					assignment->as.nonblocking_assignment.value,
+					resolver->policy, resolver->error);
+
+				return resolve_placeholder_assignment(resolver, module_id,
+					process, domain, assignment_id, assignment, guard,
+					placeholder_value);
+			}
+		}
+	}
 	pigen_expr_id destination_expression = pigen_resolve_expression(
 		resolver->syntax, model, resolver->expression_scope,
 		assignment->as.nonblocking_assignment.destination, resolver->policy,

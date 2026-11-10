@@ -2125,6 +2125,11 @@ static int drive_concat_rtl_value(pigen_rtl_lowering *lowering,
 		if (!pigen_const_expr_evaluate_u64(sem, child_width_expr, &width) ||
 			width == 0 || width > remaining)
 			return 0;
+		if (child->kind == PIGEN_LVALUE_PLACEHOLDER)
+		{
+			remaining -= width;
+			continue;
+		}
 		child_type = pigen_lower_rtl_type(lowering, child_data_type);
 		low_word = (pigen_rtl_literal_word){remaining - width, 0, 0};
 		low = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
@@ -2531,6 +2536,9 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 						pigen_const_expr_id dw, vw;
 						uint64_t d = 0, v = 0;
 
+						if (child && child->kind ==
+							PIGEN_LVALUE_PLACEHOLDER)
+							continue;
 						if (!child || !child_value_expr)
 						{
 							aligned = 0;
@@ -2609,6 +2617,11 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 							free(update_ids);
 							return -1;
 						}
+						if (child->kind == PIGEN_LVALUE_PLACEHOLDER)
+						{
+							remaining -= width;
+							continue;
+						}
 						child_type = pigen_lower_rtl_type(lowering,
 							child_data_type);
 						low_word = (pigen_rtl_literal_word){
@@ -2666,9 +2679,12 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 						dest_children[c]);
 					const pigen_semantic_expr *child_value_expr =
 						pigen_expr_get(sem, value_children[c]);
-					pigen_rtl_expr_id child_value = lower_expr(lowering,
-						value_children[c]);
+					pigen_rtl_expr_id child_value;
 
+					if (child && child->kind ==
+						PIGEN_LVALUE_PLACEHOLDER)
+						continue;
+					child_value = lower_expr(lowering, value_children[c]);
 					if (!child || !child_value_expr ||
 						child_value.index == PIGEN_INVALID_ID)
 					{

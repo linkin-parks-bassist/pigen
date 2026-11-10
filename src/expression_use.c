@@ -258,6 +258,7 @@ static int analyze_lvalue(use_analyzer *analyzer,
 	size_t i;
 
 	if (!lvalue) return 0;
+	if (lvalue->kind == PIGEN_LVALUE_PLACEHOLDER) return 1;
 	if (lvalue->kind == PIGEN_LVALUE_PROJECTION)
 		return visit_lvalue(analyzer, lvalue->expression,
 			INVALID_ID(pigen_expr_id), predicate);

@@ -1,0 +1,7 @@
+module ph(input logic clk, input bit[8] buf a, input bit[8] buf b, input bit[8] buf c,
+ output bit[8] buf x, output bit[8] buf y);
+ always_ff @(posedge clk) begin
+  {x, _} <= {a ^ 8'd1, b};
+  y <= c;
+ end
+endmodule

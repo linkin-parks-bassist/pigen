@@ -1700,9 +1700,11 @@ static pigen_lvalue_id add_lvalue(pigen_semantic_model *model,
 	pigen_semantic_lvalue lvalue)
 {
 	const pigen_symbol *symbol;
-	pigen_semantic_expr *expression;
+	pigen_semantic_expr *expression = NULL;
 	pigen_lvalue_id result;
-	if (!pigen_expr_get(model, lvalue.expression) ||
+	if ((lvalue.kind != PIGEN_LVALUE_PLACEHOLDER &&
+		 lvalue.kind != PIGEN_LVALUE_CONCATENATION &&
+		 !pigen_expr_get(model, lvalue.expression)) ||
 		!pigen_data_type_exists(model, lvalue.data_type) ||
 		!pigen_source_span_valid(model->sources, lvalue.span) ||
 		!id_capacity_available(model->lvalue_count))
@@ -1728,11 +1730,14 @@ static pigen_lvalue_id add_lvalue(pigen_semantic_model *model,
 			if (!pigen_lvalue_get(model, children[i]))
 				return INVALID_ID(pigen_lvalue_id);
 	}
-	else
+	else if (lvalue.kind != PIGEN_LVALUE_PLACEHOLDER)
 		return INVALID_ID(pigen_lvalue_id);
-	expression = &model->expressions[lvalue.expression.index];
-	if (expression->lvalue.index != PIGEN_INVALID_ID)
-		return INVALID_ID(pigen_lvalue_id);
+	if (lvalue.expression.index != PIGEN_INVALID_ID)
+	{
+		expression = &model->expressions[lvalue.expression.index];
+		if (expression->lvalue.index != PIGEN_INVALID_ID)
+			return INVALID_ID(pigen_lvalue_id);
+	}
 	if (model->lvalue_count == model->lvalue_capacity)
 	{
 		model->lvalue_capacity = model->lvalue_capacity ?
@@ -1742,7 +1747,8 @@ static pigen_lvalue_id add_lvalue(pigen_semantic_model *model,
 	}
 	result = (pigen_lvalue_id){(uint32_t)model->lvalue_count};
 	model->lvalues[model->lvalue_count++] = lvalue;
-	expression->lvalue = result;
+	if (lvalue.expression.index != PIGEN_INVALID_ID)
+		expression->lvalue = result;
 	return result;
 }
 
@@ -1895,6 +1901,42 @@ const pigen_semantic_struct_member *pigen_struct_member_find(
 			return member;
 	}
 	return NULL;
+}
+
+pigen_lvalue_id pigen_lvalue_add_placeholder(
+	pigen_semantic_model *model, pigen_data_type_id data_type,
+	pigen_source_span span)
+{
+	pigen_semantic_lvalue lvalue = {0};
+
+	if (!model || data_type.index == PIGEN_INVALID_ID) return INVALID_ID(pigen_lvalue_id);
+	lvalue.kind = PIGEN_LVALUE_PLACEHOLDER;
+	lvalue.expression = INVALID_ID(pigen_expr_id);
+	lvalue.data_type = data_type;
+	lvalue.span = span;
+	return add_lvalue(model, lvalue);
+}
+
+pigen_lvalue_id pigen_lvalue_add_concatenation(
+	pigen_semantic_model *model, const pigen_lvalue_id *children,
+	size_t child_count, pigen_data_type_id data_type,
+	pigen_source_span span)
+{
+	pigen_semantic_lvalue lvalue = {0};
+	size_t first;
+
+	if (!model || !children || !child_count ||
+		data_type.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_lvalue_id);
+	first = append_lvalue_children(model, children, child_count);
+	if (first == SIZE_MAX) return INVALID_ID(pigen_lvalue_id);
+	lvalue.kind = PIGEN_LVALUE_CONCATENATION;
+	lvalue.expression = INVALID_ID(pigen_expr_id);
+	lvalue.data_type = data_type;
+	lvalue.span = span;
+	lvalue.as.sequence.first_child = first;
+	lvalue.as.sequence.child_count = child_count;
+	return add_lvalue(model, lvalue);
 }
 
 const pigen_semantic_lvalue *pigen_lvalue_get(
@@ -2301,11 +2343,14 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	if (!module || !process || process->module.index != module_id.index ||
 		process->domain.index != domain_id.index ||
 		!pigen_clock_domain_get(model, domain_id) ||
-		!destination_value || !destination_expression || !source_expression ||
+		!destination_value || !source_expression ||
+		(!destination_expression &&
+			destination_value->kind != PIGEN_LVALUE_CONCATENATION) ||
 		(destination_value->kind != PIGEN_LVALUE_CONCATENATION &&
 			destination_value->data_type.index !=
 				source_expression->data_type.index) ||
 		(destination_value->kind != PIGEN_LVALUE_CONCATENATION &&
+			destination_expression &&
 			destination_expression->shape.index !=
 				source_expression->shape.index) ||
 		guard.index == PIGEN_INVALID_ID || guard.index >= model->predicate_count ||

@@ -250,7 +250,8 @@ typedef struct {
 
 typedef enum {
 	PIGEN_LVALUE_PROJECTION,
-	PIGEN_LVALUE_CONCATENATION
+	PIGEN_LVALUE_CONCATENATION,
+	PIGEN_LVALUE_PLACEHOLDER
 } pigen_lvalue_kind;
 
 typedef struct {
@@ -620,6 +621,13 @@ pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 	pigen_expr_id expression);
 const pigen_semantic_lvalue *pigen_lvalue_get(
 	const pigen_semantic_model *model, pigen_lvalue_id lvalue);
+pigen_lvalue_id pigen_lvalue_add_placeholder(
+	pigen_semantic_model *model, pigen_data_type_id data_type,
+	pigen_source_span span);
+pigen_lvalue_id pigen_lvalue_add_concatenation(
+	pigen_semantic_model *model, const pigen_lvalue_id *children,
+	size_t child_count, pigen_data_type_id data_type,
+	pigen_source_span span);
 int pigen_struct_member_add(pigen_semantic_model *model,
 	pigen_symbol_id owner, pigen_source_span name,
 	pigen_data_type_id data_type, size_t offset);
