@@ -846,6 +846,24 @@ static int emit_connection(struct buf *b, const pigen_rtl_model *rtl,
 		buf_append_str(b, name);
 		return b->failed ? -1 : 0;
 	}
+	{
+		const pigen_rtl_expr *value = pigen_rtl_expr_get(rtl,
+			connection->value);
+		const pigen_rtl_type *type = value ?
+			pigen_rtl_type_get(rtl, value->type) : NULL;
+
+		/* One-bit literal ties are written as 1'b0/1'b1 so lint tools do
+		 * not see an unsized 32-bit literal at a one-bit port. */
+		if (value && type && type->width == 1 &&
+			(value->kind == PIGEN_RTL_EXPR_INTEGER ||
+			 value->kind == PIGEN_RTL_EXPR_BITS) &&
+			value->literal_words)
+		{
+			buf_append_str(b, "1'b");
+			buf_append_ull(b, value->literal_words[0].value & 1u);
+			return b->failed ? -1 : 0;
+		}
+	}
 	return emit_expr(b, rtl, connection->value);
 }
 
