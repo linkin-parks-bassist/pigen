@@ -14,7 +14,7 @@ module coslice
 
 	always_ff @(posedge clk)
 	begin
-		{left, right, state, state_delay} <= {source, source, source, state[3:0]};
+		{left, right, state, state_delay} <= {source ^ 8'h01, source ^ 8'h02, source, state[3:0]};
 		history <= state;
 		previous <= state;
 	end

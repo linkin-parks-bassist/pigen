@@ -2,9 +2,9 @@ module signed_widen
     (
         input logic clk,
         input logic reset,
-        input buf signed [23:0] lhs,
-        input buf signed [23:0] rhs,
-        output buf signed [49:0] product
+        input logic signed [23:0] buf lhs,
+        input logic signed [23:0] buf rhs,
+        output logic signed [49:0] buf product
     );
 
     always_ff @(posedge clk)

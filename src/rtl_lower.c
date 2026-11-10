@@ -2087,10 +2087,8 @@ static int lower_actions(pigen_rtl_lowering *lowering, pigen_module_id module,
 				targets[target_count++] = endpoints->force_after_transfer;
 			}
 			else if (action->action == PIGEN_ACTION_INVALIDATE)
-			{
+				/* A transfer in the same cycle wins over invalidate. */
 				targets[target_count++] = endpoints->force_invalid;
-				targets[target_count++] = endpoints->force_after_transfer;
-			}
 			else
 				targets[target_count++] = endpoints->clear;
 		}
@@ -2401,15 +2399,16 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 					return -1;
 				}
 			}
-			else if (lval->kind == PIGEN_LVALUE_CONCATENATION &&
-				value_expr->kind == PIGEN_EXPR_CONCATENATION)
+			else if (lval->kind == PIGEN_LVALUE_CONCATENATION)
 			{
 				const pigen_lvalue_id *dest_children = pigen_lvalue_children(
 					sem, lval->as.sequence.first_child,
 					lval->as.sequence.child_count);
-				const pigen_expr_id *value_children = pigen_expr_children(sem,
-					value_expr->as.sequence.first_child,
-					value_expr->as.sequence.child_count);
+				const pigen_expr_id *value_children =
+					value_expr->kind == PIGEN_EXPR_CONCATENATION ?
+					pigen_expr_children(sem,
+						value_expr->as.sequence.first_child,
+						value_expr->as.sequence.child_count) : NULL;
 				size_t c;
 
 				int aligned = dest_children && value_children &&
