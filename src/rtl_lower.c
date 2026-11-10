@@ -323,6 +323,10 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 	result_type = pigen_lower_rtl_type(lowering, owner->data_type);
 	if (result_type.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	/* Computing the type may intern width constants and reallocate the
+	 * semantic constant-expression arena; refresh the borrowed owner. */
+	owner = pigen_const_expr_get(sem, expression);
+	if (!owner) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 
 	/* Children are lowered recursively bottom-up by identity in owner order;
 	 * every child must resolve before the parent record is published so a
@@ -407,6 +411,8 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 			owner->as.conversion.operand);
 		if (operand.index == PIGEN_INVALID_ID)
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		owner = pigen_const_expr_get(sem, expression);
+		if (!owner) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 		result = pigen_rtl_expr_add_conversion(rtl, result_type,
 			&owner->as.conversion.conversion, operand, origin);
 		break;
@@ -424,13 +430,20 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 			left.index == PIGEN_INVALID_ID ||
 			right.index == PIGEN_INVALID_ID)
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-		result = pigen_rtl_expr_add_select(rtl, result_type, base, left,
-			right, owner->as.select.kind, origin);
+		{
+			pigen_select_kind kind = owner->as.select.kind;
+
+			owner = pigen_const_expr_get(sem, expression);
+			if (!owner) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			result = pigen_rtl_expr_add_select(rtl, result_type, base,
+				left, right, kind, origin);
+		}
 		break;
 	}
 	case PIGEN_CONST_EXPR_CONCATENATION:
 	{
 		const pigen_const_expr_id *owner_children;
+		pigen_const_expr_id *ids;
 		size_t child_count;
 		size_t i;
 		pigen_rtl_expr_id *children;
@@ -440,6 +453,10 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 			owner->as.sequence.first_child, child_count);
 		if (child_count && !owner_children)
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		ids = pigen_resize(NULL, child_count * sizeof(*ids));
+		if (child_count && !ids) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		if (child_count)
+			memcpy(ids, owner_children, child_count * sizeof(*ids));
 		if (child_count > SIZE_MAX / sizeof(*children))
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 		children = pigen_resize(NULL,
@@ -448,8 +465,7 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 		for (i = 0; i < child_count; i++)
 		{
-			children[i] = pigen_lower_rtl_expression(lowering,
-				owner_children[i]);
+			children[i] = pigen_lower_rtl_expression(lowering, ids[i]);
 			if (children[i].index == PIGEN_INVALID_ID)
 			{
 				free(children);
@@ -459,6 +475,7 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 		result = pigen_rtl_expr_add_concatenation(rtl, result_type,
 			children, child_count, origin);
 		free(children);
+		free(ids);
 		break;
 	}
 	default:
@@ -2526,8 +2543,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 							break;
 						}
 						dw = pigen_data_type_packed_width(sem,
-							pigen_signal_get(sem, child->as.projection.signal)
-								->data_type);
+							child->data_type);
 						vw = pigen_data_type_packed_width(sem,
 							child_value_expr->data_type);
 						if (!pigen_const_expr_evaluate_u64(sem, dw, &d) ||
@@ -2654,10 +2670,30 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 						value_children[c]);
 
 					if (!child || !child_value_expr ||
-						child_value.index == PIGEN_INVALID_ID ||
-						!drive_destination(lowering, rtl_module, child,
-							child_value, child_value_expr, fire, owner->span,
-							update_ids, &update_count))
+						child_value.index == PIGEN_INVALID_ID)
+					{
+						free(update_ids);
+						return -1;
+					}
+					if (child->kind == PIGEN_LVALUE_CONCATENATION)
+					{
+						pigen_rtl_type_id child_type =
+							pigen_lower_rtl_type(lowering,
+								child->data_type);
+
+						if (child_type.index == PIGEN_INVALID_ID ||
+							!drive_concat_rtl_value(lowering, rtl_module,
+								child, child_value, child->data_type,
+								child_type, fire, owner->span, update_ids,
+								&update_count))
+						{
+							free(update_ids);
+							return -1;
+						}
+					}
+					else if (!drive_destination(lowering, rtl_module, child,
+						child_value, child_value_expr, fire, owner->span,
+						update_ids, &update_count))
 					{
 						free(update_ids);
 						return -1;

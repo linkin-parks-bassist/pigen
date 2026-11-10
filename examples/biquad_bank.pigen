@@ -4,151 +4,97 @@
 `define COEF_INTBIT		4
 `define N_SLOTS			8
 `define ACC_WIDTH		(`DATA_WIDTH + `COEF_WIDTH + 3)
-
-`define HANDLE_WIDTH $clog2(`N_SLOTS)
+`define HANDLE_WIDTH	3
 
 typedef struct packed {
-	logic        [`HANDLE_WIDTH - 1 : 0] handle;
-	logic signed [`DATA_WIDTH   - 1 : 0] sample;
+	logic        [`HANDLE_WIDTH - 1:0] handle;
+	logic signed [`DATA_WIDTH   - 1:0] sample;
 } biquad_req;
 
 typedef struct packed {
-	logic signed [`DATA_WIDTH   - 1 : 0] sample;
-} biquad_out;
-
-typedef struct packed {
-	logic        [`HANDLE_WIDTH   - 1 : 0] handle;
-	logic signed [`COEF_WIDTH * 5 - 1 : 0] coefs;
+	logic        [`HANDLE_WIDTH   - 1:0] handle;
+	logic signed [`COEF_WIDTH * 5 - 1:0] coefs;
 } biquad_coef_write_req;
-
-typedef logic [`HANDLE_WIDTH  - 1 : 0] handle_t;
-typedef logic signed [`COEF_WIDTH - 1 : 0] coef_t;
-typedef logic signed [`DATA_WIDTH - 1 : 0] sample_t;
-
-typedef sample_t [3:0] state_t;
-
-typedef logic signed [`ACC_WIDTH - 1 : 0] acc_t;
-
-typedef struct packed {
-	handle_t handle;
-	biquad_out out;
-	state_t state;
-} biquad_pipeline_result;
 
 module biquad_pipeline
 	(
-		input clk,
-		input reset,
-		input enable,
+		input logic clk,
+		input logic reset,
+		input logic enable,
 
-		input  port biquad_req req_in,
-		output port biquad_out bqd_out,
-
-		input port biquad_coef_write_req coef_write_port
+		input  biquad_req buf req_in,
+		output logic signed [15:0] buf bqd_out,
+		input  biquad_coef_write_req buf coef_write_port
 	);
 
-	buf sample_t sample_in;
-	buf sample_t sample_in_;
-	buf handle_t handle_in;
-	buf handle_t handle_in_;
+	logic signed [`COEF_WIDTH * 5 - 1:0] coef_mem [`N_SLOTS - 1:0];
+	logic signed [`DATA_WIDTH * 4 - 1:0] state_mem [`N_SLOTS - 1:0];
+	logic [`N_SLOTS - 1:0] coefs_valid, state_valid;
 
-	buf signed [`COEF_WIDTH * 5 - 1 : 0] coef_read;
-	buf signed [`DATA_WIDTH * 4 - 1 : 0] state_read;
+	localparam logic signed [17:0] coef_1 = 18'sd8192;
+	localparam logic signed [17:0] coef_0 = 18'sd0;
+	localparam logic signed [`COEF_WIDTH * 5 - 1:0] trivial_coefs =
+		{coef_1, coef_0, coef_0, coef_0, coef_0};
+	localparam logic signed [`DATA_WIDTH * 4 - 1:0] zero_state = 0;
 
-	reg signed [`COEF_WIDTH * 5 - 1 : 0] coef_mem  [`N_SLOTS - 1 : 0];
-	reg signed [`DATA_WIDTH * 4 - 1 : 0] state_mem [`N_SLOTS - 1 : 0];
+	logic signed [36:0] mac;
+	logic signed [15:0] y_next;
+	logic [`DATA_WIDTH * 4 - 1:0] next_state;
 
-	/* The accumulator retains the sample's fractional bits and the
-	 * coefficient's fractional bits. Its remaining high bits are headroom for
-	 * the five-term MAC. Saturation is therefore expressed directly in the
-	 * accumulator's binary point. */
-	localparam sample_fracbit = `DATA_WIDTH - `DATA_INTBIT - 1;
-	localparam coef_fracbit   = `COEF_WIDTH - `COEF_INTBIT - 1;
-	localparam acc_t SAT_MAX = {{(`ACC_WIDTH - `DATA_WIDTH - coef_fracbit){1'b0}},
-		1'b0, {(`DATA_WIDTH - 1){1'b1}}, {coef_fracbit{1'b0}}};
-	localparam acc_t SAT_MIN = {{(`ACC_WIDTH - `DATA_WIDTH - coef_fracbit){1'b1}},
-		1'b1, {(`DATA_WIDTH - 1){1'b0}}, {coef_fracbit{1'b0}}};
+	assign mac =
+		$signed({{19{coef_mem[req_in[18:16]][89]}}, coef_mem[req_in[18:16]][89:72]}) *
+			$signed({{21{req_in[15]}}, req_in[15:0]}) +
+		$signed({{19{coef_mem[req_in[18:16]][71]}}, coef_mem[req_in[18:16]][71:54]}) *
+			$signed({{21{state_mem[req_in[18:16]][63]}}, state_mem[req_in[18:16]][63:48]}) +
+		$signed({{19{coef_mem[req_in[18:16]][53]}}, coef_mem[req_in[18:16]][53:36]}) *
+			$signed({{21{state_mem[req_in[18:16]][47]}}, state_mem[req_in[18:16]][47:32]}) +
+		$signed({{19{coef_mem[req_in[18:16]][35]}}, coef_mem[req_in[18:16]][35:18]}) *
+			$signed({{21{state_mem[req_in[18:16]][31]}}, state_mem[req_in[18:16]][31:16]}) +
+		$signed({{19{coef_mem[req_in[18:16]][17]}}, coef_mem[req_in[18:16]][17:0]}) *
+			$signed({{21{state_mem[req_in[18:16]][15]}}, state_mem[req_in[18:16]][15:0]});
+	assign y_next = $signed(mac) >>> 13;
+	assign next_state = {req_in[15:0],
+		state_mem[req_in[18:16]][63:48],
+		y_next,
+		state_mem[req_in[18:16]][31:16]};
 
-	localparam signed [`COEF_WIDTH - 1 : 0] coef_1 = (1 << (`COEF_WIDTH - `COEF_INTBIT - 1));
-	localparam signed [`COEF_WIDTH - 1 : 0] coef_0 = 0;
-	localparam trivial_coefs = {coef_1, coef_0, coef_0, coef_0, coef_0};
-
-	reg [`N_SLOTS - 1 : 0] coefs_valid, state_valid;
-
-	buf coef_t   b0_in, b1_in, b2_in, a1_in, a2_in;
-	buf sample_t x0_in, x1_in, x2_in, y1_in, y2_in;
-	buf handle_t handle_pin;
-
-	always @(posedge clk) begin
-		if (reset) begin
-			pipeline_reset(bqd_pipeline);
-			state_valid <= '0;
-			coefs_valid <= '0;
-		end else if (enable) begin
-			transfer begin
-				handle_in <= req_in.handle;
-				sample_in <= req_in.sample;
+	always_ff @(posedge clk)
+	begin
+		if (reset)
+		begin
+			coefs_valid <= 8'd0;
+			state_valid <= 8'd0;
+			coef_mem[0] <= {18'sd8192, 18'sd0, 18'sd0, 18'sd0, 18'sd0};
+			coef_mem[1] <= {18'sd8192, 18'sd0, 18'sd0, 18'sd0, 18'sd0};
+			coef_mem[2] <= {18'sd8192, 18'sd0, 18'sd0, 18'sd0, 18'sd0};
+			coef_mem[3] <= {18'sd8192, 18'sd0, 18'sd0, 18'sd0, 18'sd0};
+			coef_mem[4] <= {18'sd8192, 18'sd0, 18'sd0, 18'sd0, 18'sd0};
+			coef_mem[5] <= {18'sd8192, 18'sd0, 18'sd0, 18'sd0, 18'sd0};
+			coef_mem[6] <= {18'sd8192, 18'sd0, 18'sd0, 18'sd0, 18'sd0};
+			coef_mem[7] <= {18'sd8192, 18'sd0, 18'sd0, 18'sd0, 18'sd0};
+			state_mem[0] <= 64'sd0;
+			state_mem[1] <= 64'sd0;
+			state_mem[2] <= 64'sd0;
+			state_mem[3] <= 64'sd0;
+			state_mem[4] <= 64'sd0;
+			state_mem[5] <= 64'sd0;
+			state_mem[6] <= 64'sd0;
+			state_mem[7] <= 64'sd0;
+		end
+		else if (enable)
+		begin
+			if (valid(coef_write_port))
+			begin
+				{coef_mem[coef_write_port.handle],
+				 coefs_valid[coef_write_port.handle]} <=
+					{coef_write_port.coefs, 1'b1};
 			end
 
-			transfer begin
-				handle_in_ <= handle_in;
-				sample_in_ <= sample_in;
-				coef_read  <= coefs_valid[handle_in] ? coef_mem [handle_in] : trivial_coefs;
-				state_read <= state_valid[handle_in] ? state_mem[handle_in] : '0;
-			end
-
-			transfer begin
-				{b0_in, b1_in, b2_in, a1_in, a2_in} <= coef_read;
-				{x1_in, x2_in, y1_in, y2_in} <= state_read;
-				handle_pin <= handle_in_;
-				x0_in <= sample_in_;
-			end
-
-			transfer begin
-				coef_mem[coef_write_port.handle] <= coef_write_port.coefs;
-				coefs_valid[coef_write_port.handle] <= 1'b1;
-			end
-
-			pipeline bqd_pipeline begin
-				sample_t x0, x1, x2, y1, y2, acc_out;
-				coef_t b0, b1, b2, a1, a2;
-				handle_t handle;
-				acc_t acc;
-
-				stage begin
-					{b0, b1, b2, a1, a2} <= {b0_in, b1_in, b2_in, a1_in, a2_in};
-					{x0, x1, x2, y1, y2} <= {x0_in, x1_in, x2_in, y1_in, y2_in};
-					handle <= handle_pin;
-
-					acc <= b0_in * x0_in + b1_in * x1_in + b2_in * x2_in;
-				end
-
-
-				stage begin
-					acc <= acc + a1 * y1 + a2 * y2;
-				end
-
-				stage begin
-					acc <= acc > SAT_MAX ? SAT_MAX : (acc < SAT_MIN ? SAT_MIN : acc);
-				end
-
-				stage begin
-					wire sample_t acc_final = acc >>> coef_fracbit;
-
-					acc_out <= acc_final;
-					x1 <= x0;
-					x2 <= x1;
-					y1 <= acc_final;
-					y2 <= y1;
-				end
-
-				yield {handle, acc_out, x1, x2, y1, y2};
-			endpipeline
-
-			transfer begin
-				bqd_out <= bqd_pipeline[`DATA_WIDTH * 4 +: `DATA_WIDTH];
-				state_mem[bqd_pipeline[`DATA_WIDTH * 5 + `HANDLE_WIDTH - 1 : `DATA_WIDTH * 5]] <= bqd_pipeline[0 +: `DATA_WIDTH * 4];
-				state_valid[bqd_pipeline[`DATA_WIDTH * 5 + `HANDLE_WIDTH - 1 : `DATA_WIDTH * 5]] <= 1'b1;
+			if (valid(req_in))
+			begin
+				bqd_out <= y_next;
+				{state_mem[req_in.handle], state_valid[req_in.handle]} <=
+					{next_state, 1'b1};
 			end
 		end
 	end

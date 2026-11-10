@@ -288,8 +288,19 @@ int pigen_data_type_exists(const pigen_semantic_model *model,
 pigen_signedness pigen_data_type_signedness(
 	const pigen_semantic_model *model, pigen_data_type_id data_type)
 {
-	const pigen_data_type *known = data_type_get(model, data_type);
-	return known ? known->signedness : PIGEN_SIGN_INVALID;
+	size_t remaining = model ? model->data_type_count + 1 : 0;
+
+	while (remaining--)
+	{
+		const pigen_data_type *known = data_type_get(model, data_type);
+
+		if (!known) return PIGEN_SIGN_INVALID;
+		if (known->signedness != PIGEN_SIGN_IMPLICIT ||
+			known->constructor != PIGEN_DATA_TYPE_ALIAS)
+			return known->signedness;
+		data_type = known->alias_target;
+	}
+	return PIGEN_SIGN_IMPLICIT;
 }
 
 size_t pigen_data_type_dimension_count(const pigen_semantic_model *model,

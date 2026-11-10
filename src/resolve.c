@@ -1304,6 +1304,7 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 		}
 		}
 	}
+	destination_value = pigen_expr_get(model, destination_expression);
 	if (!destination_value || !source_value ||
 		destination_value->shape.index != source_value->shape.index)
 		return fail_location(resolver, assignment->location,
