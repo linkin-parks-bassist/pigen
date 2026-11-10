@@ -1154,6 +1154,18 @@ static int add_mixed_process_splits(const char *source,
 							char *function_condition = leaf_if_condition(source,
 								tokens, leaves[f].first, leaves[f].last);
 
+							for (size_t other = 0; other < leaf_count; other++)
+							{
+								char *other_lhs;
+
+								if (other == f || !leaves[other].function)
+									continue;
+								other_lhs = statement_lhs_name(source, tokens,
+									leaves[other].first, leaves[other].last);
+								if (other_lhs && text_equals(lhs, other_lhs))
+									covered = 0;
+								free(other_lhs);
+							}
 							leaf_guard_range(source, tokens, begin,
 								leaves[f].first, &guard_start, &guard_end);
 							for (size_t p = 0; p < leaf_count; p++)
@@ -1164,15 +1176,8 @@ static int add_mixed_process_splits(const char *source,
 									continue;
 								if (function_condition)
 								{
-									char *condition = leaf_if_condition(source,
-										tokens, leaves[p].first, leaves[p].last);
-
-									if (leaves[p].first <= guard_start ||
-										leaves[p].first >= guard_end ||
-										!condition ||
-										!text_equals(function_condition, condition))
+									if (leaves[p].first < leaves[f].last)
 										covered = 0;
-									free(condition);
 								}
 								else if (leaves[p].first <= guard_start ||
 									leaves[p].first >= guard_end ||
@@ -1200,7 +1205,21 @@ static int add_mixed_process_splits(const char *source,
 							pigen_append(&prologue, "; assign ");
 							pigen_append(&prologue, helper_name);
 							pigen_append(&prologue, " = ");
-							pigen_append(&prologue, rhs);
+							{
+								char *condition = leaf_if_condition(source, tokens,
+									leaves[f].first, leaves[f].last);
+
+								if (condition)
+								{
+									pigen_append(&prologue, condition);
+									pigen_append(&prologue, " ? ");
+									pigen_append(&prologue, rhs);
+									pigen_append(&prologue, " : ");
+									pigen_append(&prologue, lhs);
+									free(condition);
+								}
+								else pigen_append(&prologue, rhs);
+							}
 							pigen_append(&prologue, ";\n");
 							substitutions = pigen_resize(substitutions,
 								(substitution_count + 1) *
