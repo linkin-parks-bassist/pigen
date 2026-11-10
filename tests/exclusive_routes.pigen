@@ -5,10 +5,10 @@ module exclusive_routes
 		input logic select
 	);
 
-	buf [7:0] source;
-	buf [7:0] left;
-	buf [7:0] right;
-	buf [7:0] merged;
+	bit[8] buf source;
+	bit[8] buf left;
+	bit[8] buf right;
+	bit[8] buf merged;
 
 	always_ff @(posedge clk)
 	begin

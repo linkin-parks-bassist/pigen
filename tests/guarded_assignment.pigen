@@ -6,7 +6,7 @@ module guarded_assignment
 	);
 
 	wire [7:0] value;
-	buf [7:0] stage;
+	bit[8] buf stage;
 
 	always_ff @(posedge clk)
 	begin

@@ -2,8 +2,8 @@ module coslice_xprop
 	(
 		input logic clk,
 		input logic reset,
-		input buf [7:0] source,
-		output buf [7:0] left,
+		input bit[8] buf source,
+		output bit[8] buf left,
 		output logic [7:0] previous
 	);
 

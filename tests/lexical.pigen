@@ -6,7 +6,7 @@ module lexical
 
 	// A fake declaration; valid(stage); must stay a comment.
 	wire [7:0] source;
-	buf [7:0] stage;
+	bit[8] buf stage;
 
 	assign source = 8'h5a;
 

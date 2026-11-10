@@ -3,8 +3,8 @@ module output_fifo
 		input logic clk,
 		input logic reset,
 
-		input  buf [7:0] in_packet,
-		output fifo[7:0][4] out_packet
+		input  bit[8] buf in_packet,
+		output bit[8] fifo[4] out_packet
 	);
 
 	always_ff @(posedge clk)

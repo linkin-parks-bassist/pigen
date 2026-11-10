@@ -5,8 +5,8 @@ module clear_actions
 		input logic discard
 	);
 
-	buf [7:0] stage;
-	fifo [7:0][4] queue;
+	bit[8] buf stage;
+	bit[8] fifo[4] queue;
 
 	always_ff @(posedge clk)
 	begin

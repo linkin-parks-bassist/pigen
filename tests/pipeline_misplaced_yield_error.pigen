@@ -1,7 +1,7 @@
 module pipeline_misplaced_yield_error(
 	input logic clk,
-	input buf [7:0] source,
-	output buf [7:0] destination
+	input bit[8] buf source,
+	output bit[8] buf destination
 );
 	always @(posedge clk) begin
 		pipeline misplaced_yield begin

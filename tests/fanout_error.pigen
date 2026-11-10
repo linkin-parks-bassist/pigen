@@ -4,9 +4,9 @@ module fanout_error
 		input logic reset
 	);
 
-	buf [7:0] source;
-	buf [7:0] left;
-	buf [7:0] right;
+	bit[8] buf source;
+	bit[8] buf left;
+	bit[8] buf right;
 
 	always_ff @(posedge clk)
 	begin

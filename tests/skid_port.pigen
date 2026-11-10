@@ -6,8 +6,8 @@ module skid_port
 	);
 
 	wire [7:0] input_data;
-	skid [7:0] skid_queue;
-	port [7:0] pulse;
+	bit[8] skid skid_queue;
+	bit[8] port pulse;
 
 	assign input_data = data;
 

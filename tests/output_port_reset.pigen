@@ -3,7 +3,7 @@ module output_port_reset
 		input logic clk,
 		input logic reset,
 		input logic [7:0] next_value,
-		output port [7:0] value
+		output bit[8] port value
 	);
 
 	always_ff @(posedge clk)

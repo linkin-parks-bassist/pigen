@@ -2,9 +2,9 @@ module coslice
 	(
 		input logic clk,
 		input logic reset,
-		input buf [7:0] source,
-		output buf [7:0] left,
-		output buf [7:0] right,
+		input bit[8] buf source,
+		output bit[8] buf left,
+		output bit[8] buf right,
 		output logic [7:0] history,
 		output logic [7:0] previous
 	);

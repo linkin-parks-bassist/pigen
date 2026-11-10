@@ -5,8 +5,8 @@ module conditional_transfer
 		input logic enable
 	);
 
-	buf [7:0] source;
-	buf [7:0] destination;
+	bit[8] buf source;
+	bit[8] buf destination;
 	reg [0:0] did_transfer;
 
 	always_ff @(posedge clk)

@@ -4,8 +4,8 @@ module accepts_example
 		input logic reset
 	);
 
-	buf [7:0] source;
-	buf [7:0] destination;
+	bit[8] buf source;
+	bit[8] buf destination;
 
 	always_ff @(posedge clk)
 	begin

@@ -7,8 +7,8 @@ module else_if_guard
 	);
 
 	wire [7:0] source;
-	buf [7:0] first_stage;
-	buf [7:0] second_stage;
+	bit[8] buf first_stage;
+	bit[8] buf second_stage;
 
 	assign source = 8'h2c;
 

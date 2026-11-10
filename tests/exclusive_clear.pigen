@@ -5,8 +5,8 @@ module exclusive_clear
 		input logic select
 	);
 
-	buf [7:0] source;
-	buf [7:0] stage;
+	bit[8] buf source;
+	bit[8] buf stage;
 
 	always_ff @(posedge clk)
 	begin

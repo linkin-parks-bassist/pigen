@@ -2,9 +2,9 @@ module discard_example
     (
         input logic clk,
         input logic reset,
-        input buf [7:0] source
+        input bit[8] buf source
     );
-    buf [7:0] middle;
+    bit[8] buf middle;
     always_ff @(posedge clk)
     begin
         {middle, _} <= {source + 1'b1, source};

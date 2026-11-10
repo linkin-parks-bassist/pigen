@@ -4,11 +4,11 @@ module accessors
 		input logic reset
 	);
 
-	buf [7:0] item;
+	bit[8] buf item;
 	logic observed_valid;
 	logic observed_ready;
 
-	always_comb
+	always_ff @(posedge clk)
 	begin
 	observed_valid = valid ( item );
 	observed_ready = ready ( item );

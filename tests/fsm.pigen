@@ -3,8 +3,8 @@ module fsm_example
 		input logic clk,
 		input logic reset,
 		input logic start,
-		input buf [7:0] source,
-		output buf [7:0] destination
+		input bit[8] buf source,
+		output bit[8] buf destination
 	);
 
 	fsm sender @(posedge clk) reset (reset) initial idle

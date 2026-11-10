@@ -2,16 +2,13 @@ module transfer_block
 (
     input logic clk,
     input logic reset,
-    input port [15:0] source
+    input bit[16] port source
 );
-    buf [7:0] high;
-    buf [7:0] low;
+    bit[8] buf high;
+    bit[8] buf low;
     reg [7:0] history;
 
-    always @(posedge clk) begin
-        if (!reset) transfer/* whitespace and comments do not matter */begin
-            high <= source[15:8]; low <= source[7:0];
-            history <= source[7:0];
-        end
+    always_ff @(posedge clk) begin
+        {high, low, history} <= {source[15:8], source[7:0], source[7:0]};
     end
 endmodule

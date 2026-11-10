@@ -2,19 +2,19 @@ module slicing_concat
 	(
 		input logic clk,
 		input logic reset,
-		input buf [3:0] join_high,
-		input buf [11:0] join_low,
-		output buf [15:0] joined,
-		input buf [15:0] whole,
-		output buf [5:0] split_high,
-		output buf [9:0] split_low,
-		input buf [15:0] single_sliced,
-		output buf [7:0] selected_byte,
-		input buf [15:0] sliced,
-		output buf [7:0] slice_high,
-		output buf [7:0] slice_low,
-		output buf [7:0] constant_high,
-		output buf [7:0] constant_low
+		input bit[4] buf join_high,
+		input bit[12] buf join_low,
+		output bit[16] buf joined,
+		input bit[16] buf whole,
+		output bit[6] buf split_high,
+		output bit[10] buf split_low,
+		input bit[16] buf single_sliced,
+		output bit[8] buf selected_byte,
+		input bit[16] buf sliced,
+		output bit[8] buf slice_high,
+		output bit[8] buf slice_low,
+		output bit[8] buf constant_high,
+		output bit[8] buf constant_low
 	);
 
 	always_ff @(posedge clk)

@@ -5,7 +5,7 @@ module coslice_typedef
 	(
 		input logic clk,
 		input logic reset,
-		input buf [15:0] source,
+		input bit[16] buf source,
 		output buf low_t low,
 		output buf high_t high
 	);

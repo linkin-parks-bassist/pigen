@@ -6,7 +6,7 @@ module fifo_example
 	);
 
 	wire [7:0] input_data;
-	fifo[7:0][4] queue;
+	bit[8] fifo[4] queue;
 
 	assign input_data = data;
 

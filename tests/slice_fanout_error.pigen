@@ -3,9 +3,9 @@ module slice_fanout_error
 		input logic clk,
 		input logic reset
 	);
-	buf [15:0] source;
-	buf [7:0] high;
-	buf [7:0] low;
+	bit[16] buf source;
+	bit[8] buf high;
+	bit[8] buf low;
 	always_ff @(posedge clk)
 	begin
 		high <= source[15:8];

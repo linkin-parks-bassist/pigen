@@ -1,6 +1,6 @@
 module pipeline_first_stage_field_error(
 	input logic clk,
-	output buf [7:0] destination
+	output bit[8] buf destination
 );
 	always @(posedge clk) begin
 		pipeline invalid begin

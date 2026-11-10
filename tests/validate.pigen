@@ -4,8 +4,8 @@ module validate_example
         input logic reset,
         input logic seed,
         input logic kill,
-        output buf [7:0] value,
-        output buf [7:0] later
+        output bit[8] buf value,
+        output bit[8] buf later
     );
 
     always_ff @(posedge clk)

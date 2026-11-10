@@ -1,7 +1,7 @@
 module pipeline_wire_transfer_error(
 	input logic clk,
 	input logic [7:0] source,
-	output buf [7:0] destination
+	output bit[8] buf destination
 );
 	typedef logic [7:0] octet;
 	always @(posedge clk) begin

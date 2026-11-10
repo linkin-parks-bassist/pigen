@@ -2359,6 +2359,19 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 				continue;
 			}
 			if (parser->pipeline_failed) return 0;
+			/* A non-clocked `always` block is ordinary SV retained as-is. */
+			if (token_is(parser, at, "always"))
+			{
+				size_t retained_after;
+
+				if (parse_retained_module_item(parser, module, at, after,
+					&retained_after))
+				{
+					at = retained_after;
+					item_start = 1;
+					continue;
+				}
+			}
 		}
 		if (item_start && token_is(parser, at, "fsm"))
 		{

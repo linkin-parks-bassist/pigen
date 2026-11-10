@@ -3,12 +3,12 @@ module pipeline_scope(
 	input logic reset,
 	input logic enable,
 	input logic [7:0] static_source,
-	input buf [7:0] wire_source,
-	input buf [7:0] first_source,
-	input buf [7:0] later_source,
-	output buf [7:0] wire_result,
-	output buf [7:0] later_result,
-	output buf [7:0] static_result
+	input bit[8] buf wire_source,
+	input bit[8] buf first_source,
+	input bit[8] buf later_source,
+	output bit[8] buf wire_result,
+	output bit[8] buf later_result,
+	output bit[8] buf static_result
 );
 	typedef logic [7:0] octet;
 	localparam octet STATIC_BIAS = 8'd2;

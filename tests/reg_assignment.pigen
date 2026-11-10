@@ -4,7 +4,7 @@ module reg_assignment
 		input logic reset
 	);
 
-	buf [7:0] source;
+	bit[8] buf source;
 	reg [7:0] destination;
 
 	always_ff @(posedge clk)

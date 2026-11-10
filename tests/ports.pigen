@@ -1,5 +1,5 @@
 module ports(
-    input buf [7:0] incoming,
-    output wire [7:0] outgoing
+    input bit[8] buf incoming,
+    output bit[8] buf outgoing
 );
 endmodule

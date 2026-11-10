@@ -5,11 +5,11 @@ module port_bram
 		input logic read_enable,
 		input logic [3:0] read_address,
 		input logic [3:0] write_address,
-		input port [7:0] data_in
+		input bit[8] port data_in
 	);
 
 	reg [7:0] mem [0:15];
-	port [7:0] bram_port;
+	bit[8] port bram_port;
 
 	always_ff @(posedge clk)
 	begin
