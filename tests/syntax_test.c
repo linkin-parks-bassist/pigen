@@ -277,6 +277,36 @@ static void assert_compilation_unit_opaque_without_arena_leakage(
 	free_fixture(&fixture);
 }
 
+static void assert_byte_typedef(pigen_source_manager *sources,
+	const char *name, const char *text, int in_module)
+{
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *root;
+	const pigen_syntax_node *node;
+	pigen_syntax_id node_id;
+
+	assert(parse_fixture(sources, name, text, &fixture));
+	assert(!fixture.error.message);
+	root = pigen_syntax_get(&fixture.tree, (pigen_syntax_id){0});
+	assert(root && root->kind == PIGEN_SYNTAX_COMPILATION_UNIT);
+	node_id = root->first_child;
+	if (in_module)
+	{
+		const pigen_syntax_node *module = pigen_syntax_get(&fixture.tree,
+			node_id);
+		assert(module && module->kind == PIGEN_SYNTAX_MODULE);
+		node_id = module->first_child;
+	}
+	node = pigen_syntax_get(&fixture.tree, node_id);
+	while (node && node->kind == PIGEN_SYNTAX_OPAQUE)
+	{
+		node_id = node->next_sibling;
+		node = pigen_syntax_get(&fixture.tree, node_id);
+	}
+	assert(node && node->kind == PIGEN_SYNTAX_TYPEDEF);
+	free_fixture(&fixture);
+}
+
 static void assert_syntax_failure(pigen_source_manager *sources,
 	syntax_failure failure)
 {
@@ -716,7 +746,7 @@ static void test_opaque_typedef_shadow_barrier(pigen_source_manager *sources)
 		"typedef int[8] other_t;\n"
 		"module opaque_shadow;\n"
 		"  input sample_t before_shadow;\n"
-		"  typedef byte sample_t;\n"
+		"  typedef vendor_t sample_t;\n"
 		"  input sample_t after_shadow;\n"
 		"  input other_t unrelated;\n"
 		"endmodule\n";
@@ -742,17 +772,16 @@ static void test_transactional_typedef_ownership(
 	pigen_source_manager *sources)
 {
 	const char opaque_alias_text[] =
-		"typedef byte byte_t; "
+		"typedef vendor_t byte_t; "
 		"module opaque_alias(input byte_t endpoint); endmodule";
 	parsed_fixture fixture = {0};
 	const pigen_syntax_node *module;
 	const syntax_arena_counts opaque_alias_counts = {.syntax_nodes = 4};
 
-	assert_compilation_unit_opaque_without_arena_leakage(sources,
-		"ordinary_byte_typedef.sv", "typedef byte byte_t;");
-	assert_opaque_without_arena_leakage(sources,
-		"module_byte_typedef.sv",
-		"module module_byte_typedef; typedef byte byte_t; endmodule");
+	assert_byte_typedef(sources, "ordinary_byte_typedef.sv",
+		"typedef byte byte_t;", 0);
+	assert_byte_typedef(sources, "module_byte_typedef.sv",
+		"module module_byte_typedef; typedef byte byte_t; endmodule", 1);
 	assert_packed_struct_typedef(sources, "ordinary_aggregate_typedef.sv",
 		"typedef struct packed { logic [3:0] tag; logic flag; } packet_t;");
 	assert_compilation_unit_opaque_without_arena_leakage(sources,

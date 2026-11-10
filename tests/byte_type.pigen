@@ -1,0 +1,4 @@
+typedef byte byte_t;
+module byt(input logic clk, input byte_t buf a, output byte_t buf y);
+ always_ff @(posedge clk) y <= a;
+endmodule

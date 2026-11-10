@@ -155,6 +155,7 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 	descriptor.signedness = signedness;
 	descriptor.state_domain = state_domain;
 	descriptor.width = width;
+	descriptor.is_byte = pigen_data_type_is_byte(sem, type);
 	descriptor.width_expression = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	descriptor.dimension_count = dimension_count;
 

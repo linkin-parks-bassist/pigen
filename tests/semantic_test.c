@@ -402,8 +402,15 @@ int main(void)
 		PIGEN_INVALID_ID);
 	assert(pigen_data_type_spelling_domain(&model, byte_span) ==
 		PIGEN_TYPE_SPELLING_SYSTEMVERILOG);
-	assert(pigen_data_type_from_spelling(&model, byte_span,
-		PIGEN_SIGN_IMPLICIT, NULL, 0).index == PIGEN_INVALID_ID);
+	{
+		pigen_data_type_id byte_type = pigen_data_type_from_spelling(&model,
+			byte_span, PIGEN_SIGN_IMPLICIT, NULL, 0);
+
+		assert(byte_type.index != PIGEN_INVALID_ID);
+		assert(pigen_data_type_is_byte(&model, byte_type));
+		assert(pigen_data_type_signedness(&model, byte_type) ==
+			PIGEN_SIGN_SIGNED);
+	}
 	assert(signed_8.index == same_signed_8.index);
 	assert(signed_8.index != signed_16.index);
 	assert(signed_8.index != unsigned_8.index);

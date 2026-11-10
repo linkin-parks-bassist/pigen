@@ -413,7 +413,7 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		pigen_rtl_type descriptor = (pigen_rtl_type){
 			PIGEN_SIGN_UNSIGNED, PIGEN_DATA_TYPE_STATE_FOUR,
 			fields[i].width, INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN,
-			NULL, 0};
+			NULL, 0, 0};
 
 		field_type = pigen_rtl_type_intern(rtl, &descriptor);
 		if (field_type.index == PIGEN_INVALID_ID) return -1;
@@ -436,7 +436,7 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 	{
 		pigen_rtl_type bit1 = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
 			PIGEN_DATA_TYPE_STATE_FOUR, 1, INVALID_ID(pigen_rtl_expr_id),
-			INVALID_SPAN, NULL, 0};
+			INVALID_SPAN, NULL, 0, 0};
 
 		field_type = pigen_rtl_type_intern(rtl, &bit1);
 		if (field_type.index == PIGEN_INVALID_ID) return -1;
@@ -462,7 +462,7 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 	{
 		pigen_rtl_type packet_descriptor = (pigen_rtl_type){
 			PIGEN_SIGN_UNSIGNED, PIGEN_DATA_TYPE_STATE_FOUR, total_bits,
-			INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0};
+			INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0, 0};
 
 		packet_type = pigen_rtl_type_intern(rtl, &packet_descriptor);
 		if (packet_type.index == PIGEN_INVALID_ID) return -1;
@@ -485,7 +485,7 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		{
 			pigen_rtl_type descriptor = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
 				PIGEN_DATA_TYPE_STATE_FOUR, yield[i].width,
-				INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0};
+				INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0, 0};
 			pigen_rtl_object_id member;
 
 			field_type = pigen_rtl_type_intern(rtl, &descriptor);
@@ -569,7 +569,7 @@ static int lower_pipeline(pigen_rtl_lowering *lowering, pigen_module_id module,
 		pigen_rtl_object_id ready_object;
 		pigen_rtl_type bit1 = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
 			PIGEN_DATA_TYPE_STATE_FOUR, 1, INVALID_ID(pigen_rtl_expr_id),
-			INVALID_SPAN, NULL, 0};
+			INVALID_SPAN, NULL, 0, 0};
 		pigen_rtl_type_id bit1_type;
 
 		bit1_type = pigen_rtl_type_intern(rtl, &bit1);

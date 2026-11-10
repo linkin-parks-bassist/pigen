@@ -11,6 +11,7 @@ typedef enum {
 	PIGEN_DATA_TYPE_INVALID,
 	PIGEN_DATA_TYPE_LOGIC,
 	PIGEN_DATA_TYPE_BIT,
+	PIGEN_DATA_TYPE_BYTE,
 	PIGEN_DATA_TYPE_UNSIZED_INTEGER,
 	PIGEN_DATA_TYPE_SIGNED_INTEGER,
 	PIGEN_DATA_TYPE_UNSIGNED_INTEGER,
@@ -34,6 +35,8 @@ static const primitive_data_type_descriptor primitive_data_types[] = {
 	{PIGEN_DATA_TYPE_LOGIC, "logic", 1, PIGEN_DATA_TYPE_STATE_FOUR,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
 	{PIGEN_DATA_TYPE_BIT, "bit", 1, PIGEN_DATA_TYPE_STATE_TWO,
+		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
+	{PIGEN_DATA_TYPE_BYTE, "byte", 8, PIGEN_DATA_TYPE_STATE_TWO,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
 	{PIGEN_DATA_TYPE_UNSIZED_INTEGER, NULL, 32, PIGEN_DATA_TYPE_STATE_FOUR,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
@@ -295,6 +298,9 @@ pigen_signedness pigen_data_type_signedness(
 		const pigen_data_type *known = data_type_get(model, data_type);
 
 		if (!known) return PIGEN_SIGN_INVALID;
+		if (known->constructor == PIGEN_DATA_TYPE_BYTE &&
+			known->signedness == PIGEN_SIGN_IMPLICIT)
+			return PIGEN_SIGN_SIGNED;
 		if (known->signedness != PIGEN_SIGN_IMPLICIT ||
 			known->constructor != PIGEN_DATA_TYPE_ALIAS)
 			return known->signedness;
@@ -652,6 +658,7 @@ pigen_data_type_unqualified_transfer_policy(
 			return is_input ? PIGEN_UNQUALIFIED_TRANSFER_ABSTRACT :
 				PIGEN_UNQUALIFIED_TRANSFER_STATIC;
 		case PIGEN_DATA_TYPE_LOGIC:
+		case PIGEN_DATA_TYPE_BYTE:
 		case PIGEN_DATA_TYPE_UNSIZED_INTEGER:
 			return PIGEN_UNQUALIFIED_TRANSFER_STATIC;
 		default:
@@ -670,6 +677,15 @@ pigen_type_spelling_domain pigen_data_type_domain(
 		known->constructor == PIGEN_DATA_TYPE_UNSIGNED_INTEGER ||
 		known->constructor == PIGEN_DATA_TYPE_EXACT_INTEGER ?
 		PIGEN_TYPE_SPELLING_PIGEN : PIGEN_TYPE_SPELLING_SYSTEMVERILOG;
+}
+
+int pigen_data_type_is_byte(const pigen_semantic_model *model,
+	pigen_data_type_id type)
+{
+	const pigen_data_type *known = data_type_get(model,
+		underlying_data_type(model, type));
+
+	return known && known->constructor == PIGEN_DATA_TYPE_BYTE;
 }
 
 int pigen_data_type_is_integral(const pigen_semantic_model *model,
