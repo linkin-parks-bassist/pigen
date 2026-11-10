@@ -800,20 +800,25 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 			buf_append_str(b, " ");
 		buf_append_str(b, " ");
 	}
-	if (type->is_byte)
-		buf_append_str(b, "byte");
-	else if (type->is_integer_keyword)
-		buf_append_str(b, "integer");
-	else
+	switch ((pigen_sv_integer_keyword)type->sv_keyword)
 	{
-		const char *base = type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
-			"bit" : "logic";
+		case PIGEN_SV_INTEGER_BYTE: buf_append_str(b, "byte"); break;
+		case PIGEN_SV_INTEGER_INTEGER: buf_append_str(b, "integer"); break;
+		case PIGEN_SV_INTEGER_SHORTINT: buf_append_str(b, "shortint"); break;
+		case PIGEN_SV_INTEGER_LONGINT: buf_append_str(b, "longint"); break;
+		case PIGEN_SV_INTEGER_TIME: buf_append_str(b, "time"); break;
+		default:
+		{
+			const char *base = type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
+				"bit" : "logic";
 
-		buf_append_str(b, base);
-		if (type->signedness == PIGEN_SIGN_SIGNED)
-			buf_append_str(b, " signed");
+			buf_append_str(b, base);
+			if (type->signedness == PIGEN_SIGN_SIGNED)
+				buf_append_str(b, " signed");
+			break;
+		}
 	}
-	if (width > 1 && !type->is_byte && !type->is_integer_keyword)
+	if (width > 1 && !type->sv_keyword)
 	{
 		buf_append_str(b, " ");
 		if (emit_range(b, type) != 0)
@@ -836,18 +841,21 @@ static int emit_type(const struct buf *unused, struct buf *b,
 	const pigen_rtl_type *type)
 {
 	(void)unused;
-	if (type->is_byte)
-		buf_append_str(b, "byte");
-	else if (type->is_integer_keyword)
-		buf_append_str(b, "integer");
-	else
+	switch ((pigen_sv_integer_keyword)type->sv_keyword)
 	{
-		buf_append_str(b, type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
-			"bit" : "logic");
-		if (type->signedness == PIGEN_SIGN_SIGNED)
-			buf_append_str(b, " signed");
+		case PIGEN_SV_INTEGER_BYTE: buf_append_str(b, "byte"); break;
+		case PIGEN_SV_INTEGER_INTEGER: buf_append_str(b, "integer"); break;
+		case PIGEN_SV_INTEGER_SHORTINT: buf_append_str(b, "shortint"); break;
+		case PIGEN_SV_INTEGER_LONGINT: buf_append_str(b, "longint"); break;
+		case PIGEN_SV_INTEGER_TIME: buf_append_str(b, "time"); break;
+		default:
+			buf_append_str(b, type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
+				"bit" : "logic");
+			if (type->signedness == PIGEN_SIGN_SIGNED)
+				buf_append_str(b, " signed");
+			break;
 	}
-	if (type->width > 1 && !type->is_byte && !type->is_integer_keyword)
+	if (type->width > 1 && !type->sv_keyword)
 	{
 		buf_append_str(b, " ");
 		if (emit_range(b, type) != 0)

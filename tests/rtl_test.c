@@ -104,7 +104,7 @@ int main(void)
 	{
 		pigen_rtl_type bits4 = {
 			PIGEN_SIGN_UNSIGNED, PIGEN_DATA_TYPE_STATE_TWO, 4,
-			INVALID_ID(pigen_rtl_expr_id), first, NULL, 0, 0, 0};
+			INVALID_ID(pigen_rtl_expr_id), first, NULL, 0, 0};
 		pigen_rtl_type bits4_later = bits4;
 		pigen_rtl_type bits8 = bits4;
 		pigen_rtl_type int4 = bits4;

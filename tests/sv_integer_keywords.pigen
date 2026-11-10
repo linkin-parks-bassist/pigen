@@ -1,0 +1,10 @@
+module sv_integer_keywords(input logic clk, input logic reset,
+	input shortint a, input longint b, input time t,
+	output shortint sa, output longint lb, output time tt);
+	always_ff @(posedge clk)
+	begin
+		sa <= a;
+		lb <= b;
+		tt <= t;
+	end
+endmodule

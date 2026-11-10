@@ -13,6 +13,9 @@ typedef enum {
 	PIGEN_DATA_TYPE_BIT,
 	PIGEN_DATA_TYPE_BYTE,
 	PIGEN_DATA_TYPE_INTEGER,
+	PIGEN_DATA_TYPE_SHORTINT,
+	PIGEN_DATA_TYPE_LONGINT,
+	PIGEN_DATA_TYPE_TIME,
 	PIGEN_DATA_TYPE_UNSIZED_INTEGER,
 	PIGEN_DATA_TYPE_SIGNED_INTEGER,
 	PIGEN_DATA_TYPE_UNSIGNED_INTEGER,
@@ -40,6 +43,12 @@ static const primitive_data_type_descriptor primitive_data_types[] = {
 	{PIGEN_DATA_TYPE_BYTE, "byte", 8, PIGEN_DATA_TYPE_STATE_TWO,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
 	{PIGEN_DATA_TYPE_INTEGER, "integer", 32, PIGEN_DATA_TYPE_STATE_FOUR,
+		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
+	{PIGEN_DATA_TYPE_SHORTINT, "shortint", 16, PIGEN_DATA_TYPE_STATE_TWO,
+		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
+	{PIGEN_DATA_TYPE_LONGINT, "longint", 64, PIGEN_DATA_TYPE_STATE_TWO,
+		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
+	{PIGEN_DATA_TYPE_TIME, "time", 64, PIGEN_DATA_TYPE_STATE_FOUR,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
 	{PIGEN_DATA_TYPE_UNSIZED_INTEGER, NULL, 32, PIGEN_DATA_TYPE_STATE_FOUR,
 		PIGEN_DATA_TYPE_CAPABILITY_INTEGRAL},
@@ -302,9 +311,14 @@ pigen_signedness pigen_data_type_signedness(
 
 		if (!known) return PIGEN_SIGN_INVALID;
 		if ((known->constructor == PIGEN_DATA_TYPE_BYTE ||
-			 known->constructor == PIGEN_DATA_TYPE_INTEGER) &&
+			 known->constructor == PIGEN_DATA_TYPE_INTEGER ||
+			 known->constructor == PIGEN_DATA_TYPE_SHORTINT ||
+			 known->constructor == PIGEN_DATA_TYPE_LONGINT) &&
 			known->signedness == PIGEN_SIGN_IMPLICIT)
 			return PIGEN_SIGN_SIGNED;
+		if (known->constructor == PIGEN_DATA_TYPE_TIME &&
+			known->signedness == PIGEN_SIGN_IMPLICIT)
+			return PIGEN_SIGN_UNSIGNED;
 		if (known->signedness != PIGEN_SIGN_IMPLICIT ||
 			known->constructor != PIGEN_DATA_TYPE_ALIAS)
 			return known->signedness;
@@ -484,7 +498,10 @@ pigen_type_spelling_domain pigen_data_type_spelling_domain(
 		spelling_is(model, spelling, "uint"))
 		return PIGEN_TYPE_SPELLING_PIGEN;
 	if (spelling_is(model, spelling, "byte") ||
-		spelling_is(model, spelling, "integer"))
+		spelling_is(model, spelling, "integer") ||
+		spelling_is(model, spelling, "shortint") ||
+		spelling_is(model, spelling, "longint") ||
+		spelling_is(model, spelling, "time"))
 		return PIGEN_TYPE_SPELLING_SYSTEMVERILOG;
 	return primitive_from_spelling(model, spelling) ?
 		PIGEN_TYPE_SPELLING_SYSTEMVERILOG : PIGEN_TYPE_SPELLING_UNKNOWN;
@@ -665,6 +682,9 @@ pigen_data_type_unqualified_transfer_policy(
 		case PIGEN_DATA_TYPE_LOGIC:
 		case PIGEN_DATA_TYPE_BYTE:
 		case PIGEN_DATA_TYPE_INTEGER:
+		case PIGEN_DATA_TYPE_SHORTINT:
+		case PIGEN_DATA_TYPE_LONGINT:
+		case PIGEN_DATA_TYPE_TIME:
 		case PIGEN_DATA_TYPE_UNSIZED_INTEGER:
 			return PIGEN_UNQUALIFIED_TRANSFER_STATIC;
 		default:
@@ -685,22 +705,22 @@ pigen_type_spelling_domain pigen_data_type_domain(
 		PIGEN_TYPE_SPELLING_PIGEN : PIGEN_TYPE_SPELLING_SYSTEMVERILOG;
 }
 
-int pigen_data_type_is_byte(const pigen_semantic_model *model,
-	pigen_data_type_id type)
+pigen_sv_integer_keyword pigen_data_type_sv_keyword(
+	const pigen_semantic_model *model, pigen_data_type_id type)
 {
 	const pigen_data_type *known = data_type_get(model,
 		underlying_data_type(model, type));
 
-	return known && known->constructor == PIGEN_DATA_TYPE_BYTE;
-}
-
-int pigen_data_type_is_integer_keyword(const pigen_semantic_model *model,
-	pigen_data_type_id type)
-{
-	const pigen_data_type *known = data_type_get(model,
-		underlying_data_type(model, type));
-
-	return known && known->constructor == PIGEN_DATA_TYPE_INTEGER;
+	if (!known) return PIGEN_SV_INTEGER_NONE;
+	switch (known->constructor)
+	{
+		case PIGEN_DATA_TYPE_BYTE: return PIGEN_SV_INTEGER_BYTE;
+		case PIGEN_DATA_TYPE_INTEGER: return PIGEN_SV_INTEGER_INTEGER;
+		case PIGEN_DATA_TYPE_SHORTINT: return PIGEN_SV_INTEGER_SHORTINT;
+		case PIGEN_DATA_TYPE_LONGINT: return PIGEN_SV_INTEGER_LONGINT;
+		case PIGEN_DATA_TYPE_TIME: return PIGEN_SV_INTEGER_TIME;
+		default: return PIGEN_SV_INTEGER_NONE;
+	}
 }
 
 int pigen_data_type_is_integral(const pigen_semantic_model *model,

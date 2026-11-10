@@ -297,7 +297,7 @@ static int lower_fsm(pigen_rtl_lowering *lowering, pigen_module_id module,
 	{
 		pigen_rtl_type state_descriptor = (pigen_rtl_type){
 			PIGEN_SIGN_UNSIGNED, PIGEN_DATA_TYPE_STATE_FOUR, state_bits,
-			INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0, 0, 0};
+			INVALID_ID(pigen_rtl_expr_id), INVALID_SPAN, NULL, 0, 0};
 
 		state_type = pigen_rtl_type_intern(rtl, &state_descriptor);
 		if (state_type.index == PIGEN_INVALID_ID)
@@ -306,7 +306,7 @@ static int lower_fsm(pigen_rtl_lowering *lowering, pigen_module_id module,
 	{
 		pigen_rtl_type bit1_descriptor = (pigen_rtl_type){PIGEN_SIGN_UNSIGNED,
 			PIGEN_DATA_TYPE_STATE_FOUR, 1, INVALID_ID(pigen_rtl_expr_id),
-			INVALID_SPAN, NULL, 0, 0, 0};
+			INVALID_SPAN, NULL, 0, 0};
 
 		bit1_type = pigen_rtl_type_intern(rtl, &bit1_descriptor);
 		if (bit1_type.index == PIGEN_INVALID_ID)

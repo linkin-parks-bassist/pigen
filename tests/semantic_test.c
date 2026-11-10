@@ -407,7 +407,7 @@ int main(void)
 			byte_span, PIGEN_SIGN_IMPLICIT, NULL, 0);
 
 		assert(byte_type.index != PIGEN_INVALID_ID);
-		assert(pigen_data_type_is_byte(&model, byte_type));
+		assert(pigen_data_type_sv_keyword(&model, byte_type) == PIGEN_SV_INTEGER_BYTE);
 		assert(pigen_data_type_signedness(&model, byte_type) ==
 			PIGEN_SIGN_SIGNED);
 	}

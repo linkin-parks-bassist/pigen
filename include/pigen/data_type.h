@@ -139,9 +139,16 @@ pigen_integer_id pigen_data_type_exact_value(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
 pigen_numerical_interpretation pigen_data_type_numerical_interpretation(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
-int pigen_data_type_is_byte(
-	const pigen_semantic_model *model, pigen_data_type_id data_type);
-int pigen_data_type_is_integer_keyword(
+typedef enum {
+	PIGEN_SV_INTEGER_NONE,
+	PIGEN_SV_INTEGER_BYTE,
+	PIGEN_SV_INTEGER_INTEGER,
+	PIGEN_SV_INTEGER_SHORTINT,
+	PIGEN_SV_INTEGER_LONGINT,
+	PIGEN_SV_INTEGER_TIME
+} pigen_sv_integer_keyword;
+
+pigen_sv_integer_keyword pigen_data_type_sv_keyword(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
 int pigen_data_type_is_integral(const pigen_semantic_model *model,
 	pigen_data_type_id type);

@@ -320,7 +320,10 @@ pigen_syntax_type_ownership pigen_syntax_type_declaration_ownership(
 		(token_is(source, known->base.index, "logic") ||
 			token_is(source, known->base.index, "bit") ||
 			token_is(source, known->base.index, "byte") ||
-			token_is(source, known->base.index, "integer")))
+			token_is(source, known->base.index, "integer") ||
+			token_is(source, known->base.index, "shortint") ||
+			token_is(source, known->base.index, "longint") ||
+			token_is(source, known->base.index, "time")))
 		return PIGEN_SYNTAX_TYPE_SYSTEMVERILOG;
 	if (known->base.index == PIGEN_INVALID_ID &&
 		(known->signedness != PIGEN_SYNTAX_SIGN_IMPLICIT ||
