@@ -1,0 +1,22 @@
+module pipeline_reset(
+    input logic clk,
+    input logic reset,
+    input logic enable,
+    input bit[8] buf source,
+    output bit[8] buf destination
+);
+    always_ff @(posedge clk) begin
+        if (reset) begin
+            pipeline_reset(pipe);
+        end else if (enable) begin
+            pipeline pipe begin
+                bit[8] value;
+                bit[8] result;
+                stage begin value <= source; end
+                stage begin result <= value + 8'd1; end
+                yield result;
+            endpipeline
+            destination <= pipe;
+        end
+    end
+endmodule

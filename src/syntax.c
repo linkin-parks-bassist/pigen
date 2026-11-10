@@ -1146,6 +1146,29 @@ static const char *opaque_unit_closer(const syntax_parser *parser, size_t at)
 	return NULL;
 }
 
+static int parse_pipeline_reset(syntax_parser *parser,
+	pigen_syntax_id parent, size_t start, size_t limit, size_t *after,
+	size_t *assignment_count)
+{
+	const char *text;
+	size_t length = 0;
+	const pigen_expanded_token *token = token_at(parser, start);
+
+	(void)parent;
+	(void)limit;
+	text = token ? pigen_expanded_token_text(parser->expanded, token, &length) :
+		NULL;
+	if (!text || !((length == 14 && !memcmp(text, "pipeline_reset", 14)) ||
+		(length == 10 && !memcmp(text, "pipe_reset", 10))))
+		return 0;
+	if (!token_is(parser, start + 1, "(") || !identifier(parser, start + 2) ||
+		!token_is(parser, start + 3, ")") || !token_is(parser, start + 4, ";"))
+		return 0;
+	*after = start + 5;
+	(*assignment_count)++;
+	return 1;
+}
+
 static int parse_procedural_statement(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count);
@@ -2031,6 +2054,9 @@ static int parse_procedural_statement(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count)
 {
+	if (parse_pipeline_reset(parser, parent, start, limit, after_statement,
+		assignment_count))
+		return 1;
 	if (parse_validity_action(parser, parent, start, limit, after_statement,
 		assignment_count))
 		return 1;
