@@ -51,12 +51,23 @@ typedef struct {
 } fsm_state_names;
 
 typedef struct {
+	size_t module_token;
+	size_t instance_token;
+} pending_parameterized_instance;
+
+typedef struct {
 	const pigen_expanded_source *expanded;
 	pigen_syntax_tree *tree;
 	pigen_syntax_error *error;
 	typedef_name_fact *typedef_name_facts;
 	size_t typedef_name_fact_count;
 	size_t typedef_name_fact_capacity;
+	pigen_token_id *parameterized_module_names;
+	size_t parameterized_module_count;
+	size_t parameterized_module_capacity;
+	pending_parameterized_instance *pending_parameterized_instances;
+	size_t pending_parameterized_instance_count;
+	size_t pending_parameterized_instance_capacity;
 	pigen_token_id *function_names;
 	size_t function_name_count;
 	size_t function_name_capacity;
@@ -149,6 +160,68 @@ static int token_is(const syntax_parser *parser, size_t at, const char *text)
 	if (!token) return 0;
 	known = pigen_expanded_token_text(parser->expanded, token, &length);
 	return known && length == strlen(text) && !memcmp(known, text, length);
+}
+
+static int token_text_equal(const syntax_parser *parser, size_t left,
+	size_t right)
+{
+	const pigen_expanded_token *a = token_at(parser, left);
+	const pigen_expanded_token *b = token_at(parser, right);
+	const char *ta, *tb;
+	size_t la, lb;
+
+	if (!a || !b) return 0;
+	ta = pigen_expanded_token_text(parser->expanded, a, &la);
+	tb = pigen_expanded_token_text(parser->expanded, b, &lb);
+	return ta && tb && la == lb && !memcmp(ta, tb, la);
+}
+
+static int remember_parameterized_module(syntax_parser *parser, size_t token)
+{
+	if (parser->parameterized_module_count ==
+		parser->parameterized_module_capacity)
+	{
+		size_t capacity = parser->parameterized_module_capacity ?
+			parser->parameterized_module_capacity * 2 : 8;
+		pigen_token_id *names = pigen_resize(parser->parameterized_module_names,
+			capacity * sizeof(*names));
+
+		if (!names) return 0;
+		parser->parameterized_module_names = names;
+		parser->parameterized_module_capacity = capacity;
+	}
+	parser->parameterized_module_names[parser->parameterized_module_count++] =
+		(pigen_token_id){(uint32_t)token};
+	return 1;
+}
+
+static int remember_parameterized_instance(syntax_parser *parser,
+	size_t module_token, size_t instance_token)
+{
+	if (parser->pending_parameterized_instance_count ==
+		parser->pending_parameterized_instance_capacity)
+	{
+		size_t capacity = parser->pending_parameterized_instance_capacity ?
+			parser->pending_parameterized_instance_capacity * 2 : 8;
+		pending_parameterized_instance *instances = pigen_resize(
+			parser->pending_parameterized_instances,
+			capacity * sizeof(*instances));
+
+		if (!instances) return 0;
+		parser->pending_parameterized_instances = instances;
+		parser->pending_parameterized_instance_capacity = capacity;
+	}
+	parser->pending_parameterized_instances[
+		parser->pending_parameterized_instance_count++] =
+		(pending_parameterized_instance){module_token, instance_token};
+	return 1;
+}
+
+static void free_parser_state(syntax_parser *parser)
+{
+	free(parser->typedef_name_facts);
+	free(parser->parameterized_module_names);
+	free(parser->pending_parameterized_instances);
 }
 
 static int tokens_equal(const syntax_parser *parser, pigen_token_id left,
@@ -2822,6 +2895,7 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 		{
 			size_t retained_after;
 
+			if (!remember_parameterized_instance(parser, at, at)) return 0;
 			if (!parse_retained_module_item(parser, module, at, after,
 				&retained_after)) return 0;
 			at = retained_after;
@@ -3234,6 +3308,7 @@ static int parse_module(syntax_parser *parser, pigen_syntax_id root,
 	if (token_is(parser, header_at, "#"))
 	{
 		size_t parameter_close;
+		if (!remember_parameterized_module(parser, name)) return 0;
 		if (!token_is(parser, header_at + 1, "("))
 			return fail(parser, header_at, "module parameter list requires `(`");
 		parameter_close = matching_parenthesis(parser, header_at + 1, header_end);
@@ -3322,13 +3397,13 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 				if (decisive)
 					fail(&parser, boundary,
 						"typedef declaration requires `;`");
-				free(parser.typedef_name_facts);
+				free_parser_state(&parser);
 				return 0;
 			}
 			result = parse_typedef(&parser, root, at, semicolon, &opaque_cursor);
 			if (result == DECLARATION_INVALID)
 			{
-				free(parser.typedef_name_facts);
+				free_parser_state(&parser);
 				return 0;
 			}
 			at = semicolon + 1;
@@ -3343,13 +3418,13 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 		{
 			if (!parse_parameterized_module_opaque(&parser, root, at, &at))
 			{
-				free(parser.typedef_name_facts);
+				free_parser_state(&parser);
 				return 0;
 			}
 		}
 		else if (!parse_module(&parser, root, at, &at))
 		{
-			free(parser.typedef_name_facts);
+			free_parser_state(&parser);
 			return 0;
 		}
 		opaque_cursor = at;
@@ -3368,7 +3443,19 @@ int pigen_parse_syntax(const pigen_expanded_source *source,
 		add_opaque_bytes(&parser, owner, parser.opaque_byte_cursor,
 			parser.source_length);
 	}
-	free(parser.typedef_name_facts);
+	for (size_t i = 0; i < parser.pending_parameterized_instance_count; i++)
+		for (size_t j = 0; j < parser.parameterized_module_count; j++)
+			if (token_text_equal(&parser,
+				parser.pending_parameterized_instances[i].module_token,
+				parser.parameterized_module_names[j].index))
+			{
+				fail(&parser,
+					parser.pending_parameterized_instances[i].instance_token,
+					"parameterized Pigen child instances are not supported");
+				free_parser_state(&parser);
+				return 0;
+			}
+	free_parser_state(&parser);
 	return 1;
 }
 
