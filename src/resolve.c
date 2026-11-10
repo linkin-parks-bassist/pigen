@@ -2289,6 +2289,25 @@ static int validate_instance_destination_ownership(resolver *resolver)
 			}
 		}
 	}
+	for (size_t t = 0; t < model->transfer_count; t++)
+	{
+		const pigen_semantic_transfer *transfer = &model->transfers[t];
+		const pigen_transfer_signal_use *uses = pigen_transfer_signal_uses(
+			model, (pigen_transfer_id){(uint32_t)t});
+
+		for (size_t u = 0; uses && u < transfer->signal_use_count; u++)
+		{
+			if (!(uses[u].roles & PIGEN_TRANSFER_SIGNAL_WRITE)) continue;
+			for (size_t o = 0; o < owner_count; o++)
+				if (owners[o].module.index == transfer->module.index &&
+					owners[o].signal.index == uses[u].signal.index)
+				{
+					free(owners);
+					return fail(resolver, transfer->span,
+						"buffered destination has both instance and local producers");
+				}
+		}
+	}
 	free(owners);
 	return 1;
 }
