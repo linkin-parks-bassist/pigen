@@ -2170,10 +2170,135 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	return 1;
 }
 
+static int resolve_expr_references_symbol(const pigen_semantic_model *model,
+	pigen_expr_id expression, pigen_symbol_id symbol)
+{
+	const pigen_semantic_expr *expr;
+
+	if (expression.index == PIGEN_INVALID_ID) return 0;
+	expr = pigen_expr_get(model, expression);
+	if (!expr) return 0;
+	switch (expr->kind)
+	{
+	case PIGEN_EXPR_SYMBOL:
+		return expr->as.symbol.index == symbol.index;
+	case PIGEN_EXPR_GROUP:
+		return resolve_expr_references_symbol(model, expr->as.group.operand,
+			symbol);
+	case PIGEN_EXPR_UNARY:
+		return resolve_expr_references_symbol(model, expr->as.unary.operand,
+			symbol);
+	case PIGEN_EXPR_BINARY:
+		return resolve_expr_references_symbol(model, expr->as.binary.left,
+			symbol) ||
+			resolve_expr_references_symbol(model, expr->as.binary.right,
+				symbol);
+	case PIGEN_EXPR_CONDITIONAL:
+		return resolve_expr_references_symbol(model,
+			expr->as.conditional.condition, symbol) ||
+			resolve_expr_references_symbol(model,
+				expr->as.conditional.when_true, symbol) ||
+			resolve_expr_references_symbol(model,
+				expr->as.conditional.when_false, symbol);
+	case PIGEN_EXPR_CONVERSION:
+		return resolve_expr_references_symbol(model,
+			expr->as.conversion.operand, symbol);
+	case PIGEN_EXPR_INDEX:
+		return resolve_expr_references_symbol(model, expr->as.index.base,
+			symbol) ||
+			resolve_expr_references_symbol(model, expr->as.index.index,
+				symbol);
+	case PIGEN_EXPR_SELECT:
+		return resolve_expr_references_symbol(model, expr->as.select.base,
+			symbol) ||
+			resolve_expr_references_symbol(model, expr->as.select.left,
+				symbol) ||
+			resolve_expr_references_symbol(model, expr->as.select.right,
+				symbol);
+	case PIGEN_EXPR_CONCATENATION:
+	{
+		const pigen_expr_id *children = pigen_expr_children(model,
+			expr->as.sequence.first_child, expr->as.sequence.child_count);
+
+		for (size_t i = 0; children && i < expr->as.sequence.child_count; i++)
+			if (resolve_expr_references_symbol(model, children[i], symbol))
+				return 1;
+		return 0;
+	}
+	case PIGEN_EXPR_PEEK:
+		return resolve_expr_references_symbol(model, expr->as.peek.source,
+			symbol);
+	default:
+		return 0;
+	}
+}
+
+typedef struct {
+	pigen_module_id module;
+	pigen_signal_id signal;
+	pigen_source_span span;
+} instance_destination_owner;
+
+static int validate_instance_destination_ownership(resolver *resolver)
+{
+	pigen_semantic_model *model = resolver->model;
+	instance_destination_owner *owners = NULL;
+	size_t owner_count = 0;
+
+	for (size_t i = 0; i < model->instance_count; i++)
+	{
+		const pigen_semantic_instance *instance = &model->instances[i];
+		const pigen_semantic_instance_connection *connections =
+			pigen_instance_connections(model, (pigen_instance_id){(uint32_t)i});
+
+		for (size_t c = 0; connections && c < instance->connection_count; c++)
+		{
+			const pigen_semantic_signal *child_port;
+			pigen_transfer_type child_transfer;
+
+			if (connections[c].direction != PIGEN_SEMANTIC_OUTPUT) continue;
+			child_port = pigen_signal_get(model, connections[c].port_signal);
+			if (!child_port) continue;
+			child_transfer = child_port->transfer_type;
+			if (child_transfer != PIGEN_TRANSFER_TYPE_BUF &&
+				child_transfer != PIGEN_TRANSFER_TYPE_PORT &&
+				child_transfer != PIGEN_TRANSFER_TYPE_FIFO &&
+				child_transfer != PIGEN_TRANSFER_TYPE_SKID) continue;
+			for (size_t s = 0; s < model->signal_count; s++)
+			{
+				const pigen_semantic_signal *parent = &model->signals[s];
+				size_t o;
+
+				if (parent->module.index != instance->module.index ||
+					!resolve_expr_references_symbol(model,
+						connections[c].value, parent->symbol))
+					continue;
+				for (o = 0; o < owner_count; o++)
+					if (owners[o].module.index == parent->module.index &&
+						owners[o].signal.index == s)
+					{
+						free(owners);
+						return fail(resolver, connections[c].span,
+							"buffered instance destination has multiple producers");
+					}
+				owners = pigen_resize(owners,
+					(owner_count + 1) * sizeof(*owners));
+				owners[owner_count++] = (instance_destination_owner){
+					parent->module, (pigen_signal_id){(uint32_t)s},
+					connections[c].span};
+			}
+		}
+	}
+	free(owners);
+	return 1;
+}
+
 static int validate_signal_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
 	size_t later_index;
+
+	if (!validate_instance_destination_ownership(resolver)) return 0;
 
 	for (later_index = 0; later_index < model->transfer_count; later_index++)
 	{
