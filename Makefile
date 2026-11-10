@@ -4,7 +4,7 @@ LDLIBS		= -lm
 SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-.PHONY: all clean test ordinary-sv-preserve-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-direct-duplicate-error-test clocked-case-error-test pipeline-reset-after-test pipeline-reset-conditional-test sv-integer-keywords-test integer-signal-test byte-type-test two-state-test validate-input-error-test peek-test validate-order-test macro-paste-decl-test macro-stringify-test macro-paste-ref-test macro-paste-test clog2-test pipeline-reset-test function-retain-test concat-placeholder-test struct-write-test pipeline-alias-test fabric-merge-test fabric-merge3-test concat-misaligned-test ternary-literal-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
+.PHONY: all clean test ordinary-sv-preserve-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-direct-duplicate-error-test clocked-case-error-test pipeline-reset-after-test pipeline-reset-conditional-test sv-integer-keywords-test integer-signal-test byte-type-test two-state-test validate-input-error-test peek-test validate-order-test macro-paste-decl-test macro-stringify-test macro-paste-ref-test macro-paste-test clog2-test pipeline-reset-test function-retain-test concat-placeholder-test struct-write-test pipeline-alias-test fabric-merge-test fabric-merge3-test concat-misaligned-test ternary-literal-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
 
 all: pigen
 
@@ -12,7 +12,7 @@ pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preproc
 	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c $(LDLIBS)
 
 
-test: pigen ordinary-sv-preserve-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test typed-param-test integer-param-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
+test: pigen ordinary-sv-preserve-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test typed-param-test integer-param-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen
 
 source-test:
@@ -332,6 +332,26 @@ ordinary-sv-preserve-test: pigen
 	iverilog -g2012 -s ordinary_sv_preserve_tb -o $$dir/ordinary \
 		tests/ordinary_sv_preserve_tb.sv $$dir/ordinary.sv && \
 	vvp $$dir/ordinary | grep -Fq 'PASS ordinary SV preserved'; \
+	status=$$?; rm -rf $$dir; exit $$status
+
+elastic-child-ports-test: pigen
+	dir=$$(mktemp -d); \
+	./pigen tests/elastic_child_ports.pigen -o $$dir/elastic.sv && \
+	grep -Fq '.i_valid(a_valid), .i_ready(a_ready)' $$dir/elastic.sv && \
+	iverilog -g2012 -s elastic_child_ports_tb -o $$dir/elastic \
+		rtl/pigen_primitives.sv tests/elastic_child_ports_tb.sv $$dir/elastic.sv && \
+	vvp $$dir/elastic | grep -Fq 'PASS elastic child ports'; \
+	status=$$?; rm -rf $$dir; exit $$status
+
+elastic-pigen-children-test: pigen
+	dir=$$(mktemp -d); \
+	./pigen tests/elastic_pigen_children.pigen -o $$dir/elastic-param.sv && \
+	test $$(grep -c '^module __pigen_spec_pchild_' $$dir/elastic-param.sv) -eq 2 && \
+	grep -Fq '.i_valid(a_valid), .i_ready(a_ready)' $$dir/elastic-param.sv && \
+	iverilog -g2012 -s elastic_pigen_children_tb -o $$dir/elastic-param \
+		rtl/pigen_primitives.sv tests/elastic_pigen_children_tb.sv \
+		$$dir/elastic-param.sv && \
+	vvp $$dir/elastic-param | grep -Fq 'PASS elastic parameterized Pigen child ports'; \
 	status=$$?; rm -rf $$dir; exit $$status
 
 parameterized-pigen-children-test: pigen

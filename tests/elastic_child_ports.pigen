@@ -1,0 +1,10 @@
+module pchild(input logic clk, input bit[8] buf i, output bit[8] buf o);
+ always_ff @(posedge clk) o <= i;
+endmodule
+module top(
+ input logic clk,
+ input logic [7:0] a, input logic a_valid, output logic a_ready,
+ output logic [7:0] y, output logic y_valid, input logic y_ready
+);
+ pchild c(.clk(clk), .i(a), .o(y));
+endmodule

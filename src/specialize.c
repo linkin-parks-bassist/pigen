@@ -267,44 +267,44 @@ static int collect_modules(const char *source, const pigen_tokens *tokens,
 			if (token_is_text(source, &tokens->items[endmodule], "endmodule"))
 				break;
 		if (endmodule == tokens->count) continue;
-		if (name + 2 < header_end &&
-			token_is_text(source, &tokens->items[name + 1], "#") &&
-			token_is_text(source, &tokens->items[name + 2], "("))
+		if (module_has_pigen(source, tokens, at, endmodule))
 		{
-			size_t close = find_matching(source, tokens, name + 2, "(", ")",
-				header_end);
+			size_t port_open = name + 1;
+			int parameterized = name + 2 < header_end &&
+				token_is_text(source, &tokens->items[name + 1], "#") &&
+				token_is_text(source, &tokens->items[name + 2], "(");
 
-			if (close < header_end)
+			module.module_token = at;
+			module.name_token = name;
+			module.endmodule_token = endmodule;
+			module.pigen = 1;
+			if (parameterized)
 			{
-				module.module_token = at;
-				module.name_token = name;
+				size_t close = find_matching(source, tokens, name + 2, "(", ")",
+					header_end);
+
+				if (close == header_end) continue;
 				module.parameter_hash_token = name + 1;
 				module.parameter_close_token = close;
-				module.endmodule_token = endmodule;
-				module.pigen = module_has_pigen(source, tokens, at, endmodule);
-				if (module.pigen)
-				{
-					size_t port_open = close + 1;
-
-					parse_module_parameters(source, tokens, &module);
-					if (token_is_text(source, &tokens->items[port_open], "("))
-					{
-						size_t port_close = find_matching(source, tokens,
-							port_open, "(", ")", header_end);
-
-						if (port_close < header_end)
-							parse_buffered_ports(source, tokens, &module,
-								port_open, port_close);
-					}
-				}
-				if (count == capacity)
-				{
-					capacity = capacity ? capacity * 2 : 4;
-					out = pigen_resize(out, capacity * sizeof(*out));
-				}
-				out[count++] = module;
-				at = endmodule;
+				port_open = close + 1;
+				parse_module_parameters(source, tokens, &module);
 			}
+			if (token_is_text(source, &tokens->items[port_open], "("))
+			{
+				size_t port_close = find_matching(source, tokens, port_open,
+					"(", ")", header_end);
+
+				if (port_close < header_end)
+					parse_buffered_ports(source, tokens, &module, port_open,
+						port_close);
+			}
+			if (count == capacity)
+			{
+				capacity = capacity ? capacity * 2 : 4;
+				out = pigen_resize(out, capacity * sizeof(*out));
+			}
+			out[count++] = module;
+			at = endmodule;
 		}
 	}
 	*modules = out;
@@ -503,6 +503,53 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 		size_t value_count = 0;
 		char *clone_name = NULL;
 
+		if (token_is_identifier(token) && i + 3 < tokens.count &&
+			!token_is_text(source, token, "module") &&
+			token_is_identifier(&tokens.items[i + 1]) &&
+			token_is_text(source, &tokens.items[i + 2], "("))
+		{
+			module_name = token_text(source, token);
+			for (size_t m = 0; m < module_count; m++)
+			{
+				char *candidate = token_text(source,
+					&tokens.items[modules[m].name_token]);
+
+				if (modules[m].pigen && modules[m].buffered_port_count &&
+					text_equals(module_name, candidate))
+					module = &modules[m];
+				free(candidate);
+				if (module) break;
+			}
+			if (module)
+			{
+				size_t open = i + 2;
+				size_t close_plain = find_matching(source, &tokens, open,
+					"(", ")", tokens.count);
+
+				if (close_plain < tokens.count - 1 &&
+					token_is_text(source, &tokens.items[close_plain + 1], ";"))
+				{
+					char *plain_name = token_text(source,
+						&tokens.items[module->name_token]);
+					char *instance_text = build_instance_text(source, &tokens,
+						module, plain_name, i + 1, open, close_plain);
+					spec_replacement *grown = pigen_resize(replacements,
+						(replacement_count + 1) * sizeof(*replacements));
+
+					replacements = grown;
+					replacements[replacement_count++] = (spec_replacement){
+						token->span.start,
+						tokens.items[close_plain + 1].span.end,
+						instance_text};
+					free(plain_name);
+					free(module_name);
+					changed = 1;
+					i = close_plain + 1;
+					continue;
+				}
+			}
+			free(module_name);
+		}
 		if (!token_is_identifier(token) || i + 4 >= tokens.count ||
 			!token_is_text(source, &tokens.items[i + 1], "#") ||
 			!token_is_text(source, &tokens.items[i + 2], "("))
