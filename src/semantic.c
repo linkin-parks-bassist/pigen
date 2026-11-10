@@ -889,6 +889,20 @@ static int evaluate_u64(pigen_semantic_model *model,
 			*value = result;
 			return 1;
 		}
+		case PIGEN_CONST_EXPR_SYMBOL:
+		{
+			const pigen_symbol *symbol = pigen_symbol_get(model,
+				known->as.symbol);
+			const pigen_semantic_parameter *parameter;
+
+			if (!symbol || symbol->kind != PIGEN_SYMBOL_PARAMETER)
+				return 0;
+			parameter = pigen_parameter_get(model,
+				pigen_symbol_parameter(model, known->as.symbol));
+			return parameter && evaluate_u64(model,
+				pigen_expr_constant(model, parameter->value), value,
+				remaining - 1);
+		}
 		case PIGEN_CONST_EXPR_CONVERSION:
 			return evaluate_u64(model, known->as.conversion.operand, value,
 				remaining - 1);

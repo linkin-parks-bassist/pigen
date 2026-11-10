@@ -1,0 +1,3 @@
+module paramod #(parameter WIDTH = 8) (input logic clk, input bit[WIDTH] buf a, output bit[WIDTH] buf y);
+ always_ff @(posedge clk) y <= a;
+endmodule

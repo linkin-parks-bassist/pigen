@@ -304,6 +304,14 @@ clocked-case-error-test: pigen
 		echo 'structured case process unexpectedly compiled' >&2; exit 1; fi
 	grep -q 'structured construct in an unsupported clocked process is not supported' /tmp/case-error.err
 
+parameter-width-test: pigen
+	dir=$$(mktemp -d); \
+	./pigen tests/parameter_width.pigen -o $$dir/param.sv && \
+	grep -Fq 'input  bit [7:0] a' $$dir/param.sv && \
+	iverilog -g2012 -s parameter_width_tb -o $$dir/param \
+		rtl/pigen_primitives.sv $$dir/param.sv tests/parameter_width_tb.sv && \
+	vvp $$dir/param; status=$$?; rm -rf $$dir; exit $$status
+
 pipeline-reset-after-test: pigen
 	dir=$$(mktemp -d); \
 	./pigen tests/pipeline_reset_after.pigen -o $$dir/reset.sv && \
