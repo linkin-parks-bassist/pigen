@@ -70,6 +70,8 @@ typedef struct {
 
 static int node_has_function_call(syntax_parser *parser,
 	pigen_syntax_id node_id, size_t depth);
+static int node_has_structured_construct(syntax_parser *parser,
+	pigen_syntax_id node_id, size_t depth);
 static void remember_function_name(syntax_parser *parser, size_t start,
 	size_t end);
 
@@ -2132,6 +2134,9 @@ static int parse_clocked_process(syntax_parser *parser,
 		process_after);
 	if (node_has_function_call(parser, process, 0))
 	{
+		if (node_has_structured_construct(parser, process, 0))
+			return fail(parser, start,
+				"function call in a structured clocked process is not supported");
 		restore_checkpoint(parser, checkpoint);
 		return 0;
 	}
@@ -2441,6 +2446,28 @@ static int expression_has_function_call(syntax_parser *parser,
 		default:
 			return 0;
 	}
+}
+
+static int node_has_structured_construct(syntax_parser *parser,
+	pigen_syntax_id node_id, size_t depth)
+{
+	const pigen_syntax_node *node = pigen_syntax_get(parser->tree, node_id);
+	pigen_syntax_id child;
+
+	if (!node || depth > 64) return 0;
+	if (node->kind == PIGEN_SYNTAX_PIPELINE ||
+		node->kind == PIGEN_SYNTAX_FSM ||
+		node->kind == PIGEN_SYNTAX_ACTION)
+		return 1;
+	for (child = node->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *known = pigen_syntax_get(parser->tree, child);
+
+		if (!known) break;
+		if (node_has_structured_construct(parser, child, depth + 1)) return 1;
+		child = known->next_sibling;
+	}
+	return 0;
 }
 
 static int node_has_function_call(syntax_parser *parser,

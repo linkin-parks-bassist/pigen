@@ -1,0 +1,13 @@
+module pipeline_function_mix_error(input logic clk, input bit[8] buf source, output bit[8] buf destination);
+  function automatic logic [7:0] inc(input logic [7:0] v);
+    inc = v + 8'd1;
+  endfunction
+  always_ff @(posedge clk) begin
+    pipeline p begin
+      bit[8] value;
+      stage begin value <= source; end
+      yield value;
+    endpipeline
+    destination <= inc(p);
+  end
+endmodule

@@ -41,4 +41,13 @@ fi
 grep -q 'buffered transfer cannot source its destination' \
 	"$temporary/first-stage.err"
 
+
+if "$tool" tests/pipeline_function_mix_error.pigen \
+	-o "$temporary/function-mix.sv" 2>"$temporary/function-mix.err"; then
+	echo 'function call in structured process unexpectedly compiled' >&2
+	exit 1
+fi
+grep -q 'function call in a structured clocked process is not supported' \
+	"$temporary/function-mix.err"
+
 echo "PASS: pipeline grammar and lexical shadowing are diagnosed"
