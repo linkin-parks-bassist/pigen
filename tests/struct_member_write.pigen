@@ -1,0 +1,14 @@
+typedef struct packed { logic [3:0] tag; logic [11:0] payload; } packet_t;
+
+module struct_member_write(input logic clk, input logic reset,
+	output logic [3:0] tag, output logic [11:0] payload);
+	packet_t reg state;
+
+	always_ff @(posedge clk)
+	begin
+		state.tag <= 4'ha;
+		state.payload <= 12'h123;
+		tag <= state.tag;
+		payload <= state.payload;
+	end
+endmodule
