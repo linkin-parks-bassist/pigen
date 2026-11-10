@@ -833,6 +833,17 @@ static int expr_references_symbol(const pigen_semantic_model *model,
 	}
 }
 
+static int signal_is_instance_destination(const pigen_semantic_model *model,
+	pigen_symbol_id symbol)
+{
+	for (size_t i = 0; i < model->instance_connection_count; i++)
+		if (model->instance_connections[i].direction == PIGEN_SEMANTIC_OUTPUT &&
+			expr_references_symbol(model, model->instance_connections[i].value,
+				symbol))
+			return 1;
+	return 0;
+}
+
 static int boundary_endpoints(pigen_rtl_lowering *lowering,
 	const pigen_semantic_signal *owner_signal, size_t signal_index,
 	pigen_rtl_module_id rtl_module, pigen_rtl_signal_endpoints *out)
@@ -876,9 +887,13 @@ static int boundary_endpoints(pigen_rtl_lowering *lowering,
 	payload = add_named_object(lowering, rtl_module, data_type,
 		owner_signal->direction, signal_index, origin, base, NULL);
 	valid_object = add_named_object(lowering, rtl_module, control_type,
-		PIGEN_SEMANTIC_INPUT, signal_index, origin, base, "_valid");
+		owner_signal->direction == PIGEN_SEMANTIC_OUTPUT ?
+			PIGEN_SEMANTIC_OUTPUT : PIGEN_SEMANTIC_INPUT,
+		signal_index, origin, base, "_valid");
 	ready_object = add_named_object(lowering, rtl_module, control_type,
-		PIGEN_SEMANTIC_OUTPUT, signal_index, origin, base, "_ready");
+		owner_signal->direction == PIGEN_SEMANTIC_OUTPUT ?
+			PIGEN_SEMANTIC_INPUT : PIGEN_SEMANTIC_OUTPUT,
+		signal_index, origin, base, "_ready");
 	free(base);
 	if (payload.index == PIGEN_INVALID_ID ||
 		valid_object.index == PIGEN_INVALID_ID ||
@@ -1270,6 +1285,7 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 		const struct pigen_realization_endpoint_adapter *adapter;
 		pigen_rtl_signal_endpoints endpoints;
 		int is_storage;
+		int instance_destination;
 
 		if (owner_signal->module.index != module.index)
 			continue;
@@ -1288,10 +1304,14 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 			realization == PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER ||
 			realization == PIGEN_TRANSFER_REALIZATION_PARAMETERIZED_QUEUE ||
 			realization == PIGEN_TRANSFER_REALIZATION_SKID_QUEUE;
+		instance_destination = signal_is_instance_destination(sem,
+			owner_signal->symbol);
 		/* A concrete buffered input is an upstream-owned boundary view, not
 		 * local storage, so it is lowered in the first pass with the
-		 * boundary shape. */
-		if (is_storage && owner_signal->direction == PIGEN_SEMANTIC_INPUT)
+		 * boundary shape. A buffered output driven by a child instance is
+		 * likewise the child's boundary view, not a second storage owner. */
+		if (is_storage && (owner_signal->direction == PIGEN_SEMANTIC_INPUT ||
+			instance_destination))
 			is_storage = 0;
 		if ((pass == 0) == is_storage)
 			continue;
