@@ -1,3 +1,4 @@
-module exact_wide(input wire clk,input wire reset,output uint[194] buf o);
+module exact_wide(input wire clk,input wire reset,output uint[194] buf o,output int[194] buf n);
  always_ff @(posedge clk) o<=12554203470773361527671578846415332832204710888928069025793;
+ always_ff @(posedge clk) n<=-12554203470773361527671578846415332832204710888928069025793;
 endmodule

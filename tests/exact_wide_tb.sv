@@ -1,6 +1,7 @@
 module exact_wide_tb;
  logic clk=0,reset=1,o_ready=1,o_valid;
  logic [193:0] o;
+ logic signed [193:0] n; logic n_ready=1,n_valid;
  integer received=0;
  exact_wide dut(.*);
  always #5 clk=~clk;
@@ -8,6 +9,7 @@ module exact_wide_tb;
   #20 reset=0;
   repeat(10) begin
    @(negedge clk);
+   if(n_valid && n!==-194'sh2000000000000000000000000000000000000000000000001) $fatal(1,"negative exact changed");
    if(o_valid) received=received+1;
    if(o_valid && o!==194'h2000000000000000000000000000000000000000000000001) $fatal(1,"exact wide value changed");
   end

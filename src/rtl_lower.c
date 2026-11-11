@@ -408,6 +408,32 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 	case PIGEN_CONST_EXPR_CONVERSION:
 	{
 		pigen_rtl_expr_id operand;
+		const pigen_const_expr *source = pigen_const_expr_get(sem, owner->as.conversion.operand);
+		if (source && pigen_data_type_numerical_interpretation(sem, source->data_type) == PIGEN_NUMERICAL_EXACT_INTEGER &&
+			pigen_integer_is_negative(sem, pigen_data_type_exact_value(sem, source->data_type)))
+		{
+			const pigen_integer *integer = &sem->integers[pigen_data_type_exact_value(sem, source->data_type).index];
+			const pigen_rtl_type *target = pigen_rtl_type_get(rtl, result_type);
+			uint64_t bits = target->width;
+			size_t count = bits / 64 + (bits % 64 != 0);
+			if (!count || count > SIZE_MAX / sizeof(pigen_rtl_literal_word))
+				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			pigen_rtl_literal_word *words = calloc(count, sizeof *words);
+			if (!words) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			for (size_t i = 0; i < integer->limb_count && i / 2 < count; i++)
+				words[i / 2].value |= (uint64_t)sem->integer_limbs[integer->first_limb+i] << ((i % 2)*32);
+			uint64_t carry = 1;
+			for (size_t i = 0; i < count; i++)
+			{
+				words[i].value = ~words[i].value + carry;
+				carry = carry && words[i].value == 0;
+			}
+			if (bits % 64) words[count-1].value &= (UINT64_C(1) << (bits % 64))-1;
+			result = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_BITS,
+				result_type, words, bits, 0, origin);
+			free(words);
+			break;
+		}
 
 		operand = pigen_lower_rtl_expression(lowering,
 			owner->as.conversion.operand);
