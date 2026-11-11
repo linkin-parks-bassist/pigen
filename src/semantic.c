@@ -2370,6 +2370,24 @@ pigen_process_id pigen_process_add(pigen_semantic_model *model,
 	return result;
 }
 
+pigen_process_id pigen_structural_process_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module, pigen_source_span span)
+{
+	if (!pigen_module_get(model, module) || syntax.index == PIGEN_INVALID_ID ||
+		!pigen_source_span_valid(model->sources, span) ||
+		!id_capacity_available(model->process_count)) return INVALID_ID(pigen_process_id);
+	if (model->process_count == model->process_capacity)
+	{
+		model->process_capacity = model->process_capacity ? model->process_capacity * 2 : 16;
+		model->processes = pigen_resize(model->processes,
+			model->process_capacity * sizeof(*model->processes));
+	}
+	pigen_process_id result = {(uint32_t)model->process_count};
+	model->processes[model->process_count++] = (pigen_semantic_process){
+		syntax, module, INVALID_ID(pigen_clock_domain_id), INVALID_ID(pigen_expr_id), span};
+	return result;
+}
+
 pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module_id,
 	pigen_process_id process_id, pigen_lvalue_id destination,
@@ -2391,7 +2409,7 @@ pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 
 	if (!module || !process || process->module.index != module_id.index ||
 		process->domain.index != domain_id.index ||
-		!pigen_clock_domain_get(model, domain_id) ||
+		(process->clock.index != PIGEN_INVALID_ID && !pigen_clock_domain_get(model, domain_id)) ||
 		!destination_value || !source_expression ||
 		(!destination_expression &&
 			destination_value->kind != PIGEN_LVALUE_CONCATENATION) ||

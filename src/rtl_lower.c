@@ -2668,11 +2668,13 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 		if (!owner_process)
 			return -1;
 		owner_domain = pigen_clock_domain_get(sem, owner_process->domain);
-		if (!owner_domain)
-			return -1;
-		clock_expr = lower_expr(lowering, owner_process->clock);
-		if (clock_expr.index == PIGEN_INVALID_ID)
-			return -1;
+		clock_expr = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		if (owner_process->clock.index != PIGEN_INVALID_ID)
+		{
+			if (!owner_domain) return -1;
+			clock_expr = lower_expr(lowering, owner_process->clock);
+			if (clock_expr.index == PIGEN_INVALID_ID) return -1;
+		}
 		transfers = pigen_process_transfers(sem, processes[pi],
 			&transfer_count);
 		if (!transfers && transfer_count)
@@ -2994,6 +2996,12 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			}
 		}
 
+		if (!owner_domain && update_count)
+		{
+			free(update_ids);
+			return -1;
+		}
+		if (owner_domain)
 		{
 			pigen_rtl_process_id proc_id = pigen_rtl_process_add_with_owner(rtl, rtl_module, clock_expr,
 				owner_domain->edge, update_ids, update_count,

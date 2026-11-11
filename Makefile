@@ -1103,13 +1103,21 @@ fabric-anonymous-test: pigen
 
 child-port-endpoint-test: pigen
 	dir=$$(mktemp -d); status=0; \
+	for fixture in expression expression_alias expression_join; do \
+		tb=tests/child_port_expression_tb.sv; \
+		if [ "$$fixture" = expression_join ]; then tb=tests/child_port_expression_join_tb.sv; fi; \
+		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
+		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim $$tb rtl/pigen_primitives.sv $$dir/design.sv && \
+		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
+	done; rm -rf $$dir; exit $$status
+	dir=$$(mktemp -d); status=0; \
 	for fixture in endpoint parent destination fabric forward module_order explicit_alias explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim tests/child_port_endpoint_tb.sv rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; \
 	if [ $$status -eq 0 ]; then \
-		for fixture in write missing consumers local_consumer explicit_consumers wire_view_consumers; do \
+		for fixture in write missing consumers local_consumer explicit_consumers wire_view_consumers expression_consumers; do \
 			if ./pigen tests/child_port_$${fixture}_error.pigen -o $$dir/error.sv 2>$$dir/error; then status=1; break; fi; \
 			grep -Eq 'transfer destination is not a writable variable or signal|transfer value requires a compatible expression|elastic endpoint has multiple child consumers|elastic endpoint has both child and local consumers' $$dir/error || { status=1; break; }; \
 		done; \

@@ -690,7 +690,7 @@ static int analyze_transfer(resolver *resolver, pigen_lvalue_id destination,
 			fail(resolver, span, "buffered transfer cannot source its destination");
 			valid = 0;
 		}
-	for (i = 0; valid && i < *signal_use_count; i++)
+	for (i = 0; valid && domain.index != PIGEN_INVALID_ID && i < *signal_use_count; i++)
 		if (!pigen_signal_bind_domain(resolver->model,
 			(*signal_uses)[i].signal, domain))
 		{
@@ -2296,6 +2296,54 @@ resolve_body:
 				!resolve_instance(resolver, module_id, child, node, phase)) return 0;
 			child = node->next_sibling;
 		}
+	/* Computed elastic inputs are storage-free atomic transfers into a
+	 * child boundary. Reuse ordinary expression and transfer semantics. */
+	for (size_t i = 0; i < model->instance_count; i++)
+	{
+		const pigen_semantic_instance *instance = &model->instances[i];
+		if (instance->module.index != module_id.index) continue;
+		for (size_t c = 0; c < instance->connection_count; c++)
+		{
+			pigen_semantic_instance_connection *connection = &model->instance_connections[instance->first_connection+c];
+			pigen_semantic_signal port = model->signals[connection->port_signal.index];
+			const pigen_semantic_expr *value = pigen_expr_get(model, connection->value);
+			while (value && value->kind == PIGEN_EXPR_CONVERSION)
+				value = pigen_expr_get(model, value->as.conversion.operand);
+			if (connection->direction != PIGEN_SEMANTIC_INPUT || port.direction != PIGEN_SEMANTIC_INPUT ||
+				pigen_transfer_type_descriptor_get(port.transfer_type)->is_static || !value || value->kind == PIGEN_EXPR_SYMBOL) continue;
+			/* Control sibling connections share port_signal: only adapt payload. */
+			const pigen_symbol *port_symbol = pigen_symbol_get(model, port.symbol);
+			size_t n = 0, m = 0;
+			const char *name = pigen_source_span_text(model->sources, connection->port_name, &n);
+			const char *base = pigen_source_span_text(model->sources, port_symbol->name, &m);
+			if (!name || !base || n != m || memcmp(name, base, n)) continue;
+			char name_buffer[96];
+			snprintf(name_buffer, sizeof name_buffer, "__pigen_connection_%zu_%zu", i, c);
+			pigen_source_id source = pigen_source_add((pigen_source_manager *)model->sources,
+				"<pigen-connection>", name_buffer, strlen(name_buffer));
+			pigen_source_span span = {source, 0, strlen(name_buffer)};
+			pigen_symbol_id symbol;
+			if (pigen_symbol_declare(model, scope, PIGEN_SYMBOL_SIGNAL, port.data_type,
+				span, span, &symbol, NULL) != PIGEN_DECLARE_OK) return 0;
+			pigen_signal_id signal = pigen_signal_add(model, instance->syntax, module_id, symbol,
+				port.data_type, port.shape, INVALID_ID(pigen_expr_id), PIGEN_TRANSFER_TYPE_BUF,
+				PIGEN_SEMANTIC_OUTPUT, span);
+			if (signal.index == PIGEN_INVALID_ID) return 0;
+			pigen_expr_id endpoint = pigen_expr_add_symbol(model, symbol, port.data_type, connection->span);
+			pigen_lvalue_id destination = pigen_lvalue_resolve(model, endpoint);
+			pigen_process_id process = pigen_structural_process_add(model, instance->syntax, module_id, instance->span);
+			pigen_predicate_id guard = pigen_predicate_true(model);
+			pigen_transfer_signal_use *uses = NULL;
+			size_t use_count = 0;
+			if (!analyze_transfer(resolver, destination, connection->value, guard,
+				INVALID_ID(pigen_clock_domain_id), connection->span, &uses, &use_count)) return 0;
+			pigen_transfer_id transfer = pigen_transfer_add(model, instance->syntax, module_id, process,
+				destination, connection->value, guard, INVALID_ID(pigen_clock_domain_id), uses, use_count, connection->span);
+			free(uses);
+			if (transfer.index == PIGEN_INVALID_ID) return fail(resolver, connection->span, "invalid structural input transfer");
+			connection->value = endpoint;
+		}
+	}
 	for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);

@@ -673,6 +673,9 @@ pigen_process_id pigen_process_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module,
 	pigen_clock_domain_id domain, pigen_expr_id clock,
 	pigen_source_span span);
+/* Storage-free structural transfers have no clock or domain. */
+pigen_process_id pigen_structural_process_add(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module, pigen_source_span span);
 pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_process_id process,
 	pigen_lvalue_id destination, pigen_expr_id value,
