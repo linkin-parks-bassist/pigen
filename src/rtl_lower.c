@@ -379,6 +379,17 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 		free(words);
 		break;
 	}
+	case PIGEN_CONST_EXPR_UNARY:
+	{
+		pigen_unary_operation operation = owner->as.unary.operation;
+		pigen_rtl_expr_id operand = pigen_lower_rtl_expression(lowering, owner->as.unary.operand);
+		if (operand.index == PIGEN_INVALID_ID) return operand;
+		pigen_unary_resolution resolution = {
+			{PIGEN_CONVERSION_IDENTITY, operation.operand_data_type, operation.operand_data_type},
+			operation};
+		result = pigen_rtl_expr_add_unary(rtl, result_type, &resolution, operand, origin);
+		break;
+	}
 	case PIGEN_CONST_EXPR_SYMBOL:
 	{
 		const pigen_symbol *symbol = pigen_symbol_get(sem, owner->as.symbol);

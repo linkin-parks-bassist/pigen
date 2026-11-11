@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T17:39:29+11:00"
+revised_at: "2026-11-11T17:57:17+11:00"
 ---
 
 pigen_emit_systemverilog is the structured compiler's terminal renderer. It consumes finished named RTL and output layout, never semantic symbols or transfer types.
@@ -15,7 +15,7 @@ Equations emit assign statements, using destination_expression when present or t
 
 Names come from the RTL names arena using record identity/origin; generated text is never searched to recover meaning.
 
-Expressions render recursively with precedence and parentheses: literals, objects, unary/binary operators, conditionals, conversions, indices, range/indexed selections and concatenations. Literal rendering inspects every word: high data bits or any X/Z mask select sized binary output preserving all states; otherwise decimal output suffices. BITS carries its resolved width and explicit signed marker when signed, preserving arithmetic-shift/comparison semantics. INTEGER retains ordinary decimal form for host-word magnitudes and the negative sign when recorded. Multiword binary rendering uses resolved width, with absent upper bits zero-filled.
+Nested unary operands are parenthesized to prevent token merging. Expressions render recursively with precedence and parentheses: literals, objects, unary/binary operators, conditionals, conversions, indices, range/indexed selections and concatenations. Literal rendering inspects every word: high data bits or any X/Z mask select sized binary output preserving all states; otherwise decimal output suffices. BITS carries its resolved width and explicit signed marker when signed, preserving arithmetic-shift/comparison semantics. INTEGER retains ordinary decimal form for host-word magnitudes and the negative sign when recorded. Multiword binary rendering uses resolved width, with absent upper bits zero-filled.
 
 Select punctuation is [:], [+:] or [-:]. INTEGER_RESIZE uses a signedness cast without width; other conversions use target width/signedness, e.g. signed'(16'(a)). Children come from RTL expression ranges.
 

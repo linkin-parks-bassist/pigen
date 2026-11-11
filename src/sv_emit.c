@@ -389,7 +389,7 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 		}
 		buf_append_str(b, op->text);
 		operand_level = render_expression_level(rtl, operand);
-		if (operand_level < PRC_LEAF)
+		if (operand_level < PRC_LEAF || operand->kind == PIGEN_RTL_EXPR_UNARY)
 		{
 			buf_append_str(b, "(");
 			render(b, rtl, operand);
