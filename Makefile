@@ -1119,7 +1119,7 @@ child-port-endpoint-test: pigen
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
-	for fixture in input_alias input_payload_alias input_selected_alias input_fabric_alias endpoint parent destination fabric fabric_peek forward module_order explicit_alias omitted_explicit_alias omitted_valid_only omitted_ready_only omitted_valid_select omitted_ready_select omitted_ready_select_fabric valid_select valid_select_fabric ready_select ready_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
+	for fixture in input_forward_grouped input_forward_alias input_forward_controls input_backward_controls input_forward_selected input_alias input_payload_alias input_selected_alias input_fabric_alias endpoint parent destination fabric fabric_peek forward module_order explicit_alias omitted_explicit_alias omitted_valid_only omitted_ready_only omitted_valid_select omitted_ready_select omitted_ready_select_fabric valid_select valid_select_fabric ready_select ready_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
 		case "$$fixture" in ready_select|ready_select_fabric|omitted_ready_select|omitted_ready_select_fabric) tb=tests/child_port_ready_select_tb.sv ;; *) tb=tests/child_port_endpoint_tb.sv ;; esac; \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim $$tb rtl/pigen_primitives.sv $$dir/design.sv && \

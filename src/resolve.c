@@ -2057,7 +2057,34 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		connection_type = port->data_type;
 	port_ready:
 		if (phase == 0) goto add_connection;
-		if ((phase == 1) != (direction == PIGEN_SEMANTIC_OUTPUT || generated_control))
+		pigen_syntax_expr_id binding = connection->as.connection.value;
+		const pigen_syntax_expr *group = pigen_syntax_expr_get(&resolver->syntax->expressions, binding);
+		while (group && group->kind == PIGEN_SYNTAX_EXPR_GROUP)
+		{
+			binding = group->as.group.operand;
+			group = pigen_syntax_expr_get(&resolver->syntax->expressions, binding);
+		}
+		if (phase == 3)
+		{
+			/* Bind direct parent-wire input aliases before resolving sibling
+			 * output lvalues. Endpoint expressions wait for normal input resolution. */
+			const pigen_syntax_expr *expr = pigen_syntax_expr_get(&resolver->syntax->expressions,
+				binding);
+			while (expr && expr->kind == PIGEN_SYNTAX_EXPR_GROUP)
+				expr = pigen_syntax_expr_get(&resolver->syntax->expressions, expr->as.group.operand);
+			const pigen_symbol *parent = expr && expr->kind == PIGEN_SYNTAX_EXPR_NAME ?
+				pigen_symbol_get(model, pigen_symbol_lookup(model, module->scope,
+					token_spelling(resolver, expr->as.atom.token))) : NULL;
+			if (generated_control || direction != PIGEN_SEMANTIC_INPUT || !parent ||
+				parent->kind != PIGEN_SYMBOL_SIGNAL ||
+				!pigen_transfer_type_descriptor_get(model->signals[parent->object.signal.index].transfer_type)->is_static)
+			{
+				connection_index++;
+				child_id = connection->next_sibling;
+				continue;
+			}
+		}
+		else if ((phase == 1) != (direction == PIGEN_SEMANTIC_OUTPUT || generated_control))
 		{
 			connection_index++;
 			child_id = connection->next_sibling;
@@ -2067,19 +2094,19 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		{
 			/* Explicit parent controls have semantic identities needed by fabric
 			 * lowering. Implicit boundary siblings are emitted later. */
-			if (connection->as.connection.value.index != PIGEN_INVALID_ID)
+			if (binding.index != PIGEN_INVALID_ID)
 				value = pigen_resolve_expression(resolver->syntax, model,
-					module->scope, connection->as.connection.value,
+					module->scope, binding,
 					resolver->policy, NULL);
 			goto add_connection;
 		}
-		if (connection->as.connection.value.index != PIGEN_INVALID_ID)
+		if (binding.index != PIGEN_INVALID_ID)
 		{
 			if (direction == PIGEN_SEMANTIC_OUTPUT)
 			{
 				pigen_expr_id expression = pigen_resolve_expression(
 					resolver->syntax, model, module->scope,
-					connection->as.connection.value, resolver->policy,
+					binding, resolver->policy,
 					resolver->error);
 				pigen_lvalue_id lvalue = pigen_lvalue_resolve(model, expression);
 				const pigen_semantic_lvalue *known =
@@ -2093,13 +2120,13 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 			{
 				value = pigen_resolve_assignment_value(resolver->syntax,
 					model, module->scope,
-					connection->as.connection.value, connection_type,
+					binding, connection_type,
 					resolver->policy, resolver->error);
 				if (value.index == PIGEN_INVALID_ID)
 				{
 					pigen_expr_id raw = pigen_resolve_expression(
 						resolver->syntax, model, module->scope,
-						connection->as.connection.value, resolver->policy,
+						binding, resolver->policy,
 						resolver->error);
 					const pigen_semantic_expr *known =
 						pigen_expr_get(model, raw);
@@ -2142,7 +2169,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		connection_index++;
 		child_id = connection->next_sibling;
 	}
-	if (phase == 1 || phase == 2)
+	if (phase == 1 || phase == 2 || phase == 3)
 	{
 		const pigen_semantic_instance *record = pigen_instance_get(model, instance);
 		for (size_t c = 0; c < record->connection_count; c++)
@@ -2163,10 +2190,10 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				expression = pigen_expr_get(model, expression->as.conversion.operand);
 			if (!expression || expression->kind != PIGEN_EXPR_SYMBOL) continue;
 			parent = pigen_signal_get(model, pigen_symbol_signal(model, expression->as.symbol));
-			if (!parent || (phase == 2 && parent->direction == PIGEN_SEMANTIC_INPUT)) continue;
+			if (!parent || (phase != 1 && parent->direction == PIGEN_SEMANTIC_INPUT)) continue;
 			if (!pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static)
 			{
-				if (phase == 2) continue;
+				if (phase != 1) continue;
 				pigen_signal_id parent_id = pigen_symbol_signal(model, expression->as.symbol);
 				int explicit_control = 0;
 				if (!pigen_signal_is_instance_endpoint(model, parent_id)) continue;
@@ -2195,6 +2222,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				}
 				if (connection->endpoint_view.index != PIGEN_INVALID_ID) continue;
 			}
+			if (connection->endpoint_view.index != PIGEN_INVALID_ID) continue;
 			char name[96];
 			snprintf(name, sizeof name, "__pigen_endpoint_view_%u_%zu", instance.index, c);
 			pigen_source_id source = pigen_source_add((pigen_source_manager *)model->sources,
@@ -2321,14 +2349,15 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	return 1;
 resolve_body:
 	resolver->expression_scope = scope;
-	/* Establish every sibling's identity and omitted endpoints first, then bind
-	 * explicit output destinations before input expressions reference them. */
-	for (int phase = 0; phase < 3; phase++)
+	/* Establish sibling identities, then direct input-wire aliases, then
+	 * output destinations and finally general input expressions. */
+	for (int step = 0; step < 4; step++)
 		for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
 		{
 			const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);
 			if (node->kind == PIGEN_SYNTAX_INSTANCE &&
-				!resolve_instance(resolver, module_id, child, node, phase)) return 0;
+				!resolve_instance(resolver, module_id, child, node,
+					step == 0 ? 0 : step == 1 ? 3 : step == 2 ? 1 : 2)) return 0;
 			child = node->next_sibling;
 		}
 	/* Computed elastic inputs are storage-free atomic transfers into a
