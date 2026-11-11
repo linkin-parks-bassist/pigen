@@ -2460,6 +2460,9 @@ typedef struct {
 	pigen_source_span span;
 } instance_destination_owner;
 
+static int endpoint_has_readonly_control(pigen_semantic_model *model,
+	pigen_signal_id endpoint, pigen_semantic_direction direction);
+
 static int validate_instance_destination_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
@@ -2494,6 +2497,12 @@ static int validate_instance_destination_ownership(resolver *resolver)
 					!resolve_expr_references_symbol(model,
 						connections[c].value, parent->symbol))
 					continue;
+				if (!pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static &&
+					endpoint_has_readonly_control(model, (pigen_signal_id){(uint32_t)s}, PIGEN_SEMANTIC_INPUT))
+				{
+					free(owners);
+					return fail(resolver, connections[c].span, "automatic producer conflicts with read-only child valid binding");
+				}
 				for (o = 0; o < owner_count; o++)
 					if (owners[o].module.index == parent->module.index &&
 						owners[o].signal.index == s)
@@ -2644,8 +2653,8 @@ static pigen_signal_id canonical_endpoint(const pigen_semantic_model *model, pig
 	return signal;
 }
 
-static int endpoint_has_readonly_ready(pigen_semantic_model *model,
-	pigen_signal_id endpoint)
+static int endpoint_has_readonly_control(pigen_semantic_model *model,
+	pigen_signal_id endpoint, pigen_semantic_direction direction)
 {
 	endpoint = canonical_endpoint(model, endpoint);
 	for (size_t i = 0; i < model->instance_count; i++)
@@ -2654,7 +2663,7 @@ static int endpoint_has_readonly_ready(pigen_semantic_model *model,
 		for (size_t c = 0; c < instance->connection_count; c++)
 		{
 			const pigen_semantic_instance_connection *payload = &model->instance_connections[instance->first_connection+c];
-			if (payload->direction != PIGEN_SEMANTIC_OUTPUT ||
+			if (payload->direction != direction ||
 				canonical_endpoint(model, connection_signal(model, payload)).index != endpoint.index) continue;
 			const pigen_symbol *port = pigen_symbol_get(model, payload->port_symbol);
 			size_t n = 0;
@@ -2664,12 +2673,18 @@ static int endpoint_has_readonly_ready(pigen_semantic_model *model,
 				const pigen_semantic_instance_connection *control = &model->instance_connections[instance->first_connection+d];
 				size_t m = 0;
 				const char *name = pigen_source_span_text(model->sources, control->port_name, &m);
-				if (name && m == n+6 && !memcmp(name, base, n) && !memcmp(name+n, "_ready", 6) &&
+				if (name && m == n+6 && !memcmp(name, base, n) && !memcmp(name+n, direction == PIGEN_SEMANTIC_OUTPUT ? "_ready" : "_valid", 6) &&
 					pigen_lvalue_resolve(model, control->value).index == PIGEN_INVALID_ID) return 1;
 			}
 		}
 	}
 	return 0;
+}
+
+static int endpoint_has_readonly_ready(pigen_semantic_model *model,
+	pigen_signal_id endpoint)
+{
+	return endpoint_has_readonly_control(model, endpoint, PIGEN_SEMANTIC_OUTPUT);
 }
 
 static const pigen_semantic_instance_connection *resolved_fabric_port(resolver *resolver,
@@ -2751,6 +2766,8 @@ static int validate_fabric_ownership(resolver *resolver)
 				if (src.index == PIGEN_INVALID_ID || dst.index == PIGEN_INVALID_ID)
 					return fail(resolver, edge->location.source_span, "fabric endpoint requires a signal binding");
 				int consuming = !pigen_transfer_type_descriptor_get(model->signals[source->port_signal.index].transfer_type)->is_static;
+				if (endpoint_has_readonly_control(model, dst, PIGEN_SEMANTIC_INPUT))
+					return fail(resolver, edge->location.source_span, "automatic producer conflicts with read-only child valid binding");
 				if (consuming && endpoint_has_readonly_ready(model, src))
 					return fail(resolver, edge->location.source_span, "automatic consumer conflicts with read-only child ready binding");
 				if (consuming && !validate_prior_fabric_sources(resolver,
@@ -2818,6 +2835,12 @@ static int validate_signal_ownership(resolver *resolver)
 				(pigen_transfer_id){(uint32_t)later_index});
 		size_t earlier_index;
 		size_t i;
+
+		for (i = 0; i < later->signal_use_count; i++)
+			if ((later_uses[i].roles & PIGEN_TRANSFER_SIGNAL_WRITE) &&
+				!pigen_transfer_type_descriptor_get(model->signals[later_uses[i].signal.index].transfer_type)->is_static &&
+				endpoint_has_readonly_control(model, later_uses[i].signal, PIGEN_SEMANTIC_INPUT))
+				return fail(resolver, later->span, "automatic producer conflicts with read-only child valid binding");
 
 		for (earlier_index = 0; earlier_index < later_index; earlier_index++)
 		{

@@ -1289,14 +1289,22 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				const pigen_semantic_expr *expr=pigen_expr_get(sem,control->value);
 				while (expr && expr->kind == PIGEN_EXPR_CONVERSION)
 					expr = pigen_expr_get(sem, expr->as.conversion.operand);
-				if (ready && connection->direction == PIGEN_SEMANTIC_OUTPUT &&
+				if (ready == (connection->direction == PIGEN_SEMANTIC_OUTPUT) &&
 					pigen_lvalue_resolve(sem, control->value).index == PIGEN_INVALID_ID)
 				{
-					/* Fully explicit handshakes may supply read-only readiness.
-					 * Ownership validation excludes automatic consumers. */
-					out->ready = lower_expr(lowering, control->value);
-					out->input_ready = out->source_ready = (pigen_rtl_object_id){PIGEN_INVALID_ID};
-					if (out->ready.index == PIGEN_INVALID_ID) return -1;
+					/* Read-only controls belong to the explicit handshake owner. */
+					pigen_rtl_expr_id observed = lower_expr(lowering, control->value);
+					if (observed.index == PIGEN_INVALID_ID) return -1;
+					if (ready)
+					{
+						out->ready = observed;
+						out->input_ready = out->source_ready = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+					}
+					else
+					{
+						out->valid = observed;
+						out->input_valid = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+					}
 					continue;
 				}
 				if (!expr || expr->kind != PIGEN_EXPR_SYMBOL)
