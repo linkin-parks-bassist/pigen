@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T17:45:34+11:00"
+revised_at: "2026-11-11T17:46:16+11:00"
 checked_at: "2026-09-30T20:31:53+10:00"
 ---
 
@@ -18,4 +18,4 @@ The signed evaluator reuses nonnegative evaluation, then handles negative exact/
 
 The u64 query rejects left shifts overflowing its capacity when the declared result is wider, and rejects wide XNOR results whose high ones cannot fit. Runtime RTL retains those operations. Checked repeated squaring supports signed powers; negative exponents yield zero except for bases ±1. Zero to a negative exponent fails. Powers up to 64 bits wrap at fixed widths; mathematical powers reject overflow. Multiword powers/evaluation and symbolic bounds remain unfinished. Source bitwise witnesses use explicitly sized signed operands; untyped negative bitwise expressions need type-resolution work.
 
-rtl-lower-test covers identity, type/expression correctness, failure, memo stability and deterministic builds. semantic-test covers signed coordinates, conditional/short-circuit evaluation, shifts/reductions, powers/overflow, INT64_MIN, range overflow and refusal to truncate wide results. exact-wide-test checks positive/negative 194-bit decimal literals against hexadecimal references, negative carry across bit 64, seven-bit truncation and 257-bit sign extension. wide-literal-test simulates 193-bit four-state data and a signed 128-bit arithmetic shift. child-port-endpoint-test verifies aliases/sized-power coordinates under stalls. Task 6 owns realization-based declarations/endpoints; companion gates are rtl-test and rtl-name-test.
+rtl-lower-test covers identity, type/expression correctness, failure, memo stability and deterministic builds. semantic-test covers signed coordinates, conditional/short-circuit evaluation, shifts/reductions, powers/overflow, INT64_MIN, range overflow and refusal to truncate wide results. exact-wide-test checks positive/negative 194-bit decimal literals against hexadecimal references, carry, seven-bit truncation and 257-bit sign/zero extension. wide-literal-test simulates 193-bit four-state data and a signed 128-bit arithmetic shift. child-port-endpoint-test verifies aliases/sized-power coordinates under stalls. Task 6 owns realization-based declarations/endpoints; companion gates are rtl-test and rtl-name-test.
