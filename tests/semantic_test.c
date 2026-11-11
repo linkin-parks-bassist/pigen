@@ -1142,7 +1142,35 @@ int main(void)
 	assert(pigen_const_expr_normalize_count(&model,
 		pigen_const_expr_intern_bits(&model,
 			(pigen_bit_state[]){PIGEN_BIT_ONE}, 1, bit_type)).index ==
-		PIGEN_INVALID_ID);
+		width_1.index);
+	{
+		pigen_data_type_id u4 = pigen_data_type_sized_logic(&model, 4, PIGEN_SIGN_UNSIGNED);
+		pigen_data_type_id s4 = pigen_data_type_sized_logic(&model, 4, PIGEN_SIGN_SIGNED);
+		pigen_const_expr_id zero = pigen_const_expr_intern_bits(&model,
+			(pigen_bit_state[]){0,0,0,0}, 4, u4);
+		pigen_const_expr_id eight = pigen_const_expr_intern_bits(&model,
+			(pigen_bit_state[]){0,0,0,1}, 4, u4);
+		pigen_const_expr_id negative = pigen_const_expr_intern_bits(&model,
+			(pigen_bit_state[]){1,1,1,1}, 4, s4);
+		pigen_data_type_id pair = pigen_data_type_concatenation(&model,
+			(pigen_data_type_id[]){u4,u4}, 2);
+		pigen_const_expr_id concat = pigen_const_expr_intern_concatenation(&model,
+			(pigen_const_expr_id[]){zero,eight}, 2, pair);
+		assert(pigen_const_expr_normalize_count(&model, concat).index == width_8.index);
+		assert(pigen_const_expr_normalize_count(&model, zero).index == PIGEN_INVALID_ID);
+		assert(pigen_const_expr_normalize_count(&model, negative).index == PIGEN_INVALID_ID);
+		for (pigen_bit_state unknown = PIGEN_BIT_X; unknown <= PIGEN_BIT_Z; unknown++)
+			assert(pigen_const_expr_normalize_count(&model,
+				pigen_const_expr_intern_bits(&model, &unknown, 1, bit_type)).index == PIGEN_INVALID_ID);
+		pigen_bit_state wide[65] = {0};
+		wide[64] = PIGEN_BIT_ONE;
+		assert(pigen_const_expr_normalize_count(&model, pigen_const_expr_intern_bits(&model,
+			wide, 65, pigen_data_type_sized_logic(&model, 65, PIGEN_SIGN_UNSIGNED))).index == PIGEN_INVALID_ID);
+		pair = pigen_data_type_concatenation(&model, (pigen_data_type_id[]){s4,u4}, 2);
+		concat = pigen_const_expr_intern_concatenation(&model,
+			(pigen_const_expr_id[]){negative,eight}, 2, pair);
+		assert(evaluate_width(&model, concat) == 248);
+	}
 	assert(pigen_const_expr_normalize_count(NULL, width_8).index ==
 		PIGEN_INVALID_ID);
 	assert(pigen_const_expr_normalize_count(&model,

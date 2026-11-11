@@ -12,7 +12,7 @@ pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preproc
 	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c $(LDLIBS)
 
 
-test: pigen specialization-test child-port-endpoint-test fabric-anonymous-test case-wildcard-test case-width-test case-signed-test case-nested-test ordinary-case-test case-guarded-complex-test ordinary-sv-preserve-test case-guarded-mixed-test mixed-write-conflict-error-test dependent-ordered-writes-test multiple-ordered-writes-test final-else-guard-dependency-test else-if-guard-dependency-test else-guard-dependency-test nested-guard-chain-dependency-test differing-guardless-dependency-test bare-uint-error-test int-ports-sv-test mixed-plain-always-test guardless-blocking-dependency-test same-guardless-dependency-test guardless-blocking-dependency-error-test dependent-parameter-override-test explicit-elastic-controls-test deep-guarded-blocking-dependency-test blocking-dependency-guard-error-test guarded-blocking-dependency-test blocking-dependency-inline-test directive-sv-test positional-elastic-child-test unpacked-struct-sv-test nba-dependency-split-test union-sv-test localparam-override-test generate-if-sv-test independent-blocking-function-test buffered-instance-local-conflict-error-test buffered-instance-producer-error-test mixed-clocked-task-error-test async-reset-always-sv-test async-reset-sv-test mixed-clocked-order-error-test nested-mixed-clocked-function-test mixed-clocked-function-test parent-parameter-override-test implicit-elastic-destinations-test implicit-elastic-child-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test typed-param-test integer-param-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
+test: pigen specialization-test packed-count-error-test child-port-endpoint-test fabric-anonymous-test case-wildcard-test case-width-test case-signed-test case-nested-test ordinary-case-test case-guarded-complex-test ordinary-sv-preserve-test case-guarded-mixed-test mixed-write-conflict-error-test dependent-ordered-writes-test multiple-ordered-writes-test final-else-guard-dependency-test else-if-guard-dependency-test else-guard-dependency-test nested-guard-chain-dependency-test differing-guardless-dependency-test bare-uint-error-test int-ports-sv-test mixed-plain-always-test guardless-blocking-dependency-test same-guardless-dependency-test guardless-blocking-dependency-error-test dependent-parameter-override-test explicit-elastic-controls-test deep-guarded-blocking-dependency-test blocking-dependency-guard-error-test guarded-blocking-dependency-test blocking-dependency-inline-test directive-sv-test positional-elastic-child-test unpacked-struct-sv-test nba-dependency-split-test union-sv-test localparam-override-test generate-if-sv-test independent-blocking-function-test buffered-instance-local-conflict-error-test buffered-instance-producer-error-test mixed-clocked-task-error-test async-reset-always-sv-test async-reset-sv-test mixed-clocked-order-error-test nested-mixed-clocked-function-test mixed-clocked-function-test parent-parameter-override-test implicit-elastic-destinations-test implicit-elastic-child-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test typed-param-test integer-param-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen
 
 source-test:
@@ -1108,9 +1108,10 @@ child-port-endpoint-test: pigen
 	vvp $$dir/sim | grep -Fq 'PASS unused child endpoints'; \
 	status=$$?; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
-	for fixture in expression expression_alias expression_join expression_conditional expression_concat expression_parameter_concat; do \
+	for fixture in expression expression_alias expression_join expression_conditional expression_concat expression_parameter_concat expression_packed_count expression_packed_depth; do \
 		tb=tests/child_port_expression_tb.sv; \
 		case "$$fixture" in \
+			expression_packed_count|expression_packed_depth) tb=tests/child_port_expression_concat_tb.sv ;; \
 			expression_join|expression_conditional|expression_concat|expression_parameter_concat) tb=tests/child_port_$${fixture}_tb.sv ;; \
 		esac; \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
@@ -1156,3 +1157,16 @@ specialization-test: pigen
 	iverilog -g2012 -s deep_specialization_tb -o $$dir/sim tests/deep_specialization_tb.sv rtl/pigen_primitives.sv $$dir/deep.sv && \
 	vvp $$dir/sim | grep -Fq 'PASS deep specialization'; \
 	status=$$?; rm -rf $$dir; exit $$status
+
+.PHONY: packed-count-error-test
+packed-count-error-test: pigen
+	dir=$$(mktemp -d); \
+	./pigen tests/packed_count_static.pigen -o $$dir/static.sv && \
+	iverilog -g2012 -s packed_count_static_tb -o $$dir/sim tests/packed_count_static_tb.sv $$dir/static.sv && \
+	vvp $$dir/sim | grep -Fq 'PASS packed static count'; \
+	status=$$?; rm -rf $$dir; exit $$status
+	dir=$$(mktemp -d); status=0; \
+	for fixture in zero unknown negative shift_zero static_zero; do \
+		if ./pigen tests/packed_count_$${fixture}_error.pigen -o $$dir/out.sv 2>$$dir/error; then status=1; break; fi; \
+		grep -Fq 'type count must be a positive integer' $$dir/error || { status=1; break; }; \
+	done; rm -rf $$dir; exit $$status

@@ -3393,7 +3393,17 @@ static int module_header_has_directionless_port(const syntax_parser *parser,
 	{
 		size_t next = item;
 
-		while (next < close && !token_is(parser, next, ",")) next++;
+		size_t depth = 0;
+		while (next < close)
+		{
+			if (token_is(parser, next, "(") || token_is(parser, next, "[") || token_is(parser, next, "{")) depth++;
+			else if (token_is(parser, next, ")") || token_is(parser, next, "]") || token_is(parser, next, "}"))
+			{
+				if (depth) depth--;
+			}
+			else if (!depth && token_is(parser, next, ",")) break;
+			next++;
+		}
 		if (item < next && !token_is(parser, item, "input") &&
 			!token_is(parser, item, "output") && !token_is(parser, item, "inout"))
 			return 1;

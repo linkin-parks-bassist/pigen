@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T16:12:13+11:00"
+revised_at: "2026-11-11T16:21:25+11:00"
 ---
 
 Child ports are parent endpoints. `producer a(clk, reset); consumer b(.clk(clk), .reset(reset), .i(a.o), .o(result));` connects siblings without intermediary wires. Parent clocked transfers can read `a.o` or write `b.i`; named/anonymous fabrics can route `a.o -> b.i`. Explicit parent wires remain supported. Output transfers remain explicit, e.g. `output uint[8] buf o`. Use static `input wire reset` for broadcast reset; unqualified input bit remains abstract.
@@ -19,4 +19,4 @@ Parent offers exclude their own destination readiness, avoiding circular handsha
 
 `make child-port-endpoint-test` covers arithmetic, concatenation, ternary and parameterized connections, joins at different rates, parent transfers, routing, forward references, nesting, partial bindings, introspection and unused defaults under backpressure. Negative fixtures cover output writes, missing ports and duplicate consumers. Positional tests cover conventional handshake names.
 
-Remaining: explicit control overrides on computed inputs, other expressions, input aliases, arrays/generate scopes, non-symbol controls and broader alias/fabric ownership. Packed concatenations used as type counts remain a separate limitation in how/to/normalize/declaration/counts.md.
+Remaining: explicit control overrides on computed inputs, other expressions, input aliases, arrays/generate scopes, non-symbol controls and broader alias/fabric ownership. Packed declaration-count rules and coverage are in how/to/normalize/declaration/counts.md.

@@ -1,0 +1,1 @@
+module top(output bit[{4'd0,4'd0}] buf o); endmodule

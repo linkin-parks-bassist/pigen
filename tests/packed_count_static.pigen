@@ -1,0 +1,1 @@
+module packed_count_static(output bit[{4'd0,4'd8}] o); assign o=8'ha5; endmodule

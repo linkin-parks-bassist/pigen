@@ -860,7 +860,25 @@ const pigen_bit_state *pigen_const_expr_bits(
 	return model->literal_states + known->as.bits.first_state;
 }
 
+/* Decode the literal bit pattern; signedness is applied by its caller. */
+static int literal_bits_u64(const pigen_semantic_model *model,
+	const pigen_const_expr *literal, uint64_t *value)
+{
+	uint64_t result = 0;
+	for (size_t i = 0; i < literal->as.bits.state_count; i++)
+	{
+		pigen_bit_state bit = model->literal_states[literal->as.bits.first_state+i];
+		if (bit == PIGEN_BIT_X || bit == PIGEN_BIT_Z || (i >= 64 && bit == PIGEN_BIT_ONE)) return 0;
+		if (bit == PIGEN_BIT_ONE) result |= UINT64_C(1) << i;
+	}
+	*value = result;
+	return 1;
+}
+
 static int evaluate_u64(pigen_semantic_model *model,
+	pigen_const_expr_id expression, uint64_t *value, size_t remaining);
+
+static int evaluate_u64_raw(pigen_semantic_model *model,
 	pigen_const_expr_id expression, uint64_t *value, size_t remaining)
 {
 	const pigen_const_expr *known = pigen_const_expr_get(model, expression);
@@ -871,6 +889,9 @@ static int evaluate_u64(pigen_semantic_model *model,
 	size_t i;
 
 	if (!known || !value || !remaining) return 0;
+	/* Width queries below may intern constants and move the arena. */
+	pigen_const_expr snapshot = *known;
+	known = &snapshot;
 	switch (known->kind)
 	{
 		case PIGEN_CONST_EXPR_INTEGER:
@@ -889,6 +910,41 @@ static int evaluate_u64(pigen_semantic_model *model,
 			*value = result;
 			return 1;
 		}
+		case PIGEN_CONST_EXPR_BITS:
+			if (pigen_data_type_signedness(model, known->data_type) == PIGEN_SIGN_SIGNED &&
+				known->as.bits.state_count && model->literal_states[known->as.bits.first_state +
+				known->as.bits.state_count - 1] == PIGEN_BIT_ONE) return 0;
+			return literal_bits_u64(model, known, value);
+		case PIGEN_CONST_EXPR_CONCATENATION:
+			result = 0;
+			for (i = 0; i < known->as.sequence.child_count; i++)
+			{
+				children = pigen_const_expr_children(model, known->as.sequence.first_child,
+					known->as.sequence.child_count);
+				if (!children) return 0;
+				pigen_const_expr_id child_id = children[i];
+				const pigen_const_expr *child = pigen_const_expr_get(model, child_id);
+				if (!child) return 0;
+				pigen_data_type_id type = child->data_type;
+				int evaluated = child->kind == PIGEN_CONST_EXPR_BITS ?
+					literal_bits_u64(model, child, &right) :
+					evaluate_u64(model, child_id, &right, remaining - 1);
+				if (!evaluated) return 0;
+				pigen_const_expr_id width = pigen_data_type_packed_width(model, type);
+				if (!evaluate_u64(model, width, &left, remaining - 1) || !left) return 0;
+				if (left >= 64)
+				{
+					if (result) return 0;
+					result = right;
+				}
+				else
+				{
+					if (result > (UINT64_MAX >> left)) return 0;
+					result = (result << left) | (right & ((UINT64_C(1) << left) - 1));
+				}
+			}
+			*value = result;
+			return 1;
 		case PIGEN_CONST_EXPR_SYMBOL:
 		{
 			const pigen_symbol *symbol = pigen_symbol_get(model,
@@ -1018,7 +1074,9 @@ static int evaluate_u64(pigen_semantic_model *model,
 			result = known->kind == PIGEN_CONST_EXPR_WIDTH_PRODUCT ? 1 : 0;
 			for (i = 0; i < known->as.sequence.child_count; i++)
 			{
-				if (!evaluate_u64(model, children[i], &right, remaining - 1))
+				children = pigen_const_expr_children(model, known->as.sequence.first_child,
+					known->as.sequence.child_count);
+				if (!children || !evaluate_u64(model, children[i], &right, remaining - 1))
 					return 0;
 				if (known->kind == PIGEN_CONST_EXPR_WIDTH_SUM)
 				{
@@ -1040,6 +1098,28 @@ static int evaluate_u64(pigen_semantic_model *model,
 		default:
 			return 0;
 	}
+}
+
+static int evaluate_u64(pigen_semantic_model *model,
+	pigen_const_expr_id expression, uint64_t *value, size_t remaining)
+{
+	const pigen_const_expr *known = pigen_const_expr_get(model, expression);
+	if (!known || !remaining) return 0;
+	pigen_const_expr_kind kind = known->kind;
+	pigen_data_type_id type = known->data_type;
+	if (!evaluate_u64_raw(model, expression, value, remaining)) return 0;
+	if ((kind == PIGEN_CONST_EXPR_BINARY || kind == PIGEN_CONST_EXPR_CONVERSION) &&
+		type.index != model->unsized_integer_data_type.index &&
+		pigen_data_type_numerical_interpretation(model, type) != PIGEN_NUMERICAL_EXACT_INTEGER)
+	{
+		uint64_t width;
+		pigen_const_expr_id packed_width = pigen_data_type_packed_width(model, type);
+		if (!evaluate_u64(model, packed_width, &width, remaining - 1) || !width) return 0;
+		if (width < 64) *value &= (UINT64_C(1) << width) - 1;
+		if (width <= 64 && pigen_data_type_signedness(model, type) == PIGEN_SIGN_SIGNED &&
+			(*value & (UINT64_C(1) << (width - 1)))) return 0;
+	}
+	return 1;
 }
 
 int pigen_const_expr_evaluate_u64(pigen_semantic_model *model,
@@ -1129,6 +1209,8 @@ pigen_const_expr_id pigen_const_expr_normalize_count(
 		return evaluated ? pigen_const_expr_intern_integer(model, evaluated,
 			pigen_data_type_unsized_integer(model)) :
 			INVALID_ID(pigen_const_expr_id);
+	known = pigen_const_expr_get(model, value);
+	if (!known) return INVALID_ID(pigen_const_expr_id);
 	integer = pigen_data_type_exact_value(model, known->data_type);
 	if (integer.index != PIGEN_INVALID_ID)
 	{
