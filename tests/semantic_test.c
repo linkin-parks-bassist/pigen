@@ -494,6 +494,18 @@ int main(void)
 			(pigen_unary_operation){PIGEN_UNARY_REDUCTION_XOR,wide_reduction_type,boolean_type},unknown_wide);
 		assert(!pigen_const_expr_evaluate_i64(&model,dominant,&coordinate));
 
+		for(size_t i=0;i<129;i++) wide_bits[i]=PIGEN_BIT_ZERO;
+		wide_bits[128]=PIGEN_BIT_ONE; wide_bits[0]=PIGEN_BIT_X;
+		pigen_const_expr_id wide_condition=pigen_const_expr_intern_bits(&model,wide_bits,129,wide_reduction_type);
+		pigen_conditional_operation wide_choose={wide_reduction_type,unsized_integer_data_type,unsized_integer_data_type,unsized_integer_data_type};
+		pigen_const_expr_id wide_choice=pigen_const_expr_intern_conditional(&model,wide_choose,wide_condition,width_8,invalid_branch);
+		assert(pigen_const_expr_evaluate_i64(&model,wide_choice,&coordinate) && coordinate==8);
+		assert(pigen_const_expr_evaluate_u64(&model,wide_choice,&span) && span==8);
+		wide_bits[128]=PIGEN_BIT_ZERO;
+		wide_condition=pigen_const_expr_intern_bits(&model,wide_bits,129,wide_reduction_type);
+		wide_choice=pigen_const_expr_intern_conditional(&model,wide_choose,wide_condition,width_8,width_1);
+		assert(!pigen_const_expr_evaluate_i64(&model,wide_choice,&coordinate));
+
 
 	}
 	signed_8 = pigen_data_type_signed_integer(&model, width_8);

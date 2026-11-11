@@ -888,6 +888,24 @@ static int64_t signed_pattern(uint64_t bits)
 		-1 - (int64_t)(UINT64_MAX - bits);
 }
 
+/* Truth does not require the vector's numeric value to fit a host word. */
+static int literal_truth(pigen_semantic_model *model,
+	pigen_const_expr_id expression, int64_t *value)
+{
+	const pigen_const_expr *literal = pigen_const_expr_get(model, expression);
+	if (!literal || literal->kind != PIGEN_CONST_EXPR_BITS) return 0;
+	int unknown = 0;
+	for (size_t i = 0; i < literal->as.bits.state_count; i++)
+	{
+		pigen_bit_state bit = model->literal_states[literal->as.bits.first_state+i];
+		if (bit == PIGEN_BIT_ONE) { *value = 1; return 1; }
+		unknown |= bit == PIGEN_BIT_X || bit == PIGEN_BIT_Z;
+	}
+	if (unknown) return 0;
+	*value = 0;
+	return 1;
+}
+
 static int evaluate_literal_reduction(pigen_semantic_model *model,
 	pigen_const_expr known, int64_t *value, size_t remaining)
 {
@@ -1020,7 +1038,8 @@ static int evaluate_i64(pigen_semantic_model *model,
 		}
 		break;
 	case PIGEN_CONST_EXPR_CONDITIONAL:
-		if (!evaluate_i64(model, known.as.conditional.condition, &left, remaining-1) ||
+		if ((!literal_truth(model, known.as.conditional.condition, &left) &&
+			!evaluate_i64(model, known.as.conditional.condition, &left, remaining-1)) ||
 			!evaluate_i64(model, left ? known.as.conditional.when_true : known.as.conditional.when_false,
 				&result, remaining-1)) return 0;
 		break;
@@ -1247,7 +1266,8 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 		case PIGEN_CONST_EXPR_CONDITIONAL:
 		{
 			int64_t condition;
-			if (evaluate_i64(model, known->as.conditional.condition, &condition, remaining-1))
+			if (literal_truth(model, known->as.conditional.condition, &condition) ||
+			evaluate_i64(model, known->as.conditional.condition, &condition, remaining-1))
 				left = condition != 0;
 			else if (!evaluate_u64(model, known->as.conditional.condition, &left, remaining-1)) return 0;
 			return evaluate_u64(model, left ? known->as.conditional.when_true : known->as.conditional.when_false,
