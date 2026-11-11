@@ -514,6 +514,15 @@ int main(void)
 		wide_condition=pigen_const_expr_intern_bits(&model,wide_bits,129,wide_reduction_type);
 		wide_choice=pigen_const_expr_intern_conditional(&model,wide_choose,wide_condition,width_8,width_1);
 		assert(!pigen_const_expr_evaluate_i64(&model,wide_choice,&coordinate));
+		wide_or.operator=PIGEN_BINARY_LOGICAL_AND;
+		wide_logical=pigen_const_expr_intern_binary(&model,wide_or,wide_condition,zero);
+		assert(pigen_const_expr_evaluate_u64(&model,wide_logical,&span) && span==0);
+		wide_or.operator=PIGEN_BINARY_LOGICAL_OR;
+		wide_logical=pigen_const_expr_intern_binary(&model,wide_or,wide_condition,width_1);
+		assert(pigen_const_expr_evaluate_u64(&model,wide_logical,&span) && span==1);
+		wide_logical=pigen_const_expr_intern_binary(&model,wide_or,wide_condition,zero);
+		assert(!pigen_const_expr_evaluate_u64(&model,wide_logical,&span));
+
 
 
 	}

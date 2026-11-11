@@ -1306,8 +1306,14 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 				known->as.binary.operation.operator == PIGEN_BINARY_LOGICAL_OR)
 			{
 				int64_t truth;
-				if (!evaluate_truth(model, known->as.binary.left, &truth, remaining-1)) return 0;
 				int is_or = known->as.binary.operation.operator == PIGEN_BINARY_LOGICAL_OR;
+				if (!evaluate_truth(model, known->as.binary.left, &truth, remaining-1))
+				{
+					if (!evaluate_truth(model, known->as.binary.right, &truth, remaining-1) ||
+						truth != is_or) return 0;
+					*value = truth;
+					return 1;
+				}
 				if (truth == is_or) { *value = truth; return 1; }
 				if (!evaluate_truth(model, known->as.binary.right, &truth, remaining-1)) return 0;
 				*value = truth;
