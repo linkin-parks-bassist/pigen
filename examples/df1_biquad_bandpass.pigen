@@ -1,46 +1,31 @@
-module df1_biquad_bandpass
-	(
-		input  logic clk,
-		input  logic reset,
-		input  logic signed [23:0] buf sample,
-		output logic signed [23:0] buf filtered
-	);
+module df1_biquad_bandpass (
+    input wire clk,
+    input wire reset,
+    input int[24] buf sample,
+    output int[24] buf filtered
+);
+    int[24] reg x1, x2, y1, y2;
+    int[64] wire mac, shifted;
+    int[24] wire y_next;
 
-	localparam logic signed [23:0] B0 = 24'sd191477;
-	localparam logic signed [23:0] B1 = 24'sd0;
-	localparam logic signed [23:0] B2 = -24'sd191477;
-	localparam logic signed [23:0] A1 = -24'sd1849065;
-	localparam logic signed [23:0] A2 = 24'sd952838;
+    // Q1.23 samples; Q4.20 filter coefficients.
+    assign mac = 191477 * sample - 191477 * x2
+               + 1849065 * y1 - 952838 * y2;
+    assign shifted = mac >>> 20;
+    assign y_next = shifted > 8388607 ? 8388607 :
+                   (shifted < -8388608 ? -8388608 : shifted);
 
-	logic signed [23:0] x1, x2, y1, y2;
-	logic signed [63:0] mac;
-	logic signed [63:0] shifted;
-	logic signed [23:0] y_next;
-
-	assign mac =
-		64'sd191477 * $signed({{40{sample[23]}}, sample}) +
-		64'sd0 * $signed({{40{x1[23]}}, x1}) +
-		-64'sd191477 * $signed({{40{x2[23]}}, x2}) +
-		64'sd1849065 * $signed({{40{y1[23]}}, y1}) +
-		-64'sd952838 * $signed({{40{y2[23]}}, y2});
-	assign shifted = $signed(mac) >>> 20;
-	assign y_next = shifted > 64'sd8388607 ? 24'sd8388607 :
-		(shifted < -64'sd8388608 ? -24'sd8388608 : shifted[23:0]);
-
-	always_ff @(posedge clk)
-	begin
-		if (reset)
-		begin
-			x1 <= 24'sd0;
-			x2 <= 24'sd0;
-			y1 <= 24'sd0;
-			y2 <= 24'sd0;
-		end
-		else if (valid(sample))
-		begin
-			{filtered, x1, x2, y1, y2} <=
-				{y_next, sample, x1, y_next, y1};
-		end
-	end
-
+    always @(posedge clk) begin
+        if (reset) begin
+            x1 <= 0;
+            x2 <= 0;
+            y1 <= 0;
+            y2 <= 0;
+        end else begin
+            // One atomic transfer: consume a sample, emit a result,
+            // and advance all filter history together.
+            {filtered, x1, x2, y1, y2} <=
+                {y_next, sample, x1, y_next, y1};
+        end
+    end
 endmodule

@@ -1,10 +1,12 @@
 ---
 status: green
-revised_at: "2026-11-11T15:42:32+11:00"
+revised_at: "2026-11-11T18:10:46+11:00"
 checked_at: "2026-10-04T16:19:56+11:00"
 ---
 
 Pigen v1 extends ordinary SystemVerilog with ready/valid atomic transfers, independent data and transfer types, inline module-owned pipelines/fabrics and synchronous FSMs. It is source-to-source and does not change simulation timing.
+
+Pigen showcases use int[n]/uint[n]/bit numerical types and always processes. logic serves compatibility; prefer always over always_ff. Transfers already enforce validity/readiness: avoid redundant valid guards and manual Verilog sign-extension scaffolding.
 
 A runtime signal is data type × transfer type × declarator shape. Intended declarations are data-first, e.g. `int[16] fifo[8] pending[lanes];`. Pigen primitives are two-state int[n], uint[n] and bit/bit[n]; ordinary SV byte is its own signed type. Transfer types are wire/reg/logic statics plus buf/port/fifo/skid, and abstract input variables. Count brackets in declaration positions lower to descending ranges; explicit ranges and expression selects retain SV meaning. Shapes remain structural and indexing consumes unpacked dimensions before packed bits.
 
@@ -20,4 +22,4 @@ Accepted non-Pigen SV must preserve widths, signedness, events, reset and observ
 
 Related: [what is the systemverilog compatibility contract](systemverilog/compatibility/contract.md), [how does an atomic transfer fire](../../../how/does/an/atomic/transfer/fire.md).
 
-The contextual unqualified input bit exception is documented in the input/omission owners; ordinary SV types retain their own static policy. Full remaining acceptance gates, deferred choices and the quarantined prototype language are separate owners. Token formatting is not syntax. Specified grammar and lowering requirements do not imply production support.
+The contextual unqualified input bit exception is documented in the input/omission owners; ordinary SV types retain their own static policy. Full remaining acceptance gates, deferred choices and the quarantined prototype language are separate owners. Specified grammar and lowering requirements do not imply production support.
