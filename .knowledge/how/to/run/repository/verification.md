@@ -1,10 +1,12 @@
 ---
 status: green
-revised_at: "2026-11-10T16:35:06+11:00"
+revised_at: "2026-11-11T15:33:38+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-`make test` and `make verify` are fully green end to end. The suite covers the structured C owners, the data-first pipeline corpus, fixed-point MAC, text and both migrated biquad examples, FSM and child-instance checks, inline and standalone fabric fairness/router tests, SVG topology, ordinary-SV preservation witnesses, parameterized Pigen child specialization, and explicit-control elastic child ports.
+The working implementation includes preliminary clocked case-to-if rewriting and up to 16 specialization passes. Full verification currently fails at `case-guarded-mixed-error-test`, whose expected case rejection is no longer produced. Correct case semantics and replacement behavioral witnesses remain unverified; resolve this before claiming full verification green.
+
+The recorded baseline `make test` and `make verify` runs were fully green. The suite covers the structured C owners, the data-first pipeline corpus, fixed-point MAC, text and both migrated biquad examples, FSM and child-instance checks, inline and standalone fabric fairness/router tests, SVG topology, ordinary-SV preservation witnesses, parameterized Pigen child specialization, and explicit-control elastic child ports.
 
 Use focused affected gates during edits; run one full verification at meaningful checkpoints. `verify` already depends on `test`, so do not run `make test` and then `make verify` redundantly. For a full run on this 32-logical-CPU host, build the compiler first, then run a bounded parallel verification with synchronized target output:
 

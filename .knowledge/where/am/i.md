@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-10T08:38:06+11:00"
+revised_at: "2026-11-11T15:33:38+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -8,11 +8,11 @@ Pigen is an active personal C17 source-to-source compiler project extending Syst
 
 This checkout is **pigen-fork**, a delivery fork of /home/david/Projects/pigen. The production `./pigen` is the structured frontend (src/pigen.c through src/compile.c): preprocess, data-first syntax, semantic types/expressions/scopes, RTL lowering, naming, output model and SV emission. The classic textual CLI is removed; prototype sources remain only as quarantined reference material.
 
-Working end-to-end: data-first declarations; abstract inputs with valid/ready ports; static/buffered transfers with real `pigen_*` primitives; clocked processes; inline pipelines (both stage forms); FSMs with state register/reset/guards/gotos; transfer-and-branch; `accepts`/`valid`/`ready`/`peek`; multi-module designs; verbatim ordinary SV items and standard child instantiations; semantic instance/port metadata; inline fabric endpoint wiring over explicit parent payload/valid/ready nets. Simulations pass for a buf chain, arithmetic pipeline, FSM counter, README sender FSM, accepts()-based sender, standard child instance and a two-leaf fabric routed link.
+Core transfers, pipelines, FSMs, validity actions, parameterized children and buffered fabric routing with arbitration/SVG are implemented. See what/is/broken.md for capability limits and what/is/the/plan.md for remaining work.
 
-Fabric is currently wiring-only: routed links are combinational equations, with no routers, buffered ready breaks, arbitration or SVG. Also missing: `validate`/`invalidate`/`flush`; some alias/conditional expressions; examples migration; rebaseline of semantic-test's alias assertion and the nine rtl-lower/two sv-emit stale sections.
+The working implementation includes preliminary clocked case-to-if rewriting and up to 16 specialization passes. Full verification currently fails at `case-guarded-mixed-error-test`, whose expected case rejection is no longer produced. Correct case semantics and replacement behavioral witnesses remain unverified; resolve this before claiming full verification green.
 
-Repository topology: src/ structured owners plus quarantined prototype sources; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ legacy prototype-dialect designs; .knowledge/ the sole local documentation and architectural answer authority. README.md is David's public introduction restored from d14aef2; preserve it.
+Repository topology: src/ structured owners plus quarantined prototype sources; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ designs including migrated biquad examples; .knowledge/ the sole local documentation and architectural answer authority. README.md is David's public introduction restored from d14aef2; preserve it.
 
 - how/ answers mechanisms: how/does/an/atomic/transfer/fire.md, how/to/write/runnable/prototype/declarations.md, how/to/test/the/structured/foundation.md.
 - what/ answers definitions/current work: what/is/the/spec.md, what/is/the/plan.md, what/is/broken.md.

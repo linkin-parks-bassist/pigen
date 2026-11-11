@@ -1,7 +1,9 @@
 ---
 status: green
-revised_at: "2026-11-10T19:37:19+11:00"
+revised_at: "2026-11-11T15:33:38+11:00"
 ---
+
+The working implementation includes preliminary clocked case-to-if rewriting and up to 16 specialization passes. Full verification currently fails at `case-guarded-mixed-error-test`, whose expected case rejection is no longer produced. Correct case semantics and replacement behavioral witnesses remain unverified; resolve this before claiming full verification green.
 
 The structured frontend is the production compiler and lowers datapath, pipeline, FSM, acceptance behavior, buffered inline and standalone fabric routing, validity actions, grouped storage producers and concatenation destinations, with broad ordinary-SV preservation. The language is still incomplete.
 
