@@ -7,18 +7,17 @@ module fsm_example
 		output bit[8] buf destination
 	);
 
-	fsm sender @(posedge clk) reset (reset) initial idle
+	fsm @(posedge clk)
 	begin
+		if (reset)
+			goto idle;
 		state idle:
 		begin
 			if (start)
 				goto send;
 		end
 		state send:
-		begin
-			destination <= source;
-			if (accepts(destination, source))
+			when (destination <= source)
 				goto idle;
-		end
 	end
 endmodule

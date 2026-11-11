@@ -6,11 +6,12 @@ module accepts_example
 
 	bit[8] buf source;
 	bit[8] buf destination;
+	logic did_transfer;
 
 	always_ff @(posedge clk)
 	begin
-		if (accepts( destination, source ))
-			destination <= source;
+		when (destination <= source)
+			did_transfer <= 1'b1;
 	end
 
 endmodule

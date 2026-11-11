@@ -70,6 +70,10 @@
   {
     "covers": [
       "tests/fsm_syntax_test.c",
+      "tests/fsm_bad_event.pigen",
+      "tests/fsm_bad_goto.pigen",
+      "tests/fsm_duplicate_state.pigen",
+      "tests/fsm_legacy_header.pigen",
       "src/transfer_type.c",
       "src/syntax.c",
       "src/type_syntax.c",
@@ -1135,7 +1139,8 @@
     "covers": [
       "tests/fsm_lower_test.c",
       "src/fsm_lower.c",
-      "src/rtl.c"
+      "src/rtl.c",
+      "src/predicate.c"
     ],
     "command": [
       "make",
@@ -1147,7 +1152,8 @@
     "covers": [
       "tests/fsm_lower_test.c",
       "src/fsm_lower.c",
-      "src/rtl.c"
+      "src/rtl.c",
+      "src/predicate.c"
     ],
     "command": [
       "make",
@@ -1159,7 +1165,8 @@
     "covers": [
       "tests/fsm_lower_test.c",
       "src/fsm_lower.c",
-      "src/rtl.c"
+      "src/rtl.c",
+      "src/predicate.c"
     ],
     "command": [
       "make",
@@ -1171,7 +1178,8 @@
     "covers": [
       "tests/fsm_lower_test.c",
       "src/fsm_lower.c",
-      "src/rtl.c"
+      "src/rtl.c",
+      "src/predicate.c"
     ],
     "command": [
       "make",
@@ -1183,7 +1191,8 @@
     "covers": [
       "tests/fsm_lower_test.c",
       "src/fsm_lower.c",
-      "src/rtl.c"
+      "src/rtl.c",
+      "src/predicate.c"
     ],
     "command": [
       "make",
@@ -1194,7 +1203,8 @@
   {
     "covers": [
       "tests/fsm_identity_test.c",
-      "src/fsm_identity.c"
+      "src/fsm_identity.c",
+      "src/predicate.c"
     ],
     "command": [
       "make",
@@ -1205,12 +1215,49 @@
   {
     "covers": [
       "tests/fsm_identity_test.c",
-      "src/fsm_identity.c"
+      "src/fsm_identity.c",
+      "src/predicate.c"
     ],
     "command": [
       "make",
       "fsm-identity-test",
       "T=is-invalid-sentinel"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm.pigen",
+      "tests/fsm_tb.sv",
+      "src/resolve.c",
+      "src/syntax.c"
+    ],
+    "command": [
+      "make",
+      "fsm-test"
+    ]
+  },
+  {
+    "covers": [
+      "tests/fsm_goto_first.pigen",
+      "tests/fsm_goto_first_tb.sv",
+      "src/resolve.c",
+      "src/syntax.c"
+    ],
+    "command": [
+      "make",
+      "fsm-goto-first-test"
+    ]
+  },
+  {
+    "covers": [
+      "tests/when_event.pigen",
+      "tests/when_event_tb.sv",
+      "src/resolve.c",
+      "src/syntax.c"
+    ],
+    "command": [
+      "make",
+      "when-event-test"
     ]
   }
 ]

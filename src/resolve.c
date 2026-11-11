@@ -45,6 +45,13 @@ typedef struct {
 	pigen_data_type_id fsm_state_type;
 	const pigen_source_span *fsm_state_names;
 	size_t fsm_state_count;
+	/* Nonzero while resolving an FSM body. fsm_terminated is the condition
+	 * under which some goto has executed in this invocation (invalid until a
+	 * goto is resolved): every statement is suppressed once an earlier goto
+	 * fires, so the whole-FSM early exit composes in source order
+	 * (how/to/write/fsm/states.md). */
+	int in_fsm;
+	pigen_expr_id fsm_terminated;
 	int in_pipeline_stage;
 	pending_pipeline_reset *reset_bindings;
 	size_t reset_binding_count;
@@ -1000,6 +1007,146 @@ static int add_state_transfer(resolver *resolver, pigen_module_id module_id,
 static int resolve_goto(resolver *resolver, pigen_module_id module_id,
 	pigen_process_id process, pigen_clock_domain_id domain,
 	pigen_syntax_id syntax_id, const pigen_syntax_node *goto_node,
+	pigen_predicate_id guard);
+
+/* The condition expression of PREDICATE: the conjunction of its atoms, where a
+ * false atom is the negated condition. The true predicate is the constant 1.
+ * The expression is used as one guard atom, so an FSM can suppress everything
+ * after an executed goto (how/to/write/fsm/states.md). */
+static pigen_expr_id predicate_expression(resolver *resolver,
+	pigen_predicate_id predicate, pigen_source_span span)
+{
+	pigen_semantic_model *model = resolver->model;
+	const pigen_predicate *known = pigen_predicate_get(model, predicate);
+	const pigen_predicate_atom *atoms;
+	pigen_expr_id result = INVALID_ID(pigen_expr_id);
+	size_t i;
+
+	if (!known) return INVALID_ID(pigen_expr_id);
+	if (known->impossible)
+		return pigen_expr_add_integer(model, 0,
+			pigen_data_type_boolean(model), span);
+	atoms = known->atom_count ? pigen_predicate_atoms(model, predicate) : NULL;
+	if (known->atom_count && !atoms) return INVALID_ID(pigen_expr_id);
+	for (i = 0; i < known->atom_count; i++)
+	{
+		pigen_expr_id term = atoms[i].condition;
+
+		if (!atoms[i].expected)
+		{
+			const pigen_semantic_expr *condition = pigen_expr_get(model,
+				term);
+			pigen_unary_resolution resolution;
+
+			if (!condition ||
+				!pigen_data_type_resolve_unary_operation(model,
+					PIGEN_UNARY_LOGICAL_NOT, condition->data_type,
+					&resolution))
+				return INVALID_ID(pigen_expr_id);
+			term = pigen_expr_add_unary(model, resolution.operation, term,
+				span);
+			if (term.index == PIGEN_INVALID_ID)
+				return INVALID_ID(pigen_expr_id);
+		}
+		if (result.index == PIGEN_INVALID_ID)
+		{
+			result = term;
+			continue;
+		}
+		{
+			const pigen_semantic_expr *left = pigen_expr_get(model,
+				result);
+			const pigen_semantic_expr *right = pigen_expr_get(model, term);
+			pigen_binary_resolution resolution;
+
+			if (!left || !right ||
+				!pigen_data_type_resolve_binary_operation(model,
+					PIGEN_BINARY_LOGICAL_AND, left->data_type,
+					right->data_type, &resolution))
+				return INVALID_ID(pigen_expr_id);
+			result = pigen_expr_add_binary(model, resolution.operation,
+				result, term, span);
+			if (result.index == PIGEN_INVALID_ID)
+				return INVALID_ID(pigen_expr_id);
+		}
+	}
+	if (result.index == PIGEN_INVALID_ID)
+		result = pigen_expr_add_integer(model, 1,
+			pigen_data_type_boolean(model), span);
+	return result;
+}
+
+/* The condition under which this FSM invocation may still execute a leaf
+ * statement: the enclosing guard conjoined with "no goto has executed yet".
+ * Control-flow constructs do not apply this themselves - only the leaf
+ * statements with observable effects do, so the recorded goto triggers stay
+ * independent of the termination condition. */
+static pigen_predicate_id statement_guard(resolver *resolver,
+	pigen_predicate_id guard, pigen_source_span span)
+{
+	pigen_semantic_model *model = resolver->model;
+	const pigen_semantic_expr *known;
+	pigen_unary_resolution resolution;
+	pigen_expr_id live;
+
+	if (!resolver->in_fsm ||
+		resolver->fsm_terminated.index == PIGEN_INVALID_ID)
+		return guard;
+	known = pigen_expr_get(model, resolver->fsm_terminated);
+	if (!known || !pigen_data_type_resolve_unary_operation(model,
+		PIGEN_UNARY_LOGICAL_NOT, known->data_type, &resolution))
+		return INVALID_ID(pigen_predicate_id);
+	live = pigen_expr_add_unary(model, resolution.operation,
+		resolver->fsm_terminated, span);
+	if (live.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_predicate_id);
+	return pigen_predicate_and_condition(model, guard, live, 1);
+}
+
+/* Record the goto condition GUARD (before the termination condition is
+ * applied): if any of the gotos resolved so far executes, this FSM invocation
+ * ends for the current edge. fsm_terminated is the disjunction of those
+ * triggers, so the first executed goto wins by suppressing everything later
+ * in source order (how/to/write/fsm/states.md). */
+static int consume_goto(resolver *resolver, pigen_predicate_id guard,
+	pigen_source_span span)
+{
+	pigen_semantic_model *model = resolver->model;
+	pigen_expr_id executed;
+
+	if (!resolver->in_fsm) return 1;
+	executed = predicate_expression(resolver, guard, span);
+	if (executed.index == PIGEN_INVALID_ID)
+		return fail(resolver, span, "invalid fsm goto condition");
+	if (resolver->fsm_terminated.index == PIGEN_INVALID_ID)
+	{
+		resolver->fsm_terminated = executed;
+		return 1;
+	}
+	{
+		const pigen_semantic_expr *left = pigen_expr_get(model,
+			resolver->fsm_terminated);
+		const pigen_semantic_expr *right = pigen_expr_get(model, executed);
+		pigen_binary_resolution resolution;
+		pigen_expr_id merged;
+
+		if (!left || !right ||
+			!pigen_data_type_resolve_binary_operation(model,
+				PIGEN_BINARY_LOGICAL_OR, left->data_type,
+				right->data_type, &resolution))
+			return fail(resolver, span, "invalid fsm goto condition");
+		merged = pigen_expr_add_binary(model, resolution.operation,
+			resolver->fsm_terminated, executed, span);
+		if (merged.index == PIGEN_INVALID_ID)
+			return fail(resolver, span, "invalid fsm goto condition");
+		resolver->fsm_terminated = merged;
+	}
+	return 1;
+}
+
+static int resolve_goto(resolver *resolver, pigen_module_id module_id,
+	pigen_process_id process, pigen_clock_domain_id domain,
+	pigen_syntax_id syntax_id, const pigen_syntax_node *goto_node,
 	pigen_predicate_id guard)
 {
 	pigen_semantic_model *model = resolver->model;
@@ -1023,13 +1170,30 @@ static int resolve_goto(resolver *resolver, pigen_module_id module_id,
 		b = pigen_source_span_text(model->sources, target, &bl);
 		if (a && b && al == bl && !memcmp(a, b, al))
 		{
+			int ok;
+			pigen_predicate_id effective;
+
 			value = pigen_expr_add_integer(model, (uint64_t)i,
 				resolver->fsm_state_type, goto_node->location.source_span);
 			if (value.index == PIGEN_INVALID_ID)
 				return fail(resolver, goto_node->location.source_span,
 					"invalid fsm goto value");
-			return add_state_transfer(resolver, module_id, process, domain,
-				syntax_id, value, guard, goto_node->location.source_span);
+			effective = statement_guard(resolver, guard,
+				goto_node->location.source_span);
+			if (effective.index == PIGEN_INVALID_ID)
+				return fail(resolver, goto_node->location.source_span,
+					"invalid fsm goto condition");
+			ok = add_state_transfer(resolver, module_id, process, domain,
+				syntax_id, value, effective,
+				goto_node->location.source_span);
+			if (!ok) return 0;
+			/* The first executed goto ends this FSM invocation for the
+			 * current edge; later statements are suppressed by the
+			 * terminated condition (how/to/write/fsm/states.md). The
+			 * recorded trigger is the goto's own condition; repeated
+			 * disjunction is harmless. */
+			return consume_goto(resolver, guard,
+				goto_node->location.source_span);
 		}
 	}
 	return fail(resolver, goto_node->location.source_span,
@@ -1046,21 +1210,18 @@ static int resolve_fsm(resolver *resolver, pigen_module_id module_id,
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
 	pigen_expr_id clock;
-	pigen_expr_id reset;
-	pigen_expr_id initial;
 	pigen_clock_domain_id domain;
 	pigen_process_id process;
 	pigen_data_type_id state_type;
 	pigen_symbol_id state_symbol;
 	pigen_signal_id state_signal;
 	pigen_expr_id state_expression;
-	pigen_predicate_id guard_no_reset;
-	pigen_predicate_id guard_reset;
 	pigen_syntax_id child;
 	pigen_source_span *names = NULL;
+	pigen_source_span register_name;
 	size_t state_count = 0;
-	size_t initial_index = SIZE_MAX;
-	size_t i;
+	size_t index = 0;
+	pigen_scope_id saved_scope;
 	int ok = 1;
 
 	if (!module)
@@ -1082,11 +1243,6 @@ static int resolve_fsm(resolver *resolver, pigen_module_id module_id,
 			return fail(resolver, fsm_node->location.source_span,
 				"invalid fsm clock domain");
 	}
-	reset = pigen_resolve_expression(resolver->syntax, model, module->scope,
-		fsm_node->as.fsm.reset, resolver->policy, resolver->error);
-	if (reset.index == PIGEN_INVALID_ID)
-		return fail(resolver, fsm_node->location.source_span,
-			"fsm reset requires a supported expression");
 
 	/* Collect state names in source order. */
 	for (child = fsm_node->first_child; child.index != PIGEN_INVALID_ID; )
@@ -1118,31 +1274,6 @@ static int resolve_fsm(resolver *resolver, pigen_module_id module_id,
 			child = node->next_sibling;
 		}
 	}
-	{
-		pigen_source_span initial_span = token_spelling(resolver,
-			fsm_node->as.fsm.initial);
-
-		for (i = 0; i < state_count; i++)
-		{
-			size_t al = 0, bl = 0;
-			const char *a = pigen_source_span_text(model->sources,
-				names[i], &al);
-			const char *b = pigen_source_span_text(model->sources,
-				initial_span, &bl);
-
-			if (a && b && al == bl && !memcmp(a, b, al))
-			{
-				initial_index = i;
-				break;
-			}
-		}
-	}
-	if (initial_index == SIZE_MAX)
-	{
-		free(names);
-		return fail(resolver, fsm_node->location.source_span,
-			"fsm initial state is not declared");
-	}
 
 	{
 		size_t width = 1;
@@ -1157,12 +1288,31 @@ static int resolve_fsm(resolver *resolver, pigen_module_id module_id,
 		return fail(resolver, fsm_node->location.source_span,
 			"invalid fsm state type");
 	}
+	/* The state register is the named FSM's module-scope identifier, or a
+	 * synthetic internal signal for an anonymous FSM (`fsm @(posedge clk)`). */
+	if (fsm_node->as.fsm.has_name)
+		register_name = token_spelling(resolver, fsm_node->as.fsm.name);
+	else
 	{
-		pigen_source_span name = token_spelling(resolver,
-			fsm_node->as.fsm.name);
+		char name[64];
+		pigen_source_id source;
+
+		snprintf(name, sizeof name, "__pigen_fsm_%u",
+			(unsigned)syntax_id.index);
+		source = pigen_source_add((pigen_source_manager *)model->sources,
+			"<pigen-fsm>", name, strlen(name));
+		register_name = (pigen_source_span){source, 0, strlen(name)};
+	}
+	if (register_name.start == register_name.end)
+	{
+		free(names);
+		return fail(resolver, fsm_node->location.source_span,
+			"invalid fsm state register name");
+	}
+	{
 		pigen_declare_result declared = pigen_symbol_declare(model,
-			module->scope, PIGEN_SYMBOL_SIGNAL, state_type, name,
-			fsm_node->location.source_span, &state_symbol, NULL);
+			module->scope, PIGEN_SYMBOL_SIGNAL, state_type, register_name,
+			register_name, &state_symbol, NULL);
 
 		if (declared != PIGEN_DECLARE_OK)
 		{
@@ -1173,7 +1323,7 @@ static int resolve_fsm(resolver *resolver, pigen_module_id module_id,
 		state_signal = pigen_signal_add(model, syntax_id, module_id,
 			state_symbol, state_type, pigen_semantic_scalar_shape(model),
 			INVALID_ID(pigen_expr_id), PIGEN_TRANSFER_TYPE_LOGIC,
-			PIGEN_SEMANTIC_INTERNAL, fsm_node->location.source_span);
+			PIGEN_SEMANTIC_INTERNAL, register_name);
 		if (state_signal.index == PIGEN_INVALID_ID)
 		{
 			free(names);
@@ -1181,7 +1331,7 @@ static int resolve_fsm(resolver *resolver, pigen_module_id module_id,
 				"invalid fsm state register");
 		}
 		state_expression = pigen_expr_add_symbol(model, state_symbol,
-			state_type, name);
+			state_type, register_name);
 		if (state_expression.index == PIGEN_INVALID_ID)
 		{
 			free(names);
@@ -1201,51 +1351,32 @@ static int resolve_fsm(resolver *resolver, pigen_module_id module_id,
 		return fail(resolver, fsm_node->location.source_span,
 			"invalid fsm process");
 	}
-	guard_reset = pigen_predicate_and_condition(model,
-		pigen_predicate_true(model), reset, 1);
-	guard_no_reset = pigen_predicate_and_condition(model,
-		pigen_predicate_true(model), reset, 0);
-	if (guard_reset.index == PIGEN_INVALID_ID ||
-		guard_no_reset.index == PIGEN_INVALID_ID)
-	{
-		free(names);
-		return fail(resolver, fsm_node->location.source_span,
-			"invalid fsm reset predicate");
-	}
-	initial = pigen_expr_add_integer(model, (uint64_t)initial_index,
-		state_type, fsm_node->location.source_span);
-	if (initial.index == PIGEN_INVALID_ID ||
-		!add_state_transfer(resolver, module_id, process, domain, syntax_id,
-			initial, guard_reset, fsm_node->location.source_span))
-	{
-		free(names);
-		return 0;
-	}
 
-	/* Resolve every state body under its state-active and no-reset guard. */
+	/* Resolve the body in source order: level-zero ordinary statements run
+	 * unconditionally; `state identifier : statement` runs only while that
+	 * state is active. Reset is ordinary code (`if (reset) goto initialise;`)
+	 * whose goto terminates this invocation via the first-goto rule, so no
+	 * special reset priority is applied here (how/to/write/fsm/states.md). */
+	saved_scope = resolver->expression_scope;
+	resolver->expression_scope = module->scope;
+	resolver->in_fsm = 1;
+	resolver->fsm_terminated = INVALID_ID(pigen_expr_id);
+	for (child = fsm_node->first_child; ok &&
+		child.index != PIGEN_INVALID_ID; )
 	{
-		size_t index = 0;
-		pigen_scope_id saved_scope = resolver->expression_scope;
+		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax,
+			child);
 
-		resolver->expression_scope = module->scope;
-		for (child = fsm_node->first_child; ok &&
-			child.index != PIGEN_INVALID_ID; )
+		if (!node) break;
+		if (node->kind == PIGEN_SYNTAX_FSM_STATE)
 		{
-			const pigen_syntax_node *state = pigen_syntax_get(
-				resolver->syntax, child);
 			pigen_expr_id state_const;
 			pigen_binary_resolution equality_resolution;
 			pigen_expr_id condition;
 			pigen_predicate_id state_guard;
 
-			if (!state) break;
-			if (state->kind != PIGEN_SYNTAX_FSM_STATE)
-			{
-				child = state->next_sibling;
-				continue;
-			}
 			state_const = pigen_expr_add_integer(model, (uint64_t)index,
-				state_type, state->location.source_span);
+				state_type, node->location.source_span);
 			if (state_const.index == PIGEN_INVALID_ID ||
 				!pigen_data_type_resolve_binary_operation(model,
 					PIGEN_BINARY_EQUAL, state_type, state_type,
@@ -1256,42 +1387,33 @@ static int resolve_fsm(resolver *resolver, pigen_module_id module_id,
 			}
 			condition = pigen_expr_add_binary(model,
 				equality_resolution.operation, state_expression,
-				state_const, state->location.source_span);
+				state_const, node->location.source_span);
 			if (condition.index == PIGEN_INVALID_ID)
 			{
 				ok = 0;
 				break;
 			}
 			state_guard = pigen_predicate_and_condition(model,
-				guard_no_reset, condition, 1);
+				pigen_predicate_true(model), condition, 1);
 			if (state_guard.index == PIGEN_INVALID_ID)
 			{
 				ok = 0;
 				break;
 			}
-			{
-				pigen_syntax_id item;
-
-				for (item = state->first_child;
-					ok && item.index != PIGEN_INVALID_ID; )
-				{
-					const pigen_syntax_node *statement =
-						pigen_syntax_get(resolver->syntax, item);
-
-					if (!statement) break;
-					if (!resolve_procedural_statement(resolver,
-						module_id, process, domain, item,
-						state_guard))
-						ok = 0;
-					else
-						item = statement->next_sibling;
-				}
-			}
+			if (node->first_child.index != PIGEN_INVALID_ID &&
+				!resolve_procedural_statement(resolver, module_id,
+					process, domain, node->first_child, state_guard))
+				ok = 0;
 			index++;
-			child = state->next_sibling;
 		}
-		resolver->expression_scope = saved_scope;
+		else if (!resolve_procedural_statement(resolver, module_id, process,
+			domain, child, pigen_predicate_true(model)))
+			ok = 0;
+		child = node->next_sibling;
 	}
+	resolver->expression_scope = saved_scope;
+	resolver->in_fsm = 0;
+	resolver->fsm_terminated = INVALID_ID(pigen_expr_id);
 	resolver->fsm_state_expression =
 		(pigen_expr_id){PIGEN_INVALID_ID};
 	resolver->fsm_state_names = NULL;
@@ -1596,89 +1718,191 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 static int resolve_if_statement(resolver *resolver,
 	pigen_module_id module_id, pigen_process_id process,
 	pigen_clock_domain_id domain, const pigen_syntax_node *statement,
-	pigen_predicate_id guard)
+	pigen_predicate_id guard);
+
+/* The fire condition of a transfer, built from its buffered signal uses: every
+ * consumed source must be valid and every produced destination ready. Returns
+ * an invalid expression when nothing buffered constrains the fire (a static
+ * transfer always fires). */
+static pigen_expr_id transfer_fire_expression(resolver *resolver,
+	const pigen_transfer_signal_use *uses, size_t use_count,
+	pigen_source_span span)
 {
-	pigen_expr_id condition = INVALID_ID(pigen_expr_id);
-	pigen_predicate_id then_guard;
-	int transfer_condition = 0;
+	pigen_semantic_model *model = resolver->model;
+	pigen_expr_id result = INVALID_ID(pigen_expr_id);
+	size_t i;
 
-	/* `if (destination <= source)` is the transfer-and-branch form: perform
-	 * the transfer and branch on its acceptance. */
+	for (i = 0; i < use_count; i++)
 	{
-		const pigen_syntax_expr *syntax_condition = pigen_syntax_expr_get(
-			&resolver->syntax->expressions,
-			statement->as.if_statement.condition);
+		pigen_expr_id term = INVALID_ID(pigen_expr_id);
 
-		if (syntax_condition &&
-			syntax_condition->kind == PIGEN_SYNTAX_EXPR_BINARY &&
-			syntax_condition->as.binary.operator ==
-				PIGEN_SYNTAX_OP_LESS_EQUAL)
+		if (uses[i].roles & PIGEN_TRANSFER_CONSUMER)
+			term = pigen_expr_add_control(model, PIGEN_EXPR_VALID,
+				uses[i].signal, span);
+		if (uses[i].roles & PIGEN_TRANSFER_PRODUCER)
 		{
-			pigen_semantic_model *model = resolver->model;
-			pigen_expr_id destination_expression = pigen_resolve_expression(
-				resolver->syntax, model, resolver->expression_scope,
-				syntax_condition->as.binary.left, resolver->policy,
-				resolver->error);
-			pigen_lvalue_id destination =
-				pigen_lvalue_resolve(model, destination_expression);
-			const pigen_semantic_expr *destination_value =
-				pigen_expr_get(model, destination_expression);
-			pigen_expr_id source_expression = pigen_resolve_expression(
-				resolver->syntax, model, resolver->expression_scope,
-				syntax_condition->as.binary.right, resolver->policy,
-				resolver->error);
-			const pigen_semantic_expr *source_value =
-				pigen_expr_get(model, source_expression);
+			pigen_expr_id ready = pigen_expr_add_control(model,
+				PIGEN_EXPR_READY, uses[i].signal, span);
 
-			if (destination.index != PIGEN_INVALID_ID &&
-				destination_value && source_value &&
-				source_value->kind == PIGEN_EXPR_SYMBOL)
+			if (ready.index == PIGEN_INVALID_ID)
+				return INVALID_ID(pigen_expr_id);
+			if (term.index == PIGEN_INVALID_ID)
+				term = ready;
+			else
 			{
-				pigen_signal_id source_signal = pigen_symbol_signal(model,
-					source_value->as.symbol);
-				pigen_expr_id value = pigen_resolve_assignment_value(
-					resolver->syntax, model, resolver->expression_scope,
-					syntax_condition->as.binary.right,
-					destination_value->data_type, resolver->policy,
-					resolver->error);
-				pigen_transfer_signal_use *uses = NULL;
-				size_t use_count = 0;
-				pigen_transfer_id transfer;
+				const pigen_semantic_expr *left = pigen_expr_get(model,
+					term);
+				const pigen_semantic_expr *right = pigen_expr_get(model,
+					ready);
+				pigen_binary_resolution resolution;
 
-				if (value.index != PIGEN_INVALID_ID &&
-					source_signal.index != PIGEN_INVALID_ID &&
-					analyze_transfer(resolver, destination, value, guard,
-						domain, statement->location.source_span, &uses,
-						&use_count))
-				{
-					transfer = pigen_transfer_add(model,
-						statement->first_child.index ==
-							PIGEN_INVALID_ID ? (pigen_syntax_id){0} :
-							(pigen_syntax_id){0},
-						module_id, process, destination, value, guard,
-						domain, uses, use_count,
-						statement->location.source_span);
-					free(uses);
-					if (transfer.index != PIGEN_INVALID_ID)
-					{
-						condition = pigen_expr_add_accepts(model,
-							destination, value, source_signal,
-							statement->location.source_span);
-						if (condition.index != PIGEN_INVALID_ID)
-							transfer_condition = 1;
-					}
-				}
-				else
-					free(uses);
+				if (!left || !right ||
+					!pigen_data_type_resolve_binary_operation(model,
+						PIGEN_BINARY_LOGICAL_AND, left->data_type,
+						right->data_type, &resolution))
+					return INVALID_ID(pigen_expr_id);
+				term = pigen_expr_add_binary(model,
+					resolution.operation, term, ready, span);
 			}
 		}
+		if (term.index == PIGEN_INVALID_ID)
+			continue;
+		if (result.index == PIGEN_INVALID_ID)
+		{
+			result = term;
+			continue;
+		}
+		{
+			const pigen_semantic_expr *left = pigen_expr_get(model, result);
+			const pigen_semantic_expr *right = pigen_expr_get(model, term);
+			pigen_binary_resolution resolution;
+
+			if (!left || !right ||
+				!pigen_data_type_resolve_binary_operation(model,
+					PIGEN_BINARY_LOGICAL_AND, left->data_type,
+					right->data_type, &resolution))
+				return INVALID_ID(pigen_expr_id);
+			result = pigen_expr_add_binary(model, resolution.operation,
+				result, term, span);
+		}
+		if (result.index == PIGEN_INVALID_ID)
+			return INVALID_ID(pigen_expr_id);
 	}
-	if (!transfer_condition)
-		condition = pigen_resolve_expression(resolver->syntax,
-			resolver->model, resolver->expression_scope,
-			statement->as.if_statement.condition,
+	return result;
+}
+
+/* `when (destination <= source) statement`: perform the transfer and run the
+ * body only on the cycle that transfer fires (how/to/write/fsm/states.md). The
+ * transfer and the body therefore share one fire condition; the body's
+ * effective guard is the enclosing guard plus the transfer's acceptance. */
+static int resolve_when_statement(resolver *resolver,
+	pigen_module_id module_id, pigen_process_id process,
+	pigen_clock_domain_id domain, pigen_syntax_id syntax_id,
+	const pigen_syntax_node *statement, pigen_predicate_id guard)
+{
+	pigen_semantic_model *model = resolver->model;
+	const pigen_syntax_expr *condition = pigen_syntax_expr_get(
+		&resolver->syntax->expressions,
+		statement->as.when_statement.condition);
+	const pigen_syntax_node *body;
+	pigen_expr_id destination_expression;
+	pigen_expr_id value;
+	pigen_lvalue_id destination;
+	const pigen_semantic_lvalue *destination_lvalue;
+	const pigen_semantic_expr *destination_value;
+	const pigen_semantic_expr *source_value;
+	pigen_transfer_signal_use *signal_uses = NULL;
+	size_t signal_use_count = 0;
+	pigen_transfer_id transfer;
+	pigen_expr_id fire;
+	pigen_predicate_id effective = guard;
+	pigen_predicate_id body_guard = guard;
+
+	if (!condition || condition->kind != PIGEN_SYNTAX_EXPR_BINARY ||
+		condition->as.binary.operator != PIGEN_SYNTAX_OP_LESS_EQUAL)
+		return fail_location(resolver, statement->location,
+			"when requires a transfer event, e.g. "
+			"`when (destination <= source)`");
+	destination_expression = pigen_resolve_expression(resolver->syntax, model,
+		resolver->expression_scope, condition->as.binary.left,
+		resolver->policy, resolver->error);
+	destination = pigen_lvalue_resolve(model, destination_expression);
+	destination_value = pigen_expr_get(model, destination_expression);
+	destination_lvalue = pigen_lvalue_get(model, destination);
+	if (destination.index == PIGEN_INVALID_ID || !destination_value ||
+		!destination_lvalue || !lvalue_is_assignable(model, destination))
+		return fail_location(resolver, statement->location,
+			"when requires a transfer destination lvalue");
+	if (destination_lvalue->kind == PIGEN_LVALUE_CONCATENATION)
+		value = pigen_resolve_expression(resolver->syntax, model,
+			resolver->expression_scope, condition->as.binary.right,
 			resolver->policy, resolver->error);
+	else
+		value = pigen_resolve_assignment_value(resolver->syntax, model,
+			resolver->expression_scope, condition->as.binary.right,
+			destination_value->data_type, resolver->policy,
+			resolver->error);
+	source_value = pigen_expr_get(model, value);
+	if (value.index == PIGEN_INVALID_ID || !source_value)
+		return fail_location(resolver, statement->location,
+			"when transfer value requires a compatible expression");
+	if (destination_lvalue->kind != PIGEN_LVALUE_CONCATENATION &&
+		destination_value->shape.index != source_value->shape.index)
+		return fail_location(resolver, statement->location,
+			"when transfer shape mismatch");
+	/* The transfer is suppressed once an earlier goto has executed. */
+	effective = statement_guard(resolver, guard,
+		statement->location.source_span);
+	if (effective.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, statement->location,
+			"invalid when event condition");
+	if (!analyze_transfer(resolver, destination, value, effective, domain,
+		statement->location.source_span, &signal_uses, &signal_use_count))
+		return 0;
+	transfer = pigen_transfer_add(model, syntax_id, module_id, process,
+		destination, value, effective, domain, signal_uses,
+		signal_use_count, statement->location.source_span);
+	fire = transfer_fire_expression(resolver, signal_uses, signal_use_count,
+		statement->location.source_span);
+	free(signal_uses);
+	if (transfer.index == PIGEN_INVALID_ID)
+		return fail_location(resolver, statement->location,
+			"invalid when transfer event");
+	/* The body runs only when the same transfer fires. Its own leaf
+	 * statements apply the termination condition themselves, so the body
+	 * guard is the plain enclosing guard plus the fire condition. */
+	if (fire.index != PIGEN_INVALID_ID)
+	{
+		body_guard = pigen_predicate_and_condition(model, guard, fire, 1);
+		if (body_guard.index == PIGEN_INVALID_ID)
+			return fail_location(resolver, statement->location,
+				"invalid when event condition");
+	}
+	body = pigen_syntax_get(resolver->syntax, statement->first_child);
+	if (!body)
+		return fail_location(resolver, statement->location,
+			"when requires a body statement");
+	if (!resolve_procedural_statement(resolver, module_id, process, domain,
+		statement->first_child, body_guard))
+		return 0;
+	return 1;
+}
+
+static int resolve_if_statement(resolver *resolver,
+	pigen_module_id module_id, pigen_process_id process,
+	pigen_clock_domain_id domain, const pigen_syntax_node *statement,
+	pigen_predicate_id guard)
+{
+	/* `if` tests a computed condition, including ordinary relational `<=`; the
+	 * transfer-event form is `when` (how/to/write/fsm/states.md). Control flow
+	 * has no observable effect of its own, so the FSM termination condition is
+	 * applied by the leaf statements inside each branch. */
+	pigen_expr_id condition = pigen_resolve_expression(resolver->syntax,
+		resolver->model, resolver->expression_scope,
+		statement->as.if_statement.condition, resolver->policy,
+		resolver->error);
 	pigen_predicate_id else_guard;
+	pigen_predicate_id then_guard;
 	pigen_syntax_id then_id = statement->first_child;
 	const pigen_syntax_node *then_statement = pigen_syntax_get(resolver->syntax,
 		then_id);
@@ -1823,10 +2047,14 @@ static int resolve_procedural_statement(resolver *resolver,
 	if (!statement) return 0;
 	if (statement->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT)
 		return resolve_assignment(resolver, module_id, process, domain,
-			statement_id, statement, guard);
+			statement_id, statement,
+			statement_guard(resolver, guard, statement->location.source_span));
 	if (statement->kind == PIGEN_SYNTAX_IF_STATEMENT)
 		return resolve_if_statement(resolver, module_id, process, domain,
 			statement, guard);
+	if (statement->kind == PIGEN_SYNTAX_WHEN_STATEMENT)
+		return resolve_when_statement(resolver, module_id, process, domain,
+			statement_id, statement, guard);
 	if (statement->kind == PIGEN_SYNTAX_PIPELINE)
 		return resolve_pipeline(resolver, module_id, process, domain,
 			statement_id, statement, guard);
@@ -1835,7 +2063,8 @@ static int resolve_procedural_statement(resolver *resolver,
 			statement_id, statement, guard);
 	if (statement->kind == PIGEN_SYNTAX_ACTION)
 		return resolve_action(resolver, module_id, process, domain,
-			statement_id, statement, guard);
+			statement_id, statement,
+			statement_guard(resolver, guard, statement->location.source_span));
 	if (statement->kind != PIGEN_SYNTAX_PROCEDURAL_BLOCK)
 		return fail_location(resolver, statement->location,
 			"invalid procedural statement");
@@ -3499,10 +3728,12 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 {
 	const pigen_source_manager *sources = syntax && syntax->expanded ?
 		syntax->expanded->sources : NULL;
-	resolver resolver = {syntax, model, policy, error,
-		(pigen_scope_id){PIGEN_INVALID_ID},
-		INVALID_ID(pigen_expr_id), INVALID_ID(pigen_data_type_id),
-		NULL, 0, 0, NULL, 0, 0, NULL, 0, 0};
+	resolver resolver = {
+		.syntax = syntax, .model = model, .policy = policy, .error = error,
+		.expression_scope = (pigen_scope_id){PIGEN_INVALID_ID},
+		.fsm_state_expression = INVALID_ID(pigen_expr_id),
+		.fsm_state_type = INVALID_ID(pigen_data_type_id),
+		.fsm_terminated = INVALID_ID(pigen_expr_id)};
 	const pigen_syntax_node *root;
 	pigen_syntax_id child;
 	pigen_source_span root_span;

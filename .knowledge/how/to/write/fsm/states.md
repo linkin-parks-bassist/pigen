@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T18:48:06+11:00"
+revised_at: "2026-11-11T19:55:35+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -14,4 +14,4 @@ On the next edge execution restarts at the top of the FSM with the destination s
 
 The specified transfer-event control is `when (result <= total) goto idle;`. It performs the transfer and runs its body only when that transfer fires on this cycle. `if` tests computed conditions, so `if (a <= b)` must mean relational less-than-or-equal. A goto itself never waits for a transfer. Event control applies generally, not only to gotos; other when-event kinds remain unspecified.
 
-Implementation status: the compiler currently accepts state identifier: statement, mandatory named/reset/initial FSM headers, legacy if-transfer syntax and explicit transfer plus accepts(destination,source). Existing transition-path checks do not establish whole-FSM early-exit behavior. Anonymous FSMs, level-zero ordinary statements, when migration and the new goto termination rule require implementation/verification. Migrate old transfer-if tests/examples, preserve one atomic transfer/body fire, and test source ordering, nested gotos, reset suppression and preceding transfers. Do not silently present accepts workarounds as preferred syntax. The remaining plan is what/is/the/plan.md.
+Implementation status: the structured compiler implements this surface. `fsm` accepts an optional name and the anonymous form; level-zero ordinary statements and ordinary reset code resolve alongside the state-gated statements with no reset intrinsic. Each leaf statement carries the termination condition, the disjunction of the goto triggers resolved before it, so an executed goto preserves earlier writes, schedules its destination and suppresses every later statement in source order. `when (destination <= source) statement` creates one transfer and runs its body on that same fire; `if` evaluates a computed condition. Behavioral witnesses are tests/fsm.pigen, tests/fsm_goto_first.pigen (nested branches, suppression, preserved writes, an independent process) and tests/when_event.pigen; the standalone fsm-identity and fsm-lower records derive the initial state from the first level-zero goto. Production resolves the FSM into the shared model; src/fsm_lower.c remains a structural stage recorded by fsm-lower-test, not the production route. Startup without reset remains open and other when-event kinds remain unspecified. The remaining plan is what/is/the/plan.md.

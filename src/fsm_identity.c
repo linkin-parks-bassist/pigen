@@ -80,9 +80,10 @@ static size_t fsm_goto_nodes(const pigen_syntax_node *fsm,
 	{
 		const pigen_syntax_node *node = fsm_node(fsm, syntax, child);
 
-		if (node->kind == PIGEN_SYNTAX_FSM_STATE)
-			count = fsm_goto_descendants(fsm, syntax, node->first_child,
-				gotos, count, capacity);
+		/* A goto may be level-zero code (the ordinary reset transition) or a
+		 * state body; the per-transition set is every goto in source order. */
+		count = fsm_goto_descendants(fsm, syntax, node->first_child,
+			gotos, count, capacity);
 		child = node->next_sibling;
 	}
 	return count;
@@ -156,50 +157,74 @@ int pigen_fsm_identity_establish(pigen_semantic_model *model,
 	if (state_count == 0)
 		return -1;
 
-	/* The FSM's one initial state (the state the header names): the per-state
-	 * identity of the declared state whose name token text matches the header's
-	 * `initial IDENTIFIER` token text. A header that names an undeclared initial
-	 * state is a failure the parser already rejects, so a well-established FSM
-	 * always names a declared state. */
+	/* The FSM's initial state: the state named by the first level-zero `goto`
+	 * (the ordinary reset transition `if (reset) goto initialise;`), else the
+	 * first declared state. A level-zero goto target is a declared state (the
+	 * parser rejects an undeclared target), so a well-established FSM with a
+	 * level-zero goto always names a declared state. */
 	{
-		const pigen_expanded_token *initial_token =
-			pigen_expanded_token_get(expanded, fsm->as.fsm.initial);
+		const pigen_expanded_token *initial_token = NULL;
 		pigen_source_span initial_span;
 		const char *initial_text;
 		size_t initial_length;
 
-		if (!initial_token)
-			return -1;
-		initial_span = pigen_origin_spelling_span(expanded,
-			initial_token->origin);
-		initial_text = pigen_source_span_text(model->sources, initial_span,
-			&initial_length);
-		if (!initial_text || initial_length == 0)
-			return -1;
-		for (i = 0; i < state_count; i++)
+		for (pigen_syntax_id child = fsm->first_child;
+			child.index != PIGEN_INVALID_ID; )
 		{
-			const pigen_expanded_token *name_token =
-				pigen_expanded_token_get(expanded,
-					states[i]->as.fsm_state.name);
-			pigen_source_span name_span;
-			const char *name_text;
-			size_t name_length;
+			const pigen_syntax_node *node = fsm_node(fsm, syntax, child);
 
-			if (!name_token)
-				continue;
-			name_span = pigen_origin_spelling_span(expanded,
-				name_token->origin);
-			name_text = pigen_source_span_text(model->sources, name_span,
-				&name_length);
-			if (name_text && name_length == initial_length &&
-				!memcmp(name_text, initial_text, initial_length))
+			if (node->kind != PIGEN_SYNTAX_FSM_STATE)
 			{
-				initial_state = i;
-				break;
+				const pigen_syntax_node *gotos[64];
+				size_t count = fsm_goto_descendants(fsm, syntax,
+					node->first_child, gotos, 0, 64);
+
+				if (count)
+				{
+					initial_token = pigen_expanded_token_get(expanded,
+						gotos[0]->as.goto_statement.target);
+					break;
+				}
 			}
+			child = node->next_sibling;
 		}
-		if (initial_state == PIGEN_INVALID_ID)
-			return -1;
+		if (!initial_token)
+		{
+			initial_state = 0;
+		}
+		else
+		{
+			initial_span = pigen_origin_spelling_span(expanded,
+				initial_token->origin);
+			initial_text = pigen_source_span_text(model->sources,
+				initial_span, &initial_length);
+			if (!initial_text || initial_length == 0)
+				return -1;
+			for (i = 0; i < state_count; i++)
+			{
+				const pigen_expanded_token *name_token =
+					pigen_expanded_token_get(expanded,
+						states[i]->as.fsm_state.name);
+				pigen_source_span name_span;
+				const char *name_text;
+				size_t name_length;
+
+				if (!name_token)
+					continue;
+				name_span = pigen_origin_spelling_span(expanded,
+					name_token->origin);
+				name_text = pigen_source_span_text(model->sources,
+					name_span, &name_length);
+				if (name_text && name_length == initial_length &&
+					!memcmp(name_text, initial_text, initial_length))
+				{
+					initial_state = i;
+					break;
+				}
+			}
+			if (initial_state == PIGEN_INVALID_ID)
+				return -1;
+		}
 	}
 
 	/* The state type: an enum-like type over the declared states, a sized logic

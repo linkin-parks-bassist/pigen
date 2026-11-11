@@ -198,8 +198,10 @@ static void test_legal_fsm(pigen_source_manager *sources)
 		"module sender(input logic clk, input logic reset, input logic start);\n"
 		"\tlogic [7:0] source;\n"
 		"\tlogic [7:0] destination;\n"
-		"\tfsm sender @(posedge clk) reset (reset) initial idle\n"
+		"\tfsm sender @(posedge clk)\n"
 		"\tbegin\n"
+		"\t\tif (reset)\n"
+		"\t\t\tgoto idle;\n"
 		"\t\tstate idle:\n"
 		"\t\tbegin\n"
 		"\t\t\tif (start)\n"
@@ -231,16 +233,20 @@ static void test_legal_fsm(pigen_source_manager *sources)
 	assert(module);
 	fsm = find_fsm(&fixture, module);
 	assert(fsm);
+	/* The name is optional; this form names the FSM. */
+	assert(fsm->as.fsm.has_name);
 	assert(token_is(&fixture.preprocessed.expanded, fsm->as.fsm.name, "sender"));
-	assert(token_is(&fixture.preprocessed.expanded, fsm->as.fsm.initial, "idle"));
 	assert(expression_span_is(sources, &fixture.tree, fsm->as.fsm.clock, "clk"));
-	assert(expression_span_is(sources, &fixture.tree, fsm->as.fsm.reset,
-		"reset"));
 	/* The FSM node carries the original span of the whole construct, from the
 	 * `fsm` keyword (byte 118) through the outer `end` (byte 322, exclusive). */
 	assert(span_is_range(sources, fsm->location.source_span, fixture.source,
 		118, 322));
 
+	/* Level-zero ordinary statements and state items coexist in source order:
+	 * the reset `if` and its goto precede the two states. */
+	assert(fsm->first_child.index != PIGEN_INVALID_ID);
+	assert(pigen_syntax_get(&fixture.tree, fsm->first_child)->kind ==
+		PIGEN_SYNTAX_IF_STATEMENT);
 	for (child = fsm->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pigen_syntax_get(&fixture.tree, child);
@@ -251,6 +257,9 @@ static void test_legal_fsm(pigen_source_manager *sources)
 	assert(state_count == 2);
 
 	state = pigen_syntax_get(&fixture.tree, fsm->first_child);
+	assert(state && state->kind == PIGEN_SYNTAX_IF_STATEMENT);
+	assert(state->next_sibling.index != PIGEN_INVALID_ID);
+	state = pigen_syntax_get(&fixture.tree, state->next_sibling);
 	assert(state && state->kind == PIGEN_SYNTAX_FSM_STATE);
 	assert(token_is(&fixture.preprocessed.expanded, state->as.fsm_state.name,
 		"idle"));
@@ -267,19 +276,26 @@ static void test_legal_fsm(pigen_source_manager *sources)
 	for (child = fsm->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pigen_syntax_get(&fixture.tree, child);
-		assert(node && node->kind == PIGEN_SYNTAX_FSM_STATE);
-		body = pigen_syntax_get(&fixture.tree, node->first_child);
-		assert(body && body->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK);
-		count_kinds(&fixture.tree, child, &goto_count, &assignment_count,
-			&if_count);
+		assert(node);
+		if (node->kind == PIGEN_SYNTAX_FSM_STATE)
+		{
+			body = pigen_syntax_get(&fixture.tree, node->first_child);
+			assert(body && body->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK);
+			count_kinds(&fixture.tree, child, &goto_count,
+				&assignment_count, &if_count);
+		}
 		child = node->next_sibling;
 	}
-	assert(goto_count == 2);
+	/* The level-zero reset if and its goto. */
+	count_kinds(&fixture.tree, fsm->first_child, &goto_count,
+		&assignment_count, &if_count);
+	assert(goto_count == 3);
 	assert(assignment_count == 1);
-	assert(if_count == 2);
+	assert(if_count == 3);
 	/* Each goto node spans the full statement including the semicolon. The
 	 * first state (idle) issues `goto send;`, the second (send) `goto idle;`. */
 	state = pigen_syntax_get(&fixture.tree, fsm->first_child);
+	state = pigen_syntax_get(&fixture.tree, state->next_sibling);
 	assert(state && state->kind == PIGEN_SYNTAX_FSM_STATE);
 	goto_node = find_goto(&fixture.tree, state->first_child);
 	assert(goto_node);
@@ -289,6 +305,34 @@ static void test_legal_fsm(pigen_source_manager *sources)
 	goto_node = find_goto(&fixture.tree, state->first_child);
 	assert(goto_node);
 	assert(span_is(sources, goto_node->location.source_span, "goto idle;"));
+	free_fixture(&fixture);
+}
+
+static void test_anonymous_fsm(pigen_source_manager *sources)
+{
+	const char text[] =
+		"module anon(input logic clk, input logic reset);\n"
+		"\tfsm @(posedge clk)\n"
+		"\tbegin\n"
+		"\t\tif (reset)\n"
+		"\t\t\tgoto idle;\n"
+		"\t\tstate idle:\n"
+		"\t\t\tgoto idle;\n"
+		"\tend\n"
+		"endmodule";
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const pigen_syntax_node *fsm;
+
+	assert(parse_fixture(sources, "anonymous_fsm.pigen", text, &fixture));
+	assert(!fixture.error.message);
+	module = fixture_module(&fixture);
+	assert(module);
+	fsm = find_fsm(&fixture, module);
+	assert(fsm);
+	assert(!fsm->as.fsm.has_name);
+	assert(fsm->as.fsm.name.index == PIGEN_INVALID_ID);
+	assert(expression_span_is(sources, &fixture.tree, fsm->as.fsm.clock, "clk"));
 	free_fixture(&fixture);
 }
 
@@ -363,6 +407,7 @@ int main(void)
 	pigen_source_manager sources = {0};
 
 	test_legal_fsm(&sources);
+	test_anonymous_fsm(&sources);
 	assert_syntax_failure(&sources, (syntax_failure){
 		"tests/fsm_bad_event.pigen",
 		"fsm event control must be one posedge", "or", 1});
@@ -370,13 +415,16 @@ int main(void)
 		"tests/fsm_bad_goto.pigen",
 		"goto references an undeclared state", "missing", 1});
 	assert_syntax_failure(&sources, (syntax_failure){
-		"tests/fsm_bad_initial.pigen",
-		"fsm initial state is not declared", "missing", 1});
-	assert_syntax_failure(&sources, (syntax_failure){
 		"tests/fsm_duplicate_state.pigen",
 		"fsm state declared more than once", "idle", 3});
-	assert_inline_syntax_failure(&sources, "missing_reset.pigen",
-		"module missing_reset(input logic clk, input logic reset);\n"
+	/* The superseded reset/initial header is diagnosed with the ordinary-code
+	 * migration at the header keyword's original span. */
+	assert_syntax_failure(&sources, (syntax_failure){
+		"tests/fsm_legacy_header.pigen",
+		"fsm reset is ordinary code: use `if (reset) goto state;`",
+		"reset", 2});
+	assert_inline_syntax_failure(&sources, "legacy_initial.pigen",
+		"module legacy_initial(input logic clk, input logic reset);\n"
 		"\tfsm sender @(posedge clk) initial idle\n"
 		"\tbegin\n"
 		"\t\tstate idle:\n"
@@ -384,17 +432,8 @@ int main(void)
 		"\t\tend\n"
 		"\tend\n"
 		"endmodule",
-		"fsm requires `reset (name)`", "initial", 1);
-	assert_inline_syntax_failure(&sources, "missing_initial.pigen",
-		"module missing_initial(input logic clk, input logic reset);\n"
-		"\tfsm sender @(posedge clk) reset (reset)\n"
-		"\tbegin\n"
-		"\t\tstate idle:\n"
-		"\t\tbegin\n"
-		"\t\tend\n"
-		"\tend\n"
-		"endmodule",
-		"fsm requires an initial state", "begin", 1);
+		"fsm initial state is ordinary code: use `goto state;`",
+		"initial", 2);
 	pigen_free_sources(&sources);
 	puts("PASS: fsm syntax parses to structured nodes");
 	return 0;

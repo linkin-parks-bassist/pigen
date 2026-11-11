@@ -1418,6 +1418,45 @@ static int parse_if_statement(syntax_parser *parser, pigen_syntax_id parent,
 	return 1;
 }
 
+/* The transfer-event control `when (destination <= source) statement`: the
+ * body runs only on the cycle the transfer fires. The condition is parsed as
+ * an ordinary expression; resolution decides whether it is the transfer form
+ * (how/to/write/fsm/states.md). */
+static int parse_when_statement(syntax_parser *parser, pigen_syntax_id parent,
+	size_t start, size_t limit, size_t *after_statement,
+	size_t *assignment_count)
+{
+	pigen_syntax_node node = {0};
+	pigen_syntax_id statement;
+	size_t close;
+	size_t at;
+
+	if (!token_is(parser, start, "when") || !token_is(parser, start + 1, "("))
+		return 0;
+	close = matching_parenthesis(parser, start + 1, limit);
+	if (close == limit || close == start + 2) return 0;
+	node.kind = PIGEN_SYNTAX_WHEN_STATEMENT;
+	node.parent = INVALID_SYNTAX;
+	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
+	if (!pigen_parse_expression(parser->expanded, start + 2, close,
+		&parser->tree->expressions, &parser->tree->types,
+		&node.as.when_statement.condition, parser->error)) return 0;
+	statement = add_node(parser, node);
+	add_child(parser, parent, statement);
+	at = close + 1;
+	if (!parse_procedural_statement(parser, statement, at, limit, &at,
+		assignment_count))
+	{
+		if (parser->fsm_states)
+			parser->fsm_body_failed = 1;
+		return 0;
+	}
+	*after_statement = at;
+	parser->tree->nodes[statement.index].location = range_location(parser, start,
+		at);
+	return 1;
+}
+
 static int parse_nonblocking_assignment(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count)
@@ -1994,6 +2033,14 @@ static size_t fsm_skip_statement(const syntax_parser *parser, size_t start,
 			at = fsm_skip_statement(parser, at + 1, limit);
 		return at;
 	}
+	if (token_is(parser, start, "when"))
+	{
+		size_t close = matching_parenthesis(parser, start + 1, limit);
+		size_t at;
+		if (close == limit || close == start + 2) return limit;
+		at = fsm_skip_statement(parser, close + 1, limit);
+		return at;
+	}
 	{
 		size_t semicolon = top_level_token(parser, start, limit, ";");
 		return semicolon == limit ? limit : semicolon + 1;
@@ -2038,16 +2085,24 @@ static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
 	fsm_state_names declared = {0};
 	syntax_checkpoint checkpoint;
 	size_t name = start + 1;
+	size_t clock_at;
 	size_t at;
-	size_t initial_at;
+	size_t body_start;
 	size_t body_end;
+	int has_name = 0;
 	int saw_state = 0;
 	int ok = 0;
 
 	if (!token_is(parser, start, "fsm")) return 0;
-	if (name >= limit || !identifier(parser, name))
-		return fail(parser, start, "fsm requires a name");
-	at = name + 1;
+	/* The FSM name is optional: `fsm sender @(posedge clk)` or the anonymous
+	 * `fsm @(posedge clk)`. */
+	if (name < limit && identifier(parser, name))
+	{
+		has_name = 1;
+		at = name + 1;
+	}
+	else
+		at = start + 1;
 	if (at >= limit || !token_is(parser, at, "@"))
 		return fail(parser, at, "fsm requires an event control");
 	at++;
@@ -2065,6 +2120,7 @@ static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
 		if (scan >= close || !identifier(parser, scan))
 			return fail(parser, scan < close ? scan : close,
 				"fsm event control must be one posedge");
+		clock_at = scan;
 		scan++;
 		if (scan != close)
 			return fail(parser, scan < close ? scan : close,
@@ -2072,23 +2128,19 @@ static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
 		at = close;
 	}
 	at++;
-	if (at >= limit || !token_is(parser, at, "reset"))
-		return fail(parser, at, "fsm requires `reset (name)`");
-	at++;
-	if (at >= limit || !token_is(parser, at, "(") ||
-		at + 2 >= limit || !identifier(parser, at + 1) ||
-		!token_is(parser, at + 2, ")"))
-		return fail(parser, at, "fsm requires `reset (name)`");
-	at += 3;
-	if (at >= limit || !token_is(parser, at, "initial"))
-		return fail(parser, at, "fsm requires an initial state");
-	at++;
-	if (at >= limit || !identifier(parser, at))
-		return fail(parser, at, "fsm requires an initial state");
-	initial_at = at;
-	at++;
+	/* The reset/initial header is superseded: reset is ordinary level-zero
+	 * code and the initial state is an ordinary state named by a goto
+	 * (how/to/write/fsm/states.md). Diagnose the old header at its original
+	 * span rather than failing on the generic body check. */
+	if (at < limit && token_is(parser, at, "reset"))
+		return fail(parser, at,
+			"fsm reset is ordinary code: use `if (reset) goto state;`");
+	if (at < limit && token_is(parser, at, "initial"))
+		return fail(parser, at,
+			"fsm initial state is ordinary code: use `goto state;`");
 	if (at >= limit || !token_is(parser, at, "begin"))
 		return fail(parser, at, "fsm requires `begin`");
+	body_start = at + 1;
 	body_end = matching_begin_end(parser, at, limit);
 	if (body_end == limit)
 		return fail(parser, at, "fsm requires `end`");
@@ -2097,29 +2149,33 @@ static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
 	node.location = range_location(parser, start, body_end + 1);
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
-	node.as.fsm.name = (pigen_token_id){(uint32_t)name};
+	node.as.fsm.name = has_name ?
+		(pigen_token_id){(uint32_t)name} : INVALID_ID(pigen_token_id);
+	node.as.fsm.has_name = has_name;
 	node.as.fsm.clock = INVALID_ID(pigen_syntax_expr_id);
-	node.as.fsm.reset = INVALID_ID(pigen_syntax_expr_id);
-	node.as.fsm.initial = (pigen_token_id){(uint32_t)initial_at};
 	fsm = add_node(parser, node);
 	add_child(parser, parent, fsm);
-	if (!pigen_parse_expression(parser->expanded, initial_at - 7, initial_at - 6,
+	if (!pigen_parse_expression(parser->expanded, clock_at, clock_at + 1,
 		&parser->tree->expressions, &parser->tree->types,
-		&node.as.fsm.clock, parser->error) ||
-		!pigen_parse_expression(parser->expanded, initial_at - 3, initial_at - 2,
-			&parser->tree->expressions, &parser->tree->types,
-			&node.as.fsm.reset, parser->error))
+		&node.as.fsm.clock, parser->error))
 		goto done;
-	at++;
 	parser->fsm_states = &declared;
 	parser->fsm_body_failed = 0;
+	/* Declare every state name before parsing the bodies, so a goto may
+	 * forward-reference a later state. Level-zero ordinary statements are
+	 * skipped as whole statements. */
 	{
-		size_t scan = at;
+		size_t scan = body_start;
 		while (scan < body_end)
 		{
 			size_t sname, sbody;
 			if (!fsm_state_header(parser, scan, body_end, &sname, &sbody))
-				break;
+			{
+				size_t next = fsm_skip_statement(parser, scan, body_end);
+				if (next == scan || next >= body_end) break;
+				scan = next;
+				continue;
+			}
 			if (fsm_state_names_contains(parser, &declared,
 				(pigen_token_id){(uint32_t)sname}))
 			{
@@ -2131,23 +2187,34 @@ static int parse_fsm(syntax_parser *parser, pigen_syntax_id parent,
 			if (scan == body_end) break;
 		}
 	}
+	/* The body is an ordered sequence of level-zero ordinary statements and
+	 * `state identifier : statement` items. */
+	at = body_start;
 	while (at < body_end)
 	{
 		size_t item_after;
-		if (!parse_fsm_state(parser, fsm, at, body_end, &item_after))
-			goto done;
-		saw_state = 1;
+		if (token_is(parser, at, "state") && identifier(parser, at + 1))
+		{
+			if (!parse_fsm_state(parser, fsm, at, body_end, &item_after))
+				goto done;
+			saw_state = 1;
+		}
+		else
+		{
+			size_t assignment_count = 0;
+			if (!parse_procedural_statement(parser, fsm, at, body_end,
+				&item_after, &assignment_count))
+			{
+				if (!(parser->error && parser->error->message))
+					parser->fsm_body_failed = 1;
+				goto done;
+			}
+		}
 		at = item_after;
 	}
 	if (!saw_state)
 	{
 		fail(parser, start, "fsm requires at least one state");
-		goto done;
-	}
-	if (!fsm_state_names_contains(parser, &declared,
-		(pigen_token_id){(uint32_t)initial_at}))
-	{
-		fail(parser, initial_at, "fsm initial state is not declared");
 		goto done;
 	}
 	ok = 1;
@@ -2157,13 +2224,12 @@ done:
 		parser->fsm_body_failed)
 	{
 		fail(parser, start,
-			"fsm state body statement must be an ordinary statement");
+			"fsm body statement must be an ordinary statement");
 		parser->fsm_body_failed = 0;
 	}
 	if (ok)
 	{
 		parser->tree->nodes[fsm.index].as.fsm.clock = node.as.fsm.clock;
-		parser->tree->nodes[fsm.index].as.fsm.reset = node.as.fsm.reset;
 		*after_statement = body_end + 1;
 	}
 	else
@@ -2225,6 +2291,9 @@ static int parse_procedural_statement(syntax_parser *parser,
 	if (token_is(parser, start, "if"))
 		return parse_if_statement(parser, parent, start, limit, after_statement,
 			assignment_count);
+	if (token_is(parser, start, "when"))
+		return parse_when_statement(parser, parent, start, limit,
+			after_statement, assignment_count);
 	if (token_is(parser, start, "pipeline"))
 		return parse_pipeline(parser, parent, start, limit, after_statement,
 			assignment_count);
@@ -2826,6 +2895,9 @@ static int node_has_function_call(syntax_parser *parser,
 		return 1;
 	if (node->kind == PIGEN_SYNTAX_IF_STATEMENT &&
 		expression_has_function_call(parser, node->as.if_statement.condition, 0))
+		return 1;
+	if (node->kind == PIGEN_SYNTAX_WHEN_STATEMENT &&
+		expression_has_function_call(parser, node->as.when_statement.condition, 0))
 		return 1;
 	for (child = node->first_child; child.index != PIGEN_INVALID_ID; )
 	{

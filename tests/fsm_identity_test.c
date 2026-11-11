@@ -13,16 +13,14 @@
  * statements, legal on their own syntactic path. */
 #define FSM_WITNESS \
 	"module fsm_witness(input logic clk, input logic reset);\n" \
-	"\tfsm sender @(posedge clk) reset (reset) initial idle\n" \
+	"\tfsm sender @(posedge clk)\n" \
 	"\tbegin\n" \
-	"\t\tstate idle:\n" \
-	"\t\tbegin\n" \
-	"\t\t\tgoto run;\n" \
-	"\t\tend\n" \
-	"\t\tstate run:\n" \
-	"\t\tbegin\n" \
+	"\t\tif (reset)\n" \
 	"\t\t\tgoto idle;\n" \
-	"\t\tend\n" \
+	"\t\tstate idle:\n" \
+	"\t\t\tgoto run;\n" \
+	"\t\tstate run:\n" \
+	"\t\t\tgoto idle;\n" \
 	"\tend\n" \
 	"endmodule"
 
@@ -36,16 +34,14 @@
  * and always picks the first declared state returns 0 and cannot pass. */
 #define FSM_WITNESS_NONFIRST \
 	"module fsm_witness_nonfirst(input logic clk, input logic reset);\n" \
-	"\tfsm sender @(posedge clk) reset (reset) initial run\n" \
+	"\tfsm sender @(posedge clk)\n" \
 	"\tbegin\n" \
-	"\t\tstate idle:\n" \
-	"\t\tbegin\n" \
+	"\t\tif (reset)\n" \
 	"\t\t\tgoto run;\n" \
-	"\t\tend\n" \
+	"\t\tstate idle:\n" \
+	"\t\t\tgoto run;\n" \
 	"\t\tstate run:\n" \
-	"\t\tbegin\n" \
 	"\t\t\tgoto idle;\n" \
-	"\t\tend\n" \
 	"\tend\n" \
 	"endmodule"
 
@@ -176,9 +172,8 @@ static size_t collect_fsm_gotos(const parsed_fixture *fixture,
 		const pigen_syntax_node *node = pigen_syntax_get(&fixture->tree, child);
 
 		assert(node);
-		if (node->kind == PIGEN_SYNTAX_FSM_STATE)
-			count = collect_gotos_in(fixture, node->first_child, out, count,
-				capacity);
+		count = collect_gotos_in(fixture, node->first_child, out, count,
+			capacity);
 		child = node->next_sibling;
 	}
 	return count;
@@ -239,7 +234,7 @@ static void test_fsm_establish_valid_args(pigen_source_manager *sources)
 	state_count = collect_states(&fixture, fsm, states, 64);
 	goto_count = collect_fsm_gotos(&fixture, fsm, gotos, 64);
 	assert(state_count == 2);
-	assert(goto_count == 2);
+	assert(goto_count == 3);
 
 	/* The individually-invalid forms are rejected rc == -1 leaving
 	 * *identity all-sentinel: a non-FSM node kind (the owning module node is
@@ -319,7 +314,7 @@ static void test_fsm_establish_valid_args(pigen_source_manager *sources)
 	nonfirst_goto_count = collect_fsm_gotos(&nonfirst, nonfirst_fsm,
 		nonfirst_gotos, 64);
 	assert(nonfirst_state_count == 2);
-	assert(nonfirst_goto_count == 2);
+	assert(nonfirst_goto_count == 3);
 
 	identity = (pigen_fsm_identity){0};
 	pigen_semantic_init(&model, sources);

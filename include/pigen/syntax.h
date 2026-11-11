@@ -16,6 +16,7 @@ typedef enum {
 	PIGEN_SYNTAX_CLOCKED_PROCESS,
 	PIGEN_SYNTAX_PROCEDURAL_BLOCK,
 	PIGEN_SYNTAX_IF_STATEMENT,
+	PIGEN_SYNTAX_WHEN_STATEMENT,
 	PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT,
 	PIGEN_SYNTAX_PIPELINE,
 	PIGEN_SYNTAX_STAGE,
@@ -108,6 +109,9 @@ typedef struct {
 			int has_else;
 		} if_statement;
 		struct {
+			pigen_syntax_expr_id condition;
+		} when_statement;
+		struct {
 			pigen_syntax_expr_id destination;
 			pigen_syntax_expr_id value;
 		} nonblocking_assignment;
@@ -121,9 +125,8 @@ typedef struct {
 		} stage;
 		struct {
 			pigen_token_id name;
+			int has_name;
 			pigen_syntax_expr_id clock;
-			pigen_syntax_expr_id reset;
-			pigen_token_id initial;
 		} fsm;
 		struct {
 			pigen_token_id name;

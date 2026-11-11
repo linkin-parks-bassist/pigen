@@ -129,9 +129,10 @@ static size_t fsm_goto_nodes(const pigen_syntax_node *fsm,
 	{
 		const pigen_syntax_node *node = fsm_child(fsm, syntax, child);
 
-		if (node->kind == PIGEN_SYNTAX_FSM_STATE)
-			count = fsm_goto_descendants(fsm, syntax, node->first_child,
-				gotos, count, capacity);
+		/* Level-zero gotos (the ordinary reset transition) and state-body
+		 * gotos are all transitions of this FSM, in source order. */
+		count = fsm_goto_descendants(fsm, syntax, node->first_child,
+			gotos, count, capacity);
 		child = node->next_sibling;
 	}
 	return count;
@@ -340,14 +341,39 @@ static int lower_fsm(pigen_rtl_lowering *lowering, pigen_module_id module,
 			return -1;
 	}
 
-	/* The header initial state (obligation a): the state whose name matches the
-	 * header's `initial` token. A header naming an undeclared initial state is
-	 * rejected by the parser, so a well-established FSM always names a declared
-	 * state. */
-	initial_index = state_index_for_token(sem, expanded, states_list,
-		state_count, fsm->as.fsm.initial);
-	if (initial_index == FSM_MAX)
-		return -1;
+	/* The initial state (obligation a): the state named by the first level-zero
+	 * `goto` (the ordinary reset transition `if (reset) goto initialise;`),
+	 * else the first declared state. */
+	{
+		const pigen_syntax_node *initial_goto = NULL;
+
+		for (pigen_syntax_id c = fsm->first_child; c.index != PIGEN_INVALID_ID; )
+		{
+			const pigen_syntax_node *node = fsm_child(fsm, syntax, c);
+
+			if (node->kind != PIGEN_SYNTAX_FSM_STATE)
+			{
+				const pigen_syntax_node *gotos[FSM_MAX];
+				size_t count = fsm_goto_descendants(fsm, syntax,
+					node->first_child, gotos, 0, FSM_MAX);
+
+				if (count)
+				{
+					initial_goto = gotos[0];
+					break;
+				}
+			}
+			c = node->next_sibling;
+		}
+		if (initial_goto)
+			initial_index = state_index_for_token(sem, expanded,
+				states_list, state_count,
+				initial_goto->as.goto_statement.target);
+		else
+			initial_index = 0;
+		if (initial_index == FSM_MAX)
+			return -1;
+	}
 
 	/* The clock: the module's clock input (the header's posedge clock). */
 	{

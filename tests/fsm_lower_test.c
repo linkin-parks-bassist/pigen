@@ -626,8 +626,10 @@ static int owned_object_bound_to(const owned_records *g,
 	"\tinput logic start,\n" \
 	"\toutput logic done\n" \
 	");\n" \
-	"\nfsm " NAME " @(posedge clk) reset (rst) initial idle\n" \
+	"\nfsm " NAME " @(posedge clk)\n" \
 	"begin\n" \
+	"\tif (rst)\n" \
+	"\t\tgoto idle;\n" \
 	"\tstate idle:\n" \
 	"\tbegin\n" \
 	"\t\tif (start)\n" \
@@ -767,8 +769,10 @@ int main(int argc, char **argv)
 				"\tinput logic start,\n"
 				"\toutput logic done\n"
 				");\n"
-				"\nfsm srr_red @(posedge clk) reset (rst) initial pending\n"
+				"\nfsm srr_red @(posedge clk)\n"
 				"begin\n"
+				"\tif (rst)\n"
+				"\t\tgoto pending;\n"
 				"\tstate idle:\n"
 				"\tbegin\n"
 				"\t\tif (start)\n"
@@ -853,8 +857,10 @@ int main(int argc, char **argv)
 				"\tinput logic start,\n"
 				"\toutput logic done\n"
 				");\n"
-				"\nfsm psb_red @(posedge clk) reset (rst) initial idle\n"
+				"\nfsm psb_red @(posedge clk)\n"
 				"begin\n"
+				"\tif (rst)\n"
+				"\t\tgoto idle;\n"
 				"\tstate idle:\n"
 				"\tbegin\n"
 				"\t\tif (start)\n"
@@ -970,8 +976,10 @@ int main(int argc, char **argv)
 				"\tinput logic start,\n"
 				"\toutput logic done\n"
 				");\n"
-				"\nfsm ggt_red @(posedge clk) reset (rst) initial idle\n"
+				"\nfsm ggt_red @(posedge clk)\n"
 				"begin\n"
+				"\tif (rst)\n"
+				"\t\tgoto idle;\n"
 				"\tstate idle:\n"
 				"\tbegin\n"
 				"\t\tif (start)\n"
@@ -1136,8 +1144,10 @@ int main(int argc, char **argv)
 				"\tinput logic start,\n"
 				"\toutput logic done\n"
 				");\n"
-				"\nfsm sxe_red @(posedge clk) reset (rst) initial idle\n"
+				"\nfsm sxe_red @(posedge clk)\n"
 				"begin\n"
+				"\tif (rst)\n"
+				"\t\tgoto idle;\n"
 				"\tstate idle:\n"
 				"\tbegin\n"
 				"\t\tif (start)\n"

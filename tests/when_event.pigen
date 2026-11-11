@@ -1,0 +1,22 @@
+module when_event
+	(
+		input logic clk,
+		input logic reset,
+		input bit[8] buf source,
+		output bit[8] buf destination,
+		output logic [7:0] fired,
+		output logic below
+	);
+
+	always_ff @(posedge clk)
+	begin
+		when (destination <= source)
+			fired <= fired + 8'd1;
+		/* `if` tests a computed condition, including the relational <=. */
+		if (fired <= 8'd1)
+			below <= 1'b1;
+		else
+			below <= 1'b0;
+	end
+
+endmodule

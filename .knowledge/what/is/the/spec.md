@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T18:48:14+11:00"
+revised_at: "2026-11-11T19:56:13+11:00"
 checked_at: "2026-10-04T16:19:56+11:00"
 ---
 
@@ -12,7 +12,7 @@ A runtime signal is data type × transfer type × declarator shape. Intended dec
 
 Every module input has payload/valid inbound and ready outbound. Unqualified inputs are abstract; explicit annotations constrain compatible peers. Data-type owner decides omission for internal/output signals. statics retain semantic identities even if control laws lower to constants.
 
-`when (destination <= source)` performs a transfer and runs its body only on that cycle's fire. `if` tests computed conditions, including relational <=. Implementation/migration remains pending (how/to/write/fsm/states.md).
+`when (destination <= source)` performs a transfer and runs its body only on that cycle's fire. `if` tests computed conditions, including relational <=. Implementation status: how/to/write/fsm/states.md.
 
 A transfer has one guard and fire event across all ready destinations and distinct valid consuming sources. Projections consume complete base tokens, repeated reads deduplicate, co-slices preserve packed bit-stream order, buffered destinations are whole, and mixed static writes share the fire. Ownership requires exclusive buffered producers/consumers; self-consumption and unbroken ready cycles are errors. peek observes payload without token dependencies. Local synchronous validity actions compose in source order and cannot modify upstream input validity.
 

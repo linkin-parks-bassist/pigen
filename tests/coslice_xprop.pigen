@@ -11,7 +11,7 @@ module coslice_xprop
 
 	always_ff @(posedge clk)
 	begin
-		if ({left, state} <= {source + 8'd1, peek(source)})
+		when ({left, state} <= {source + 8'd1, peek(source)})
 			previous <= state;
 	end
 endmodule

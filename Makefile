@@ -4,7 +4,7 @@ LDLIBS		= -lm
 SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
-.PHONY: all clean test child-port-endpoint-test fabric-anonymous-test case-wildcard-test case-width-test case-signed-test case-nested-test ordinary-case-test case-guarded-complex-test ordinary-sv-preserve-test case-guarded-mixed-test mixed-write-conflict-error-test dependent-ordered-writes-test multiple-ordered-writes-test final-else-guard-dependency-test else-if-guard-dependency-test else-guard-dependency-test nested-guard-chain-dependency-test differing-guardless-dependency-test bare-uint-error-test int-ports-sv-test mixed-plain-always-test guardless-blocking-dependency-test same-guardless-dependency-test guardless-blocking-dependency-error-test dependent-parameter-override-test explicit-elastic-controls-test deep-guarded-blocking-dependency-test blocking-dependency-guard-error-test guarded-blocking-dependency-test blocking-dependency-inline-test directive-sv-test positional-elastic-child-test unpacked-struct-sv-test nba-dependency-split-test union-sv-test localparam-override-test generate-if-sv-test independent-blocking-function-test buffered-instance-local-conflict-error-test buffered-instance-producer-error-test mixed-clocked-task-error-test async-reset-always-sv-test async-reset-sv-test mixed-clocked-order-error-test nested-mixed-clocked-function-test mixed-clocked-function-test parent-parameter-override-test implicit-elastic-destinations-test implicit-elastic-child-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-direct-duplicate-error-test clocked-case-error-test pipeline-reset-after-test pipeline-reset-conditional-test sv-integer-keywords-test integer-signal-test byte-type-test two-state-test validate-input-error-test peek-test validate-order-test macro-paste-decl-test macro-stringify-test macro-paste-ref-test macro-paste-test clog2-test pipeline-reset-test function-retain-test concat-placeholder-test struct-write-test pipeline-alias-test fabric-merge-test fabric-merge3-test concat-misaligned-test ternary-literal-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
+.PHONY: all clean test fsm-goto-first-test when-event-test child-port-endpoint-test fabric-anonymous-test case-wildcard-test case-width-test case-signed-test case-nested-test ordinary-case-test case-guarded-complex-test ordinary-sv-preserve-test case-guarded-mixed-test mixed-write-conflict-error-test dependent-ordered-writes-test multiple-ordered-writes-test final-else-guard-dependency-test else-if-guard-dependency-test else-guard-dependency-test nested-guard-chain-dependency-test differing-guardless-dependency-test bare-uint-error-test int-ports-sv-test mixed-plain-always-test guardless-blocking-dependency-test same-guardless-dependency-test guardless-blocking-dependency-error-test dependent-parameter-override-test explicit-elastic-controls-test deep-guarded-blocking-dependency-test blocking-dependency-guard-error-test guarded-blocking-dependency-test blocking-dependency-inline-test directive-sv-test positional-elastic-child-test unpacked-struct-sv-test nba-dependency-split-test union-sv-test localparam-override-test generate-if-sv-test independent-blocking-function-test buffered-instance-local-conflict-error-test buffered-instance-producer-error-test mixed-clocked-task-error-test async-reset-always-sv-test async-reset-sv-test mixed-clocked-order-error-test nested-mixed-clocked-function-test mixed-clocked-function-test parent-parameter-override-test implicit-elastic-destinations-test implicit-elastic-child-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-direct-duplicate-error-test clocked-case-error-test pipeline-reset-after-test pipeline-reset-conditional-test sv-integer-keywords-test integer-signal-test byte-type-test two-state-test validate-input-error-test peek-test validate-order-test macro-paste-decl-test macro-stringify-test macro-paste-ref-test macro-paste-test clog2-test pipeline-reset-test function-retain-test concat-placeholder-test struct-write-test pipeline-alias-test fabric-merge-test fabric-merge3-test concat-misaligned-test ternary-literal-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
 
 all: pigen
 
@@ -179,7 +179,7 @@ pipeline-output-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-pipeline-output-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-output-test tests/pipeline_output_test.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-output-test tests/pipeline_output_test.c src/pipeline_identity.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-pipeline-output-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -187,7 +187,7 @@ pipeline-stage-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-pipeline-stage-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-stage-test tests/pipeline_stage_test.c src/pipeline_stage.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-stage-test tests/pipeline_stage_test.c src/pipeline_stage.c src/pipeline_identity.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-pipeline-stage-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -203,7 +203,7 @@ fsm-identity-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-fsm-identity-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-identity-test tests/fsm_identity_test.c src/fsm_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-identity-test tests/fsm_identity_test.c src/fsm_identity.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-fsm-identity-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -211,7 +211,7 @@ fsm-lower-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-fsm-lower-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-lower-test tests/fsm_lower_test.c src/fsm_lower.c src/rtl.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-lower-test tests/fsm_lower_test.c src/fsm_lower.c src/rtl.c src/predicate.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-fsm-lower-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -947,6 +947,16 @@ fsm-test: pigen
 	./pigen tests/fsm.pigen -o /tmp/pigen-fsm.sv
 	verilator --binary --top-module fsm_tb --Mdir /tmp/pigen-fsm-verilator rtl/pigen_primitives.sv /tmp/pigen-fsm.sv tests/fsm_tb.sv
 	/tmp/pigen-fsm-verilator/Vfsm_tb
+
+fsm-goto-first-test: pigen
+	./pigen tests/fsm_goto_first.pigen -o /tmp/pigen-fsm-goto-first.sv
+	verilator --binary --top-module fsm_goto_first_tb --Mdir /tmp/pigen-fsm-goto-first-verilator rtl/pigen_primitives.sv /tmp/pigen-fsm-goto-first.sv tests/fsm_goto_first_tb.sv
+	/tmp/pigen-fsm-goto-first-verilator/Vfsm_goto_first_tb
+
+when-event-test: pigen
+	./pigen tests/when_event.pigen -o /tmp/pigen-when-event.sv
+	verilator --binary --top-module when_event_tb --Mdir /tmp/pigen-when-event-verilator rtl/pigen_primitives.sv /tmp/pigen-when-event.sv tests/when_event_tb.sv
+	/tmp/pigen-when-event-verilator/Vwhen_event_tb
 
 vertical-slice-test: pigen
 	./pigen examples/buf_pipeline.pigen -o /tmp/pigen-vertical-slice.sv

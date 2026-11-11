@@ -1,0 +1,49 @@
+module fsm_goto_first
+	(
+		input logic clk,
+		input logic reset,
+		input logic a,
+		output logic [7:0] marker,
+		output logic [7:0] after,
+		output logic [7:0] ticks,
+		output logic [7:0] other
+	);
+
+	/* An independent process keeps running across an FSM goto. */
+	always_ff @(posedge clk)
+	begin
+		if (reset)
+			other <= 8'd0;
+		else
+			other <= other + 8'd1;
+	end
+
+	fsm seq @(posedge clk)
+	begin
+		if (reset)
+		begin
+			marker <= 8'd0;
+			after <= 8'd0;
+			ticks <= 8'd0;
+			goto idle;
+			marker <= 8'd99;
+		end
+		ticks <= ticks + 8'd1;
+		state idle:
+		begin
+			if (a)
+			begin
+				marker <= 8'd7;
+				goto one;
+				marker <= 8'd8;
+			end
+			if (a)
+				goto two;
+			after <= 8'd9;
+		end
+		state one:
+			marker <= 8'd1;
+		state two:
+			marker <= 8'd2;
+	end
+endmodule

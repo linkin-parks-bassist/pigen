@@ -11,7 +11,7 @@ module conditional_transfer
 
 	always_ff @(posedge clk)
 	begin
-		if (destination <= source)
+		when (destination <= source)
 			did_transfer <= 1'b1;
 	end
 
