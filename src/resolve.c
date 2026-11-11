@@ -1923,6 +1923,9 @@ static pigen_expr_id partial_endpoint_alias(pigen_semantic_model *model,
 	pigen_expr_id value, const pigen_semantic_instance_connection *upstream,
 	pigen_data_type_id target_type, pigen_source_span span);
 
+static pigen_expr_id resolve_input_aliases(pigen_semantic_model *model,
+	pigen_expr_id value);
+
 static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 	pigen_syntax_id syntax_id, const pigen_syntax_node *node, int phase)
 {
@@ -2432,6 +2435,9 @@ resolve_body:
 			const char *name = pigen_source_span_text(model->sources, connection->port_name, &n);
 			const char *base = pigen_source_span_text(model->sources, port_symbol->name, &m);
 			if (!name || !base || n != m || memcmp(name, base, n)) continue;
+			connection->value = resolve_input_aliases(model, connection->value);
+			if (connection->value.index == PIGEN_INVALID_ID)
+				return fail(resolver, connection->span, "invalid endpoint alias expression");
 			char name_buffer[96];
 			snprintf(name_buffer, sizeof name_buffer, "__pigen_connection_%zu_%zu", i, c);
 			pigen_source_id source = pigen_source_add((pigen_source_manager *)model->sources,
@@ -2729,6 +2735,84 @@ static pigen_expr_id partial_endpoint_alias(pigen_semantic_model *model,
 		return INVALID_ID(pigen_expr_id);
 	return conversion.kind == PIGEN_CONVERSION_IDENTITY ? projected :
 		pigen_expr_add_conversion(model, conversion, projected, span);
+}
+
+/* Rebuild only changed expression paths; never mutate shared expression nodes.
+	* A selection must map as a unit, since replacing its base can rebase coordinates. */
+static pigen_expr_id resolve_input_aliases(pigen_semantic_model *model,
+	pigen_expr_id value)
+{
+	const pigen_semantic_expr *original = pigen_expr_get(model, value);
+	if (!original) return value;
+	pigen_semantic_expr expr = *original;
+	if (expr.kind == PIGEN_EXPR_SYMBOL || expr.kind == PIGEN_EXPR_SELECT ||
+		expr.kind == PIGEN_EXPR_INDEX)
+	{
+		for (size_t i = 0; i < model->instance_connection_count; i++)
+		{
+			const pigen_semantic_instance_connection *upstream = &model->instance_connections[i];
+			if (upstream->direction != PIGEN_SEMANTIC_OUTPUT ||
+				upstream->endpoint_view.index == PIGEN_INVALID_ID) continue;
+			const pigen_semantic_signal *source = pigen_signal_get(model, upstream->endpoint_view);
+			if (source && source->data_type.index == expr.data_type.index &&
+				source->shape.index == expr.shape.index &&
+				ownership_same_projection(model, value, upstream->value))
+				return pigen_expr_add_symbol(model, source->symbol, source->data_type, expr.span);
+			pigen_expr_id mapped = partial_endpoint_alias(model, value, upstream, expr.data_type, expr.span);
+			if (mapped.index != PIGEN_INVALID_ID) return mapped;
+		}
+		return value;
+	}
+	pigen_expr_id a, b, c;
+	switch (expr.kind)
+	{
+	case PIGEN_EXPR_GROUP:
+		a = resolve_input_aliases(model, expr.as.group.operand);
+		return a.index == expr.as.group.operand.index ? value : pigen_expr_add_group(model, a, expr.span);
+	case PIGEN_EXPR_CONVERSION:
+		a = resolve_input_aliases(model, expr.as.conversion.operand);
+		return a.index == expr.as.conversion.operand.index ? value :
+			pigen_expr_add_conversion(model, expr.as.conversion.conversion, a, expr.span);
+	case PIGEN_EXPR_UNARY:
+		a = resolve_input_aliases(model, expr.as.unary.operand);
+		return a.index == expr.as.unary.operand.index ? value :
+			pigen_expr_add_unary(model, expr.as.unary.operation, a, expr.span);
+	case PIGEN_EXPR_BINARY:
+		a = resolve_input_aliases(model, expr.as.binary.left);
+		b = resolve_input_aliases(model, expr.as.binary.right);
+		return a.index == expr.as.binary.left.index && b.index == expr.as.binary.right.index ? value :
+			pigen_expr_add_binary(model, expr.as.binary.operation, a, b, expr.span);
+	case PIGEN_EXPR_CONDITIONAL:
+		a = resolve_input_aliases(model, expr.as.conditional.condition);
+		b = resolve_input_aliases(model, expr.as.conditional.when_true);
+		c = resolve_input_aliases(model, expr.as.conditional.when_false);
+		return a.index == expr.as.conditional.condition.index &&
+			b.index == expr.as.conditional.when_true.index && c.index == expr.as.conditional.when_false.index ? value :
+			pigen_expr_add_conditional(model, expr.as.conditional.operation, a, b, c, expr.span);
+	case PIGEN_EXPR_PEEK:
+		a = resolve_input_aliases(model, expr.as.peek.source);
+		return a.index == expr.as.peek.source.index ? value : pigen_expr_add_peek(model, a, expr.span);
+	case PIGEN_EXPR_CONCATENATION:
+	{
+		size_t count = expr.as.sequence.child_count;
+		pigen_expr_id *children = malloc(count * sizeof *children);
+		if (!children && count) return INVALID_ID(pigen_expr_id);
+		const pigen_expr_id *old = pigen_expr_children(model, expr.as.sequence.first_child, count);
+		if (count) memcpy(children, old, count * sizeof *children);
+		int changed = 0;
+		for (size_t i = 0; i < count; i++)
+		{
+			a = resolve_input_aliases(model, children[i]);
+			changed |= a.index != children[i].index;
+			children[i] = a;
+		}
+		a = changed ? pigen_expr_add_concatenation(model, children, count, expr.span) : value;
+		free(children);
+		return a;
+	}
+	default:
+		return value;
+	}
 }
 
 static int ownership_disjoint(pigen_semantic_model *model,

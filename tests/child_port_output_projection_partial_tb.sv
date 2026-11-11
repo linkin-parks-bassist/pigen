@@ -1,5 +1,5 @@
 module child_port_endpoint_tb;
- parameter WIDTH=4, SHIFT=0;
+ parameter WIDTH=4, SHIFT=0, ADD=0, MODE=0;
  logic clk=0, reset=1, result_ready=0;
  logic [WIDTH-1:0] result; logic result_valid;
  integer queue[0:255], head=0, tail=0, cycle=0;
@@ -17,7 +17,12 @@ module child_port_endpoint_tb;
    head=head+1;
   end
   if(dut.a.o_valid && dut.a.o_ready) begin
-   queue[tail]=dut.a.o >> SHIFT; tail=tail+1;
+   case(MODE)
+    1: queue[tail]={dut.a.o[1:0],dut.a.o[3:2]};
+    2: queue[tail]=dut.a.o[0] ? dut.a.o[7:4] : dut.a.o[3:0];
+    3: queue[tail]=~dut.a.o;
+    default: queue[tail]=(dut.a.o >> SHIFT)+ADD;
+   endcase tail=tail+1;
   end
   if(cycle==60) begin
    if(head<20) $fatal(1,"insufficient progress %0d",head);
