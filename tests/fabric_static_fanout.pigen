@@ -1,0 +1,14 @@
+module static_leaf(input wire [7:0] i, output wire [7:0] o);
+ assign o=i;
+endmodule
+module static_fanout(input wire [7:0] data, output wire [7:0] left, output wire [7:0] right);
+ static_leaf source(.i(data));
+ static_leaf a(.o(left));
+ static_leaf b(.o(right));
+ fabric begin
+  source.o > a.i;
+ endfabric
+ fabric begin
+  source.o > b.i;
+ endfabric
+endmodule

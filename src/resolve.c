@@ -2612,6 +2612,38 @@ static const pigen_semantic_instance_connection *resolved_fabric_port(resolver *
 	return NULL;
 }
 
+/* Compare canonical endpoint identities across all earlier fabric blocks. */
+static int validate_prior_fabric_sources(resolver *resolver,
+	pigen_module_id module_id, const pigen_syntax_node *edge,
+	pigen_signal_id source)
+{
+	const pigen_syntax_node *module = pigen_syntax_get(resolver->syntax,
+		resolver->model->modules[module_id.index].syntax);
+	for (pigen_syntax_id item = module->first_child;
+		item.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *fabric = pigen_syntax_get(resolver->syntax, item);
+		item = fabric->next_sibling;
+		if (fabric->kind != PIGEN_SYNTAX_FABRIC) continue;
+		for (pigen_syntax_id e = fabric->first_child;
+			e.index != PIGEN_INVALID_ID; )
+		{
+			const pigen_syntax_node *prior = pigen_syntax_get(resolver->syntax, e);
+			e = prior->next_sibling;
+			if (prior == edge) return 1;
+			if (prior->kind != PIGEN_SYNTAX_FABRIC_CONNECTION) continue;
+			const pigen_semantic_instance_connection *connection = resolved_fabric_port(
+				resolver, module_id, prior->as.fabric_connection.left_instance,
+				prior->as.fabric_connection.left_port);
+			if (connection && canonical_endpoint(resolver->model,
+				connection_signal(resolver->model, connection)).index == source.index)
+				return fail(resolver, edge->location.source_span,
+					"fabric source has another fabric consumer");
+		}
+	}
+	return 1;
+}
+
 /* Fabric arbitration owns its routed group. That ownership cannot also be
  * claimed by a named child connection or a parent transfer. */
 static int validate_fabric_ownership(resolver *resolver)
@@ -2642,6 +2674,8 @@ static int validate_fabric_ownership(resolver *resolver)
 				if (src.index == PIGEN_INVALID_ID || dst.index == PIGEN_INVALID_ID)
 					return fail(resolver, edge->location.source_span, "fabric endpoint requires a signal binding");
 				int consuming = !pigen_transfer_type_descriptor_get(model->signals[source->port_signal.index].transfer_type)->is_static;
+				if (consuming && !validate_prior_fabric_sources(resolver,
+					(pigen_module_id){(uint32_t)m}, edge, src)) return 0;
 				if (model->signals[dst.index].direction == PIGEN_SEMANTIC_INPUT)
 					return fail(resolver, edge->location.source_span, "fabric destination already has an upstream producer");
 				for (size_t i = 0; i < model->instance_count; i++)
@@ -2658,6 +2692,11 @@ static int validate_fabric_ownership(resolver *resolver)
 						if (consuming && signal.index == src.index && other->direction == PIGEN_SEMANTIC_INPUT &&
 							!pigen_transfer_type_descriptor_get(port->transfer_type)->is_static)
 							return fail(resolver, edge->location.source_span, "fabric source has another child consumer");
+						if (other != destination && signal.index == dst.index &&
+							other->direction == PIGEN_SEMANTIC_INPUT &&
+							!pigen_transfer_type_descriptor_get(port->transfer_type)->is_static)
+							return fail(resolver, edge->location.source_span,
+								"fabric destination aliases another child consumer");
 						if (signal.index == dst.index && other->direction == PIGEN_SEMANTIC_OUTPUT)
 							return fail(resolver, edge->location.source_span, "fabric destination has another child producer");
 					}
