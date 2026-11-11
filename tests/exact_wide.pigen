@@ -1,4 +1,7 @@
-module exact_wide(input wire clk,input wire reset,output uint[194] buf o,output int[194] buf n);
+module exact_wide(input wire clk,input wire reset,output uint[194] buf o,output int[194] buf n,output uint[65] buf carry,output uint[7] buf truncated,output int[257] buf extended);
  always_ff @(posedge clk) o<=12554203470773361527671578846415332832204710888928069025793;
  always_ff @(posedge clk) n<=-12554203470773361527671578846415332832204710888928069025793;
+ always_ff @(posedge clk) carry<=-18446744073709551616;
+ always_ff @(posedge clk) truncated<=-12554203470773361527671578846415332832204710888928069025793;
+ always_ff @(posedge clk) extended<=-12554203470773361527671578846415332832204710888928069025793;
 endmodule

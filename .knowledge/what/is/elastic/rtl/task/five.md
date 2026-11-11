@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T17:42:04+11:00"
+revised_at: "2026-11-11T17:42:42+11:00"
 checked_at: "2026-09-30T20:31:53+10:00"
 ---
 
@@ -18,4 +18,4 @@ The signed evaluator reuses nonnegative evaluation, then handles negative exact/
 
 The u64 query rejects left shifts overflowing its capacity when the declared result is wider, and rejects wide XNOR results whose high ones cannot fit. Runtime RTL retains those operations. Multiword constant evaluation, signed power and general symbolic bounds remain unfinished. Source bitwise witnesses use explicitly sized signed operands; untyped negative bitwise expressions need type-resolution work.
 
-rtl-lower-test covers identity, type/expression correctness, failure, memo stability and deterministic builds. semantic-test covers signed coordinates, conditional/short-circuit evaluation, shifts/reductions, INT64_MIN, range overflow and refusal to truncate wide results. exact-wide-test simulates positive and negative 194-bit decimal exact literals against an independent hexadecimal reference. wide-literal-test simulates 193-bit four-state data and a signed 128-bit arithmetic shift. child-port-endpoint-test covers coordinate aliases under stalls. Task 6 owns realization-based declarations/endpoints; companion gates are rtl-test and rtl-name-test.
+rtl-lower-test covers identity, type/expression correctness, failure, memo stability and deterministic builds. semantic-test covers signed coordinates, conditional/short-circuit evaluation, shifts/reductions, INT64_MIN, range overflow and refusal to truncate wide results. exact-wide-test checks positive/negative 194-bit decimal literals against hexadecimal references, negative carry across bit 64, seven-bit truncation and 257-bit sign extension. wide-literal-test simulates 193-bit four-state data and a signed 128-bit arithmetic shift. child-port-endpoint-test covers coordinate aliases under stalls. Task 6 owns realization-based declarations/endpoints; companion gates are rtl-test and rtl-name-test.

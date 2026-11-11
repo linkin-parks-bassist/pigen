@@ -2,18 +2,25 @@ module exact_wide_tb;
  logic clk=0,reset=1,o_ready=1,o_valid;
  logic [193:0] o;
  logic signed [193:0] n; logic n_ready=1,n_valid;
- integer received=0;
+ logic [64:0] carry; logic carry_ready=1,carry_valid;
+ logic [6:0] truncated; logic truncated_ready=1,truncated_valid;
+ logic signed [256:0] extended; logic extended_ready=1,extended_valid;
+ integer received=0,negative_received=0;
  exact_wide dut(.*);
  always #5 clk=~clk;
  initial begin
   #20 reset=0;
   repeat(10) begin
    @(negedge clk);
+   if(carry_valid && carry!==65'h10000000000000000) $fatal(1,"negative carry changed");
+   if(truncated_valid && truncated!==7'h7f) $fatal(1,"negative truncation changed");
+   if(extended_valid && extended!==-257'sh2000000000000000000000000000000000000000000000001) $fatal(1,"negative extension changed");
+   if(n_valid && carry_valid && truncated_valid && extended_valid) negative_received=negative_received+1;
    if(n_valid && n!==-194'sh2000000000000000000000000000000000000000000000001) $fatal(1,"negative exact changed");
    if(o_valid) received=received+1;
    if(o_valid && o!==194'h2000000000000000000000000000000000000000000000001) $fatal(1,"exact wide value changed");
   end
-  if(received<5) $fatal(1,"insufficient progress");
+  if(received<5 || negative_received<5) $fatal(1,"insufficient progress");
   $display("PASS exact wide"); $finish;
  end
 endmodule
