@@ -1913,6 +1913,9 @@ static int child_port_at(pigen_semantic_model *model,
 	return 0;
 }
 
+static int ownership_same_projection(pigen_semantic_model *model,
+	pigen_expr_id left, pigen_expr_id right);
+
 static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 	pigen_syntax_id syntax_id, const pigen_syntax_node *node, int phase)
 {
@@ -2217,7 +2220,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				}
 				if (!explicit_control) continue;
 			}
-			if (phase == 2 && expression && expression->kind == PIGEN_EXPR_SYMBOL)
+			if (phase == 2 && expression)
 			{
 				/* A wire already driven by an elastic output retains that
 				 * upstream endpoint identity, including write protection. */
@@ -2226,10 +2229,10 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 					const pigen_semantic_instance_connection *upstream = &model->instance_connections[d];
 					if (upstream->direction != PIGEN_SEMANTIC_OUTPUT ||
 						upstream->endpoint_view.index == PIGEN_INVALID_ID) continue;
-					const pigen_semantic_expr *bound = pigen_expr_get(model, upstream->value);
-					while (bound && bound->kind == PIGEN_EXPR_CONVERSION)
-						bound = pigen_expr_get(model, bound->as.conversion.operand);
-					if (bound && bound->kind == PIGEN_EXPR_SYMBOL && bound->as.symbol.index == parent->symbol.index)
+					const pigen_semantic_signal *source = pigen_signal_get(model, upstream->endpoint_view);
+					if (source && source->data_type.index == port.data_type.index &&
+						source->shape.index == port.shape.index &&
+						ownership_same_projection(model, connection->value, upstream->value))
 						connection->endpoint_view = upstream->endpoint_view;
 				}
 				if (connection->endpoint_view.index != PIGEN_INVALID_ID) continue;
@@ -2560,8 +2563,18 @@ static int ownership_same_projection(pigen_semantic_model *model,
 	if (a == b) return 1;
 	if (a->kind == PIGEN_EXPR_SYMBOL && b->kind == PIGEN_EXPR_SYMBOL)
 		return a->as.symbol.index == b->as.symbol.index;
-	/* Equal index projections preserve the next dimension's coordinate system.
-	 * Part-selects may rebase or reverse it, so do not equate those here. */
+	/* Equal selections preserve coordinates only with equal ordered bounds and
+	 * selection kind. Do not equate reversed ranges or rebased expressions. */
+	if (a->kind == PIGEN_EXPR_SELECT && b->kind == PIGEN_EXPR_SELECT &&
+		a->as.select.kind == b->as.select.kind)
+	{
+		uint64_t al, ar, bl, br;
+		return pigen_const_expr_evaluate_u64(model, pigen_expr_constant(model, a->as.select.left), &al) &&
+			pigen_const_expr_evaluate_u64(model, pigen_expr_constant(model, a->as.select.right), &ar) &&
+			pigen_const_expr_evaluate_u64(model, pigen_expr_constant(model, b->as.select.left), &bl) &&
+			pigen_const_expr_evaluate_u64(model, pigen_expr_constant(model, b->as.select.right), &br) &&
+			al == bl && ar == br && ownership_same_projection(model, a->as.select.base, b->as.select.base);
+	}
 	return a->kind == PIGEN_EXPR_INDEX && b->kind == PIGEN_EXPR_INDEX &&
 		ownership_selection(model, a, &abase, &alow, &ahigh) &&
 		ownership_selection(model, b, &bbase, &blow, &bhigh) &&
@@ -2674,7 +2687,7 @@ static int validate_instance_destination_ownership(resolver *resolver)
 }
 
 /* Explicit parent payload wires and instance.port share a consumer identity. */
-static int connection_consumes_endpoint(const pigen_semantic_model *model,
+static int connection_consumes_endpoint(pigen_semantic_model *model,
 	pigen_expr_id value, pigen_signal_id endpoint)
 {
 	const pigen_semantic_signal *signal = pigen_signal_get(model, endpoint);
@@ -2683,6 +2696,7 @@ static int connection_consumes_endpoint(const pigen_semantic_model *model,
 	{
 		const pigen_semantic_instance_connection *connection = &model->instance_connections[c];
 		if (connection->endpoint_view.index != endpoint.index) continue;
+		if (ownership_same_projection(model, value, connection->value)) return 1;
 		const pigen_semantic_expr *payload = pigen_expr_get(model, connection->value);
 		while (payload && payload->kind == PIGEN_EXPR_CONVERSION)
 			payload = pigen_expr_get(model, payload->as.conversion.operand);

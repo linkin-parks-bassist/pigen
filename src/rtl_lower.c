@@ -1267,7 +1267,8 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 		{
 			const pigen_semantic_instance_connection *connection = &sem->instance_connections[instance->first_connection+c];
 			const pigen_semantic_expr *value;
-			if (connection->endpoint_view.index != signal_index) continue;
+			if (connection->endpoint_view.index != signal_index ||
+				sem->signals[signal_index].syntax.index != instance->syntax.index) continue;
 			value = pigen_expr_get(sem, connection->value);
 			while(value && value->kind==PIGEN_EXPR_CONVERSION) value=pigen_expr_get(sem,value->as.conversion.operand);
 			pigen_signal_id payload = {PIGEN_INVALID_ID};
