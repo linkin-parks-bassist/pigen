@@ -1,0 +1,33 @@
+module leaf2(
+  input logic clk,
+  input logic reset,
+  input bit[8] buf in,
+  output bit[8] buf out
+);
+  always_ff @(posedge clk) out <= in;
+endmodule
+
+module top2(
+  input logic clk,
+  input logic reset,
+  input bit[8] buf s1,
+  input bit[8] buf s2,
+  input logic dst_ready,
+  output logic [7:0] dst
+);
+  logic [7:0] a, b, m;
+  logic av, ar, bv, br, dv, dr, mv, mr;
+  logic sv1, sr1, sv2, sr2;
+  leaf2 x(.clk(clk), .reset(reset), .in(s1), .in_valid(sv1), .in_ready(sr1), .out(a), .out_valid(av), .out_ready(ar));
+  leaf2 z(.clk(clk), .reset(reset), .in(s2), .in_valid(sv2), .in_ready(sr2), .out(b), .out_valid(bv), .out_ready(br));
+  leaf2 y(.clk(clk), .reset(reset), .in(m), .in_valid(mv), .in_ready(mr), .out(dst), .out_valid(dv), .out_ready(dr));
+  assign sv1 = s1_valid;
+  assign s1_ready = sr1;
+  assign sv2 = s2_valid;
+  assign s2_ready = sr2;
+  assign dr = dst_ready;
+  fabric begin
+    x.out -> y.in;
+    z.out -> y.in;
+  endfabric
+endmodule

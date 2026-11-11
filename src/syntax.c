@@ -2880,13 +2880,16 @@ static int parse_fabric_block(syntax_parser *parser, pigen_syntax_id module,
 	const pigen_expanded_token *start_tok = token_at(parser, start);
 	const pigen_expanded_token *last_tok;
 
-	if (!identifier(parser, at))
-		return fail(parser, at, "fabric requires a name");
 	node.kind = PIGEN_SYNTAX_FABRIC;
-	node.as.fabric.name = (pigen_token_id){(uint32_t)at};
+	node.as.fabric.name = (pigen_token_id){PIGEN_INVALID_ID};
+	if (!token_is(parser, at, "begin"))
+	{
+		if (!identifier(parser, at))
+			return fail(parser, at, "fabric requires a name or `begin`");
+		node.as.fabric.name = (pigen_token_id){(uint32_t)at++};
+	}
 	node.parent = INVALID_SYNTAX;
 	node.first_child = node.last_child = node.next_sibling = INVALID_SYNTAX;
-	at++;
 	if (at >= limit || !token_is(parser, at, "begin"))
 		return fail(parser, at, "fabric requires `begin`");
 	at++;

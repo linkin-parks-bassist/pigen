@@ -2048,7 +2048,15 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		connection_type = port->data_type;
 	port_ready:
 		if (generated_control)
+		{
+			/* Explicit parent controls have semantic identities needed by fabric
+			 * lowering. Implicit boundary siblings are emitted later. */
+			if (connection->as.connection.value.index != PIGEN_INVALID_ID)
+				value = pigen_resolve_expression(resolver->syntax, model,
+					module->scope, connection->as.connection.value,
+					resolver->policy, NULL);
 			goto add_connection;
+		}
 		if (connection->as.connection.value.index != PIGEN_INVALID_ID)
 		{
 			if (direction == PIGEN_SEMANTIC_OUTPUT)
