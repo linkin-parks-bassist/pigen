@@ -1892,9 +1892,6 @@ static int add_clocked_process(resolver *resolver,
 		body_id, pigen_predicate_true(model));
 }
 
-static int resolve_instance(resolver *resolver, pigen_module_id module_id,
-	pigen_syntax_id syntax_id, const pigen_syntax_node *node);
-
 static int child_port_at(pigen_semantic_model *model,
 	pigen_module_id child_module, size_t index, pigen_symbol_id *symbol,
 	pigen_signal_id *signal)
@@ -1917,7 +1914,7 @@ static int child_port_at(pigen_semantic_model *model,
 }
 
 static int resolve_instance(resolver *resolver, pigen_module_id module_id,
-	pigen_syntax_id syntax_id, const pigen_syntax_node *node)
+	pigen_syntax_id syntax_id, const pigen_syntax_node *node, int phase)
 {
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_module *module = pigen_module_get(model, module_id);
@@ -1934,7 +1931,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 	pigen_declare_result declared;
 	pigen_instance_id instance;
 	pigen_syntax_id child_id;
-	size_t positional = 0;
+	size_t positional = 0, connection_index = 0;
 
 	if (!module) return fail_location(resolver, node->location,
 		"instance requires a module");
@@ -1945,18 +1942,28 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 	child = pigen_module_get(model, child_module);
 	if (!child) return fail_location(resolver, node->location,
 		"invalid instance module");
-	declared = pigen_symbol_declare(model, module->scope,
-		PIGEN_SYMBOL_INSTANCE, INVALID_ID(pigen_data_type_id),
-		instance_name, node->location.source_span, &instance_symbol, NULL);
-	if (declared == PIGEN_DECLARE_DUPLICATE)
-		return fail_location(resolver, node->location, "duplicate instance name");
-	if (declared != PIGEN_DECLARE_OK)
-		return fail_location(resolver, node->location, "invalid instance declaration");
-	instance = pigen_instance_add(model, syntax_id, module_id,
-		instance_symbol, child_module, node->location.source_span);
-	if (instance.index == PIGEN_INVALID_ID)
-		return fail_location(resolver, node->location,
-			"invalid instance semantic object");
+	if (phase == 0)
+	{
+		declared = pigen_symbol_declare(model, module->scope,
+			PIGEN_SYMBOL_INSTANCE, INVALID_ID(pigen_data_type_id),
+			instance_name, node->location.source_span, &instance_symbol, NULL);
+		if (declared == PIGEN_DECLARE_DUPLICATE)
+			return fail_location(resolver, node->location, "duplicate instance name");
+		if (declared != PIGEN_DECLARE_OK)
+			return fail_location(resolver, node->location, "invalid instance declaration");
+		instance = pigen_instance_add(model, syntax_id, module_id,
+			instance_symbol, child_module, node->location.source_span);
+		if (instance.index == PIGEN_INVALID_ID)
+			return fail_location(resolver, node->location,
+				"invalid instance semantic object");
+	}
+	else
+	{
+		instance_symbol = pigen_symbol_lookup(model, module->scope, instance_name);
+		const pigen_symbol *known = pigen_symbol_get(model, instance_symbol);
+		if (!known || known->kind != PIGEN_SYMBOL_INSTANCE) return 0;
+		instance = known->object.instance;
+	}
 	for (child_id = node->first_child; child_id.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *connection = pigen_syntax_get(resolver->syntax, child_id);
@@ -2049,6 +2056,13 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		direction = port->direction;
 		connection_type = port->data_type;
 	port_ready:
+		if (phase == 0) goto add_connection;
+		if ((phase == 1) != (direction == PIGEN_SEMANTIC_OUTPUT || generated_control))
+		{
+			connection_index++;
+			child_id = connection->next_sibling;
+			continue;
+		}
 		if (generated_control)
 		{
 			/* Explicit parent controls have semantic identities needed by fabric
@@ -2114,13 +2128,21 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 					"instance connection requires a compatible expression");
 		}
 	add_connection:
-		if (!pigen_instance_add_connection(model, instance, port_symbol,
-			port_signal, port_name, value, direction,
-			connection->location.source_span))
-			return fail_location(resolver, connection->location,
-				"invalid instance connection");
+		if (phase == 0)
+		{
+			if (!pigen_instance_add_connection(model, instance, port_symbol,
+				port_signal, port_name, value, direction, connection->location.source_span))
+				return fail_location(resolver, connection->location, "invalid instance connection");
+		}
+		else
+		{
+			const pigen_semantic_instance *record = pigen_instance_get(model, instance);
+			model->instance_connections[record->first_connection + connection_index].value = value;
+		}
+		connection_index++;
 		child_id = connection->next_sibling;
 	}
+	if (phase != 0) return 1;
 	/* Omitted child ports remain addressable from the enclosing module. */
 	{
 		size_t signal_count = model->signal_count;
@@ -2172,7 +2194,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 }
 
 static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
-	pigen_syntax_id syntax_id)
+	pigen_syntax_id syntax_id, int declarations_only)
 {
 	pigen_semantic_model *model = resolver->model;
 	pigen_symbol_id symbol;
@@ -2180,6 +2202,17 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	pigen_scope_id scope;
 	pigen_module_id module_id;
 	pigen_syntax_id child;
+
+	if (!declarations_only)
+	{
+		symbol = pigen_symbol_lookup(model, model->compilation_scope,
+			token_spelling(resolver, syntax_node->as.module.name));
+		const pigen_symbol *known = pigen_symbol_get(model, symbol);
+		if (!known || known->kind != PIGEN_SYMBOL_MODULE) return 0;
+		module_id = known->object.module;
+		scope = pigen_module_get(model, module_id)->scope;
+		goto resolve_body;
+	}
 
 	declared = pigen_symbol_declare(model, model->compilation_scope,
 		PIGEN_SYMBOL_MODULE, INVALID_ID(pigen_data_type_id),
@@ -2213,13 +2246,19 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 			!add_signal_declaration(resolver, module_id, node)) return 0;
 		child = node->next_sibling;
 	}
-	for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
-	{
-		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);
-		if (node->kind == PIGEN_SYNTAX_INSTANCE &&
-			!resolve_instance(resolver, module_id, child, node)) return 0;
-		child = node->next_sibling;
-	}
+	return 1;
+resolve_body:
+	resolver->expression_scope = scope;
+	/* Establish every sibling's identity and omitted endpoints first, then bind
+	 * explicit output destinations before input expressions reference them. */
+	for (int phase = 0; phase < 3; phase++)
+		for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
+		{
+			const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);
+			if (node->kind == PIGEN_SYNTAX_INSTANCE &&
+				!resolve_instance(resolver, module_id, child, node, phase)) return 0;
+			child = node->next_sibling;
+		}
 	for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);
@@ -2374,12 +2413,65 @@ static int validate_instance_destination_ownership(resolver *resolver)
 	return 1;
 }
 
+static int validate_instance_consumer_ownership(resolver *resolver)
+{
+	pigen_semantic_model *model = resolver->model;
+	unsigned char *owned = calloc(model->signal_count ? model->signal_count : 1, 1);
+	if (!owned) return fail(resolver, model->scopes[model->compilation_scope.index].span,
+		"cannot allocate child consumer ownership map");
+	for (size_t i = 0; i < model->instance_count; i++)
+	{
+		const pigen_semantic_instance *instance = &model->instances[i];
+		for (size_t c = 0; c < instance->connection_count; c++)
+		{
+			const pigen_semantic_instance_connection *connection =
+				&model->instance_connections[instance->first_connection + c];
+			const pigen_semantic_signal *port = pigen_signal_get(model, connection->port_signal);
+			const pigen_symbol *port_symbol = pigen_symbol_get(model, connection->port_symbol);
+			size_t name_length = 0, port_length = 0;
+			const char *name = pigen_source_span_text(model->sources, connection->port_name, &name_length);
+			const char *port_name = port_symbol ? pigen_source_span_text(model->sources, port_symbol->name, &port_length) : NULL;
+			if (!port || !name || !port_name || name_length != port_length ||
+				memcmp(name, port_name, name_length) || connection->direction != PIGEN_SEMANTIC_INPUT ||
+				pigen_transfer_type_descriptor_get(port->transfer_type)->is_static) continue;
+			for (size_t signal = 0; signal < model->signal_count; signal++)
+			{
+				const pigen_semantic_signal *parent = &model->signals[signal];
+				if (parent->module.index != instance->module.index ||
+					pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static ||
+					!resolve_expr_references_symbol(model, connection->value, parent->symbol)) continue;
+				if (owned[signal])
+				{
+					free(owned);
+					return fail(resolver, connection->span, "elastic endpoint has multiple child consumers");
+				}
+				owned[signal] = 1;
+			}
+		}
+	}
+	for (size_t t = 0; t < model->transfer_count; t++)
+	{
+		const pigen_semantic_transfer *transfer = &model->transfers[t];
+		const pigen_transfer_signal_use *uses = pigen_transfer_signal_uses(model,
+			(pigen_transfer_id){(uint32_t)t});
+		for (size_t u = 0; uses && u < transfer->signal_use_count; u++)
+			if ((uses[u].roles & PIGEN_TRANSFER_CONSUMER) && owned[uses[u].signal.index])
+			{
+				free(owned);
+				return fail(resolver, transfer->span, "elastic endpoint has both child and local consumers");
+			}
+	}
+	free(owned);
+	return 1;
+}
+
 static int validate_signal_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
 	size_t later_index;
 
-	if (!validate_instance_destination_ownership(resolver)) return 0;
+	if (!validate_instance_destination_ownership(resolver) ||
+		!validate_instance_consumer_ownership(resolver)) return 0;
 
 	for (later_index = 0; later_index < model->transfer_count; later_index++)
 	{
@@ -2459,7 +2551,14 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 		if (node->kind == PIGEN_SYNTAX_TYPEDEF &&
 			!add_typedef(&resolver, model->compilation_scope, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_MODULE &&
-			!add_module(&resolver, node, child)) return 0;
+			!add_module(&resolver, node, child, 1)) return 0;
+		child = node->next_sibling;
+	}
+	for (child = root->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(syntax, child);
+		if (node->kind == PIGEN_SYNTAX_MODULE &&
+			!add_module(&resolver, node, child, 0)) return 0;
 		child = node->next_sibling;
 	}
 	return validate_signal_ownership(&resolver);

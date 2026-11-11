@@ -1103,15 +1103,15 @@ fabric-anonymous-test: pigen
 
 child-port-endpoint-test: pigen
 	dir=$$(mktemp -d); status=0; \
-	for fixture in endpoint parent destination fabric; do \
+	for fixture in endpoint parent destination fabric forward module_order; do \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim tests/child_port_endpoint_tb.sv rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; \
 	if [ $$status -eq 0 ]; then \
-		for fixture in write missing; do \
+		for fixture in write missing consumers local_consumer; do \
 			if ./pigen tests/child_port_$${fixture}_error.pigen -o $$dir/error.sv 2>$$dir/error; then status=1; break; fi; \
-			grep -Eq 'transfer destination is not a writable variable or signal|transfer value requires a compatible expression' $$dir/error || { status=1; break; }; \
+			grep -Eq 'transfer destination is not a writable variable or signal|transfer value requires a compatible expression|elastic endpoint has multiple child consumers|elastic endpoint has both child and local consumers' $$dir/error || { status=1; break; }; \
 		done; \
 	fi; \
 	if [ $$status -eq 0 ]; then \
