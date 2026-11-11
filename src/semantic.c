@@ -999,6 +999,21 @@ static int evaluate_i64(pigen_semantic_model *model,
 		case PIGEN_BINARY_MULTIPLY:
 			if (__builtin_mul_overflow(left, right, &result)) return 0;
 			break;
+		case PIGEN_BINARY_POWER:
+			if (right < 0)
+			{
+				if (!left) return 0;
+				result = left == 1 ? 1 : left == -1 ? ((right & 1) ? -1 : 1) : 0;
+				break;
+			}
+			result = 1;
+			while (right)
+			{
+				if ((right & 1) && __builtin_mul_overflow(result, left, &result)) return 0;
+				right >>= 1;
+				if (right && __builtin_mul_overflow(left, left, &left)) return 0;
+			}
+			break;
 		case PIGEN_BINARY_DIVIDE:
 		case PIGEN_BINARY_MODULO:
 			if (!right || (left == INT64_MIN && right == -1)) return 0;

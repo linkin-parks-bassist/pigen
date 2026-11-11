@@ -387,6 +387,16 @@ int main(void)
 			pigen_const_expr_id compared = pigen_const_expr_intern_binary(&model, op, minus_eight, width_4);
 			assert(pigen_const_expr_evaluate_i64(&model, compared, &coordinate) && coordinate == expected[i]);
 		}
+		pigen_binary_operation power = {PIGEN_BINARY_POWER, unsized_integer_data_type,
+			unsized_integer_data_type, unsized_integer_data_type};
+		pigen_const_expr_id three = pigen_const_expr_intern_integer(&model, 3, unsized_integer_data_type);
+		pigen_const_expr_id powered = pigen_const_expr_intern_binary(&model, power, minus_eight, three);
+		assert(pigen_const_expr_evaluate_i64(&model, powered, &coordinate) && coordinate == -512);
+		powered = pigen_const_expr_intern_binary(&model, power, minus_eight, minus_eight);
+		assert(pigen_const_expr_evaluate_i64(&model, powered, &coordinate) && coordinate == 0);
+		pigen_const_expr_id huge_exponent = pigen_const_expr_intern_integer(&model, 63, unsized_integer_data_type);
+		powered = pigen_const_expr_intern_binary(&model, power, minus_eight, huge_exponent);
+		assert(!pigen_const_expr_evaluate_i64(&model, powered, &coordinate));
 		pigen_const_expr_id zero = pigen_const_expr_intern_integer(&model, 0, unsized_integer_data_type);
 		pigen_binary_operation divide = {PIGEN_BINARY_DIVIDE, unsized_integer_data_type,
 			unsized_integer_data_type, unsized_integer_data_type};
