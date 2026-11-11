@@ -624,6 +624,9 @@ pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 	pigen_expr_id expression);
 const pigen_semantic_lvalue *pigen_lvalue_get(
 	const pigen_semantic_model *model, pigen_lvalue_id lvalue);
+/* Structural writability: projections/concatenations must not target inputs. */
+int pigen_lvalue_is_writable(const pigen_semantic_model *model,
+	pigen_lvalue_id lvalue);
 pigen_lvalue_id pigen_lvalue_add_placeholder(
 	pigen_semantic_model *model, pigen_data_type_id data_type,
 	pigen_source_span span);

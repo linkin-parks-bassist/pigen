@@ -1322,7 +1322,7 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				while (expr && expr->kind == PIGEN_EXPR_CONVERSION)
 					expr = pigen_expr_get(sem, expr->as.conversion.operand);
 				if (ready == (connection->direction == PIGEN_SEMANTIC_OUTPUT) &&
-					pigen_lvalue_resolve(sem, control->value).index == PIGEN_INVALID_ID)
+					!pigen_lvalue_is_writable(sem, pigen_lvalue_resolve(sem, control->value)))
 				{
 					/* Read-only controls belong to the explicit handshake owner. */
 					pigen_rtl_expr_id observed = lower_expr(lowering, control->value);

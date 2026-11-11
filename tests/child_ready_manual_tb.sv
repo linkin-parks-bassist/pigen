@@ -1,5 +1,5 @@
 module child_ready_manual_tb;
- parameter CONSTANT_READY=0;
+ parameter CONSTANT_READY=0, DIRECT_READY=0;
  logic clk=0, reset=1, offer=0, enable=0, ready=0, accepted, valid;
  logic [7:0] data=0,result;
  integer sent=0, received=0, cycle=0;
@@ -8,7 +8,7 @@ module child_ready_manual_tb;
  always @(negedge clk) begin
   cycle=cycle+1; reset=cycle<3;
   data=sent; offer=!reset && sent<20;
-  enable=cycle%3!=0; ready=cycle%5<3;
+  enable=DIRECT_READY || cycle%3!=0; ready=cycle%5<3;
  end
  always @(posedge clk) if(!reset) begin
   if(valid && (CONSTANT_READY || (enable && ready))) begin

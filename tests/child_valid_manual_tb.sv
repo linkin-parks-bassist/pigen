@@ -1,15 +1,16 @@
 module child_valid_manual_tb;
- parameter CONSTANT_VALID=0;
+ parameter CONSTANT_VALID=0, DIRECT_VALID=0;
  logic clk=0, reset=1, offer=0, enable=0, ready=0, accepted, valid;
  logic [7:0] data=0,result;
  integer sent=0, received=0, cycle=0;
  logic [7:0] expected[0:255];
+ wire [1:0] controls={1'b0,offer && enable};
  manual_top dut(.*);
  always #5 clk=~clk;
  always @(negedge clk) begin
   cycle=cycle+1; reset=cycle<3;
   data=sent; offer=!reset && sent<20;
-  enable=cycle%3!=0; ready=cycle%5<3;
+  enable=DIRECT_VALID || cycle%3!=0; ready=cycle%5<3;
  end
  always @(posedge clk) if(!reset) begin
   if(valid && ready) begin

@@ -1,0 +1,13 @@
+module producer(input wire clk, input wire reset, output bit[8] buf o);
+ logic [7:0] count;
+ always_ff @(posedge clk) begin
+  if(reset) count<=0;
+  else count<=count+1;
+  o<=count;
+ end
+endmodule
+module slice_top(input wire clk, input wire reset,
+ output wire [15:0] data, output wire [1:0] valid, input wire [1:0] ready);
+ producer a(.clk(clk),.reset(reset),.o(data[7:0]),.o_valid(valid[0]),.o_ready(ready[0]));
+ producer b(.clk(clk),.reset(reset),.o(data[15:8]),.o_valid(valid[1]),.o_ready(ready[1]));
+endmodule

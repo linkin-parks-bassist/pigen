@@ -1239,14 +1239,14 @@ fabric-static-fanout-test: pigen
 .PHONY: child-ready-manual-test
 child-ready-manual-test: pigen
 	@set -eu; dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
-	for mode in expression constant; do \
+	for mode in expression constant input_scalar; do \
 		constant=0; if [ "$$mode" = constant ]; then constant=1; fi; \
 		./pigen tests/child_ready_$$mode.pigen -o $$dir/design.sv; \
-		iverilog -g2012 -s child_ready_manual_tb -P child_ready_manual_tb.CONSTANT_READY=$$constant \
+		iverilog -g2012 -s child_ready_manual_tb -P child_ready_manual_tb.CONSTANT_READY=$$constant -P child_ready_manual_tb.DIRECT_READY=$$(test "$$mode" = input_scalar && echo 1 || echo 0) \
 			-o $$dir/sim rtl/pigen_primitives.sv $$dir/design.sv tests/child_ready_manual_tb.sv; \
 		vvp $$dir/sim > $$dir/result; cat $$dir/result; grep -q 'PASS manual child ready' $$dir/result; \
 	done; \
-	for mode in child local fabric; do \
+	for mode in child local fabric input_scalar input_selected; do \
 		if ./pigen tests/child_ready_readonly_$${mode}_error.pigen -o $$dir/error.sv 2>$$dir/error; then \
 			echo "read-only ready $$mode unexpectedly compiled" >&2; exit 1; fi; \
 		grep -q 'automatic consumer conflicts with read-only child ready binding' $$dir/error; \
@@ -1255,14 +1255,14 @@ child-ready-manual-test: pigen
 .PHONY: child-valid-manual-test
 child-valid-manual-test: pigen
 	@set -eu; dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
-	for mode in expression constant register projection projection_constant; do \
+	for mode in expression constant register projection projection_constant input_scalar input_selected; do \
 		constant=0; if [ "$$mode" = constant ] || [ "$$mode" = projection_constant ]; then constant=1; fi; \
 		./pigen tests/child_valid_$$mode.pigen -o $$dir/design.sv; \
-		iverilog -g2012 -s child_valid_manual_tb -P child_valid_manual_tb.CONSTANT_VALID=$$constant \
+		iverilog -g2012 -s child_valid_manual_tb -P child_valid_manual_tb.CONSTANT_VALID=$$constant -P child_valid_manual_tb.DIRECT_VALID=$$(test "$$mode" = input_scalar && echo 1 || echo 0) \
 			-o $$dir/sim rtl/pigen_primitives.sv $$dir/design.sv tests/child_valid_manual_tb.sv; \
 		vvp $$dir/sim > $$dir/result; cat $$dir/result; grep -q 'PASS manual child valid' $$dir/result; \
 	done; \
-	for mode in child local fabric; do \
+	for mode in child local fabric input_scalar input_selected; do \
 		if ./pigen tests/child_valid_readonly_$${mode}_error.pigen -o $$dir/error.sv 2>$$dir/error; then \
 			echo "read-only valid $$mode unexpectedly compiled" >&2; exit 1; fi; \
 		grep -q 'automatic producer conflicts with read-only child valid binding' $$dir/error; \
@@ -1271,7 +1271,7 @@ child-valid-manual-test: pigen
 .PHONY: child-slice-ownership-test
 child-slice-ownership-test: pigen
 	dir=$$(mktemp -d); status=0; \
-	for fixture in disjoint indexed_up indexed_down; do \
+	for fixture in disjoint indexed_up indexed_down input_ready; do \
 		./pigen tests/child_slice_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_slice_tb -o $$dir/sim tests/child_slice_tb.sv rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child slice ownership' || { status=1; break; }; \

@@ -1966,6 +1966,29 @@ pigen_lvalue_id pigen_lvalue_resolve(pigen_semantic_model *model,
 	return add_lvalue(model, lvalue);
 }
 
+int pigen_lvalue_is_writable(const pigen_semantic_model *model,
+	pigen_lvalue_id id)
+{
+	const pigen_semantic_lvalue *lvalue = pigen_lvalue_get(model, id);
+	if (!lvalue) return 0;
+	if (lvalue->kind == PIGEN_LVALUE_PROJECTION)
+	{
+		const pigen_semantic_signal *signal = pigen_signal_get(model,
+			lvalue->as.projection.signal);
+		return signal && signal->direction != PIGEN_SEMANTIC_INPUT;
+	}
+	if (lvalue->kind == PIGEN_LVALUE_CONCATENATION)
+	{
+		const pigen_lvalue_id *children = pigen_lvalue_children(model,
+			lvalue->as.sequence.first_child, lvalue->as.sequence.child_count);
+		if (!children || !lvalue->as.sequence.child_count) return 0;
+		for (size_t i = 0; i < lvalue->as.sequence.child_count; i++)
+			if (!pigen_lvalue_is_writable(model, children[i])) return 0;
+		return 1;
+	}
+	return 0;
+}
+
 int pigen_struct_member_add(pigen_semantic_model *model,
 	pigen_symbol_id owner, pigen_source_span name,
 	pigen_data_type_id data_type, size_t offset)

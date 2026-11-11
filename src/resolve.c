@@ -2805,7 +2805,7 @@ static int endpoint_has_readonly_control(pigen_semantic_model *model,
 				size_t m = 0;
 				const char *name = pigen_source_span_text(model->sources, control->port_name, &m);
 				if (name && m == n+6 && !memcmp(name, base, n) && !memcmp(name+n, direction == PIGEN_SEMANTIC_OUTPUT ? "_ready" : "_valid", 6) &&
-					pigen_lvalue_resolve(model, control->value).index == PIGEN_INVALID_ID) return 1;
+					!pigen_lvalue_is_writable(model, pigen_lvalue_resolve(model, control->value))) return 1;
 			}
 		}
 	}
