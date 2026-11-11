@@ -1283,7 +1283,10 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 			}
 			if(payload.index>=lowering->lowered_endpoint_count) return -1;
 			*out=lowering->lowered_endpoints[payload.index];
-			if (!value || value->kind != PIGEN_EXPR_SYMBOL)
+			/* A borrowed object must preserve the endpoint's packed coordinates,
+			 * signedness and state domain, not merely its payload width. */
+			if (!value || value->kind != PIGEN_EXPR_SYMBOL ||
+				value->data_type.index != sem->signals[signal_index].data_type.index)
 			{
 				const pigen_semantic_signal *view = &sem->signals[signal_index];
 				char *name = signal_spelling(lowering, view);

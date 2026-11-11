@@ -1923,6 +1923,10 @@ static pigen_expr_id partial_endpoint_alias(pigen_semantic_model *model,
 	pigen_expr_id value, const pigen_semantic_instance_connection *upstream,
 	pigen_data_type_id target_type, pigen_source_span span);
 
+static pigen_expr_id dynamic_endpoint_alias(pigen_semantic_model *model,
+	pigen_expr_id value, const pigen_semantic_instance_connection *upstream,
+	pigen_data_type_id target_type, pigen_source_span span);
+
 static pigen_expr_id resolve_input_aliases(pigen_semantic_model *model,
 	pigen_expr_id value);
 
@@ -2267,6 +2271,9 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 					const pigen_semantic_instance_connection *upstream = &model->instance_connections[d];
 					pigen_expr_id mapped = partial_endpoint_alias(model, connection->value,
 						upstream, port.data_type, connection->span);
+					if (mapped.index == PIGEN_INVALID_ID)
+						mapped = dynamic_endpoint_alias(model, connection->value, upstream,
+							port.data_type, connection->span);
 					if (mapped.index == PIGEN_INVALID_ID) continue;
 					connection->value = mapped;
 					connection->endpoint_view = INVALID_ID(pigen_signal_id);
@@ -2737,8 +2744,72 @@ static pigen_expr_id partial_endpoint_alias(pigen_semantic_model *model,
 		pigen_expr_add_conversion(model, conversion, projected, span);
 }
 
+/* Runtime coordinates use a widened signed domain so subtraction neither
+	* truncates a small index nor wraps an out-of-range value into the payload. */
+static pigen_expr_id dynamic_endpoint_alias(pigen_semantic_model *model,
+	pigen_expr_id value, const pigen_semantic_instance_connection *upstream,
+	pigen_data_type_id target_type, pigen_source_span span)
+{
+	if (upstream->direction != PIGEN_SEMANTIC_OUTPUT ||
+		upstream->endpoint_view.index == PIGEN_INVALID_ID) return INVALID_ID(pigen_expr_id);
+	const pigen_semantic_expr *known = ownership_expression(model, value);
+	const pigen_semantic_expr *producer = ownership_expression(model, upstream->value);
+	if (!known || !producer || producer->kind != PIGEN_EXPR_SYMBOL ||
+		(known->kind != PIGEN_EXPR_INDEX && known->kind != PIGEN_EXPR_SELECT)) return INVALID_ID(pigen_expr_id);
+	pigen_semantic_expr expr = *known;
+	if (expr.kind == PIGEN_EXPR_SELECT && expr.as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE)
+		return INVALID_ID(pigen_expr_id);
+	pigen_expr_id base = expr.kind == PIGEN_EXPR_INDEX ? expr.as.index.base : expr.as.select.base;
+	pigen_expr_id index = expr.kind == PIGEN_EXPR_INDEX ? expr.as.index.index : expr.as.select.left;
+	if (!ownership_same_projection(model, base, upstream->value)) return INVALID_ID(pigen_expr_id);
+	const pigen_semantic_signal *endpoint = pigen_signal_get(model, upstream->endpoint_view);
+	const pigen_semantic_expr *index_expr = pigen_expr_get(model, index);
+	int64_t sl, sr, el, er;
+	uint64_t sw, ew, iw;
+	if (!endpoint || !index_expr ||
+		!packed_coordinate_range(model, producer->data_type, producer->shape, &sl, &sr) ||
+		!packed_coordinate_range(model, endpoint->data_type, endpoint->shape, &el, &er) ||
+		!pigen_const_expr_evaluate_u64(model, pigen_data_type_packed_width(model, producer->data_type), &sw) ||
+		!pigen_const_expr_evaluate_u64(model, pigen_data_type_packed_width(model, endpoint->data_type), &ew) ||
+		!pigen_const_expr_evaluate_u64(model, pigen_data_type_packed_width(model, index_expr->data_type), &iw) ||
+		sw != ew || !iw || iw > 64) return INVALID_ID(pigen_expr_id);
+	pigen_symbol_id symbol = endpoint->symbol;
+	pigen_data_type_id payload_type = endpoint->data_type;
+	pigen_data_type_id index_type = index_expr->data_type;
+	pigen_packed_dimension dimension = {pigen_const_expr_intern_integer(model, 66, pigen_data_type_unsized_integer(model)),
+		pigen_const_expr_intern_integer(model, 0, pigen_data_type_unsized_integer(model))};
+	pigen_data_type_id wide = pigen_data_type_implicit(model, PIGEN_SIGN_SIGNED, &dimension, 1);
+	pigen_conversion conversion;
+	if (!pigen_data_type_resolve_assignment_conversion(model, index_type, wide, &conversion))
+		return INVALID_ID(pigen_expr_id);
+	pigen_expr_id coordinate = pigen_expr_add_conversion(model, conversion, index, span);
+	pigen_expr_id source_right = pigen_expr_add_integer(model,
+		sr < 0 ? (uint64_t)(-(sr+1))+1 : (uint64_t)sr, wide, span);
+	pigen_expr_id endpoint_right = pigen_expr_add_integer(model,
+		er < 0 ? (uint64_t)(-(er+1))+1 : (uint64_t)er, wide, span);
+	pigen_unary_operation negate = {PIGEN_UNARY_NEGATE, wide, wide};
+	if (sr < 0) source_right = pigen_expr_add_unary(model, negate, source_right, span);
+	if (er < 0) endpoint_right = pigen_expr_add_unary(model, negate, endpoint_right, span);
+	int reversed = (sl >= sr) != (el >= er);
+	coordinate = pigen_expr_add_binary(model, (pigen_binary_operation){PIGEN_BINARY_SUBTRACT, wide, wide, wide},
+		reversed ? source_right : coordinate, reversed ? coordinate : source_right, span);
+	coordinate = pigen_expr_add_binary(model, (pigen_binary_operation){PIGEN_BINARY_ADD, wide, wide, wide}, endpoint_right, coordinate, span);
+	pigen_expr_id source = pigen_expr_add_symbol(model, symbol, payload_type, span);
+	pigen_select_kind kind = expr.kind == PIGEN_EXPR_SELECT ? expr.as.select.kind : PIGEN_SEMANTIC_SELECT_RANGE;
+	if (expr.kind == PIGEN_EXPR_SELECT && reversed)
+		kind = kind == PIGEN_SEMANTIC_SELECT_INDEXED_UP ? PIGEN_SEMANTIC_SELECT_INDEXED_DOWN : PIGEN_SEMANTIC_SELECT_INDEXED_UP;
+	pigen_expr_id projected = expr.kind == PIGEN_EXPR_INDEX ?
+		pigen_expr_add_index(model, source, coordinate, span) :
+		pigen_expr_add_select(model, source, coordinate, expr.as.select.right, kind, span);
+	const pigen_semantic_expr *result = pigen_expr_get(model, projected);
+	if (!result || !pigen_data_type_resolve_assignment_conversion(model, result->data_type, target_type, &conversion))
+		return INVALID_ID(pigen_expr_id);
+	return conversion.kind == PIGEN_CONVERSION_IDENTITY ? projected :
+		pigen_expr_add_conversion(model, conversion, projected, span);
+}
+
 /* Rebuild only changed expression paths; never mutate shared expression nodes.
-	* A selection must map as a unit, since replacing its base can rebase coordinates. */
+ * A selection must map as a unit, since replacing its base can rebase coordinates. */
 static pigen_expr_id resolve_input_aliases(pigen_semantic_model *model,
 	pigen_expr_id value)
 {
@@ -2759,6 +2830,8 @@ static pigen_expr_id resolve_input_aliases(pigen_semantic_model *model,
 				ownership_same_projection(model, value, upstream->value))
 				return pigen_expr_add_symbol(model, source->symbol, source->data_type, expr.span);
 			pigen_expr_id mapped = partial_endpoint_alias(model, value, upstream, expr.data_type, expr.span);
+			if (mapped.index == PIGEN_INVALID_ID)
+				mapped = dynamic_endpoint_alias(model, value, upstream, expr.data_type, expr.span);
 			if (mapped.index != PIGEN_INVALID_ID) return mapped;
 		}
 		return value;
