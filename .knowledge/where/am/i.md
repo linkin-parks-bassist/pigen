@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T15:51:27+11:00"
+revised_at: "2026-11-11T16:15:18+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -10,7 +10,7 @@ This checkout is **pigen-fork**, a delivery fork of /home/david/Projects/pigen. 
 
 Core transfers, pipelines, FSMs, validity actions, parameterized children, parent child-port endpoints and buffered fabric routing with arbitration/SVG are implemented. See what/is/broken.md for capability limits and what/is/the/plan.md for remaining work.
 
-Mixed cases lower through native SystemVerilog combinational case decoders and scalar branch guards. Native case/casez/casex semantics preserve common width/signedness, wildcard matching and branch priority. Simulations cover ordinary selector evaluation, nested/ternary/concatenated labels, optional default colons, unbraced if/else, arithmetic widening, signedness, unknown selectors and wildcard comparisons against native reference cases. Full verification passes. Mixed selector scheduling, qualified cases and specialization convergence remain open; decoders currently evaluate selectors combinationally.
+Mixed cases lower through native SystemVerilog combinational case decoders and scalar branch guards. Native case/casez/casex semantics preserve common width/signedness, wildcard matching and branch priority. Simulations cover ordinary selector evaluation, nested/ternary/concatenated labels, optional default colons, unbraced if/else, arithmetic widening, signedness, unknown selectors and wildcard comparisons against native reference cases. Full verification passes. Mixed selector scheduling and qualified cases remain open; decoders currently evaluate selectors combinationally.
 
 Repository topology: src/ structured owners plus quarantined prototype sources; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ designs including migrated biquad examples; .knowledge/ the sole local documentation and architectural answer authority. README.md is David's public introduction restored from d14aef2; preserve it.
 

@@ -183,27 +183,24 @@ int main(int argc, char **argv)
 	pigen_fabric_diagrams diagrams = {0};
 	char *cleaned = pigen_lower_blocks(source, source_length, &generated,
 		no_diagram ? NULL : &diagrams);
-	for (int specialize_pass = 0; specialize_pass < 16; specialize_pass++)
 	{
 		const char *specialize_error = NULL;
 		size_t specialize_error_offset = 0;
-		char *specialized = pigen_specialize_parameterized_instances(cleaned,
-			strlen(cleaned), &specialize_error, &specialize_error_offset);
-
-		if (specialize_error)
+		char *specialized = pigen_specialize_fixed_point(cleaned, strlen(cleaned),
+			256, 64u * 1024u * 1024u, &specialize_error, &specialize_error_offset);
+		if (!specialized)
 		{
 			size_t line = 1, column = 1;
 			for (size_t i = 0; i < specialize_error_offset && cleaned[i]; i++)
 				if (cleaned[i] == '\n') { line++; column = 1; }
 				else column++;
 			fprintf(stderr, "%s:%zu:%zu: %s\n", input_path, line, column,
-				specialize_error);
+				specialize_error ? specialize_error : "specialization failed");
 			free(cleaned);
 			free(source);
 			free(owned_output_path);
 			return 1;
 		}
-		if (!specialized) break;
 		free(cleaned);
 		cleaned = specialized;
 	}

@@ -398,7 +398,8 @@ static char *build_specialized_module(const char *source,
 			pigen_append(&out, clone_name);
 			replaced = 1;
 		}
-		else if (token_is_identifier(token))
+		else if (token_is_identifier(token) &&
+			!(at > module->module_token && token_is_text(source, &tokens->items[at - 1], ".")))
 		{
 			for (size_t p = 0; p < value_count; p++)
 				if (values[p].name && values[p].expr &&
@@ -2124,24 +2125,25 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 			}
 		clone_name = pigen_copy_range("", 0);
 		free(clone_name);
+		/* Names must be unique across rounds as nested clones are expanded. */
 		clone_name = NULL;
+		for (;;)
 		{
-			char number[32];
 			pigen_string name = {0};
-			snprintf(number, sizeof number, "%zu", clone_index++);
-			pigen_append(&name, "__pigen_spec_");
+			char *base = token_text(source, &tokens.items[module->name_token]);
+			pigen_append_format(&name, "__pigen_spec_%s_%zu", base, clone_index++);
+			free(base);
+			int exists = 0;
 			for (size_t m = 0; m < module_count; m++)
-				if (&modules[m] == module)
-				{
-					char *base = token_text(source,
-						&tokens.items[modules[m].name_token]);
-					pigen_append(&name, base);
-					free(base);
-				}
-			pigen_append(&name, "_");
-			pigen_append(&name, number);
-			clone_name = name.data;
+			{
+				const pigen_token *candidate = &tokens.items[modules[m].name_token];
+				if (pigen_is_word(source + candidate->span.start,
+					candidate->span.end - candidate->span.start, name.data)) exists = 1;
+			}
+			if (!exists) { clone_name = name.data; break; }
+			free(name.data);
 		}
+
 		{
 			char *specialized = build_specialized_module(source, &tokens, module,
 				values, value_count, clone_name);
@@ -2203,5 +2205,50 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 	free(modules);
 	if (clones.data) free(clones.data);
 	pigen_free_tokens(&tokens);
+	if (changed && output.length == length && !memcmp(output.data, source, length))
+	{
+		free(output.data);
+		return NULL;
+	}
 	return changed ? output.data : NULL;
+}
+
+char *pigen_specialize_fixed_point(const char *source, size_t length,
+	size_t maximum_rounds, size_t maximum_bytes, const char **error,
+	size_t *error_offset)
+{
+	if (error) *error = NULL;
+	if (error_offset) *error_offset = 0;
+	if (!source || length > maximum_bytes)
+	{
+		if (error) *error = "specialization exceeded transformed-source size limit";
+		return NULL;
+	}
+	char *current = pigen_copy_range(source, length);
+	for (size_t round = 0; ; round++)
+	{
+		const char *failure = NULL;
+		size_t offset = 0;
+		char *next = pigen_specialize_parameterized_instances(current, strlen(current), &failure, &offset);
+		if (failure)
+		{
+			if (error) *error = failure;
+			if (error_offset) *error_offset = offset;
+			free(next);
+			free(current);
+			return NULL;
+		}
+		if (!next) return current;
+		if (round >= maximum_rounds || strlen(next) > maximum_bytes)
+		{
+			if (error) *error = round >= maximum_rounds ?
+				"specialization exceeded rewrite-round limit" :
+				"specialization exceeded transformed-source size limit";
+			free(next);
+			free(current);
+			return NULL;
+		}
+		free(current);
+		current = next;
+	}
 }

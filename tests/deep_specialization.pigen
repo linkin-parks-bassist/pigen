@@ -1,0 +1,66 @@
+module layer0 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ always_ff @(posedge clk) o<=i;
+endmodule
+module layer1 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer0 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer2 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer1 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer3 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer2 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer4 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer3 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer5 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer4 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer6 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer5 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer7 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer6 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer8 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer7 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer9 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer8 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer10 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer9 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer11 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer10 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer12 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer11 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer13 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer12 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer14 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer13 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer15 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer14 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer16 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer15 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer17 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer16 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer18 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer17 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer19 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer18 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module layer20 #(parameter W=8)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ layer19 #(.W(W)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
+module specialization_top(input logic clk, input logic reset, input bit[8] buf i, output bit[8] buf o);
+ layer20 #(.W(8)) child(.clk(clk),.reset(reset),.i(i),.o(o));
+endmodule
