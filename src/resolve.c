@@ -2496,10 +2496,97 @@ static int resolve_expr_references_symbol(const pigen_semantic_model *model,
 	}
 }
 
+/* Only prove disjointness in a shared selection coordinate system. Unknown
+ * indices remain potentially overlapping; buffered tokens never use this escape. */
+static const pigen_semantic_expr *ownership_expression(
+	const pigen_semantic_model *model, pigen_expr_id value)
+{
+	const pigen_semantic_expr *expr = pigen_expr_get(model, value);
+	while (expr && (expr->kind == PIGEN_EXPR_GROUP ||
+		expr->kind == PIGEN_EXPR_CONVERSION))
+		expr = pigen_expr_get(model, expr->kind == PIGEN_EXPR_GROUP ?
+			expr->as.group.operand : expr->as.conversion.operand);
+	return expr;
+}
+
+static int ownership_selection(pigen_semantic_model *model,
+	const pigen_semantic_expr *expr, pigen_expr_id *base,
+	uint64_t *low, uint64_t *high)
+{
+	pigen_expr_id left, right;
+	uint64_t a, b;
+	if (!expr) return 0;
+	if (expr->kind == PIGEN_EXPR_INDEX)
+	{
+		*base = expr->as.index.base;
+		if (!pigen_const_expr_evaluate_u64(model,
+			pigen_expr_constant(model, expr->as.index.index), &a)) return 0;
+		*low = *high = a;
+		return 1;
+	}
+	if (expr->kind != PIGEN_EXPR_SELECT) return 0;
+	*base = expr->as.select.base;
+	left = expr->as.select.left;
+	right = expr->as.select.right;
+	if (!pigen_const_expr_evaluate_u64(model, pigen_expr_constant(model, left), &a) ||
+		!pigen_const_expr_evaluate_u64(model, pigen_expr_constant(model, right), &b))
+		return 0;
+	if (expr->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE)
+	{
+		*low = a < b ? a : b;
+		*high = a > b ? a : b;
+	}
+	else if (expr->as.select.kind == PIGEN_SEMANTIC_SELECT_INDEXED_UP)
+	{
+		if (!b || UINT64_MAX - a < b - 1) return 0;
+		*low = a; *high = a + b - 1;
+	}
+	else
+	{
+		if (!b || a < b - 1) return 0;
+		*low = a - (b - 1); *high = a;
+	}
+	return 1;
+}
+
+static int ownership_same_projection(pigen_semantic_model *model,
+	pigen_expr_id left, pigen_expr_id right)
+{
+	const pigen_semantic_expr *a = ownership_expression(model, left);
+	const pigen_semantic_expr *b = ownership_expression(model, right);
+	pigen_expr_id abase, bbase;
+	uint64_t alow, ahigh, blow, bhigh;
+	if (!a || !b) return 0;
+	if (a == b) return 1;
+	if (a->kind == PIGEN_EXPR_SYMBOL && b->kind == PIGEN_EXPR_SYMBOL)
+		return a->as.symbol.index == b->as.symbol.index;
+	/* Equal index projections preserve the next dimension's coordinate system.
+	 * Part-selects may rebase or reverse it, so do not equate those here. */
+	return a->kind == PIGEN_EXPR_INDEX && b->kind == PIGEN_EXPR_INDEX &&
+		ownership_selection(model, a, &abase, &alow, &ahigh) &&
+		ownership_selection(model, b, &bbase, &blow, &bhigh) &&
+		alow == blow && ownership_same_projection(model, abase, bbase);
+}
+
+static int ownership_disjoint(pigen_semantic_model *model,
+	pigen_expr_id left, pigen_expr_id right)
+{
+	const pigen_semantic_expr *a = ownership_expression(model, left);
+	const pigen_semantic_expr *b = ownership_expression(model, right);
+	pigen_expr_id abase, bbase;
+	uint64_t alow, ahigh, blow, bhigh;
+	if (!ownership_selection(model, a, &abase, &alow, &ahigh) ||
+		!ownership_selection(model, b, &bbase, &blow, &bhigh)) return 0;
+	if (ownership_same_projection(model, abase, bbase))
+		return ahigh < blow || bhigh < alow;
+	return ownership_disjoint(model, abase, bbase);
+}
+
 typedef struct {
 	pigen_module_id module;
 	pigen_signal_id signal;
 	pigen_source_span span;
+	pigen_expr_id destination;
 } instance_destination_owner;
 
 static int endpoint_has_readonly_control(pigen_semantic_model *model,
@@ -2547,7 +2634,9 @@ static int validate_instance_destination_ownership(resolver *resolver)
 				}
 				for (o = 0; o < owner_count; o++)
 					if (owners[o].module.index == parent->module.index &&
-						owners[o].signal.index == s)
+						owners[o].signal.index == s &&
+						!(pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static &&
+							ownership_disjoint(model, owners[o].destination, connections[c].value)))
 					{
 						free(owners);
 						return fail(resolver, connections[c].span,
@@ -2557,7 +2646,7 @@ static int validate_instance_destination_ownership(resolver *resolver)
 					(owner_count + 1) * sizeof(*owners));
 				owners[owner_count++] = (instance_destination_owner){
 					parent->module, (pigen_signal_id){(uint32_t)s},
-					connections[c].span};
+					connections[c].span, connections[c].value};
 			}
 		}
 	}
