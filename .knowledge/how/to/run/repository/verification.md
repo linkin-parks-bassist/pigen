@@ -1,10 +1,10 @@
 ---
 status: green
-revised_at: "2026-11-11T15:36:27+11:00"
+revised_at: "2026-11-11T15:38:49+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-Clocked case rewriting is limited to bodies identified as containing Pigen actions. Ordinary cases retain their original selector evaluation and control flow. Mixed cases use case equality (`===`), parenthesized operands, concatenated/comma-separated labels and complete if/else branch statements. Simulation witnesses cover single evaluation of an ordinary side-effecting selector, matching/default/unknown mixed selectors, concatenated labels and unbraced if/else bodies. Full `make -j8 --output-sync=target verify` passes. Remaining case gaps include mixed selector evaluation, common case width/signedness, nested case variants and bounded specialization convergence.
+Clocked case rewriting applies to bodies identified as containing Pigen actions; ordinary cases retain original evaluation and control flow. Mixed cases use case equality and a common width/signedness context across selector and labels. Unevaluated conditional arms impose that context without evaluating the other labels. Complete statement boundaries support nested cases and unbraced if/else, with concatenated/comma-separated/ternary labels and optional default colons. Simulations cover these forms, ordinary single selector evaluation, unknown selectors, arithmetic widening and mixed signedness. Full verification passes. Mixed selector evaluation, wildcard/qualified cases and specialization convergence remain open.
 
 The recorded baseline `make test` and `make verify` runs were fully green. The suite covers the structured C owners, the data-first pipeline corpus, fixed-point MAC, text and both migrated biquad examples, FSM and child-instance checks, inline and standalone fabric fairness/router tests, SVG topology, ordinary-SV preservation witnesses, parameterized Pigen child specialization, and explicit-control elastic child ports.
 

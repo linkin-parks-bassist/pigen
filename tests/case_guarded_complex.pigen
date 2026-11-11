@@ -4,8 +4,8 @@ module mixed_case_complex(input logic clk, input logic [1:0] sel, input bit[8] b
  endfunction
  always_ff @(posedge clk) begin
   case (sel)
-   {1'b0,1'b1}, 2'd2: if (i == 10) temp = inc(i); else temp = inc(8'd40);
-   default: begin
+   1'b1 ? {1'b0,1'b1} : 2'd0, 2'd2: if (i == 10) temp = inc(i); else temp = inc(8'd40);
+   default begin
    end
   endcase
   o <= temp;

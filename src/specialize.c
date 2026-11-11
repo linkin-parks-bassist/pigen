@@ -1225,21 +1225,11 @@ static void leaf_guard_range(const char *source, const pigen_tokens *tokens,
 
 
 
-static int range_text_has_xz(const char *source,
-	const pigen_tokens *tokens, size_t first, size_t last)
+static int is_case_keyword(const char *source, const pigen_token *token)
 {
-	for (size_t i = first; i < last; i++)
-	{
-		const char *text = source + tokens->items[i].span.start;
-		size_t length = tokens->items[i].span.end - tokens->items[i].span.start;
-
-		if (tokens->items[i].kind != PIGEN_TOKEN_NUMBER) continue;
-		for (size_t k = 0; k < length; k++)
-			if (text[k] == 'x' || text[k] == 'X' || text[k] == 'z' ||
-				text[k] == 'Z' || text[k] == '?')
-				return 1;
-	}
-	return 0;
+	return token_is_text(source, token, "case") ||
+		token_is_text(source, token, "casez") ||
+		token_is_text(source, token, "casex");
 }
 
 /* Return the final token of one complete procedural statement. */
@@ -1248,6 +1238,16 @@ static size_t find_statement_end(const char *source,
 {
 	size_t depth = 0;
 	if (first >= limit) return limit;
+	if (is_case_keyword(source, &tokens->items[first]))
+	{
+		for (size_t at = first; at < limit; at++)
+		{
+			if (is_case_keyword(source, &tokens->items[at])) depth++;
+			else if (token_is_text(source, &tokens->items[at], "endcase") && --depth == 0)
+				return at;
+		}
+		return limit;
+	}
 	if (token_is_text(source, &tokens->items[first], "begin"))
 	{
 		size_t end = find_matching(source, tokens, first, "begin", "end", limit);
@@ -1283,6 +1283,64 @@ static size_t find_statement_end(const char *source,
 	return limit;
 }
 
+/* Delimiters inside expressions do not terminate case labels. */
+static size_t case_label_end(const char *source, const pigen_tokens *tokens,
+	size_t first, size_t limit, const char *delimiter)
+{
+	size_t depth = 0, conditional = 0;
+	if (text_equals(delimiter, ":") && first < limit &&
+		token_is_text(source, &tokens->items[first], "default"))
+		return first + 1 < limit && token_is_text(source, &tokens->items[first + 1], ":")
+			? first + 1 : first;
+	for (size_t at = first; at < limit; at++)
+	{
+		const pigen_token *token = &tokens->items[at];
+		if (token_is_text(source, token, "(") || token_is_text(source, token, "[") ||
+			token_is_text(source, token, "{")) depth++;
+		else if (token_is_text(source, token, ")") || token_is_text(source, token, "]") ||
+			token_is_text(source, token, "}")) { if (depth) depth--; }
+		else if (!depth && token_is_text(source, token, "?")) conditional++;
+		else if (!depth && conditional && token_is_text(source, token, ":")) conditional--;
+		else if (!depth && !conditional && token_is_text(source, token, delimiter)) return at;
+	}
+	return limit;
+}
+
+/* Unselected conditional arms impose the common case expression type without
+ * evaluating labels or changing the selected operand's value. */
+static char *case_type_context(const char *source, const pigen_tokens *tokens,
+	size_t first, size_t endcase, const char *selector)
+{
+	pigen_string context = {0};
+	size_t arms = 0;
+	for (size_t item = first; item < endcase; )
+	{
+		size_t colon = case_label_end(source, tokens, item, endcase, ":");
+		size_t end;
+		if (colon == endcase) { free(context.data); return NULL; }
+		end = find_statement_end(source, tokens, colon + 1, endcase);
+		if (end == endcase) { free(context.data); return NULL; }
+		if (!token_is_text(source, &tokens->items[item], "default"))
+			for (size_t label = item; label < colon; )
+			{
+				size_t next = case_label_end(source, tokens, label, colon, ",");
+				char *value = build_tokens(source, tokens, label, next, NULL, 0);
+				pigen_append(&context, "(1'b0 ? (");
+				pigen_append(&context, value);
+				pigen_append(&context, ") : ");
+				free(value);
+				arms++;
+				label = next + 1;
+			}
+		item = end + 1;
+	}
+	pigen_append(&context, "(");
+	pigen_append(&context, selector);
+	pigen_append(&context, ")");
+	while (arms--) pigen_append(&context, ")");
+	return context.data;
+}
+
 static char *rewrite_cases_in_range(const char *source,
 	const pigen_tokens *tokens, size_t first, size_t last);
 static char *rewrite_case_statement(const char *source,
@@ -1290,7 +1348,7 @@ static char *rewrite_case_statement(const char *source,
 {
 	size_t open = start + 1;
 	size_t header_close, endcase, item;
-	char *selector;
+	char *selector, *context;
 	pigen_string out = {0};
 	char *default_body = NULL;
 	int branch_count = 0;
@@ -1303,39 +1361,25 @@ static char *rewrite_case_statement(const char *source,
 		size_t depth = 0;
 
 		for (endcase = start; endcase < tokens->count; endcase++)
-			if (token_is_text(source, &tokens->items[endcase], "case")) depth++;
+			if (is_case_keyword(source, &tokens->items[endcase])) depth++;
 			else if (token_is_text(source, &tokens->items[endcase], "endcase") &&
 				!--depth) break;
 	}
 	if (endcase == tokens->count) return NULL;
 	selector = build_tokens(source, tokens, open + 1, header_close, NULL, 0);
+	context = case_type_context(source, tokens, header_close + 1, endcase, selector);
+	if (!context) { free(selector); return NULL; }
 	item = header_close + 1;
 	while (item < endcase)
 	{
-		size_t colon = item;
-		size_t depth = 0;
+		size_t colon = case_label_end(source, tokens, item, endcase, ":");
 		size_t body, body_end;
 		int is_default;
 		pigen_string condition = {0};
 		pigen_string body_text = {0};
 
-		while (colon < endcase)
-		{
-			if (token_is_text(source, &tokens->items[colon], "(") ||
-				token_is_text(source, &tokens->items[colon], "["))
-				depth++;
-			else if (token_is_text(source, &tokens->items[colon], ")") ||
-				token_is_text(source, &tokens->items[colon], "]"))
-			{
-				if (depth) depth--;
-			}
-			else if (!depth &&
-				token_is_text(source, &tokens->items[colon], ":")) break;
-			colon++;
-		}
 		if (colon == endcase) { unsafe = 1; break; }
 		is_default = token_is_text(source, &tokens->items[item], "default");
-		if (range_text_has_xz(source, tokens, item, colon)) { unsafe = 1; break; }
 		body = colon + 1;
 		body_end = find_statement_end(source, tokens, body, endcase);
 		if (body_end == tokens->count || body_end == endcase) { unsafe = 1; break; }
@@ -1355,36 +1399,21 @@ static char *rewrite_case_statement(const char *source,
 		{
 			for (size_t label = item; label < colon; )
 			{
-				size_t label_end = label;
-				size_t inner = 0;
-
-				while (label_end < colon)
-				{
-					if (token_is_text(source, &tokens->items[label_end], "(") ||
-						token_is_text(source, &tokens->items[label_end], "[") ||
-						token_is_text(source, &tokens->items[label_end], "{"))
-						inner++;
-					else if (token_is_text(source, &tokens->items[label_end], ")") ||
-						token_is_text(source, &tokens->items[label_end], "]") ||
-						token_is_text(source, &tokens->items[label_end], "}"))
-					{
-						if (inner) inner--;
-					}
-					else if (!inner &&
-						token_is_text(source, &tokens->items[label_end], ","))
-						break;
-					label_end++;
-				}
+				size_t label_end = case_label_end(source, tokens, label, colon, ",");
 				if (label_end > label)
 				{
 					char *value = build_tokens(source, tokens, label, label_end,
 						NULL, 0);
 
 					if (condition.length) pigen_append(&condition, " || ");
-					pigen_append(&condition, "((");
+					pigen_append(&condition, "((1'b1 ? (");
 					pigen_append(&condition, selector);
-					pigen_append(&condition, ") === (");
+					pigen_append(&condition, ") : ");
+					pigen_append(&condition, context);
+					pigen_append(&condition, ") === (1'b1 ? (");
 					pigen_append(&condition, value);
+					pigen_append(&condition, ") : ");
+					pigen_append(&condition, context);
 					pigen_append(&condition, "))");
 					free(value);
 				}
@@ -1403,6 +1432,7 @@ static char *rewrite_case_statement(const char *source,
 		item = body_end + 1;
 	}
 	free(selector);
+	free(context);
 	if (unsafe)
 	{
 		free(out.data);

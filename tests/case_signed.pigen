@@ -1,0 +1,13 @@
+module case_signed(input logic clk, input logic signed [3:0] sel, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc=x+1;
+ endfunction
+ always_ff @(posedge clk) begin
+  case(sel)
+   8'shff: temp=inc(8'd10);
+   8'h0f: temp=inc(8'd20);
+   default: temp=inc(8'd30);
+  endcase
+  o<=temp;
+ end
+endmodule
