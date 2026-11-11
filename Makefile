@@ -1119,14 +1119,14 @@ child-port-endpoint-test: pigen
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
-	for fixture in endpoint parent destination fabric fabric_peek forward module_order explicit_alias omitted_explicit_alias omitted_valid_only omitted_ready_only omitted_valid_select omitted_ready_select omitted_ready_select_fabric valid_select valid_select_fabric ready_select ready_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
+	for fixture in input_alias input_payload_alias input_selected_alias input_fabric_alias endpoint parent destination fabric fabric_peek forward module_order explicit_alias omitted_explicit_alias omitted_valid_only omitted_ready_only omitted_valid_select omitted_ready_select omitted_ready_select_fabric valid_select valid_select_fabric ready_select ready_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
 		case "$$fixture" in ready_select|ready_select_fabric|omitted_ready_select|omitted_ready_select_fabric) tb=tests/child_port_ready_select_tb.sv ;; *) tb=tests/child_port_endpoint_tb.sv ;; esac; \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim $$tb rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; \
 	if [ $$status -eq 0 ]; then \
-		for fixture in write missing consumers local_consumer explicit_consumers wire_view_consumers expression_consumers; do \
+		for fixture in input_alias_producer write missing consumers local_consumer explicit_consumers wire_view_consumers expression_consumers; do \
 			if ./pigen tests/child_port_$${fixture}_error.pigen -o $$dir/error.sv 2>$$dir/error; then status=1; break; fi; \
 			grep -Eq 'transfer destination is not a writable variable or signal|transfer value requires a compatible expression|elastic endpoint has multiple child consumers|elastic endpoint has both child and local consumers' $$dir/error || { status=1; break; }; \
 		done; \
@@ -1222,7 +1222,7 @@ fabric-endpoint-ownership-test: pigen
 	for fixture in repeated_source source_fanout destination_alias; do \
 		if ./pigen tests/fabric_$${fixture}_error.pigen -o $$dir/output.sv 2>$$dir/error; then \
 			echo "$$fixture unexpectedly compiled" >&2; exit 1; fi; \
-		case $$fixture in destination_alias) expected='fabric destination aliases another child consumer';; \
+		case $$fixture in destination_alias) expected='elastic endpoint has multiple child consumers';; \
 		*) expected='fabric source has another fabric consumer';; esac; \
 		grep -q "$$expected" $$dir/error; \
 	done

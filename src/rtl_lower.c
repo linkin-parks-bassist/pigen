@@ -1289,7 +1289,8 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				const pigen_semantic_expr *expr=pigen_expr_get(sem,control->value);
 				while (expr && expr->kind == PIGEN_EXPR_CONVERSION)
 					expr = pigen_expr_get(sem, expr->as.conversion.operand);
-				if (ready && pigen_lvalue_resolve(sem, control->value).index == PIGEN_INVALID_ID)
+				if (ready && connection->direction == PIGEN_SEMANTIC_OUTPUT &&
+					pigen_lvalue_resolve(sem, control->value).index == PIGEN_INVALID_ID)
 				{
 					/* Fully explicit handshakes may supply read-only readiness.
 					 * Ownership validation excludes automatic consumers. */
@@ -1314,18 +1315,19 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 					pigen_rtl_expr_id expression = lower_expr(lowering, control->value);
 					if (object.index == PIGEN_INVALID_ID || expression.index == PIGEN_INVALID_ID) return -1;
 					pigen_rtl_expr_id scalar = object_expression(lowering, type, object, control->span);
-					if (ready)
+					int drive = ready == (connection->direction == PIGEN_SEMANTIC_OUTPUT);
+					if (drive)
 					{
 						if (pigen_rtl_equation_add_projection_with_owner(lowering->rtl, module,
 							expression, scalar, control->span).index == PIGEN_INVALID_ID) return -1;
-						out->ready = scalar; out->input_ready = object; out->source_ready = object;
 					}
 					else
 					{
 						if (pigen_rtl_equation_add_with_owner(lowering->rtl, module,
 							object, expression, control->span).index == PIGEN_INVALID_ID) return -1;
-						out->valid = scalar; out->input_valid = object;
 					}
+					if (ready) { out->ready = scalar; out->input_ready = object; out->source_ready = object; }
+					else { out->valid = scalar; out->input_valid = object; }
 					continue;
 				}
 				pigen_signal_id signal=pigen_symbol_signal(sem,expr->as.symbol);

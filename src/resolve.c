@@ -2142,7 +2142,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 		connection_index++;
 		child_id = connection->next_sibling;
 	}
-	if (phase == 1)
+	if (phase == 1 || phase == 2)
 	{
 		const pigen_semantic_instance *record = pigen_instance_get(model, instance);
 		for (size_t c = 0; c < record->connection_count; c++)
@@ -2155,7 +2155,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 			size_t port_length = 0, name_length = 0;
 			const char *port_name = pigen_source_span_text(model->sources, port_symbol_record->name, &port_length);
 			const char *connection_name = pigen_source_span_text(model->sources, connection->port_name, &name_length);
-			if (port.direction != PIGEN_SEMANTIC_OUTPUT ||
+			if (port.direction != (phase == 1 ? PIGEN_SEMANTIC_OUTPUT : PIGEN_SEMANTIC_INPUT) ||
 				pigen_transfer_type_descriptor_get(port.transfer_type)->is_static ||
 				!port_name || !connection_name || port_length != name_length ||
 				memcmp(port_name, connection_name, port_length)) continue;
@@ -2163,9 +2163,10 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				expression = pigen_expr_get(model, expression->as.conversion.operand);
 			if (!expression || expression->kind != PIGEN_EXPR_SYMBOL) continue;
 			parent = pigen_signal_get(model, pigen_symbol_signal(model, expression->as.symbol));
-			if (!parent) continue;
+			if (!parent || (phase == 2 && parent->direction == PIGEN_SEMANTIC_INPUT)) continue;
 			if (!pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static)
 			{
+				if (phase == 2) continue;
 				pigen_signal_id parent_id = pigen_symbol_signal(model, expression->as.symbol);
 				int explicit_control = 0;
 				if (!pigen_signal_is_instance_endpoint(model, parent_id)) continue;
@@ -2177,6 +2178,23 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				}
 				if (!explicit_control) continue;
 			}
+			if (phase == 2)
+			{
+				/* A wire already driven by an elastic output retains that
+				 * upstream endpoint identity, including write protection. */
+				for (size_t d = 0; d < model->instance_connection_count; d++)
+				{
+					const pigen_semantic_instance_connection *upstream = &model->instance_connections[d];
+					if (upstream->direction != PIGEN_SEMANTIC_OUTPUT ||
+						upstream->endpoint_view.index == PIGEN_INVALID_ID) continue;
+					const pigen_semantic_expr *bound = pigen_expr_get(model, upstream->value);
+					while (bound && bound->kind == PIGEN_EXPR_CONVERSION)
+						bound = pigen_expr_get(model, bound->as.conversion.operand);
+					if (bound && bound->kind == PIGEN_EXPR_SYMBOL && bound->as.symbol.index == parent->symbol.index)
+						connection->endpoint_view = upstream->endpoint_view;
+				}
+				if (connection->endpoint_view.index != PIGEN_INVALID_ID) continue;
+			}
 			char name[96];
 			snprintf(name, sizeof name, "__pigen_endpoint_view_%u_%zu", instance.index, c);
 			pigen_source_id source = pigen_source_add((pigen_source_manager *)model->sources,
@@ -2187,7 +2205,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				port.data_type, span, span, &symbol, NULL) != PIGEN_DECLARE_OK) return 0;
 			pigen_signal_id view = pigen_signal_add(model, syntax_id, module_id, symbol,
 				port.data_type, port.shape, INVALID_ID(pigen_expr_id), PIGEN_TRANSFER_TYPE_BUF,
-				PIGEN_SEMANTIC_INPUT, span);
+				(phase == 1 ? PIGEN_SEMANTIC_INPUT : PIGEN_SEMANTIC_OUTPUT), span);
 			if (view.index == PIGEN_INVALID_ID) return 0;
 			connection->endpoint_view = view;
 		}
