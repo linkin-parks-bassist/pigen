@@ -1365,7 +1365,7 @@ static char *rewrite_case_statement(const char *source,
 					if (condition.length) pigen_append(&condition, " || ");
 					pigen_append(&condition, "(");
 					pigen_append(&condition, selector);
-					pigen_append(&condition, " == ");
+					pigen_append(&condition, " === ");
 					pigen_append(&condition, value);
 					pigen_append(&condition, ")");
 					free(value);
