@@ -1102,6 +1102,11 @@ fabric-anonymous-test: pigen
 	vvp $$dir/merge-fair; status=$$?; rm -rf $$dir; exit $$status
 
 child-port-endpoint-test: pigen
+	dir=$$(mktemp -d); \
+	./pigen tests/child_port_unused.pigen -o $$dir/design.sv && \
+	iverilog -g2012 -s child_port_unused_tb -o $$dir/sim tests/child_port_unused_tb.sv rtl/pigen_primitives.sv $$dir/design.sv && \
+	vvp $$dir/sim | grep -Fq 'PASS unused child endpoints'; \
+	status=$$?; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
 	for fixture in expression expression_alias expression_join expression_conditional expression_concat expression_parameter_concat; do \
 		tb=tests/child_port_expression_tb.sv; \

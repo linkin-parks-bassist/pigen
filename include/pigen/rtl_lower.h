@@ -125,6 +125,9 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
  * arrives with the test-contract and implementation stages; the stub returns
  * -1 (the unimplemented sentinel) without touching the lowering maps or the
  * RTL model. */
+/* After all structural wiring, tie undriven generated child inputs inactive. */
+int pigen_lower_rtl_endpoint_defaults(pigen_rtl_lowering *lowering,
+	pigen_module_id module);
 int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	pigen_module_id module);
 

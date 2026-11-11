@@ -3081,6 +3081,102 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	return 0;
 }
 
+/* Child instances are emitted from semantic connections, so their output
+ * drivers are not represented by RTL equations. */
+static int child_connection_drives(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_rtl_object_id object)
+{
+	const pigen_semantic_model *sem = lowering->semantics;
+	for (size_t i = 0; i < sem->instance_count; i++)
+	{
+		const pigen_semantic_instance *instance = &sem->instances[i];
+		if (instance->module.index != module.index) continue;
+		for (size_t c = 0; c < instance->connection_count; c++)
+		{
+			const pigen_semantic_instance_connection *connection = &sem->instance_connections[instance->first_connection+c];
+			const pigen_semantic_expr *value = pigen_expr_get(sem, connection->value);
+			while (value && value->kind == PIGEN_EXPR_CONVERSION)
+				value = pigen_expr_get(sem, value->as.conversion.operand);
+			if (!value || value->kind != PIGEN_EXPR_SYMBOL) continue;
+			pigen_signal_id signal = connection->endpoint_view;
+			if (signal.index == PIGEN_INVALID_ID) signal = pigen_symbol_signal(sem, value->as.symbol);
+			if (signal.index >= lowering->lowered_endpoint_count) continue;
+			const pigen_rtl_signal_endpoints *endpoint = &lowering->lowered_endpoints[signal.index];
+			if (connection->direction == PIGEN_SEMANTIC_OUTPUT && endpoint->payload.index == object.index) return 1;
+			const pigen_symbol *port = pigen_symbol_get(sem, connection->port_symbol);
+			size_t n = 0, m = 0;
+			const char *name = pigen_source_span_text(sem->sources, connection->port_name, &n);
+			const char *base = pigen_source_span_text(sem->sources, port->name, &m);
+			if (!name || !base || n != m || memcmp(name, base, n)) continue;
+			int ready = connection->direction == PIGEN_SEMANTIC_INPUT;
+			int explicit_control = 0;
+			for (size_t d = 0; d < instance->connection_count; d++)
+			{
+				size_t length = 0;
+				const char *control = pigen_source_span_text(sem->sources,
+					sem->instance_connections[instance->first_connection+d].port_name, &length);
+				if (control && length == n + 6 && !memcmp(control, name, n) &&
+					!memcmp(control+n, ready ? "_ready" : "_valid", 6)) explicit_control = 1;
+			}
+			if (explicit_control) continue;
+			const pigen_rtl_expr *control = pigen_rtl_expr_get(lowering->rtl, ready ? endpoint->ready : endpoint->valid);
+			if (control && control->kind == PIGEN_RTL_EXPR_OBJECT && control->object.index == object.index) return 1;
+		}
+	}
+	return 0;
+}
+
+int pigen_lower_rtl_endpoint_defaults(pigen_rtl_lowering *lowering,
+	pigen_module_id module)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	pigen_rtl_module_id owner = rtl_module_for_semantic(rtl, sem, module);
+	for (size_t s = 0; s < sem->signal_count; s++)
+	{
+		const pigen_semantic_signal *signal = &sem->signals[s];
+		if (signal->module.index != module.index || !signal_is_child_endpoint(sem, s) ||
+			s >= lowering->lowered_endpoint_count) continue;
+		const pigen_rtl_signal_endpoints *endpoint = &lowering->lowered_endpoints[s];
+		pigen_rtl_object_id targets[2] = {endpoint->source_ready, {PIGEN_INVALID_ID}};
+		if (signal->direction == PIGEN_SEMANTIC_OUTPUT)
+		{
+			targets[0] = endpoint->input_payload;
+			targets[1] = endpoint->input_valid;
+		}
+		for (size_t t = 0; t < 2; t++)
+		{
+			const pigen_rtl_object *object = pigen_rtl_object_get(rtl, targets[t]);
+			/* Borrowed explicit parent controls retain their existing owner. */
+			if (!object || object->semantic_signal.index != s) continue;
+			int driven = child_connection_drives(lowering, module, targets[t]);
+			for (size_t i = 0; !driven && i < rtl->instance_count; i++)
+			{
+				const pigen_rtl_instance *instance = &rtl->instances[i];
+				if (instance->module.index != owner.index || instance->primitive == PIGEN_RTL_PRIMITIVE_INVALID) continue;
+				for (size_t c = 0; c < instance->connection_records.count; c++)
+				{
+					const pigen_rtl_connection *connection = &rtl->connections[instance->connection_records.first+c];
+					if (connection->object.index != targets[t].index || !connection->port) continue;
+					if (!strcmp(connection->port, "packet_out") || !strcmp(connection->port, "out_valid") ||
+						!strcmp(connection->port, "in_ready") ||
+						(instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE2 &&
+						 (!strcmp(connection->port, "i0_ready") || !strcmp(connection->port, "i1_ready")))) driven = 1;
+				}
+			}
+			for (size_t e = 0; !driven && e < rtl->equation_count; e++)
+				if (rtl->equations[e].destination.index == targets[t].index) driven = 1;
+			for (size_t u = 0; !driven && u < rtl->update_count; u++)
+				if (rtl->updates[u].destination.index == targets[t].index) driven = 1;
+			if (driven) continue;
+			pigen_rtl_expr_id zero = pigen_rtl_expr_add_bits(rtl, object->type, 0, signal->span);
+			if (zero.index == PIGEN_INVALID_ID || pigen_rtl_equation_add_with_owner(rtl,
+				owner, targets[t], zero, signal->span).index == PIGEN_INVALID_ID) return -1;
+		}
+	}
+	return 0;
+}
+
 /* Task 8 (6) module composition: returns the published module identity whose
  * four record ranges - objects, instances, equations and processes - cover
  * exactly the witness's records in arena order. The transfer lowering

@@ -1,0 +1,18 @@
+module producer(input logic clk, input logic reset, output bit[8] buf o);
+ logic [7:0] count;
+ always_ff @(posedge clk) begin
+  if(reset) count<=0;
+  else count<=count+1;
+  o<=count;
+ end
+endmodule
+module consumer(input logic clk, input logic reset, input bit[8] buf i, output bit[8] buf o);
+ always_ff @(posedge clk) o<=i;
+endmodule
+module endpoint_top(input logic clk, input logic reset, input logic external_ready);
+ logic [7:0] data, explicit_data; logic explicit_valid;
+ producer a(clk,reset);
+ consumer b(clk,reset);
+ producer c(.clk(clk),.reset(reset),.o(data));
+ producer d(.clk(clk),.reset(reset),.o(explicit_data),.o_valid(explicit_valid),.o_ready(external_ready));
+endmodule

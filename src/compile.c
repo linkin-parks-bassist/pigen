@@ -181,11 +181,12 @@ int pigen_compile_source(pigen_source_manager *sources,
             return -1;
         }
         
-        if (pigen_fabric_lower(&lowering, module, &syntax_tree) != 0)
+        if (pigen_fabric_lower(&lowering, module, &syntax_tree) != 0 ||
+            pigen_lower_rtl_endpoint_defaults(&lowering, module) != 0)
         {
             if (error) { error->origin = (pigen_origin_id){0};
                 error->span = (pigen_source_span){0};
-                error->message = "fabric lowering failed"; }
+                error->message = "structural connection lowering failed"; }
             pigen_free_preprocess_result(&preprocess_result);
             pigen_free_syntax_tree(&syntax_tree);
             pigen_free_semantic_model(&semantic_model);
