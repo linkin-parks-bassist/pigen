@@ -139,20 +139,38 @@ static int connect(pigen_rtl_lowering *lowering, pigen_rtl_module_id module,
 static pigen_rtl_object_id endpoint_control(pigen_rtl_lowering *lowering,
 	const pigen_semantic_instance_connection *connection, int ready)
 {
-	const pigen_semantic_expr *value = connection ? pigen_expr_get(lowering->semantics, connection->value) : NULL;
-	while(value && value->kind==PIGEN_EXPR_CONVERSION)
-		value=pigen_expr_get(lowering->semantics,value->as.conversion.operand);
-	if(value && value->kind==PIGEN_EXPR_SYMBOL)
+	pigen_signal_id signal;
+	const pigen_semantic_expr *value;
+	const pigen_rtl_signal_endpoints *endpoint;
+	const pigen_rtl_expr *expr;
+
+	if (!connection) return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	signal = connection->endpoint_view;
+	if (signal.index == PIGEN_INVALID_ID)
 	{
-		pigen_signal_id signal=pigen_symbol_signal(lowering->semantics,value->as.symbol);
-		if(signal.index<lowering->lowered_endpoint_count)
-		{
-			const pigen_rtl_signal_endpoints *endpoint=&lowering->lowered_endpoints[signal.index];
-			const pigen_rtl_expr *expr=pigen_rtl_expr_get(lowering->rtl,ready?endpoint->ready:endpoint->valid);
-			if(expr && expr->kind==PIGEN_RTL_EXPR_OBJECT) return expr->object;
-		}
+		value = pigen_expr_get(lowering->semantics, connection->value);
+		while (value && value->kind == PIGEN_EXPR_CONVERSION)
+			value = pigen_expr_get(lowering->semantics,
+				value->as.conversion.operand);
+		if (value && value->kind == PIGEN_EXPR_SYMBOL)
+			signal = pigen_symbol_signal(lowering->semantics, value->as.symbol);
 	}
-	return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	if (signal.index >= lowering->lowered_endpoint_count)
+		return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	endpoint = &lowering->lowered_endpoints[signal.index];
+	expr = pigen_rtl_expr_get(lowering->rtl,
+		ready ? endpoint->ready : endpoint->valid);
+	return expr && expr->kind == PIGEN_RTL_EXPR_OBJECT ? expr->object :
+		(pigen_rtl_object_id){PIGEN_INVALID_ID};
+}
+
+static pigen_rtl_object_id connection_control(pigen_rtl_lowering *lowering,
+	const pigen_semantic_instance_connection *payload,
+	const pigen_semantic_instance_connection *control, int ready)
+{
+	pigen_rtl_object_id object = connection_payload(lowering, control);
+	return object.index != PIGEN_INVALID_ID ? object :
+		endpoint_control(lowering, payload, ready);
 }
 
 static pigen_signal_id module_input_named(pigen_semantic_model *model,
@@ -446,7 +464,8 @@ static int route_through_mergeN(pigen_rtl_lowering *lowering,
 		return 0;
 	for (i = 0; i < count; i++)
 	{
-		pigen_rtl_literal_word word = {(uint64_t)i, 0, 0};
+		/* Concatenation places source zero in the most significant lane. */
+		pigen_rtl_literal_word word = {(uint64_t)(count - 1 - i), 0, 0};
 		pigen_rtl_expr_id index = pigen_rtl_expr_add_literal(rtl,
 			PIGEN_RTL_EXPR_INTEGER, index_type, &word, 64, 0, span);
 		pigen_rtl_expr_id ready_expr = pigen_rtl_expr_add_object(rtl,
@@ -592,14 +611,10 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 			if (!sp || !dp) return -1;
 			sp_obj = connection_payload(lowering, sp);
 			dp_obj = connection_payload(lowering, dp);
-			sv_obj = connection_payload(lowering, sv);
-			dv_obj = connection_payload(lowering, dv);
-			sr_obj = connection_payload(lowering, sr);
-			dr_obj = connection_payload(lowering, dr);
-			if (sv_obj.index==PIGEN_INVALID_ID) sv_obj=endpoint_control(lowering,sp,0);
-			if (sr_obj.index==PIGEN_INVALID_ID) sr_obj=endpoint_control(lowering,sp,1);
-			if (dv_obj.index==PIGEN_INVALID_ID) dv_obj=endpoint_control(lowering,dp,0);
-			if (dr_obj.index==PIGEN_INVALID_ID) dr_obj=endpoint_control(lowering,dp,1);
+			sv_obj = connection_control(lowering, sp, sv, 0);
+			dv_obj = connection_control(lowering, dp, dv, 0);
+			sr_obj = connection_control(lowering, sp, sr, 1);
+			dr_obj = connection_control(lowering, dp, dr, 1);
 			if (sp_obj.index == PIGEN_INVALID_ID ||
 				dp_obj.index == PIGEN_INVALID_ID)
 				return -1;
@@ -698,8 +713,8 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 						qr = find_port(model, sinst, syntax,
 							q->as.fabric_connection.left_port, "_ready");
 						lsp = connection_payload(lowering, qp);
-						lsv = connection_payload(lowering, qv);
-						lsr = connection_payload(lowering, qr);
+						lsv = connection_control(lowering, qp, qv, 0);
+						lsr = connection_control(lowering, qp, qr, 1);
 						if (lsp.index == PIGEN_INVALID_ID ||
 							lsv.index == PIGEN_INVALID_ID ||
 							lsr.index == PIGEN_INVALID_ID)
@@ -774,8 +789,8 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 						qr = find_port(model, sinst, syntax,
 							q->as.fabric_connection.left_port, "_ready");
 						lsp = connection_payload(lowering, qp);
-						lsv = connection_payload(lowering, qv);
-						lsr = connection_payload(lowering, qr);
+						lsv = connection_control(lowering, qp, qv, 0);
+						lsr = connection_control(lowering, qp, qr, 1);
 						if (lsp.index == PIGEN_INVALID_ID ||
 							lsv.index == PIGEN_INVALID_ID ||
 							lsr.index == PIGEN_INVALID_ID)
