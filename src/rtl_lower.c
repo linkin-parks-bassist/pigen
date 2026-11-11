@@ -379,6 +379,24 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 		free(words);
 		break;
 	}
+	case PIGEN_CONST_EXPR_CONDITIONAL:
+	{
+		pigen_const_expr snapshot = *owner;
+		pigen_conditional_operation operation = snapshot.as.conditional.operation;
+		pigen_rtl_expr_id condition = pigen_lower_rtl_expression(lowering, snapshot.as.conditional.condition);
+		pigen_rtl_expr_id when_true = pigen_lower_rtl_expression(lowering, snapshot.as.conditional.when_true);
+		pigen_rtl_expr_id when_false = pigen_lower_rtl_expression(lowering, snapshot.as.conditional.when_false);
+		if (condition.index == PIGEN_INVALID_ID || when_true.index == PIGEN_INVALID_ID ||
+			when_false.index == PIGEN_INVALID_ID) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		pigen_conditional_resolution resolution = {
+			{PIGEN_CONVERSION_IDENTITY, operation.condition_data_type, operation.condition_data_type},
+			{PIGEN_CONVERSION_IDENTITY, operation.when_true_data_type, operation.when_true_data_type},
+			{PIGEN_CONVERSION_IDENTITY, operation.when_false_data_type, operation.when_false_data_type},
+			operation};
+		result = pigen_rtl_expr_add_conditional(rtl, result_type, &resolution,
+			condition, when_true, when_false, origin);
+		break;
+	}
 	case PIGEN_CONST_EXPR_UNARY:
 	{
 		pigen_unary_operation operation = owner->as.unary.operation;
