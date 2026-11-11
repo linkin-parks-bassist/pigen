@@ -1705,6 +1705,10 @@ ordinary:
 			if (!known || type.index == PIGEN_INVALID_ID)
 				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 			constant = pigen_expr_constant(sem, known->value);
+			/* Preserve multiword values and four-state masks through the
+			 * ordinary constant adapter before considering a host-word fold. */
+			pigen_rtl_expr_id parameter_value = pigen_lower_rtl_expression(lowering, constant);
+			if (parameter_value.index != PIGEN_INVALID_ID) return parameter_value;
 			if (constant.index == PIGEN_INVALID_ID ||
 				!pigen_const_expr_evaluate_u64(sem, constant, &value))
 				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
