@@ -12,7 +12,7 @@ pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preproc
 	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c $(LDLIBS)
 
 
-test: pigen specialization-test packed-count-error-test child-port-endpoint-test fabric-anonymous-test case-wildcard-test case-width-test case-signed-test case-nested-test ordinary-case-test case-guarded-complex-test ordinary-sv-preserve-test case-guarded-mixed-test mixed-write-conflict-error-test dependent-ordered-writes-test multiple-ordered-writes-test final-else-guard-dependency-test else-if-guard-dependency-test else-guard-dependency-test nested-guard-chain-dependency-test differing-guardless-dependency-test bare-uint-error-test int-ports-sv-test mixed-plain-always-test guardless-blocking-dependency-test same-guardless-dependency-test guardless-blocking-dependency-error-test dependent-parameter-override-test explicit-elastic-controls-test deep-guarded-blocking-dependency-test blocking-dependency-guard-error-test guarded-blocking-dependency-test blocking-dependency-inline-test directive-sv-test positional-elastic-child-test unpacked-struct-sv-test nba-dependency-split-test union-sv-test localparam-override-test generate-if-sv-test independent-blocking-function-test buffered-instance-local-conflict-error-test buffered-instance-producer-error-test mixed-clocked-task-error-test async-reset-always-sv-test async-reset-sv-test mixed-clocked-order-error-test nested-mixed-clocked-function-test mixed-clocked-function-test parent-parameter-override-test implicit-elastic-destinations-test implicit-elastic-child-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test typed-param-test integer-param-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
+test: pigen fabric-mixed-ownership-test specialization-test packed-count-error-test child-port-endpoint-test fabric-anonymous-test case-wildcard-test case-width-test case-signed-test case-nested-test ordinary-case-test case-guarded-complex-test ordinary-sv-preserve-test case-guarded-mixed-test mixed-write-conflict-error-test dependent-ordered-writes-test multiple-ordered-writes-test final-else-guard-dependency-test else-if-guard-dependency-test else-guard-dependency-test nested-guard-chain-dependency-test differing-guardless-dependency-test bare-uint-error-test int-ports-sv-test mixed-plain-always-test guardless-blocking-dependency-test same-guardless-dependency-test guardless-blocking-dependency-error-test dependent-parameter-override-test explicit-elastic-controls-test deep-guarded-blocking-dependency-test blocking-dependency-guard-error-test guarded-blocking-dependency-test blocking-dependency-inline-test directive-sv-test positional-elastic-child-test unpacked-struct-sv-test nba-dependency-split-test union-sv-test localparam-override-test generate-if-sv-test independent-blocking-function-test buffered-instance-local-conflict-error-test buffered-instance-producer-error-test mixed-clocked-task-error-test async-reset-always-sv-test async-reset-sv-test mixed-clocked-order-error-test nested-mixed-clocked-function-test mixed-clocked-function-test parent-parameter-override-test implicit-elastic-destinations-test implicit-elastic-child-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test typed-param-test integer-param-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
 	./tests/smoke.sh ./pigen
 
 source-test:
@@ -1119,7 +1119,7 @@ child-port-endpoint-test: pigen
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
-	for fixture in endpoint parent destination fabric forward module_order explicit_alias explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
+	for fixture in endpoint parent destination fabric fabric_peek forward module_order explicit_alias explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim tests/child_port_endpoint_tb.sv rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
@@ -1169,4 +1169,12 @@ packed-count-error-test: pigen
 	for fixture in zero unknown negative shift_zero static_zero; do \
 		if ./pigen tests/packed_count_$${fixture}_error.pigen -o $$dir/out.sv 2>$$dir/error; then status=1; break; fi; \
 		grep -Fq 'type count must be a positive integer' $$dir/error || { status=1; break; }; \
+	done; rm -rf $$dir; exit $$status
+
+.PHONY: fabric-mixed-ownership-test
+fabric-mixed-ownership-test: pigen
+	dir=$$(mktemp -d); status=0; \
+	for fixture in child_consumer wire_consumer local_consumer local_producer child_producer direction missing_endpoint; do \
+		if ./pigen tests/fabric_$${fixture}_error.pigen -o $$dir/out.sv 2>$$dir/error; then status=1; break; fi; \
+		grep -Eq 'fabric (source|destination|endpoint)' $$dir/error || { status=1; break; }; \
 	done; rm -rf $$dir; exit $$status
