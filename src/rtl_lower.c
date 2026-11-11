@@ -343,16 +343,19 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 		break;
 	case PIGEN_CONST_EXPR_EXACT_INTEGER:
 	{
-		/* An owner-constructable exact-integer constant lowers IDENTICALLY to
-		 * the bare integer constant: one PIGEN_RTL_EXPR_INTEGER carrying the
-		 * owner-reported non-negative value and the lowered exact-integer type.
-		 * The result type (lowered above) already gates a negative value to the
-		 * sentinel, so here the value always evaluates to a u64. */
-		uint64_t exact_value;
-		if (!pigen_const_expr_evaluate_u64(sem, expression, &exact_value))
+		const pigen_integer *integer = &sem->integers[owner->as.exact_integer.index];
+		if (integer->negative) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		size_t count = integer->limb_count / 2 + (integer->limb_count % 2 != 0);
+		if (!count) count = 1;
+		if (count > SIZE_MAX / sizeof(pigen_rtl_literal_word) || count > SIZE_MAX / 64)
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-		result = pigen_rtl_expr_add_integer(rtl, result_type, exact_value,
-			origin);
+		pigen_rtl_literal_word *words = calloc(count, sizeof *words);
+		if (!words) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		for (size_t i = 0; i < integer->limb_count; i++)
+			words[i / 2].value |= (uint64_t)sem->integer_limbs[integer->first_limb+i] << ((i % 2)*32);
+		result = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_INTEGER,
+			result_type, words, count*64, 0, origin);
+		free(words);
 		break;
 	}
 	case PIGEN_CONST_EXPR_BITS:
