@@ -1119,7 +1119,7 @@ child-port-endpoint-test: pigen
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
-	for fixture in endpoint parent destination fabric fabric_peek forward module_order explicit_alias explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
+	for fixture in endpoint parent destination fabric fabric_peek forward module_order explicit_alias valid_select valid_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim tests/child_port_endpoint_tb.sv rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \

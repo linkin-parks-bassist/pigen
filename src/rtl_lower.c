@@ -1252,6 +1252,9 @@ done:
 	return ok;
 }
 
+static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
+	pigen_expr_id expression);
+
 /* Bind a typed child-port view to the explicitly connected parent triplet. */
 static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index,
 	pigen_rtl_signal_endpoints *out)
@@ -1284,7 +1287,30 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				if(!ready && memcmp(name+base_length,"_valid",6)) continue;
 				bound[ready] = 1;
 				const pigen_semantic_expr *expr=pigen_expr_get(sem,control->value);
-				if(!expr || expr->kind!=PIGEN_EXPR_SYMBOL) continue;
+				while (expr && expr->kind == PIGEN_EXPR_CONVERSION)
+					expr = pigen_expr_get(sem, expr->as.conversion.operand);
+				if (!expr || expr->kind != PIGEN_EXPR_SYMBOL)
+				{
+					if (ready) continue;
+					/* The child may drive a selected bit of a parent vector.
+					 * Publish a scalar observation for endpoint consumers. */
+					const pigen_semantic_signal *view = &sem->signals[signal_index];
+					char *view_name = signal_spelling(lowering, view);
+					if (!view_name) return -1;
+					pigen_rtl_type_id type = pigen_lower_rtl_type(lowering,
+						pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED));
+					pigen_rtl_module_id module = rtl_module_for_semantic(lowering->rtl, sem, view->module);
+					pigen_rtl_object_id object = add_named_object(lowering, module,
+						type, PIGEN_SEMANTIC_INTERNAL, signal_index, control->span, view_name, "_valid");
+					free(view_name);
+					pigen_rtl_expr_id expression = lower_expr(lowering, control->value);
+					if (object.index == PIGEN_INVALID_ID || expression.index == PIGEN_INVALID_ID ||
+						pigen_rtl_equation_add_with_owner(lowering->rtl, module,
+							object, expression, control->span).index == PIGEN_INVALID_ID) return -1;
+					out->valid = object_expression(lowering, type, object, control->span);
+					out->input_valid = object;
+					continue;
+				}
 				pigen_signal_id signal=pigen_symbol_signal(sem,expr->as.symbol);
 				if(signal.index>=lowering->lowered_endpoint_count) return -1;
 				pigen_rtl_object_id object=lowering->lowered_endpoints[signal.index].payload;
