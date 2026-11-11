@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T17:49:26+11:00"
+revised_at: "2026-11-11T17:50:31+11:00"
 checked_at: "2026-09-30T20:31:53+10:00"
 ---
 
@@ -14,7 +14,7 @@ Constant lowering resolves types and children bottom-up. INTEGER, EXACT_INTEGER,
 
 Semantic index/select lowering uses lower_coordinate for negative constants: evaluate the mathematical coordinate and publish a signed concrete RTL integer with sign/magnitude, without constructing a standalone negative exact hardware type. Other coordinates follow ordinary lowering. Range widths and endpoint overlap/equality share signed evaluation; count rules remain separate (how/to/normalize/declaration/counts.md).
 
-The signed evaluator reuses nonnegative evaluation, then handles negative exact/packed literals, parameters, conversions, unary +/−/~/!, checked arithmetic, comparisons, logical/bitwise operators and conditionals. Conditions inspect every literal bit: any one establishes truth despite X/Z; otherwise unknown bits remain unresolved. Only the selected branch evaluates. Logical short-circuiting skips unnecessary operands. Resolved fixed widths/signedness apply. Unknown, unsupported or overflowing values fail. Shifts support operands through 64 bits: logical right zero-fills, arithmetic right sign-fills, and left shifts truncate. Signed/unsigned queries share literal reductions at any width; zero dominates AND and one dominates OR despite X/Z, while unresolved parity fails.
+The signed evaluator reuses nonnegative evaluation, then handles negative exact/packed literals, parameters, conversions, unary +/−/~/!, checked arithmetic, comparisons, logical/bitwise operators and conditionals. Conditions/NOT/AND/OR inspect every literal bit: any one establishes truth despite X/Z; otherwise unknown bits remain unresolved. Only the selected branch evaluates. Logical short-circuiting skips unnecessary operands. Resolved fixed widths/signedness apply. Unknown, unsupported or overflowing values fail. Shifts support operands through 64 bits: logical right zero-fills, arithmetic right sign-fills, and left shifts truncate. Signed/unsigned queries share literal reductions at any width; zero dominates AND and one dominates OR despite X/Z, while unresolved parity fails.
 
 The u64 query rejects left shifts overflowing its capacity when the declared result is wider, and rejects wide XNOR results whose high ones cannot fit. Runtime RTL retains those operations. Checked repeated squaring supports signed powers; negative exponents yield zero except for bases ±1. Zero to a negative exponent fails. Powers up to 64 bits wrap at fixed widths; mathematical powers reject overflow. Multiword powers/evaluation and symbolic bounds remain unfinished. Source bitwise witnesses use explicitly sized signed operands; untyped negative bitwise expressions need type-resolution work.
 

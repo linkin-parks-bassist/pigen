@@ -906,6 +906,18 @@ static int literal_truth(pigen_semantic_model *model,
 	return 1;
 }
 
+static int evaluate_truth(pigen_semantic_model *model,
+	pigen_const_expr_id expression, int64_t *value, size_t remaining)
+{
+	uint64_t positive;
+	if (!remaining) return 0;
+	if (literal_truth(model, expression, value)) return 1;
+	if (evaluate_i64(model, expression, value, remaining-1)) { *value = !!*value; return 1; }
+	if (!evaluate_u64(model, expression, &positive, remaining-1)) return 0;
+	*value = positive != 0;
+	return 1;
+}
+
 static int evaluate_literal_reduction(pigen_semantic_model *model,
 	pigen_const_expr known, int64_t *value, size_t remaining)
 {
@@ -1279,11 +1291,28 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 		case PIGEN_CONST_EXPR_UNARY:
 		{
 			int64_t reduced;
+			if (known->as.unary.operation.operator == PIGEN_UNARY_LOGICAL_NOT)
+			{
+				if (!evaluate_truth(model, known->as.unary.operand, &reduced, remaining-1)) return 0;
+				*value = !reduced;
+				return 1;
+			}
 			if (!evaluate_literal_reduction(model, *known, &reduced, remaining)) return 0;
 			*value = (uint64_t)reduced;
 			return 1;
 		}
 		case PIGEN_CONST_EXPR_BINARY:
+			if (known->as.binary.operation.operator == PIGEN_BINARY_LOGICAL_AND ||
+				known->as.binary.operation.operator == PIGEN_BINARY_LOGICAL_OR)
+			{
+				int64_t truth;
+				if (!evaluate_truth(model, known->as.binary.left, &truth, remaining-1)) return 0;
+				int is_or = known->as.binary.operation.operator == PIGEN_BINARY_LOGICAL_OR;
+				if (truth == is_or) { *value = truth; return 1; }
+				if (!evaluate_truth(model, known->as.binary.right, &truth, remaining-1)) return 0;
+				*value = truth;
+				return 1;
+			}
 			if (!evaluate_u64(model, known->as.binary.left, &left,
 				remaining - 1) ||
 				!evaluate_u64(model, known->as.binary.right, &right,

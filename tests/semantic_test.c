@@ -501,6 +501,15 @@ int main(void)
 		pigen_const_expr_id wide_choice=pigen_const_expr_intern_conditional(&model,wide_choose,wide_condition,width_8,invalid_branch);
 		assert(pigen_const_expr_evaluate_i64(&model,wide_choice,&coordinate) && coordinate==8);
 		assert(pigen_const_expr_evaluate_u64(&model,wide_choice,&span) && span==8);
+		pigen_const_expr_id negated_wide=pigen_const_expr_intern_unary(&model,
+			(pigen_unary_operation){PIGEN_UNARY_LOGICAL_NOT,wide_reduction_type,boolean_type},wide_condition);
+		assert(pigen_const_expr_evaluate_u64(&model,negated_wide,&span) && span==0);
+		pigen_binary_operation wide_or={PIGEN_BINARY_LOGICAL_OR,wide_reduction_type,unsized_integer_data_type,boolean_type};
+		pigen_const_expr_id wide_logical=pigen_const_expr_intern_binary(&model,wide_or,wide_condition,invalid_branch);
+		assert(pigen_const_expr_evaluate_u64(&model,wide_logical,&span) && span==1);
+		wide_or.operator=PIGEN_BINARY_LOGICAL_AND;
+		wide_logical=pigen_const_expr_intern_binary(&model,wide_or,wide_condition,invalid_branch);
+		assert(!pigen_const_expr_evaluate_u64(&model,wide_logical,&span));
 		wide_bits[128]=PIGEN_BIT_ZERO;
 		wide_condition=pigen_const_expr_intern_bits(&model,wide_bits,129,wide_reduction_type);
 		wide_choice=pigen_const_expr_intern_conditional(&model,wide_choose,wide_condition,width_8,width_1);
