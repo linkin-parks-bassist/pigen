@@ -1289,6 +1289,15 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				const pigen_semantic_expr *expr=pigen_expr_get(sem,control->value);
 				while (expr && expr->kind == PIGEN_EXPR_CONVERSION)
 					expr = pigen_expr_get(sem, expr->as.conversion.operand);
+				if (ready && pigen_lvalue_resolve(sem, control->value).index == PIGEN_INVALID_ID)
+				{
+					/* Fully explicit handshakes may supply read-only readiness.
+					 * Ownership validation excludes automatic consumers. */
+					out->ready = lower_expr(lowering, control->value);
+					out->input_ready = out->source_ready = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+					if (out->ready.index == PIGEN_INVALID_ID) return -1;
+					continue;
+				}
 				if (!expr || expr->kind != PIGEN_EXPR_SYMBOL)
 				{
 					/* Preserve selected control bindings through scalar endpoints:

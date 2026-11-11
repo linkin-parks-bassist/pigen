@@ -2517,6 +2517,9 @@ static int connection_consumes_endpoint(const pigen_semantic_model *model,
 	return 0;
 }
 
+static int endpoint_has_readonly_ready(pigen_semantic_model *model,
+	pigen_signal_id endpoint);
+
 static int validate_instance_consumer_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
@@ -2545,6 +2548,11 @@ static int validate_instance_consumer_ownership(resolver *resolver)
 					pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static ||
 					!connection_consumes_endpoint(model, connection->value,
 						(pigen_signal_id){(uint32_t)signal})) continue;
+				if (endpoint_has_readonly_ready(model, (pigen_signal_id){(uint32_t)signal}))
+				{
+					free(owned);
+					return fail(resolver, connection->span, "automatic consumer conflicts with read-only child ready binding");
+				}
 				if (owned[signal])
 				{
 					free(owned);
@@ -2559,6 +2567,12 @@ static int validate_instance_consumer_ownership(resolver *resolver)
 		const pigen_semantic_transfer *transfer = &model->transfers[t];
 		const pigen_transfer_signal_use *uses = pigen_transfer_signal_uses(model,
 			(pigen_transfer_id){(uint32_t)t});
+		for (size_t u = 0; uses && u < transfer->signal_use_count; u++)
+			if ((uses[u].roles & PIGEN_TRANSFER_CONSUMER) && endpoint_has_readonly_ready(model, uses[u].signal))
+			{
+				free(owned);
+				return fail(resolver, transfer->span, "automatic consumer conflicts with read-only child ready binding");
+			}
 		for (size_t u = 0; uses && u < transfer->signal_use_count; u++)
 			if ((uses[u].roles & PIGEN_TRANSFER_CONSUMER) && owned[uses[u].signal.index])
 			{
@@ -2593,6 +2607,34 @@ static pigen_signal_id canonical_endpoint(const pigen_semantic_model *model, pig
 			pigen_symbol_signal(model, value->as.symbol).index == signal.index) return connection->endpoint_view;
 	}
 	return signal;
+}
+
+static int endpoint_has_readonly_ready(pigen_semantic_model *model,
+	pigen_signal_id endpoint)
+{
+	endpoint = canonical_endpoint(model, endpoint);
+	for (size_t i = 0; i < model->instance_count; i++)
+	{
+		const pigen_semantic_instance *instance = &model->instances[i];
+		for (size_t c = 0; c < instance->connection_count; c++)
+		{
+			const pigen_semantic_instance_connection *payload = &model->instance_connections[instance->first_connection+c];
+			if (payload->direction != PIGEN_SEMANTIC_OUTPUT ||
+				canonical_endpoint(model, connection_signal(model, payload)).index != endpoint.index) continue;
+			const pigen_symbol *port = pigen_symbol_get(model, payload->port_symbol);
+			size_t n = 0;
+			const char *base = pigen_source_span_text(model->sources, port->name, &n);
+			for (size_t d = 0; base && d < instance->connection_count; d++)
+			{
+				const pigen_semantic_instance_connection *control = &model->instance_connections[instance->first_connection+d];
+				size_t m = 0;
+				const char *name = pigen_source_span_text(model->sources, control->port_name, &m);
+				if (name && m == n+6 && !memcmp(name, base, n) && !memcmp(name+n, "_ready", 6) &&
+					pigen_lvalue_resolve(model, control->value).index == PIGEN_INVALID_ID) return 1;
+			}
+		}
+	}
+	return 0;
 }
 
 static const pigen_semantic_instance_connection *resolved_fabric_port(resolver *resolver,
@@ -2674,6 +2716,8 @@ static int validate_fabric_ownership(resolver *resolver)
 				if (src.index == PIGEN_INVALID_ID || dst.index == PIGEN_INVALID_ID)
 					return fail(resolver, edge->location.source_span, "fabric endpoint requires a signal binding");
 				int consuming = !pigen_transfer_type_descriptor_get(model->signals[source->port_signal.index].transfer_type)->is_static;
+				if (consuming && endpoint_has_readonly_ready(model, src))
+					return fail(resolver, edge->location.source_span, "automatic consumer conflicts with read-only child ready binding");
 				if (consuming && !validate_prior_fabric_sources(resolver,
 					(pigen_module_id){(uint32_t)m}, edge, src)) return 0;
 				if (model->signals[dst.index].direction == PIGEN_SEMANTIC_INPUT)
