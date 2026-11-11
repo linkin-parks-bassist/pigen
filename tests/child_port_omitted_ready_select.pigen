@@ -1,0 +1,17 @@
+module producer(input logic clk, input logic reset, output bit[8] buf o);
+ logic [7:0] count;
+ always_ff @(posedge clk) begin
+  if(reset) count<=0;
+  else count<=count+1;
+  o<=count;
+ end
+endmodule
+module consumer(input logic clk, input logic reset, input bit[8] buf i, output bit[8] buf o);
+ always_ff @(posedge clk) o<=i;
+endmodule
+module endpoint_top(input logic clk, input logic reset, output bit[8] buf result);
+ logic [7:0] wire_data; logic wire_valid; logic [1:0] wire_ready;
+ assign wire_ready[0] = 1'b1;
+ producer a(.clk(clk),.reset(reset),.o_valid(wire_valid),.o_ready(wire_ready[1]));
+ consumer b(.clk(clk),.reset(reset),.i(a.o),.o(result));
+endmodule

@@ -2163,7 +2163,20 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				expression = pigen_expr_get(model, expression->as.conversion.operand);
 			if (!expression || expression->kind != PIGEN_EXPR_SYMBOL) continue;
 			parent = pigen_signal_get(model, pigen_symbol_signal(model, expression->as.symbol));
-			if (!parent || !pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static) continue;
+			if (!parent) continue;
+			if (!pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static)
+			{
+				pigen_signal_id parent_id = pigen_symbol_signal(model, expression->as.symbol);
+				int explicit_control = 0;
+				if (!pigen_signal_is_instance_endpoint(model, parent_id)) continue;
+				for (size_t d = 0; d < record->connection_count; d++)
+				{
+					const pigen_semantic_instance_connection *control = &model->instance_connections[record->first_connection+d];
+					if (control->port_signal.index == connection->port_signal.index &&
+						!spelling_text_equal(resolver, control->port_name, connection->port_name)) explicit_control = 1;
+				}
+				if (!explicit_control) continue;
+			}
 			char name[96];
 			snprintf(name, sizeof name, "__pigen_endpoint_view_%u_%zu", instance.index, c);
 			pigen_source_id source = pigen_source_add((pigen_source_manager *)model->sources,
@@ -2200,9 +2213,13 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 			if (port.module.index != child_module.index || port.direction == PIGEN_SEMANTIC_INTERNAL ||
 				pigen_signal_is_instance_endpoint(model, (pigen_signal_id){(uint32_t)p}))
 				continue;
+			port_symbol_record = pigen_symbol_get(model, port.symbol);
 			for (size_t c = 0; c < record->connection_count; c++)
-				if (model->instance_connections[record->first_connection + c].port_signal.index == p)
-					connected = 1;
+			{
+				const pigen_semantic_instance_connection *connection = &model->instance_connections[record->first_connection+c];
+				if (connection->port_signal.index == p &&
+					spelling_text_equal(resolver, connection->port_name, port_symbol_record->name)) connected = 1;
+			}
 			if (connected) continue;
 			port_symbol_record = pigen_symbol_get(model, port.symbol);
 			port_name = port_symbol_record->name;

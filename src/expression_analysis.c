@@ -655,6 +655,15 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 						const pigen_semantic_expr *value;
 						const pigen_semantic_signal *signal;
 						if (connection->port_symbol.index != port.index) continue;
+						/* Controls share the payload's port identity, but are not
+						 * the value denoted by instance.payload. */
+						size_t n = 0, m = 0;
+						const char *connection_name = pigen_source_span_text(analyzer->model->sources,
+							connection->port_name, &n);
+						const pigen_symbol *port_record = pigen_symbol_get(analyzer->model, port);
+						const char *port_name = port_record ? pigen_source_span_text(analyzer->model->sources,
+							port_record->name, &m) : NULL;
+						if (!connection_name || !port_name || n != m || memcmp(connection_name, port_name, n)) continue;
 						if (connection->endpoint_view.index != PIGEN_INVALID_ID)
 						{
 							signal = pigen_signal_get(analyzer->model, connection->endpoint_view);
