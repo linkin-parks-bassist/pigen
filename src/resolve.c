@@ -2070,8 +2070,11 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 			 * output lvalues. Endpoint expressions wait for normal input resolution. */
 			const pigen_syntax_expr *expr = pigen_syntax_expr_get(&resolver->syntax->expressions,
 				binding);
-			while (expr && expr->kind == PIGEN_SYNTAX_EXPR_GROUP)
-				expr = pigen_syntax_expr_get(&resolver->syntax->expressions, expr->as.group.operand);
+			while (expr && (expr->kind == PIGEN_SYNTAX_EXPR_GROUP ||
+				expr->kind == PIGEN_SYNTAX_EXPR_INDEX || expr->kind == PIGEN_SYNTAX_EXPR_SELECT))
+				expr = pigen_syntax_expr_get(&resolver->syntax->expressions,
+					expr->kind == PIGEN_SYNTAX_EXPR_GROUP ? expr->as.group.operand :
+					expr->kind == PIGEN_SYNTAX_EXPR_INDEX ? expr->as.index.base : expr->as.select.base);
 			const pigen_symbol *parent = expr && expr->kind == PIGEN_SYNTAX_EXPR_NAME ?
 				pigen_symbol_get(model, pigen_symbol_lookup(model, module->scope,
 					token_spelling(resolver, expr->as.atom.token))) : NULL;
@@ -2191,10 +2194,10 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 			pigen_signal_id parent_id = INVALID_ID(pigen_signal_id);
 			if (expression && expression->kind == PIGEN_EXPR_SYMBOL)
 				parent_id = pigen_symbol_signal(model, expression->as.symbol);
-			else if (phase == 1)
+			else if (expression)
 			{
 				const pigen_semantic_lvalue *projection = pigen_lvalue_get(model,
-					pigen_lvalue_resolve(model, connection->value));
+					pigen_lvalue_resolve(model, (pigen_expr_id){(uint32_t)(expression-model->expressions)}));
 				if (projection && projection->kind == PIGEN_LVALUE_PROJECTION)
 					parent_id = projection->as.projection.signal;
 			}
@@ -2214,7 +2217,7 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				}
 				if (!explicit_control) continue;
 			}
-			if (phase == 2)
+			if (phase == 2 && expression && expression->kind == PIGEN_EXPR_SYMBOL)
 			{
 				/* A wire already driven by an elastic output retains that
 				 * upstream endpoint identity, including write protection. */
@@ -2382,7 +2385,8 @@ resolve_body:
 			const pigen_semantic_expr *value = pigen_expr_get(model, connection->value);
 			while (value && value->kind == PIGEN_EXPR_CONVERSION)
 				value = pigen_expr_get(model, value->as.conversion.operand);
-			if (connection->direction != PIGEN_SEMANTIC_INPUT || port.direction != PIGEN_SEMANTIC_INPUT ||
+			if (connection->endpoint_view.index != PIGEN_INVALID_ID ||
+				connection->direction != PIGEN_SEMANTIC_INPUT || port.direction != PIGEN_SEMANTIC_INPUT ||
 				pigen_transfer_type_descriptor_get(port.transfer_type)->is_static || !value || value->kind == PIGEN_EXPR_SYMBOL) continue;
 			/* Control sibling connections share port_signal: only adapt payload. */
 			const pigen_symbol *port_symbol = pigen_symbol_get(model, port.symbol);
@@ -2855,11 +2859,62 @@ static int validate_fabric_ownership(resolver *resolver)
 	return 1;
 }
 
+static void mark_endpoint_view_driven(pigen_semantic_model *model, pigen_signal_id signal)
+{
+	if (signal.index == PIGEN_INVALID_ID) return;
+	for (size_t c = 0; c < model->instance_connection_count; c++)
+		if (model->instance_connections[c].direction == PIGEN_SEMANTIC_INPUT &&
+			model->instance_connections[c].endpoint_view.index == signal.index)
+			model->instance_connections[c].endpoint_view_driven = 1;
+}
+
+static void resolve_endpoint_view_drivers(resolver *resolver)
+{
+	pigen_semantic_model *model = resolver->model;
+	for (size_t c = 0; c < model->instance_connection_count; c++)
+	{
+		const pigen_semantic_instance_connection *connection = &model->instance_connections[c];
+		if (connection->direction != PIGEN_SEMANTIC_OUTPUT) continue;
+		const pigen_semantic_expr *value = pigen_expr_get(model, connection->value);
+		while (value && value->kind == PIGEN_EXPR_CONVERSION)
+			value = pigen_expr_get(model, value->as.conversion.operand);
+		if (value && value->kind == PIGEN_EXPR_SYMBOL)
+			mark_endpoint_view_driven(model, pigen_symbol_signal(model, value->as.symbol));
+	}
+	for (size_t t = 0; t < model->transfer_count; t++)
+	{
+		const pigen_transfer_signal_use *uses = pigen_transfer_signal_uses(model,
+			(pigen_transfer_id){(uint32_t)t});
+		for (size_t u = 0; u < model->transfers[t].signal_use_count; u++)
+			if (uses[u].roles & PIGEN_TRANSFER_SIGNAL_WRITE) mark_endpoint_view_driven(model, uses[u].signal);
+	}
+	for (size_t m = 0; m < model->module_count; m++)
+	{
+		const pigen_syntax_node *module = pigen_syntax_get(resolver->syntax, model->modules[m].syntax);
+		for (pigen_syntax_id i = module->first_child; i.index != PIGEN_INVALID_ID; )
+		{
+			const pigen_syntax_node *item = pigen_syntax_get(resolver->syntax, i);
+			i = item->next_sibling;
+			if (item->kind != PIGEN_SYNTAX_FABRIC) continue;
+			for (pigen_syntax_id e = item->first_child; e.index != PIGEN_INVALID_ID; )
+			{
+				const pigen_syntax_node *edge = pigen_syntax_get(resolver->syntax, e);
+				e = edge->next_sibling;
+				if (edge->kind != PIGEN_SYNTAX_FABRIC_CONNECTION) continue;
+				const pigen_semantic_instance_connection *destination = resolved_fabric_port(resolver,
+					(pigen_module_id){(uint32_t)m}, edge->as.fabric_connection.right_instance, edge->as.fabric_connection.right_port);
+				if (destination) mark_endpoint_view_driven(model, destination->endpoint_view);
+			}
+		}
+	}
+}
+
 static int validate_signal_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
 	size_t later_index;
 
+	resolve_endpoint_view_drivers(resolver);
 	if (!validate_instance_destination_ownership(resolver) ||
 		!validate_instance_consumer_ownership(resolver) ||
 		!validate_fabric_ownership(resolver)) return 0;

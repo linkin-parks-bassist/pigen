@@ -1273,10 +1273,10 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 			pigen_signal_id payload = {PIGEN_INVALID_ID};
 			if (value && value->kind == PIGEN_EXPR_SYMBOL)
 				payload = pigen_symbol_signal(sem, value->as.symbol);
-			else
+			else if (value)
 			{
 				const pigen_semantic_lvalue *projection = pigen_lvalue_get(sem,
-					pigen_lvalue_resolve(sem, connection->value));
+					pigen_lvalue_resolve(sem, (pigen_expr_id){(uint32_t)(value-sem->expressions)}));
 				if (projection && projection->kind == PIGEN_LVALUE_PROJECTION)
 					payload = projection->as.projection.signal;
 			}
@@ -1292,10 +1292,18 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				pigen_rtl_object_id object = add_named_object(lowering, module, type,
 					PIGEN_SEMANTIC_INTERNAL, signal_index, connection->span, name, NULL);
 				free(name);
-				pigen_rtl_expr_id expression = lower_expr(lowering, connection->value);
-				if (object.index == PIGEN_INVALID_ID || expression.index == PIGEN_INVALID_ID ||
-					pigen_rtl_equation_add_with_owner(lowering->rtl, module,
-						object, expression, connection->span).index == PIGEN_INVALID_ID) return -1;
+				pigen_expr_id path = (pigen_expr_id){(uint32_t)(value-sem->expressions)};
+				pigen_rtl_expr_id expression = lower_expr(lowering,
+					connection->endpoint_view_driven ? path : connection->value);
+				if (object.index == PIGEN_INVALID_ID || expression.index == PIGEN_INVALID_ID) return -1;
+				if (connection->direction == PIGEN_SEMANTIC_INPUT && connection->endpoint_view_driven)
+				{
+					pigen_rtl_expr_id source = object_expression(lowering, type, object, connection->span);
+					if (pigen_rtl_equation_add_projection_with_owner(lowering->rtl, module,
+						expression, source, connection->span).index == PIGEN_INVALID_ID) return -1;
+				}
+				else if (pigen_rtl_equation_add_with_owner(lowering->rtl, module,
+					object, expression, connection->span).index == PIGEN_INVALID_ID) return -1;
 				out->payload = out->input_payload = object;
 			}
 			const pigen_symbol *port = pigen_symbol_get(sem,connection->port_symbol);
@@ -1407,6 +1415,17 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				if (expression.index == PIGEN_INVALID_ID) return -1;
 				if (ready) { out->ready = expression; out->input_ready = object; out->source_ready = object; }
 				else { out->valid = expression; out->input_valid = object; }
+			}
+			/* A static projected expression with no automatic writer remains
+			 * continuously available unless explicitly qualified by valid. */
+			if (connection->direction == PIGEN_SEMANTIC_INPUT && !connection->endpoint_view_driven &&
+				value && value->kind != PIGEN_EXPR_SYMBOL && !bound[0])
+			{
+				const pigen_rtl_object *valid_object = pigen_rtl_object_get(lowering->rtl, out->input_valid);
+				if (valid_object && valid_object->semantic_signal.index == signal_index &&
+					pigen_rtl_equation_add_with_owner(lowering->rtl,
+						rtl_module_for_semantic(lowering->rtl, sem, sem->signals[signal_index].module),
+						out->input_valid, control_constant(lowering, 1), connection->span).index == PIGEN_INVALID_ID) return -1;
 			}
 			return 1;
 		}

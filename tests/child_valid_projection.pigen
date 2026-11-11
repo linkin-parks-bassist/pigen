@@ -1,0 +1,11 @@
+module manual_child(input logic clk, input logic reset, input bit[8] buf i, output bit[8] buf o);
+ always_ff @(posedge clk) o <= i;
+endmodule
+module manual_top(input logic clk, input logic reset, input logic [7:0] data,
+ input logic offer, input logic enable, input logic ready, output logic accepted,
+ output logic [7:0] result, output logic valid);
+ logic [15:0] input_data;
+ assign input_data={8'ha5,data};
+ manual_child c(.clk(clk),.reset(reset),.i(input_data[7:0]),.i_valid(offer && enable),.i_ready(accepted),
+  .o(result),.o_valid(valid),.o_ready(ready));
+endmodule

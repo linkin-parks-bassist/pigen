@@ -1119,8 +1119,8 @@ child-port-endpoint-test: pigen
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
-	for fixture in output_projection output_projection_implicit output_projection_fabric input_forward_grouped input_forward_alias input_forward_controls input_backward_controls input_forward_selected input_alias input_payload_alias input_selected_alias input_fabric_alias endpoint parent destination fabric fabric_peek forward module_order explicit_alias omitted_explicit_alias omitted_valid_only omitted_ready_only omitted_valid_select omitted_ready_select omitted_ready_select_fabric valid_select valid_select_fabric ready_select ready_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
-		case "$$fixture" in output_projection*) tb=tests/child_port_output_projection_tb.sv ;; ready_select|ready_select_fabric|omitted_ready_select|omitted_ready_select_fabric) tb=tests/child_port_ready_select_tb.sv ;; *) tb=tests/child_port_endpoint_tb.sv ;; esac; \
+	for fixture in input_projection_high input_projection_forward input_projection_parent input_projection_fabric output_projection output_projection_implicit output_projection_fabric input_forward_grouped input_forward_alias input_forward_controls input_backward_controls input_forward_selected input_alias input_payload_alias input_selected_alias input_fabric_alias endpoint parent destination fabric fabric_peek forward module_order explicit_alias omitted_explicit_alias omitted_valid_only omitted_ready_only omitted_valid_select omitted_ready_select omitted_ready_select_fabric valid_select valid_select_fabric ready_select ready_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
+		case "$$fixture" in input_projection_high) tb=tests/child_port_input_projection_high_tb.sv ;; input_projection*) tb=tests/child_port_input_projection_tb.sv ;; output_projection*) tb=tests/child_port_output_projection_tb.sv ;; ready_select|ready_select_fabric|omitted_ready_select|omitted_ready_select_fabric) tb=tests/child_port_ready_select_tb.sv ;; *) tb=tests/child_port_endpoint_tb.sv ;; esac; \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim $$tb rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
@@ -1255,8 +1255,8 @@ child-ready-manual-test: pigen
 .PHONY: child-valid-manual-test
 child-valid-manual-test: pigen
 	@set -eu; dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
-	for mode in expression constant register; do \
-		constant=0; if [ "$$mode" = constant ]; then constant=1; fi; \
+	for mode in expression constant register projection projection_constant; do \
+		constant=0; if [ "$$mode" = constant ] || [ "$$mode" = projection_constant ]; then constant=1; fi; \
 		./pigen tests/child_valid_$$mode.pigen -o $$dir/design.sv; \
 		iverilog -g2012 -s child_valid_manual_tb -P child_valid_manual_tb.CONSTANT_VALID=$$constant \
 			-o $$dir/sim rtl/pigen_primitives.sv $$dir/design.sv tests/child_valid_manual_tb.sv; \
