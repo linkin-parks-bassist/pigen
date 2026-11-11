@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T18:31:00+11:00"
+revised_at: "2026-11-11T18:43:10+11:00"
 ---
 
 Remaining work, next first:
@@ -11,6 +11,8 @@ Remaining work, next first:
 3. Complete mixed-case selector evaluation and qualified cases. Audit specialization diagnostic provenance. Fixed-point handling, resource-limit errors and resolved-hierarchy cycle checks are implemented (how/does/specialization/reach/a/fixed/point.md); generate-scoped hierarchy remains under item 2. Wildcard cases use native SV combinational decoders, verified against casez/casex references. Add failing behavioral witnesses before each extension.
 4. Complete sequential lowering for case guards, then loops and impure function/task side effects, then nonblocking write-conflict reconstruction. Keep unsafe forms diagnosed explicitly.
 5. Audit remaining authored examples for numerical Pigen types, always processes and implicit transfer guards; keep compatibility witnesses distinct from showcases (where/are/behavioral/examples.md). Continue requirement-by-requirement acceptance against what/is/the/spec.md and the compatibility contract. Do not shrink requirements to supported syntax. Capabilities and gaps belong in what/is/broken.md; verification procedure belongs in how/to/run/repository/verification.md.
+
+Implement optional FSM names and ordinary unconditional level-zero statements. Reset becomes ordinary if(reset) goto initialise; initialise is an ordinary state. The earlier reset-intrinsic proposal is superseded. Settle competing transitions, goto termination scope, next-state execution timing and startup without reset before lowering this surface (how/to/write/fsm/states.md).
 
 Open questions for David: explicit-valid override semantics (how/to/connect/child/ports.md); pipeline yield control surface; retention of fabric manifest/SVG; struct-like child-instantiation grammar (is/struct/like/child/instantiation/specified.md).
 
