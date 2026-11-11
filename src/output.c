@@ -458,6 +458,93 @@ static int emit_children(pigen_output_model *model, const pigen_syntax_tree *syn
 	return 0;
 }
 
+static void append_semantic_span(pigen_string *text, const pigen_semantic_model *sem,
+	pigen_source_span span)
+{
+	size_t length = 0;
+	const char *bytes = pigen_source_span_text(sem->sources, span, &length);
+	if (bytes) pigen_append_range(text, bytes, length);
+}
+
+static char *endpoint_instance_text(const pigen_syntax_tree *syntax,
+	const pigen_rtl_lowering *lowering, const pigen_syntax_node *node, uint32_t index)
+{
+	const pigen_semantic_model *sem = lowering->semantics;
+	const pigen_semantic_instance *instance = NULL;
+	pigen_string text = {0};
+	int needed = 0;
+	for (size_t i = 0; i < sem->instance_count; i++)
+		if (sem->instances[i].syntax.index == index) instance = &sem->instances[i];
+	if (!instance) return NULL;
+	for (size_t i = 0; i < sem->signal_count; i++)
+		if (sem->signals[i].syntax.index == index) needed = 1;
+	for (pigen_syntax_id id=node->first_child; id.index!=PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *connection=pigen_syntax_get(syntax,id);
+		if (connection->kind==PIGEN_SYNTAX_CONNECTION)
+		{
+			const pigen_syntax_expr *expr=pigen_syntax_expr_get(&syntax->expressions,connection->as.connection.value);
+			if(expr && expr->kind==PIGEN_SYNTAX_EXPR_MEMBER) needed=1;
+		}
+		id=connection->next_sibling;
+	}
+	if (!needed) return NULL;
+	append_semantic_span(&text,sem,pigen_symbol_get(sem,pigen_module_get(sem,instance->child_module)->symbol)->name);
+	pigen_append(&text," ");
+	append_semantic_span(&text,sem,pigen_symbol_get(sem,instance->symbol)->name);
+	pigen_append(&text," (");
+	for(size_t c=0;c<instance->connection_count;c++)
+	{
+		const pigen_semantic_instance_connection *connection=&sem->instance_connections[instance->first_connection+c];
+		const pigen_semantic_expr *value=pigen_expr_get(sem,connection->value);
+		const pigen_symbol *symbol=NULL;
+		const pigen_semantic_signal *port=pigen_signal_get(sem,connection->port_signal);
+		const pigen_symbol *port_symbol=pigen_symbol_get(sem,connection->port_symbol);
+		pigen_source_span port_name=connection->port_name;
+		int payload=port_name.source.index==port_symbol->name.source.index && port_name.start==port_symbol->name.start && port_name.end==port_symbol->name.end;
+		size_t name_length=0,base_length=0;
+		const char *name=pigen_source_span_text(sem->sources,port_name,&name_length);
+		const char *base=pigen_source_span_text(sem->sources,port_symbol->name,&base_length);
+		payload=payload || (name && base && name_length==base_length && !memcmp(name,base,name_length));
+		while(value && value->kind==PIGEN_EXPR_CONVERSION) value=pigen_expr_get(sem,value->as.conversion.operand);
+		if(value && value->kind==PIGEN_EXPR_SYMBOL) symbol=pigen_symbol_get(sem,value->as.symbol);
+		if(c) pigen_append(&text,", ");
+		pigen_append(&text,".");append_semantic_span(&text,sem,port_name);pigen_append(&text,"(");
+		if(symbol) append_semantic_span(&text,sem,symbol->name);
+		else
+		{
+			for(pigen_syntax_id id=node->first_child;id.index!=PIGEN_INVALID_ID;)
+			{
+				const pigen_syntax_node *original=pigen_syntax_get(syntax,id);
+				if(original->kind==PIGEN_SYNTAX_CONNECTION && original->location.source_span.start==connection->span.start)
+				{
+					const pigen_syntax_expr *expr=pigen_syntax_expr_get(&syntax->expressions,original->as.connection.value);
+					if(expr) append_semantic_span(&text,sem,expr->location.source_span);
+					break;
+				}
+				id=original->next_sibling;
+			}
+		}
+		pigen_append(&text,")");
+		if(payload && symbol && port && !pigen_transfer_type_descriptor_get(port->transfer_type)->is_static)
+			for(size_t control=0;control<2;control++)
+			{
+				const char *suffix=control?"_ready":"_valid";
+				int explicit_control=0;
+				for(size_t d=0;d<instance->connection_count;d++)
+				{
+					size_t n=0; const char *other=pigen_source_span_text(sem->sources,sem->instance_connections[instance->first_connection+d].port_name,&n);
+					if(other && n==base_length+6 && !memcmp(other,base,base_length) && !memcmp(other+base_length,suffix,6)) explicit_control=1;
+				}
+				if(explicit_control) continue;
+				pigen_append(&text,", .");append_semantic_span(&text,sem,port_symbol->name);pigen_append(&text,suffix);pigen_append(&text,"(");
+				append_semantic_span(&text,sem,symbol->name);pigen_append(&text,suffix);pigen_append(&text,")");
+			}
+	}
+	pigen_append(&text,");");
+	return text.data;
+}
+
 /* Emit one node and, for a module, open its nested scope so its children nest
  * inside it. Top-level items (outside any open module) are appended flat; the
  * compilation-unit root itself is never emitted. A node the walk is required to
@@ -478,7 +565,8 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	{
 		item.kind = PIGEN_OUTPUT_RETAINED;
 		item.as.span = node->location.source_span;
-		item.text = expanded_span_text(syntax, item.as.span);
+		item.text = endpoint_instance_text(syntax, lowering, node, node_index);
+		if (!item.text) item.text = expanded_span_text(syntax, item.as.span);
 		if (in_module)
 			return pigen_output_item_add_child(model, module, item) ==
 				PIGEN_INVALID_ID ? -1 : 0;

@@ -636,6 +636,41 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 		}
 		case PIGEN_SYNTAX_EXPR_MEMBER:
 		{
+			const pigen_syntax_expr *base_syntax = pigen_syntax_expr_get(
+				&analyzer->syntax->expressions, syntax->as.member.base);
+			if (base_syntax && base_syntax->kind == PIGEN_SYNTAX_EXPR_NAME && !syntax->as.member.scoped)
+			{
+				pigen_symbol_id owner_id = pigen_symbol_lookup(analyzer->model, analyzer->scope,
+					token_spelling(analyzer, base_syntax->as.atom.token));
+				const pigen_symbol *owner = pigen_symbol_get(analyzer->model, owner_id);
+				if (owner && owner->kind == PIGEN_SYMBOL_INSTANCE)
+				{
+					const pigen_semantic_instance *instance = pigen_instance_get(analyzer->model, owner->object.instance);
+					const pigen_semantic_module *child = pigen_module_get(analyzer->model, instance->child_module);
+					pigen_symbol_id port = pigen_symbol_lookup(analyzer->model, child->scope,
+						token_spelling(analyzer, syntax->as.member.member));
+					for (size_t c = 0; c < instance->connection_count; c++)
+					{
+						const pigen_semantic_instance_connection *connection = &analyzer->model->instance_connections[instance->first_connection+c];
+						const pigen_semantic_expr *value;
+						const pigen_semantic_signal *signal;
+						if (connection->port_symbol.index != port.index) continue;
+						value = pigen_expr_get(analyzer->model, connection->value);
+						while (value && value->kind == PIGEN_EXPR_CONVERSION)
+							value = pigen_expr_get(analyzer->model, value->as.conversion.operand);
+						if (!value || value->kind != PIGEN_EXPR_SYMBOL) break;
+						signal = pigen_signal_get(analyzer->model, pigen_symbol_signal(analyzer->model,value->as.symbol));
+						if (!signal) break;
+						node.kind = PIGEN_SYNTAX_EXPR_NAME;
+						node.as.symbol = value->as.symbol;
+						node.data_type = signal->data_type;
+						node.shape = signal->shape;
+						node.constant = INVALID_ID(pigen_const_expr_id);
+						return append_node(analyzer,node);
+					}
+					return fail(analyzer, syntax->location, "child port has no addressable parent endpoint");
+				}
+			}
 			pigen_analyzed_expr_id base = analyze(analyzer,
 				syntax->as.member.base);
 			const pigen_analyzed_expr *base_known = pigen_analyzed_expr_get(

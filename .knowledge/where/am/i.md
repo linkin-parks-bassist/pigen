@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T15:42:24+11:00"
+revised_at: "2026-11-11T15:51:27+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -8,7 +8,7 @@ Pigen is an active personal C17 source-to-source compiler project extending Syst
 
 This checkout is **pigen-fork**, a delivery fork of /home/david/Projects/pigen. The production `./pigen` is the structured frontend (src/pigen.c through src/compile.c): preprocess, data-first syntax, semantic types/expressions/scopes, RTL lowering, naming, output model and SV emission. The classic textual CLI is removed; prototype sources remain only as quarantined reference material.
 
-Core transfers, pipelines, FSMs, validity actions, parameterized children and buffered fabric routing with arbitration/SVG are implemented. See what/is/broken.md for capability limits and what/is/the/plan.md for remaining work.
+Core transfers, pipelines, FSMs, validity actions, parameterized children, parent child-port endpoints and buffered fabric routing with arbitration/SVG are implemented. See what/is/broken.md for capability limits and what/is/the/plan.md for remaining work.
 
 Mixed cases lower through native SystemVerilog combinational case decoders and scalar branch guards. Native case/casez/casex semantics preserve common width/signedness, wildcard matching and branch priority. Simulations cover ordinary selector evaluation, nested/ternary/concatenated labels, optional default colons, unbraced if/else, arithmetic widening, signedness, unknown selectors and wildcard comparisons against native reference cases. Full verification passes. Mixed selector scheduling, qualified cases and specialization convergence remain open; decoders currently evaluate selectors combinationally.
 

@@ -1,5 +1,6 @@
 /* Resolution from structured syntax into stable semantic identities. */
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "pigen/expression_resolve.h"
@@ -1903,7 +1904,8 @@ static int child_port_at(pigen_semantic_model *model,
 	{
 		const pigen_semantic_signal *known = &model->signals[i];
 		if (known->module.index != child_module.index ||
-			known->direction == PIGEN_SEMANTIC_INTERNAL) continue;
+			known->direction == PIGEN_SEMANTIC_INTERNAL ||
+			pigen_signal_is_instance_endpoint(model, (pigen_signal_id){(uint32_t)i})) continue;
 		if (at++ == index)
 		{
 			*symbol = known->symbol;
@@ -2119,6 +2121,53 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				"invalid instance connection");
 		child_id = connection->next_sibling;
 	}
+	/* Omitted child ports remain addressable from the enclosing module. */
+	{
+		size_t signal_count = model->signal_count;
+		for (size_t p = 0; p < signal_count; p++)
+		{
+			pigen_semantic_signal port = model->signals[p];
+			const pigen_symbol *port_symbol_record;
+			pigen_source_span port_name, name_span;
+			pigen_symbol_id endpoint_symbol;
+			pigen_signal_id endpoint;
+			pigen_expr_id value;
+			pigen_source_id name_source;
+			pigen_transfer_type transfer;
+			const pigen_transfer_type_descriptor *descriptor;
+			char name[96];
+			int connected = 0;
+			const pigen_semantic_instance *record = pigen_instance_get(model, instance);
+			if (port.module.index != child_module.index || port.direction == PIGEN_SEMANTIC_INTERNAL ||
+				pigen_signal_is_instance_endpoint(model, (pigen_signal_id){(uint32_t)p}))
+				continue;
+			for (size_t c = 0; c < record->connection_count; c++)
+				if (model->instance_connections[record->first_connection + c].port_signal.index == p)
+					connected = 1;
+			if (connected) continue;
+			port_symbol_record = pigen_symbol_get(model, port.symbol);
+			port_name = port_symbol_record->name;
+			snprintf(name, sizeof name, "__pigen_endpoint_%u_%zu", instance.index, p);
+			name_source = pigen_source_add((pigen_source_manager *)model->sources,
+				"<pigen-endpoint>", name, strlen(name));
+			name_span = (pigen_source_span){name_source, 0, strlen(name)};
+			if (pigen_symbol_declare(model, module->scope, PIGEN_SYMBOL_SIGNAL,
+				port.data_type, name_span, name_span,
+				&endpoint_symbol, NULL) != PIGEN_DECLARE_OK) return 0;
+			descriptor = pigen_transfer_type_descriptor_get(port.transfer_type);
+			transfer = descriptor->is_static ? PIGEN_TRANSFER_TYPE_LOGIC : PIGEN_TRANSFER_TYPE_BUF;
+			endpoint = pigen_signal_add(model, syntax_id, module_id, endpoint_symbol,
+				port.data_type, port.shape, INVALID_ID(pigen_expr_id), transfer,
+				port.direction == PIGEN_SEMANTIC_OUTPUT ? PIGEN_SEMANTIC_INPUT : PIGEN_SEMANTIC_OUTPUT,
+				name_span);
+			if (endpoint.index == PIGEN_INVALID_ID) return 0;
+			value = pigen_expr_add_symbol(model, endpoint_symbol, port.data_type, node->location.source_span);
+			if (!pigen_instance_add_connection(model, instance, port.symbol,
+				(pigen_signal_id){(uint32_t)p}, port_name, value, port.direction,
+				node->location.source_span)) return 0;
+		}
+	}
+
 	return 1;
 }
 
@@ -2167,12 +2216,17 @@ static int add_module(resolver *resolver, const pigen_syntax_node *syntax_node,
 	for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
 	{
 		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);
+		if (node->kind == PIGEN_SYNTAX_INSTANCE &&
+			!resolve_instance(resolver, module_id, child, node)) return 0;
+		child = node->next_sibling;
+	}
+	for (child = syntax_node->first_child; child.index != PIGEN_INVALID_ID; )
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax, child);
 		if (node->kind == PIGEN_SYNTAX_CLOCKED_PROCESS &&
 			!add_clocked_process(resolver, module_id, child, node)) return 0;
 		if (node->kind == PIGEN_SYNTAX_FSM &&
 			!resolve_fsm(resolver, module_id, child, node)) return 0;
-		if (node->kind == PIGEN_SYNTAX_INSTANCE &&
-			!resolve_instance(resolver, module_id, child, node)) return 0;
 		child = node->next_sibling;
 	}
 	return 1;

@@ -2799,3 +2799,12 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->width_constraints);
 	*model = (pigen_semantic_model){0};
 }
+
+int pigen_signal_is_instance_endpoint(const pigen_semantic_model *model, pigen_signal_id signal)
+{
+	const pigen_semantic_signal *known = pigen_signal_get(model, signal);
+	if (!known) return 0;
+	for (size_t i = 0; i < model->instance_count; i++)
+		if (model->instances[i].syntax.index == known->syntax.index) return 1;
+	return 0;
+}

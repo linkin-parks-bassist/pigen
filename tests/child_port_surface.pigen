@@ -1,0 +1,11 @@
+module A(input wire clk,input wire reset,input uint[8] x_in,output uint[8] buf x_out);
+endmodule
+module B(input wire clk,input wire reset,input uint[8] x_in,output uint[8] buf x_out);
+endmodule
+module C(input wire clk,input wire reset,input uint[8] x_in,output uint[8] buf x_out);
+ A a(clk, reset);
+ B b(.clk(clk), .reset(reset), .x_in(a.x_out));
+ fabric begin
+  b.x_out -> a.x_in;
+ endfabric
+endmodule

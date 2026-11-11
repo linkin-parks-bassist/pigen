@@ -693,12 +693,19 @@ static char *signal_shape_suffix(pigen_rtl_lowering *lowering,
 	return text.data;
 }
 
+static int signal_is_child_endpoint(const pigen_semantic_model *model, size_t index)
+{
+	return pigen_signal_is_instance_endpoint(model, (pigen_signal_id){(uint32_t)index});
+}
+
 static pigen_rtl_object_id add_named_object(pigen_rtl_lowering *lowering,
 	pigen_rtl_module_id rtl_module, pigen_rtl_type_id type,
 	pigen_semantic_direction direction, size_t signal_index,
 	pigen_source_span origin, const char *base, const char *suffix)
 {
 	pigen_rtl_model *rtl = lowering->rtl;
+	if (signal_is_child_endpoint(lowering->semantics, signal_index))
+		direction = PIGEN_SEMANTIC_INTERNAL;
 	pigen_rtl_object_id object = pigen_rtl_object_add_with_owner(rtl,
 		rtl_module, PIGEN_RTL_OBJECT_VARIABLE, type, direction,
 		(pigen_signal_id){(uint32_t)signal_index}, origin);
@@ -1311,7 +1318,7 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 		 * boundary shape. A buffered output driven by a child instance is
 		 * likewise the child's boundary view, not a second storage owner. */
 		if (is_storage && (owner_signal->direction == PIGEN_SEMANTIC_INPUT ||
-			instance_destination))
+			instance_destination || signal_is_child_endpoint(sem, i)))
 			is_storage = 0;
 		if ((pass == 0) == is_storage)
 			continue;
@@ -2049,6 +2056,21 @@ static pigen_rtl_expr_id offer_identity_for_transfer(
 	return identity;
 }
 
+static pigen_rtl_expr_id endpoint_offer(pigen_rtl_lowering *lowering,
+	const pigen_semantic_transfer *owner, const pigen_semantic_lvalue *destination,
+	pigen_rtl_expr_id fire, pigen_rtl_expr_id offer)
+{
+	if (!destination || destination->kind != PIGEN_LVALUE_PROJECTION ||
+		!signal_is_child_endpoint(lowering->semantics, destination->as.projection.signal.index)) return fire;
+	const pigen_transfer_signal_use *uses = pigen_transfer_signal_uses(lowering->semantics,
+		(pigen_transfer_id){(uint32_t)(owner-lowering->semantics->transfers)});
+	for(size_t i=0;i<owner->signal_use_count;i++)
+		if((uses[i].roles & PIGEN_TRANSFER_PRODUCER) &&
+			uses[i].signal.index!=destination->as.projection.signal.index)
+			offer=fire_and(lowering,offer,lowering->lowered_endpoints[uses[i].signal.index].ready);
+	return offer;
+}
+
 /* Lower validity actions into one equation per controlled storage port, OR-ing
  * every action guard that targets that port. */
 static int flush_storage_drives(pigen_rtl_lowering *lowering,
@@ -2604,7 +2626,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			if (lval->kind == PIGEN_LVALUE_PROJECTION)
 			{
 				if (!drive_destination(lowering, rtl_module, lval, value,
-					value_expr, fire, owner->span, update_ids, &update_count))
+					value_expr, endpoint_offer(lowering, owner, lval, fire, offer), owner->span, update_ids, &update_count))
 				{
 					free(update_ids);
 					return -1;
@@ -2763,7 +2785,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 									fire, owner->span, update_ids,
 									&update_count) :
 								!drive_destination(lowering, rtl_module, child,
-									slice, NULL, fire, owner->span, update_ids,
+									slice, NULL, endpoint_offer(lowering, owner, child, fire, offer), owner->span, update_ids,
 									&update_count)))
 						{
 							free(update_ids);
@@ -2808,7 +2830,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 						}
 					}
 					else if (!drive_destination(lowering, rtl_module, child,
-						child_value, child_value_expr, fire, owner->span,
+						child_value, child_value_expr, endpoint_offer(lowering, owner, child, fire, offer), owner->span,
 						update_ids, &update_count))
 					{
 						free(update_ids);

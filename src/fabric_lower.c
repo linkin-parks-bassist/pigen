@@ -136,6 +136,25 @@ static int connect(pigen_rtl_lowering *lowering, pigen_rtl_module_id module,
 		destination, value, span).index != PIGEN_INVALID_ID;
 }
 
+static pigen_rtl_object_id endpoint_control(pigen_rtl_lowering *lowering,
+	const pigen_semantic_instance_connection *connection, int ready)
+{
+	const pigen_semantic_expr *value = connection ? pigen_expr_get(lowering->semantics, connection->value) : NULL;
+	while(value && value->kind==PIGEN_EXPR_CONVERSION)
+		value=pigen_expr_get(lowering->semantics,value->as.conversion.operand);
+	if(value && value->kind==PIGEN_EXPR_SYMBOL)
+	{
+		pigen_signal_id signal=pigen_symbol_signal(lowering->semantics,value->as.symbol);
+		if(signal.index<lowering->lowered_endpoint_count)
+		{
+			const pigen_rtl_signal_endpoints *endpoint=&lowering->lowered_endpoints[signal.index];
+			const pigen_rtl_expr *expr=pigen_rtl_expr_get(lowering->rtl,ready?endpoint->ready:endpoint->valid);
+			if(expr && expr->kind==PIGEN_RTL_EXPR_OBJECT) return expr->object;
+		}
+	}
+	return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+}
+
 static pigen_signal_id module_input_named(pigen_semantic_model *model,
 	pigen_module_id module, const char *name)
 {
@@ -577,6 +596,10 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 			dv_obj = connection_payload(lowering, dv);
 			sr_obj = connection_payload(lowering, sr);
 			dr_obj = connection_payload(lowering, dr);
+			if (sv_obj.index==PIGEN_INVALID_ID) sv_obj=endpoint_control(lowering,sp,0);
+			if (sr_obj.index==PIGEN_INVALID_ID) sr_obj=endpoint_control(lowering,sp,1);
+			if (dv_obj.index==PIGEN_INVALID_ID) dv_obj=endpoint_control(lowering,dp,0);
+			if (dr_obj.index==PIGEN_INVALID_ID) dr_obj=endpoint_control(lowering,dp,1);
 			if (sp_obj.index == PIGEN_INVALID_ID ||
 				dp_obj.index == PIGEN_INVALID_ID)
 				return -1;

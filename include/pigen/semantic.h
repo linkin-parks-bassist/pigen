@@ -706,6 +706,7 @@ const pigen_semantic_module *pigen_module_get(const pigen_semantic_model *model,
 	pigen_module_id module);
 const pigen_semantic_parameter *pigen_parameter_get(
 	const pigen_semantic_model *model, pigen_parameter_id parameter);
+int pigen_signal_is_instance_endpoint(const pigen_semantic_model *model, pigen_signal_id signal);
 const pigen_semantic_signal *pigen_signal_get(
 	const pigen_semantic_model *model, pigen_signal_id signal);
 const pigen_semantic_clock_domain *pigen_clock_domain_get(
