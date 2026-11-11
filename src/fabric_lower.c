@@ -509,6 +509,29 @@ static int route_through_mergeN(pigen_rtl_lowering *lowering,
 	return 1;
 }
 
+/* Walk fabric edges in module order, crossing block boundaries. */
+static pigen_syntax_id next_fabric_edge(const pigen_syntax_tree *syntax,
+	pigen_syntax_id module, pigen_syntax_id edge)
+{
+	const pigen_syntax_node *owner = pigen_syntax_get(syntax, module);
+	pigen_syntax_id item = owner->first_child;
+	if (edge.index != PIGEN_INVALID_ID)
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(syntax, edge);
+		if (node->next_sibling.index != PIGEN_INVALID_ID)
+			return node->next_sibling;
+		item = pigen_syntax_get(syntax, node->parent)->next_sibling;
+	}
+	while (item.index != PIGEN_INVALID_ID)
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(syntax, item);
+		if (node->kind == PIGEN_SYNTAX_FABRIC &&
+			node->first_child.index != PIGEN_INVALID_ID) return node->first_child;
+		item = node->next_sibling;
+	}
+	return (pigen_syntax_id){PIGEN_INVALID_ID};
+}
+
 int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 	const pigen_syntax_tree *syntax)
 {
@@ -553,9 +576,8 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 			pigen_syntax_id other;
 
 			if (!first) break;
-			if (first->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
-				first->as.fabric_connection.direct)
-				for (other = first->next_sibling;
+			if (first->kind == PIGEN_SYNTAX_FABRIC_CONNECTION)
+				for (other = next_fabric_edge(syntax, owner->syntax, edge);
 					other.index != PIGEN_INVALID_ID; )
 				{
 					const pigen_syntax_node *second = pigen_syntax_get(syntax,
@@ -563,6 +585,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 
 					if (!second) break;
 					if (second->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
+						(first->as.fabric_connection.direct || second->as.fabric_connection.direct) &&
 						token_equal(syntax,
 							first->as.fabric_connection.right_instance,
 							second->as.fabric_connection.right_instance) &&
@@ -571,7 +594,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 							second->as.fabric_connection.right_port))
 						pigen_fail("direct fabric destination cannot appear in "
 							"another connection");
-					other = second->next_sibling;
+					other = next_fabric_edge(syntax, owner->syntax, other);
 				}
 			edge = first->next_sibling;
 		}
@@ -626,7 +649,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 				pigen_rtl_object_id sources_p[32], sources_v[32], sources_r[32];
 				pigen_source_span span = connection->location.source_span;
 
-				for (prior = node->first_child; prior.index !=
+				for (prior = next_fabric_edge(syntax, owner->syntax, (pigen_syntax_id){PIGEN_INVALID_ID}); prior.index !=
 					PIGEN_INVALID_ID && prior.index != edge.index; )
 				{
 					const pigen_syntax_node *p = pigen_syntax_get(syntax,
@@ -641,7 +664,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 							p->as.fabric_connection.right_port,
 							connection->as.fabric_connection.right_port))
 						break;
-					prior = p->next_sibling;
+					prior = next_fabric_edge(syntax, owner->syntax, prior);
 				}
 				if (prior.index != PIGEN_INVALID_ID &&
 					prior.index != edge.index)
@@ -662,7 +685,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 							q->as.fabric_connection.right_port,
 							connection->as.fabric_connection.right_port))
 						group_count++;
-					scan = q->next_sibling;
+					scan = next_fabric_edge(syntax, owner->syntax, scan);
 				}
 				if (group_count > 32) return -1;
 				if (group_count == 1)
@@ -700,7 +723,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 								q->as.fabric_connection.right_port,
 								connection->as.fabric_connection.right_port))
 						{
-							scan = q->next_sibling;
+							scan = next_fabric_edge(syntax, owner->syntax, scan);
 							continue;
 						}
 						sinst = find_instance(model, module, syntax,
@@ -723,7 +746,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 						sources_v[c] = lsv;
 						sources_r[c] = lsr;
 						c++;
-						scan = q->next_sibling;
+						scan = next_fabric_edge(syntax, owner->syntax, scan);
 					}
 					if (c != group_count) return -1;
 					if (group_count == 2)
@@ -776,7 +799,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 								q->as.fabric_connection.right_port,
 								connection->as.fabric_connection.right_port))
 						{
-							scan = q->next_sibling;
+							scan = next_fabric_edge(syntax, owner->syntax, scan);
 							continue;
 						}
 						sinst = find_instance(model, module, syntax,
@@ -799,7 +822,7 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 						sources_v[c] = lsv;
 						sources_r[c] = lsr;
 						c++;
-						scan = q->next_sibling;
+						scan = next_fabric_edge(syntax, owner->syntax, scan);
 					}
 					if (c != group_count) return -1;
 					for (c = 0; c < group_count; c++)

@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T16:27:54+11:00"
+revised_at: "2026-11-11T16:29:14+11:00"
 ---
 
 Child ports are parent endpoints. `producer a(clk, reset); consumer b(.clk(clk), .reset(reset), .i(a.o), .o(result));` connects siblings without intermediary wires. Parent clocked transfers can read `a.o` or write `b.i`; named/anonymous fabrics can route `a.o -> b.i`. Explicit parent wires remain supported. Output transfers remain explicit, e.g. `output uint[8] buf o`. Use static `input wire reset` for broadcast reset; unqualified input bit remains abstract.
@@ -15,7 +15,7 @@ After transfers and fabrics, pigen_lower_rtl_endpoint_defaults ties undriven gen
 
 Specialization separates list arguments only at commas outside parentheses, brackets and braces. Nested concatenations survive; replacement arrays grow consistently across plain/parameterized rewrites. The parameter-concatenation regression passes AddressSanitizer.
 
-Parent offers exclude their own destination readiness, avoiding circular handshake dependency. Ownership recognizes typed views and explicit payload wires, rejecting duplicate consumers and child/local conflicts. Fabric validation also rejects conflicting child/local consumers or producers and wrong-direction/missing endpoints. Peek remains non-consuming beside a fabric route. Cross-fabric grouping, broader aliases and retained ordinary-SV drivers remain unaudited; see what/is/an/inline/fabric.md.
+Parent offers exclude their own destination readiness, avoiding circular handshake dependency. Ownership recognizes typed views and explicit payload wires, rejecting duplicate consumers and child/local conflicts. Fabric validation also rejects conflicting child/local consumers or producers and wrong-direction/missing endpoints. Peek remains non-consuming beside a fabric route. Fabric groups span parent blocks; broader aliases and retained ordinary-SV drivers remain unaudited; see what/is/an/inline/fabric.md.
 
 `make child-port-endpoint-test` covers expression and parameterized connections, joins at different rates, parent transfers, routing, forward references, nesting, partial bindings, introspection and unused defaults under backpressure. Negative fixtures cover output writes, missing ports and duplicate consumers; fabric-mixed-ownership-test covers mixed connection conflicts. fabric-implicit-merge-test checks lossless two/three-source routing through omitted ports and payload aliases under stalls. Positional tests cover conventional handshake names.
 

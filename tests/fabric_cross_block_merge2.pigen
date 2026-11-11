@@ -1,0 +1,15 @@
+module merge_leaf(input logic clk, input logic reset, input bit[8] buf i, output bit[8] buf o);
+ always_ff @(posedge clk) o<=i;
+endmodule
+module implicit_merge_top(input logic clk, input logic reset,
+ input bit[8] buf s0, input bit[8] buf s1, input bit[8] buf s2, output bit[8] buf result);
+ merge_leaf x0(.clk(clk),.reset(reset),.i(s0));
+ merge_leaf x1(.clk(clk),.reset(reset),.i(s1));
+ merge_leaf y(.clk(clk),.reset(reset),.o(result));
+ fabric begin
+  x0.o -> y.i;
+  endfabric
+ fabric begin
+  x1.o -> y.i;
+ endfabric
+endmodule

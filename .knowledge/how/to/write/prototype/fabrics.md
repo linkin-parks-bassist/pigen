@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T16:27:54+11:00"
+revised_at: "2026-11-11T16:29:15+11:00"
 ---
 
 Fabric declarations exist in two production forms.
@@ -9,4 +9,4 @@ Inline `fabric <name> begin ... endfabric` or anonymous `fabric begin ... endfab
 
 Standalone top-level `fabric` blocks are synthesized by the compiler driver through `pigen_lower_blocks` (src/blocks.c and src/fabric_svg.inc are production). They generate a module, balanced three-port routers with two-entry registered input occupancy, round-robin grants, buffered skid hops, path metadata and deterministic SVG (`OUTPUT.sv.svg`, or `OUTPUT.sv.FABRIC.svg` for several). `--diagram PATH` is valid only for one fabric; `--no-diagram` suppresses SVG. `fabric_router_fair_tb`, `fabric_merge_fair_tb` and `fabric_merge3_tb` hold all competing sources continuously valid under backpressure and require balanced service.
 
-Inline routed groups are limited to 32 sources and grouped by destination spelling within one block. Cross-block grouping, broader aliases and retained ordinary-SV driver ownership remain unaudited; see what/is/an/inline/fabric.md. make fabric-implicit-merge-test checks ordered delivery under stalls for omitted ports and payload aliases.
+Inline routed groups are limited to 32 sources and grouped by destination spelling across all parent fabric blocks. Direct destinations are exclusive across blocks and declaration order. Broader aliases and retained ordinary-SV driver ownership remain unaudited; see what/is/an/inline/fabric.md. make fabric-implicit-merge-test checks ordered delivery under stalls for omitted ports and payload aliases.
