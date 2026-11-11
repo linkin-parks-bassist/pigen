@@ -1,10 +1,10 @@
 ---
 status: green
-revised_at: "2026-11-11T15:38:49+11:00"
+revised_at: "2026-11-11T15:42:24+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-Clocked case rewriting applies to bodies identified as containing Pigen actions; ordinary cases retain original evaluation and control flow. Mixed cases use case equality and a common width/signedness context across selector and labels. Unevaluated conditional arms impose that context without evaluating the other labels. Complete statement boundaries support nested cases and unbraced if/else, with concatenated/comma-separated/ternary labels and optional default colons. Simulations cover these forms, ordinary single selector evaluation, unknown selectors, arithmetic widening and mixed signedness. Full verification passes. Mixed selector evaluation, wildcard/qualified cases and specialization convergence remain open.
+Mixed cases lower through native SystemVerilog combinational case decoders and scalar branch guards. Native case/casez/casex semantics preserve common width/signedness, wildcard matching and branch priority. Simulations cover ordinary selector evaluation, nested/ternary/concatenated labels, optional default colons, unbraced if/else, arithmetic widening, signedness, unknown selectors and wildcard comparisons against native reference cases. Full verification passes. Mixed selector scheduling, qualified cases and specialization convergence remain open; decoders currently evaluate selectors combinationally.
 
 The recorded baseline `make test` and `make verify` runs were fully green. The suite covers the structured C owners, the data-first pipeline corpus, fixed-point MAC, text and both migrated biquad examples, FSM and child-instance checks, inline and standalone fabric fairness/router tests, SVG topology, ordinary-SV preservation witnesses, parameterized Pigen child specialization, and explicit-control elastic child ports.
 

@@ -1,11 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-11T15:38:50+11:00"
+revised_at: "2026-11-11T15:42:25+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
 Verification and durable boundary. The structured compiler implements core datapath, pipelines, FSMs, child instances, validity actions and buffered fabric routing. The former rtl-lower/sv-emit rebaseline and biquad migration blockers are resolved; the recorded baseline owner suites and full verification passed.
 
-Clocked case rewriting applies to bodies identified as containing Pigen actions; ordinary cases retain original evaluation and control flow. Mixed cases use case equality and a common width/signedness context across selector and labels. Unevaluated conditional arms impose that context without evaluating the other labels. Complete statement boundaries support nested cases and unbraced if/else, with concatenated/comma-separated/ternary labels and optional default colons. Simulations cover these forms, ordinary single selector evaluation, unknown selectors, arithmetic widening and mixed signedness. Full verification passes. Mixed selector evaluation, wildcard/qualified cases and specialization convergence remain open.
+Mixed cases lower through native SystemVerilog combinational case decoders and scalar branch guards. Native case/casez/casex semantics preserve common width/signedness, wildcard matching and branch priority. Simulations cover ordinary selector evaluation, nested/ternary/concatenated labels, optional default colons, unbraced if/else, arithmetic widening, signedness, unknown selectors and wildcard comparisons against native reference cases. Full verification passes. Mixed selector scheduling, qualified cases and specialization convergence remain open; decoders currently evaluate selectors combinationally.
 
 Use how/to/run/repository/verification.md for the verification command and what/is/the/plan.md for remaining implementation work.

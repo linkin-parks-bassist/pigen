@@ -1,0 +1,27 @@
+module mixed_casez(input logic clk, input logic [1:0] sel, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ always_ff @(posedge clk) begin
+  casez (sel)
+   2'b1?: temp=inc(8'd10);
+   2'b?1: temp=inc(8'd20);
+   default: temp=inc(8'd30);
+  endcase
+  o <= temp;
+ end
+endmodule
+
+module mixed_casex(input logic clk, input logic [1:0] sel, input bit[8] buf i, output bit[8] buf o, output logic [7:0] temp);
+ function automatic logic [7:0] inc(input logic [7:0] x);
+  inc = x + 8'd1;
+ endfunction
+ always_ff @(posedge clk) begin
+  casex (sel)
+   2'b1?: temp=inc(8'd10);
+   2'b?1: temp=inc(8'd20);
+   default: temp=inc(8'd30);
+  endcase
+  o <= temp;
+ end
+endmodule

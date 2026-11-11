@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T15:38:49+11:00"
+revised_at: "2026-11-11T15:42:24+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -10,7 +10,7 @@ This checkout is **pigen-fork**, a delivery fork of /home/david/Projects/pigen. 
 
 Core transfers, pipelines, FSMs, validity actions, parameterized children and buffered fabric routing with arbitration/SVG are implemented. See what/is/broken.md for capability limits and what/is/the/plan.md for remaining work.
 
-Clocked case rewriting applies to bodies identified as containing Pigen actions; ordinary cases retain original evaluation and control flow. Mixed cases use case equality and a common width/signedness context across selector and labels. Unevaluated conditional arms impose that context without evaluating the other labels. Complete statement boundaries support nested cases and unbraced if/else, with concatenated/comma-separated/ternary labels and optional default colons. Simulations cover these forms, ordinary single selector evaluation, unknown selectors, arithmetic widening and mixed signedness. Full verification passes. Mixed selector evaluation, wildcard/qualified cases and specialization convergence remain open.
+Mixed cases lower through native SystemVerilog combinational case decoders and scalar branch guards. Native case/casez/casex semantics preserve common width/signedness, wildcard matching and branch priority. Simulations cover ordinary selector evaluation, nested/ternary/concatenated labels, optional default colons, unbraced if/else, arithmetic widening, signedness, unknown selectors and wildcard comparisons against native reference cases. Full verification passes. Mixed selector scheduling, qualified cases and specialization convergence remain open; decoders currently evaluate selectors combinationally.
 
 Repository topology: src/ structured owners plus quarantined prototype sources; include/pigen/ C interfaces; rtl/pigen_primitives.sv storage; tests/ C/hardware regressions; examples/ designs including migrated biquad examples; .knowledge/ the sole local documentation and architectural answer authority. README.md is David's public introduction restored from d14aef2; preserve it.
 

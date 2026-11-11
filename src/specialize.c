@@ -1306,153 +1306,98 @@ static size_t case_label_end(const char *source, const pigen_tokens *tokens,
 	return limit;
 }
 
-/* Unselected conditional arms impose the common case expression type without
- * evaluating labels or changing the selected operand's value. */
-static char *case_type_context(const char *source, const pigen_tokens *tokens,
-	size_t first, size_t endcase, const char *selector)
-{
-	pigen_string context = {0};
-	size_t arms = 0;
-	for (size_t item = first; item < endcase; )
-	{
-		size_t colon = case_label_end(source, tokens, item, endcase, ":");
-		size_t end;
-		if (colon == endcase) { free(context.data); return NULL; }
-		end = find_statement_end(source, tokens, colon + 1, endcase);
-		if (end == endcase) { free(context.data); return NULL; }
-		if (!token_is_text(source, &tokens->items[item], "default"))
-			for (size_t label = item; label < colon; )
-			{
-				size_t next = case_label_end(source, tokens, label, colon, ",");
-				char *value = build_tokens(source, tokens, label, next, NULL, 0);
-				pigen_append(&context, "(1'b0 ? (");
-				pigen_append(&context, value);
-				pigen_append(&context, ") : ");
-				free(value);
-				arms++;
-				label = next + 1;
-			}
-		item = end + 1;
-	}
-	pigen_append(&context, "(");
-	pigen_append(&context, selector);
-	pigen_append(&context, ")");
-	while (arms--) pigen_append(&context, ")");
-	return context.data;
-}
-
 static char *rewrite_cases_in_range(const char *source,
-	const pigen_tokens *tokens, size_t first, size_t last);
+	const pigen_tokens *tokens, size_t first, size_t last, pigen_string *decoders);
 static char *rewrite_case_statement(const char *source,
-	const pigen_tokens *tokens, size_t start, size_t *after)
+	const pigen_tokens *tokens, size_t start, size_t *after, pigen_string *decoders)
 {
-	size_t open = start + 1;
-	size_t header_close, endcase, item;
-	char *selector, *context;
-	pigen_string out = {0};
+	size_t open = start + 1, close, endcase, item, branches = 0;
+	pigen_string out = {0}, decoder = {0}, nested = {0};
 	char *default_body = NULL;
-	int branch_count = 0;
-	int unsafe = 0;
-
-	if (!token_is_text(source, &tokens->items[open], "(")) return NULL;
-	header_close = find_matching(source, tokens, open, "(", ")", tokens->count);
-	if (header_close == tokens->count) return NULL;
-	{
-		size_t depth = 0;
-
-		for (endcase = start; endcase < tokens->count; endcase++)
-			if (is_case_keyword(source, &tokens->items[endcase])) depth++;
-			else if (token_is_text(source, &tokens->items[endcase], "endcase") &&
-				!--depth) break;
-	}
-	if (endcase == tokens->count) return NULL;
-	selector = build_tokens(source, tokens, open + 1, header_close, NULL, 0);
-	context = case_type_context(source, tokens, header_close + 1, endcase, selector);
-	if (!context) { free(selector); return NULL; }
-	item = header_close + 1;
-	while (item < endcase)
+	char name[96], number[64];
+	if (open >= tokens->count || !token_is_text(source, &tokens->items[open], "(")) return NULL;
+	close = find_matching(source, tokens, open, "(", ")", tokens->count);
+	endcase = find_statement_end(source, tokens, start, tokens->count);
+	if (close == tokens->count || endcase == tokens->count) return NULL;
+	snprintf(name, sizeof name, "__pigen_case_%zu", tokens->items[start].span.start);
+	pigen_append_range(&decoder, source + tokens->items[start].span.start,
+		tokens->items[close].span.end - tokens->items[start].span.start);
+	pigen_append(&decoder, "\n");
+	for (item = close + 1; item < endcase; )
 	{
 		size_t colon = case_label_end(source, tokens, item, endcase, ":");
-		size_t body, body_end;
-		int is_default;
-		pigen_string condition = {0};
-		pigen_string body_text = {0};
-
-		if (colon == endcase) { unsafe = 1; break; }
-		is_default = token_is_text(source, &tokens->items[item], "default");
-		body = colon + 1;
-		body_end = find_statement_end(source, tokens, body, endcase);
-		if (body_end == tokens->count || body_end == endcase) { unsafe = 1; break; }
+		size_t body = colon + 1;
+		size_t end = find_statement_end(source, tokens, body, endcase);
+		char *rewritten;
+		if (colon == endcase || end == endcase) goto unsafe;
+		rewritten = rewrite_cases_in_range(source, tokens, body, end + 1, &nested);
+		if (token_is_text(source, &tokens->items[item], "default"))
 		{
-			char *rewritten = rewrite_cases_in_range(source, tokens, body,
-				body_end + 1);
-			pigen_append(&body_text, rewritten);
-			free(rewritten);
-		}
-		if (is_default)
-		{
-			free(default_body);
-			default_body = pigen_copy_range(body_text.data ? body_text.data : "",
-				body_text.length);
+			if (default_body) { free(rewritten); goto unsafe; }
+			default_body = rewritten;
+			pigen_append(&decoder, "default: ;\n");
 		}
 		else
 		{
-			for (size_t label = item; label < colon; )
-			{
-				size_t label_end = case_label_end(source, tokens, label, colon, ",");
-				if (label_end > label)
-				{
-					char *value = build_tokens(source, tokens, label, label_end,
-						NULL, 0);
-
-					if (condition.length) pigen_append(&condition, " || ");
-					pigen_append(&condition, "((1'b1 ? (");
-					pigen_append(&condition, selector);
-					pigen_append(&condition, ") : ");
-					pigen_append(&condition, context);
-					pigen_append(&condition, ") === (1'b1 ? (");
-					pigen_append(&condition, value);
-					pigen_append(&condition, ") : ");
-					pigen_append(&condition, context);
-					pigen_append(&condition, "))");
-					free(value);
-				}
-				label = label_end + 1;
-			}
-			if (branch_count) pigen_append(&out, " else ");
+			pigen_append_range(&decoder, source + tokens->items[item].span.start,
+				tokens->items[colon].span.end - tokens->items[item].span.start);
+			pigen_append(&decoder, " ");
+			pigen_append(&decoder, name);
+			snprintf(number, sizeof number, "_%zu", branches);
+			pigen_append(&decoder, number);
+			pigen_append(&decoder, " = 1'b1;\n");
+			if (branches) pigen_append(&out, " else ");
 			pigen_append(&out, "if (");
-			pigen_append(&out, condition.data ? condition.data : "0");
+			pigen_append(&out, name);
+			pigen_append(&out, number);
 			pigen_append(&out, ") begin\n");
-			pigen_append(&out, body_text.data ? body_text.data : "");
+			pigen_append(&out, rewritten);
 			pigen_append(&out, "\nend");
-			branch_count++;
+			free(rewritten);
+			branches++;
 		}
-		free(condition.data);
-		free(body_text.data);
-		item = body_end + 1;
-	}
-	free(selector);
-	free(context);
-	if (unsafe)
-	{
-		free(out.data);
-		free(default_body);
-		return NULL;
+		item = end + 1;
 	}
 	if (default_body)
 	{
-		if (branch_count) pigen_append(&out, " else ");
+		if (branches) pigen_append(&out, " else ");
 		pigen_append(&out, "begin\n");
 		pigen_append(&out, default_body);
 		pigen_append(&out, "\nend");
-		free(default_body);
 	}
+	/* Scalar guards avoid losing a [0:0] packed shape during RTL emission. */
+	for (size_t branch = 0; branch < branches; branch++)
+	{
+		pigen_append(decoders, "logic ");
+		pigen_append(decoders, name);
+		snprintf(number, sizeof number, "_%zu;\n", branch);
+		pigen_append(decoders, number);
+	}
+	pigen_append(decoders, "always_comb begin\n");
+	for (size_t branch = 0; branch < branches; branch++)
+	{
+		pigen_append(decoders, name);
+		snprintf(number, sizeof number, "_%zu = 1'b0;\n", branch);
+		pigen_append(decoders, number);
+	}
+	pigen_append(decoders, decoder.data);
+	pigen_append(decoders, "endcase\nend\n");
+	if (nested.data) pigen_append(decoders, nested.data);
+	free(nested.data);
+	free(decoder.data);
+	free(default_body);
 	*after = endcase + 1;
 	return out.data ? out.data : pigen_copy_range("", 0);
+unsafe:
+	free(nested.data);
+	free(decoder.data);
+	free(default_body);
+	free(out.data);
+	return NULL;
 }
 
 static char *rewrite_cases_in_range(const char *source,
-	const pigen_tokens *tokens, size_t first, size_t last)
+	const pigen_tokens *tokens, size_t first, size_t last, pigen_string *decoders)
 {
 	pigen_string out = {0};
 	size_t cursor = tokens->items[first].span.start;
@@ -1466,7 +1411,7 @@ static char *rewrite_cases_in_range(const char *source,
 			size_t end = close < last ? find_statement_end(source, tokens, close + 1, last) : last;
 			if (end < last)
 			{
-				char *branch = rewrite_cases_in_range(source, tokens, close + 1, end + 1);
+				char *branch = rewrite_cases_in_range(source, tokens, close + 1, end + 1, decoders);
 				pigen_append_range(&out, source + cursor, tokens->items[close].span.end - cursor);
 				pigen_append(&out, " begin\n");
 				pigen_append(&out, branch);
@@ -1477,7 +1422,7 @@ static char *rewrite_cases_in_range(const char *source,
 					size_t else_end = find_statement_end(source, tokens, end + 2, last);
 					if (else_end < last)
 					{
-						branch = rewrite_cases_in_range(source, tokens, end + 2, else_end + 1);
+						branch = rewrite_cases_in_range(source, tokens, end + 2, else_end + 1, decoders);
 						pigen_append(&out, " else begin\n");
 						pigen_append(&out, branch);
 						pigen_append(&out, "\nend");
@@ -1490,11 +1435,11 @@ static char *rewrite_cases_in_range(const char *source,
 				continue;
 			}
 		}
-		if (token_is_text(source, &tokens->items[at], "case") &&
+		if (is_case_keyword(source, &tokens->items[at]) &&
 			token_is_text(source, &tokens->items[at + 1], "("))
 		{
 			size_t after = at;
-			char *replacement = rewrite_case_statement(source, tokens, at, &after);
+			char *replacement = rewrite_case_statement(source, tokens, at, &after, decoders);
 
 			if (replacement)
 			{
@@ -1522,6 +1467,7 @@ static int rewrite_clocked_cases(const char *source, const pigen_tokens *tokens,
 	{
 		size_t event_close, body, end;
 		int has_case = 0;
+		pigen_string decoders = {0};
 		char *body_text;
 
 		if (!(token_is_text(source, &tokens->items[i], "always_ff") ||
@@ -1541,21 +1487,18 @@ static int rewrite_clocked_cases(const char *source, const pigen_tokens *tokens,
 			tokens->count);
 		if (end == tokens->count) continue;
 		for (size_t at = body + 1; at < end; at++)
-			if (token_is_text(source, &tokens->items[at], "case")) has_case = 1;
+			if (is_case_keyword(source, &tokens->items[at])) has_case = 1;
 		if (!has_case || !statement_is_pigen(source, tokens,
 			module_containing(modules, module_count, i), body + 1, end))
 			continue;
-		body_text = rewrite_cases_in_range(source, tokens, body + 1, end);
+		body_text = rewrite_cases_in_range(source, tokens, body + 1, end, &decoders);
 		{
-			size_t original_length = tokens->items[end].span.start -
-				tokens->items[body].span.end;
-			const char *original = source + tokens->items[body].span.end;
-
-			if (strlen(body_text) != original_length ||
-				memcmp(body_text, original, original_length))
+			/* Only a successful case conversion advances specialization. */
+			if (decoders.length)
 			{
 				pigen_string text = {0};
 
+				if (decoders.data) pigen_append(&text, decoders.data);
 				pigen_append_range(&text, source + tokens->items[i].span.start,
 					tokens->items[body].span.end -
 					tokens->items[i].span.start);
@@ -1574,6 +1517,7 @@ static int rewrite_clocked_cases(const char *source, const pigen_tokens *tokens,
 			}
 		}
 		free(body_text);
+		free(decoders.data);
 		i = end;
 	}
 	return count;
