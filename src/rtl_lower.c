@@ -379,6 +379,24 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 		free(words);
 		break;
 	}
+	case PIGEN_CONST_EXPR_SYMBOL:
+	{
+		const pigen_symbol *symbol = pigen_symbol_get(sem, owner->as.symbol);
+		if (!symbol || symbol->kind != PIGEN_SYMBOL_PARAMETER)
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		const pigen_semantic_parameter *parameter = pigen_parameter_get(sem,
+			pigen_symbol_parameter(sem, owner->as.symbol));
+		const pigen_semantic_expr *value = parameter ? pigen_expr_get(sem, parameter->value) : NULL;
+		pigen_conversion conversion;
+		if (!value || !pigen_data_type_resolve_assignment_conversion(sem,
+			value->data_type, owner->data_type, &conversion))
+			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		pigen_const_expr_id source = pigen_expr_constant(sem, parameter->value);
+		pigen_rtl_expr_id child = pigen_lower_rtl_expression(lowering, source);
+		if (child.index == PIGEN_INVALID_ID) return child;
+		result = pigen_rtl_expr_add_conversion(rtl, result_type, &conversion, child, origin);
+		break;
+	}
 	case PIGEN_CONST_EXPR_BINARY:
 	{
 		const pigen_binary_operation *op = &owner->as.binary.operation;
