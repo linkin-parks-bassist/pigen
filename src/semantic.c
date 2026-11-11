@@ -1210,6 +1210,12 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 				case PIGEN_BINARY_SHIFT_LEFT:
 				case PIGEN_BINARY_ARITH_SHIFT_LEFT:
 					if (right >= 64) return 0;
+					if (left > (UINT64_MAX >> right))
+					{
+						uint64_t width;
+						if (!evaluate_u64(model, pigen_data_type_packed_width(model,
+							known->data_type), &width, remaining-1) || width > 64) return 0;
+					}
 					*value = left << right;
 					return 1;
 				case PIGEN_BINARY_SHIFT_RIGHT:
@@ -1237,7 +1243,12 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 				case PIGEN_BINARY_BITWISE_XOR:
 					*value = left ^ right; return 1;
 				case PIGEN_BINARY_BITWISE_XNOR:
+				{
+					uint64_t width;
+					if (!evaluate_u64(model, pigen_data_type_packed_width(model,
+						known->data_type), &width, remaining-1) || width > 64) return 0;
 					*value = ~(left ^ right); return 1;
+				}
 				case PIGEN_BINARY_BITWISE_OR:
 					*value = left | right; return 1;
 				case PIGEN_BINARY_LOGICAL_AND:

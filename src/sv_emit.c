@@ -317,22 +317,42 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 			b->failed = 1;
 			return -1;
 		}
-		if (expr->literal_negative)
-			buf_append_str(b, "-");
-		if (expr->kind == PIGEN_RTL_EXPR_BITS)
+		const pigen_rtl_type *type = pigen_rtl_type_get(rtl, expr->type);
+		size_t count = expr->literal_bit_count / 64 + (expr->literal_bit_count % 64 != 0);
+		int binary = 0;
+		for (size_t i = 0; i < count; i++)
+			if (words[i].x_mask || words[i].z_mask || (i && words[i].value)) binary = 1;
+		if (expr->literal_negative) buf_append_str(b, "-");
+		if (binary)
 		{
-			const pigen_rtl_type *type = pigen_rtl_type_get(rtl,
-				expr->type);
-
-			if (type && type->width)
+			uint64_t width = type && type->width ? type->width : expr->literal_bit_count;
+			buf_append_ull(b, width);
+			buf_append_str(b, type && type->signedness == PIGEN_SIGN_SIGNED ? "'sb" : "'b");
+			for (uint64_t i = width; i > 0; i--)
 			{
-				buf_append_ull(b, type->width);
-				buf_append_str(b, "'d");
+				uint64_t bit = i-1;
+				const char *digit = "0";
+				if (bit < expr->literal_bit_count)
+				{
+					const pigen_rtl_literal_word *word = &words[bit / 64];
+					uint64_t mask = UINT64_C(1) << (bit % 64);
+					digit = word->x_mask & mask ? "x" : word->z_mask & mask ? "z" : word->value & mask ? "1" : "0";
+				}
+				buf_append_str(b, digit);
 			}
 		}
-		buf_append_ull(b, words[0].value);
+		else
+		{
+			if (expr->kind == PIGEN_RTL_EXPR_BITS && type && type->width)
+			{
+				buf_append_ull(b, type->width);
+				buf_append_str(b, type->signedness == PIGEN_SIGN_SIGNED ? "'sd" : "'d");
+			}
+			buf_append_ull(b, words[0].value);
+		}
 		return 0;
 	}
+
 	case PIGEN_RTL_EXPR_OBJECT:
 	{
 		const pigen_rtl_object *object =

@@ -357,25 +357,23 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 	}
 	case PIGEN_CONST_EXPR_BITS:
 	{
-		const pigen_bit_state *states =
-			pigen_const_expr_bits(sem, expression);
+		const pigen_bit_state *states = pigen_const_expr_bits(sem, expression);
 		size_t count = owner->as.bits.state_count;
-		pigen_rtl_literal_word word = {0, 0, 0};
-		size_t i;
-
-		if (!states && count)
+		size_t word_count = count / 64 + (count % 64 != 0);
+		if (!states || !count || word_count > SIZE_MAX / sizeof(pigen_rtl_literal_word))
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-		for (i = 0; i < count && i < 64; i++)
+		pigen_rtl_literal_word *words = calloc(word_count, sizeof *words);
+		if (!words) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		for (size_t i = 0; i < count; i++)
 		{
-			if (states[i] == PIGEN_BIT_ONE)
-				word.value |= (uint64_t)1 << i;
-			else if (states[i] == PIGEN_BIT_X)
-				word.x_mask |= (uint64_t)1 << i;
-			else if (states[i] == PIGEN_BIT_Z)
-				word.z_mask |= (uint64_t)1 << i;
+			uint64_t bit = UINT64_C(1) << (i % 64);
+			if (states[i] == PIGEN_BIT_ONE) words[i / 64].value |= bit;
+			else if (states[i] == PIGEN_BIT_X) words[i / 64].x_mask |= bit;
+			else if (states[i] == PIGEN_BIT_Z) words[i / 64].z_mask |= bit;
 		}
 		result = pigen_rtl_expr_add_literal(rtl, PIGEN_RTL_EXPR_BITS,
-			result_type, &word, count, 0, origin);
+			result_type, words, count, 0, origin);
+		free(words);
 		break;
 	}
 	case PIGEN_CONST_EXPR_BINARY:
