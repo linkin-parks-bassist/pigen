@@ -900,7 +900,7 @@ concat-dest-test: pigen
 	iverilog -g2012 -o /tmp/pigen-concat-dest-vvp rtl/pigen_primitives.sv /tmp/pigen-concat-dest.sv tests/concat_dest_tb.sv
 	vvp /tmp/pigen-concat-dest-vvp
 
-verify: test pipeline-scope-test pipeline-syntax-test biquad-bank-test coslice-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test vertical-slice-test
+verify: test sv-emit-test pipeline-scope-test pipeline-syntax-test biquad-bank-test coslice-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform join-waveform fifo-waveform skid-waveform port-waveform bram-waveform guarded-waveform output-waveform clear-test fsm-test vertical-slice-test
 
 coslice-test: pigen
 	./pigen tests/coslice.pigen -o /tmp/pigen-coslice.sv
@@ -1119,8 +1119,8 @@ child-port-endpoint-test: pigen
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
-	for fixture in projection_wire_dimensions projection_wire_equivalent projection_wire_equivalent_down projection_wire_equivalent_reverse projection_wire_ascending projection_wire_ascending_down projection_wire_ascending_reverse projection_wire_alias projection_wire_forward projection_wire_indexed projection_wire_grouped input_projection_high input_projection_forward input_projection_parent input_projection_fabric output_projection output_projection_implicit output_projection_fabric input_forward_grouped input_forward_alias input_forward_controls input_backward_controls input_forward_selected input_alias input_payload_alias input_selected_alias input_fabric_alias endpoint parent destination fabric fabric_peek forward module_order explicit_alias omitted_explicit_alias omitted_valid_only omitted_ready_only omitted_valid_select omitted_ready_select omitted_ready_select_fabric valid_select valid_select_fabric ready_select ready_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
-		case "$$fixture" in projection_wire_dimensions) tb=tests/child_port_output_projection_dimensions_tb.sv ;; projection_wire_ascending*) tb=tests/child_port_output_projection_ascending_tb.sv ;; input_projection_high) tb=tests/child_port_input_projection_high_tb.sv ;; input_projection*) tb=tests/child_port_input_projection_tb.sv ;; projection_wire_*|output_projection*) tb=tests/child_port_output_projection_tb.sv ;; ready_select|ready_select_fabric|omitted_ready_select|omitted_ready_select_fabric) tb=tests/child_port_ready_select_tb.sv ;; *) tb=tests/child_port_endpoint_tb.sv ;; esac; \
+	for fixture in projection_wire_negative projection_wire_negative_down projection_wire_negative_arithmetic projection_wire_negative_ascending projection_wire_dimensions projection_wire_equivalent projection_wire_equivalent_down projection_wire_equivalent_reverse projection_wire_ascending projection_wire_ascending_down projection_wire_ascending_reverse projection_wire_alias projection_wire_forward projection_wire_indexed projection_wire_grouped input_projection_high input_projection_forward input_projection_parent input_projection_fabric output_projection output_projection_implicit output_projection_fabric input_forward_grouped input_forward_alias input_forward_controls input_backward_controls input_forward_selected input_alias input_payload_alias input_selected_alias input_fabric_alias endpoint parent destination fabric fabric_peek forward module_order explicit_alias omitted_explicit_alias omitted_valid_only omitted_ready_only omitted_valid_select omitted_ready_select omitted_ready_select_fabric valid_select valid_select_fabric ready_select ready_select_fabric explicit_parent payload_alias valid_alias ready_alias payload_parent; do \
+		case "$$fixture" in projection_wire_negative_ascending) tb=tests/child_port_output_projection_negative_ascending_tb.sv ;; projection_wire_negative*) tb=tests/child_port_output_projection_negative_tb.sv ;; projection_wire_dimensions) tb=tests/child_port_output_projection_dimensions_tb.sv ;; projection_wire_ascending*) tb=tests/child_port_output_projection_ascending_tb.sv ;; input_projection_high) tb=tests/child_port_input_projection_high_tb.sv ;; input_projection*) tb=tests/child_port_input_projection_tb.sv ;; projection_wire_*|output_projection*) tb=tests/child_port_output_projection_tb.sv ;; ready_select|ready_select_fabric|omitted_ready_select|omitted_ready_select_fabric) tb=tests/child_port_ready_select_tb.sv ;; *) tb=tests/child_port_endpoint_tb.sv ;; esac; \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim $$tb rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
@@ -1277,7 +1277,7 @@ child-slice-ownership-test: pigen
 		vvp $$dir/sim | grep -Fq 'PASS child slice ownership' || { status=1; break; }; \
 	done; \
 	if [ $$status -eq 0 ]; then \
-		for fixture in overlap indexed_overlap buffered; do \
+		for fixture in overlap indexed_overlap buffered negative_overlap; do \
 			if ./pigen tests/child_slice_$${fixture}_error.pigen -o $$dir/error.sv 2>$$dir/error; then status=1; break; fi; \
 			grep -Fq 'buffered instance destination has multiple producers' $$dir/error || { status=1; break; }; \
 		done; \

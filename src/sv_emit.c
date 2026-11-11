@@ -311,16 +311,14 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 	case PIGEN_RTL_EXPR_BITS:
 	{
 		const pigen_rtl_literal_word *words = expr->literal_words;
-		int64_t value;
 
 		if (!words)
 		{
 			b->failed = 1;
 			return -1;
 		}
-		value = (int64_t)words[0].value;
 		if (expr->literal_negative)
-			value = -value;
+			buf_append_str(b, "-");
 		if (expr->kind == PIGEN_RTL_EXPR_BITS)
 		{
 			const pigen_rtl_type *type = pigen_rtl_type_get(rtl,
@@ -332,7 +330,7 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 				buf_append_str(b, "'d");
 			}
 		}
-		buf_append_int(b, value);
+		buf_append_ull(b, words[0].value);
 		return 0;
 	}
 	case PIGEN_RTL_EXPR_OBJECT:

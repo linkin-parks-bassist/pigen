@@ -568,6 +568,9 @@ const pigen_bit_state *pigen_const_expr_bits(
 	const pigen_semantic_model *model, pigen_const_expr_id expression);
 int pigen_const_expr_evaluate_u64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, uint64_t *value);
+/* Signed coordinate evaluation; unknown, unsupported or overflowing values fail. */
+int pigen_const_expr_evaluate_i64(pigen_semantic_model *model,
+	pigen_const_expr_id expression, int64_t *value);
 int pigen_const_expr_is_symbolic(const pigen_semantic_model *model,
 	pigen_const_expr_id expression);
 pigen_const_expr_id pigen_const_expr_normalize_count(

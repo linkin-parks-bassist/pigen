@@ -172,9 +172,9 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 			return (pigen_rtl_type_id){PIGEN_INVALID_ID};
 		for (i = 0; i < dimension_count; i++)
 		{
-			uint64_t bound_value;
+			int64_t bound_value;
 
-			if (pigen_const_expr_evaluate_u64(sem,
+			if (pigen_const_expr_evaluate_i64(sem,
 				owner_dimensions[i].left, &bound_value))
 				dimensions[i].left = (pigen_rtl_bound){
 					(int64_t)bound_value,
@@ -191,7 +191,7 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 				}
 				dimensions[i].left = (pigen_rtl_bound){0, child};
 			}
-			if (pigen_const_expr_evaluate_u64(sem,
+			if (pigen_const_expr_evaluate_i64(sem,
 				owner_dimensions[i].right, &bound_value))
 				dimensions[i].right = (pigen_rtl_bound){
 					(int64_t)bound_value,
@@ -1558,6 +1558,25 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 static pigen_rtl_expr_id fire_and(pigen_rtl_lowering *lowering,
 	pigen_rtl_expr_id left, pigen_rtl_expr_id right);
 
+/* Coordinates have a signed concrete domain even when their syntax uses an
+ * exact mathematical integer that has no standalone hardware type. */
+static pigen_rtl_expr_id lower_coordinate(pigen_rtl_lowering *lowering,
+	pigen_expr_id expression)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	int64_t value;
+	if (pigen_const_expr_evaluate_i64(sem, pigen_expr_constant(sem, expression), &value) && value < 0)
+	{
+		pigen_rtl_type_id type = pigen_lower_rtl_type(lowering,
+			pigen_data_type_sized_logic(sem, 64, PIGEN_SIGN_SIGNED));
+		pigen_rtl_literal_word word = {(uint64_t)(-(value+1))+1, 0, 0};
+		const pigen_semantic_expr *source = pigen_expr_get(sem, expression);
+		return pigen_rtl_expr_add_literal(lowering->rtl, PIGEN_RTL_EXPR_INTEGER,
+			type, &word, 64, 1, source->span);
+	}
+	return lower_expr(lowering, expression);
+}
+
 static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 	pigen_expr_id expression)
 {
@@ -1816,7 +1835,7 @@ ordinary:
 		pigen_rtl_expr_id index;
 
 		base = lower_expr(lowering, owner->as.index.base);
-		index = lower_expr(lowering, owner->as.index.index);
+		index = lower_coordinate(lowering, owner->as.index.index);
 		if (base.index == PIGEN_INVALID_ID ||
 			index.index == PIGEN_INVALID_ID)
 			return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
@@ -1830,8 +1849,8 @@ ordinary:
 		pigen_rtl_expr_id right;
 
 		base = lower_expr(lowering, owner->as.select.base);
-		left = lower_expr(lowering, owner->as.select.left);
-		right = lower_expr(lowering, owner->as.select.right);
+		left = lower_coordinate(lowering, owner->as.select.left);
+		right = lower_coordinate(lowering, owner->as.select.right);
 		if (base.index == PIGEN_INVALID_ID ||
 			left.index == PIGEN_INVALID_ID ||
 			right.index == PIGEN_INVALID_ID)

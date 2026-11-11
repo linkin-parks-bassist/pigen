@@ -350,6 +350,31 @@ int main(void)
 		unsized_integer_data_type);
 	width_16 = pigen_const_expr_intern_integer(&model, 16,
 		unsized_integer_data_type);
+	/* Coordinates are signed; widths remain nonnegative and overflow-checked. */
+	{
+		int64_t coordinate;
+		uint64_t span;
+		pigen_unary_operation negate = {PIGEN_UNARY_NEGATE,
+			unsized_integer_data_type, unsized_integer_data_type};
+		pigen_const_expr_id minus_eight = pigen_const_expr_intern_unary(&model, negate, width_8);
+		assert(pigen_const_expr_evaluate_i64(&model, minus_eight, &coordinate) && coordinate == -8);
+		pigen_binary_operation subtract = {PIGEN_BINARY_SUBTRACT,
+			unsized_integer_data_type, unsized_integer_data_type, unsized_integer_data_type};
+		pigen_const_expr_id difference = pigen_const_expr_intern_binary(&model, subtract, width_4, width_12);
+		assert(pigen_const_expr_evaluate_i64(&model, difference, &coordinate) && coordinate == -8);
+		pigen_const_expr_id range = pigen_const_expr_intern_select_width(&model,
+			width_5, minus_eight, PIGEN_SEMANTIC_SELECT_RANGE);
+		assert(pigen_const_expr_evaluate_u64(&model, range, &span) && span == 14);
+		pigen_integer_id minimum = pigen_integer_negate(&model,
+			pigen_integer_intern_u64(&model, UINT64_C(1) << 63));
+		pigen_const_expr_id min_expr = pigen_const_expr_intern_exact_integer(&model,
+			minimum, pigen_data_type_exact_integer(&model, minimum));
+		assert(pigen_const_expr_evaluate_i64(&model, min_expr, &coordinate) && coordinate == INT64_MIN);
+		pigen_const_expr_id maximum = pigen_const_expr_intern_integer(&model, INT64_MAX, unsized_integer_data_type);
+		range = pigen_const_expr_intern_select_width(&model, maximum, min_expr, PIGEN_SEMANTIC_SELECT_RANGE);
+		assert(!pigen_const_expr_evaluate_u64(&model, range, &span));
+		assert(!pigen_const_expr_evaluate_u64(&model, minus_eight, &span));
+	}
 	signed_8 = pigen_data_type_signed_integer(&model, width_8);
 	same_signed_8 = pigen_data_type_signed_integer(&model, width_8);
 	signed_12 = pigen_data_type_signed_integer(&model, width_12);

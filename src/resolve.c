@@ -2514,15 +2514,15 @@ static const pigen_semantic_expr *ownership_expression(
 
 static int ownership_selection(pigen_semantic_model *model,
 	const pigen_semantic_expr *expr, pigen_expr_id *base,
-	uint64_t *low, uint64_t *high)
+	int64_t *low, int64_t *high)
 {
 	pigen_expr_id left, right;
-	uint64_t a, b;
+	int64_t a, b;
 	if (!expr) return 0;
 	if (expr->kind == PIGEN_EXPR_INDEX)
 	{
 		*base = expr->as.index.base;
-		if (!pigen_const_expr_evaluate_u64(model,
+		if (!pigen_const_expr_evaluate_i64(model,
 			pigen_expr_constant(model, expr->as.index.index), &a)) return 0;
 		*low = *high = a;
 		return 1;
@@ -2531,8 +2531,8 @@ static int ownership_selection(pigen_semantic_model *model,
 	*base = expr->as.select.base;
 	left = expr->as.select.left;
 	right = expr->as.select.right;
-	if (!pigen_const_expr_evaluate_u64(model, pigen_expr_constant(model, left), &a) ||
-		!pigen_const_expr_evaluate_u64(model, pigen_expr_constant(model, right), &b))
+	if (!pigen_const_expr_evaluate_i64(model, pigen_expr_constant(model, left), &a) ||
+		!pigen_const_expr_evaluate_i64(model, pigen_expr_constant(model, right), &b))
 		return 0;
 	if (expr->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE)
 	{
@@ -2541,12 +2541,12 @@ static int ownership_selection(pigen_semantic_model *model,
 	}
 	else if (expr->as.select.kind == PIGEN_SEMANTIC_SELECT_INDEXED_UP)
 	{
-		if (!b || UINT64_MAX - a < b - 1) return 0;
-		*low = a; *high = a + b - 1;
+		if (b <= 0 || a > INT64_MAX - (b - 1)) return 0;
+		*low = a; *high = a + (b - 1);
 	}
 	else
 	{
-		if (!b || a < b - 1) return 0;
+		if (b <= 0 || a < INT64_MIN + (b - 1)) return 0;
 		*low = a - (b - 1); *high = a;
 	}
 	return 1;
@@ -2556,15 +2556,15 @@ static int ownership_selection(pigen_semantic_model *model,
  * normalized interval alone cannot establish that payload bit order matches. */
 static int ownership_ordered_selection(pigen_semantic_model *model,
 	const pigen_semantic_expr *expr, pigen_expr_id *base,
-	uint64_t *left, uint64_t *right)
+	int64_t *left, int64_t *right)
 {
-	uint64_t low, high;
+	int64_t low, high;
 	if (!expr || expr->kind != PIGEN_EXPR_SELECT ||
 		!ownership_selection(model, expr, base, &low, &high)) return 0;
 	if (expr->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE)
-		return pigen_const_expr_evaluate_u64(model,
+		return pigen_const_expr_evaluate_i64(model,
 			pigen_expr_constant(model, expr->as.select.left), left) &&
-			pigen_const_expr_evaluate_u64(model,
+			pigen_const_expr_evaluate_i64(model,
 				pigen_expr_constant(model, expr->as.select.right), right);
 	const pigen_semantic_expr *source = pigen_expr_get(model, *base);
 	if (!source) return 0;
@@ -2572,9 +2572,9 @@ static int ownership_ordered_selection(pigen_semantic_model *model,
 	int descending = 1;
 	if (pigen_data_type_dimension_count(model, source->data_type))
 	{
-		uint64_t declared_left, declared_right;
-		if (!dimensions || !pigen_const_expr_evaluate_u64(model, dimensions[0].left, &declared_left) ||
-			!pigen_const_expr_evaluate_u64(model, dimensions[0].right, &declared_right)) return 0;
+		int64_t declared_left, declared_right;
+		if (!dimensions || !pigen_const_expr_evaluate_i64(model, dimensions[0].left, &declared_left) ||
+			!pigen_const_expr_evaluate_i64(model, dimensions[0].right, &declared_right)) return 0;
 		descending = declared_left >= declared_right;
 	}
 	*left = descending ? high : low;
@@ -2588,14 +2588,14 @@ static int ownership_same_projection(pigen_semantic_model *model,
 	const pigen_semantic_expr *a = ownership_expression(model, left);
 	const pigen_semantic_expr *b = ownership_expression(model, right);
 	pigen_expr_id abase, bbase;
-	uint64_t alow, ahigh, blow, bhigh;
+	int64_t alow, ahigh, blow, bhigh;
 	if (!a || !b) return 0;
 	if (a == b) return 1;
 	if (a->kind == PIGEN_EXPR_SYMBOL && b->kind == PIGEN_EXPR_SYMBOL)
 		return a->as.symbol.index == b->as.symbol.index;
 	if (a->kind == PIGEN_EXPR_SELECT && b->kind == PIGEN_EXPR_SELECT)
 	{
-		uint64_t al, ar, bl, br;
+		int64_t al, ar, bl, br;
 		return ownership_ordered_selection(model, a, &abase, &al, &ar) &&
 			ownership_ordered_selection(model, b, &bbase, &bl, &br) &&
 			al == bl && ar == br && ownership_same_projection(model, abase, bbase);
@@ -2612,7 +2612,7 @@ static int ownership_disjoint(pigen_semantic_model *model,
 	const pigen_semantic_expr *a = ownership_expression(model, left);
 	const pigen_semantic_expr *b = ownership_expression(model, right);
 	pigen_expr_id abase, bbase;
-	uint64_t alow, ahigh, blow, bhigh;
+	int64_t alow, ahigh, blow, bhigh;
 	if (!ownership_selection(model, a, &abase, &alow, &ahigh) ||
 		!ownership_selection(model, b, &bbase, &blow, &bhigh)) return 0;
 	if (ownership_same_projection(model, abase, bbase))

@@ -8,9 +8,7 @@
 /* The expression renderer is a file-local seam in src/sv_emit.c exposed as
  * pigen_sv_render_expression. This packet pins, by exact rendered string, one
  * case per pigen_rtl_expr kind plus the precedence parenthesization rules the
- * contract requires. On main the renderer is still a -1 stub, so every
- * successful-render assertion below is the deliberate red; the packet lands
- * later with the code that makes it green. Witnesses are built only through the
+ * contract requires. Witnesses are built only through the
  * public arena constructors (Relies on list); the negative-literal witness
  * additionally uses pigen_rtl_expr_add_literal, the only public constructor that
  * can carry literal_negative (pigen_rtl_expr_add_integer forces it to zero). */
@@ -54,8 +52,7 @@ static void render_is(const pigen_rtl_model *m, pigen_rtl_expr_id expr,
  * failure idiom (how/should/compiler/builders/fail.md): the whole-design
  * emitter validates before committing, so a malformed finished model returns
  * -1 and leaves *output_string NULL even though a renderable prefix was
- * produced. On main the emitter is the unimplemented -1 stub, so this holds;
- * the sibling positive controls below are what fail there. */
+ * otherwise renderable. Sibling positive controls require successful output. */
 static void near_valid(const pigen_source_manager *sources,
 	const pigen_output_model *layout, const pigen_rtl_model *rtl)
 {
@@ -65,9 +62,7 @@ static void near_valid(const pigen_source_manager *sources,
 	REQUIRE(out == NULL);
 }
 
-/* Whole-design positive control: a valid, finished, named design must render.
- * Pins the "a valid prefix was renderable" half of the packet -- on main the
- * -1 stub cannot satisfy this, so it is the deliberate red. */
+/* Whole-design positive control: a valid, finished, named design must render. */
 static void renders(const pigen_source_manager *sources,
 	const pigen_output_model *layout, const pigen_rtl_model *rtl)
 {
@@ -93,11 +88,7 @@ int main(int argc, char **argv)
 		/* The empty (0-item) model is a valid, complete design: a success
 		 * verdict always commits a string, never NULL. The emitter must
 		 * commit a newly-allocated, NUL-terminated empty string ("") that
-		 * the caller frees. On main the whole-design emitter is still the
-		 * -1 stub (returns -1 and leaves *output_string NULL), so ret == 0
-		 * and the empty-string commit are the deliberate red this packet
-		 * pins; it turns green once the guarded emitter's success commit
-		 * commits the empty string instead of NULL. */
+		 * the caller frees. */
 		ret = pigen_emit_systemverilog(&sources, &layout, &rtl, &out);
 		REQUIRE(ret == 0);
 		REQUIRE(out != NULL && strcmp(out, "") == 0);
@@ -136,6 +127,12 @@ int main(int argc, char **argv)
 			REQUIRE(expr_is_valid(&rtl, neg));
 			render_is(&rtl, plain, "42");
 			render_is(&rtl, neg, "-7");
+			pigen_rtl_expr_id minimum = pigen_rtl_expr_add_literal(&rtl,
+				PIGEN_RTL_EXPR_INTEGER, t,
+				&(pigen_rtl_literal_word){UINT64_C(1) << 63, 0, 0}, 64, 1, span);
+			render_is(&rtl, minimum, "-9223372036854775808");
+			pigen_rtl_expr_id maximum = pigen_rtl_expr_add_integer(&rtl, t, UINT64_MAX, span);
+			render_is(&rtl, maximum, "18446744073709551615");
 		}
 
 		/* OBJECT: renders the final name whose (role, origin) identity matches
@@ -431,9 +428,9 @@ int main(int argc, char **argv)
 			pigen_output_item items[2];
 
 			items[0] = (pigen_output_item){
-				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 4} }, {0, 0}};
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 4} }, {0, 0}, NULL};
 			items[1] = (pigen_output_item){
-				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 4, 10} }, {0, 0}};
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 4, 10} }, {0, 0}, NULL};
 			near_valid(&sources, &(pigen_output_model){
 				items, 2, 0, 0, 0, 0}, &rtl);
 
@@ -442,11 +439,11 @@ int main(int argc, char **argv)
 			pigen_output_item ok[3];
 
 			ok[0] = (pigen_output_item){
-				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 4} }, {0, 0}};
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 4} }, {0, 0}, NULL};
 			ok[1] = (pigen_output_item){
-				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 4, 10} }, {0, 0}};
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 4, 10} }, {0, 0}, NULL};
 			ok[2] = (pigen_output_item){
-				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 10, 15} }, {0, 0}};
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 10, 15} }, {0, 0}, NULL};
 			renders(&sources, &(pigen_output_model){
 				ok, 3, 0, 0, 0, 0}, &rtl);
 		}
@@ -472,14 +469,14 @@ int main(int argc, char **argv)
 				obj_unnamed.index != PIGEN_INVALID_ID);
 
 			item = (pigen_output_item){
-				PIGEN_OUTPUT_RTL_OBJECT, { .object = obj_unnamed }, {0, 0}};
+				PIGEN_OUTPUT_RTL_OBJECT, { .object = obj_unnamed }, {0, 0}, NULL};
 			near_valid(&sources, &(pigen_output_model){
 				&item, 1, 0, 0, 0, 0}, &rtl);
 
 			/* Control: the object whose origin matches the assigned name
 			 * renders. */
 			item = (pigen_output_item){
-				PIGEN_OUTPUT_RTL_OBJECT, { .object = obj_named }, {0, 0}};
+				PIGEN_OUTPUT_RTL_OBJECT, { .object = obj_named }, {0, 0}, NULL};
 			renders(&sources, &(pigen_output_model){
 				&item, 1, 0, 0, 0, 0}, &rtl);
 		}
@@ -538,13 +535,13 @@ int main(int argc, char **argv)
 			 * corrupted child index. The emitter must refuse before rendering
 			 * the (unrenderable) equation and commit no partial output. */
 			item = (pigen_output_item){
-				PIGEN_OUTPUT_RTL_EQUATION, { .equation = eq_bad }, {0, 0}};
+				PIGEN_OUTPUT_RTL_EQUATION, { .equation = eq_bad }, {0, 0}, NULL};
 			near_valid(&sources, &(pigen_output_model){
 				&item, 1, 0, 0, 0, 0}, &rtl);
 
 			/* Control: the in-range sibling equation renders. */
 			item = (pigen_output_item){
-				PIGEN_OUTPUT_RTL_EQUATION, { .equation = eq_good }, {0, 0}};
+				PIGEN_OUTPUT_RTL_EQUATION, { .equation = eq_good }, {0, 0}, NULL};
 			renders(&sources, &(pigen_output_model){
 				&item, 1, 0, 0, 0, 0}, &rtl);
 		}
@@ -558,7 +555,7 @@ int main(int argc, char **argv)
 
 			item = (pigen_output_item){
 				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 10, 100} },
-					{0, 0}};
+					{0, 0}, NULL};
 			REQUIRE(pigen_source_span_valid(&sources,
 				(pigen_source_span){src, 10, 100}) == 0);
 			near_valid(&sources, &(pigen_output_model){
@@ -566,7 +563,7 @@ int main(int argc, char **argv)
 
 			/* Control: an in-bounds span on the same source renders. */
 			item = (pigen_output_item){
-				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 15} }, {0, 0}};
+				PIGEN_OUTPUT_OPAQUE, { (pigen_source_span){src, 0, 15} }, {0, 0}, NULL};
 			REQUIRE(pigen_source_span_valid(&sources,
 				(pigen_source_span){src, 0, 15}) == 1);
 			renders(&sources, &(pigen_output_model){
@@ -587,8 +584,7 @@ int main(int argc, char **argv)
 		 * equation, and a guarded/clocked update), and a trailing OPAQUE comment.
 		 * OPAQUE spans are copied verbatim and byte-exact; the rest is rendered
 		 * from the RTL records and their final names. The golden string below is
-		 * the contract-faithful rendering; the test is red only because
-		 * pigen_emit_systemverilog is still the unimplemented stub (returns -1). */
+		 * the contract-faithful rendering of the supplied records. */
 		pigen_source_manager sources = {0};
 		pigen_source_id design;
 		pigen_source_id namefile;
@@ -623,13 +619,13 @@ int main(int argc, char **argv)
 		const char golden[] =
 			"// leading golden comment\n"
 			"module top (\n"
-			"  input  logic [7:0] a,\n"
-			"  output logic [7:0] b,\n"
-			"  input  logic clk\n"
+			"  input  bit [7:0] a,\n"
+			"  output bit [7:0] b,\n"
+			"  input  bit clk\n"
 			");\n"
-			"  logic [7:0] c;\n"
-			"  logic [7:0] d;\n"
-			"  logic [7:0] e;\n"
+			"  bit [7:0] c;\n"
+			"  bit [7:0] d;\n"
+			"  bit [7:0] e;\n"
 			"  instance #(8) (.clk(clk));\n"
 			"  assign b = signed'(16'(a));\n"
 			"  assign d = {c,e};\n"
@@ -663,18 +659,18 @@ int main(int argc, char **argv)
 		REQUIRE(pigen_source_span_valid(&sources,
 			(pigen_source_span){namefile, 14, 17}));
 
-		/* Types: an unsigned 8-bit logic, a signed 16-bit logic (the conversion
-		 * target), and an unsigned 1-bit logic (the clock). */
+		/* Types: an unsigned 8-bit bit vector, a signed 16-bit bit vector (the conversion
+		 * target), and an unsigned 1-bit bit vector (the clock). */
 		{
 			pigen_rtl_type d8 = {PIGEN_SIGN_UNSIGNED,
 				PIGEN_DATA_TYPE_STATE_TWO, 8, (pigen_rtl_expr_id){PIGEN_INVALID_ID},
-				(pigen_source_span){namefile, 0, 1}, 0, 0};
+				(pigen_source_span){namefile, 0, 1}, 0, 0, 0};
 			pigen_rtl_type d16 = {PIGEN_SIGN_SIGNED,
 				PIGEN_DATA_TYPE_STATE_TWO, 16, (pigen_rtl_expr_id){PIGEN_INVALID_ID},
-				(pigen_source_span){namefile, 0, 1}, 0, 0};
+				(pigen_source_span){namefile, 0, 1}, 0, 0, 0};
 			pigen_rtl_type d1 = {PIGEN_SIGN_UNSIGNED,
 				PIGEN_DATA_TYPE_STATE_TWO, 1, (pigen_rtl_expr_id){PIGEN_INVALID_ID},
-				(pigen_source_span){namefile, 0, 1}, 0, 0};
+				(pigen_source_span){namefile, 0, 1}, 0, 0, 0};
 
 			t8 = pigen_rtl_type_intern(&rtl, &d8);
 			t16 = pigen_rtl_type_intern(&rtl, &d16);
@@ -867,8 +863,7 @@ int main(int argc, char **argv)
 		 * and trailing OPAQUE spans copied verbatim and byte-exact, the module
 		 * header and its nested items, the signal declarations, the signed
 		 * conversion, the concatenation, the primitive parameter, the equation,
-		 * and the guarded/clocked update. Red on main: the stub returns -1 and
-		 * leaves *output_string NULL. */
+		 * and the guarded/clocked update. */
 		ret = pigen_emit_systemverilog(&sources, &layout, &rtl, &out);
 		REQUIRE(ret == 0);
 		REQUIRE(out != NULL);

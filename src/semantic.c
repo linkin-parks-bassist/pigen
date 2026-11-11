@@ -878,6 +878,131 @@ static int literal_bits_u64(const pigen_semantic_model *model,
 static int evaluate_u64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, uint64_t *value, size_t remaining);
 
+static int evaluate_i64(pigen_semantic_model *model,
+	pigen_const_expr_id expression, int64_t *value, size_t remaining);
+
+/* Convert a two's-complement pattern without implementation-defined casts. */
+static int64_t signed_pattern(uint64_t bits)
+{
+	return bits <= INT64_MAX ? (int64_t)bits :
+		-1 - (int64_t)(UINT64_MAX - bits);
+}
+
+static int evaluate_i64(pigen_semantic_model *model,
+	pigen_const_expr_id expression, int64_t *value, size_t remaining)
+{
+	const pigen_const_expr *record = pigen_const_expr_get(model, expression);
+	if (!record || !remaining || !value) return 0;
+	pigen_const_expr known = *record;
+	uint64_t positive;
+	if (evaluate_u64(model, expression, &positive, remaining))
+	{
+		if (positive > INT64_MAX) return 0;
+		*value = (int64_t)positive;
+		return 1;
+	}
+	int64_t left, right, result;
+	switch (known.kind)
+	{
+	case PIGEN_CONST_EXPR_EXACT_INTEGER:
+	{
+		const pigen_integer *integer = &model->integers[known.as.exact_integer.index];
+		if (!integer->negative || integer->limb_count > 2) return 0;
+		uint64_t magnitude = integer->limb_count ? model->integer_limbs[integer->first_limb] : 0;
+		if (integer->limb_count == 2)
+			magnitude |= (uint64_t)model->integer_limbs[integer->first_limb+1] << 32;
+		if (magnitude > (UINT64_C(1) << 63)) return 0;
+		*value = magnitude ? -1 - (int64_t)(magnitude-1) : 0;
+		return 1;
+	}
+	case PIGEN_CONST_EXPR_BITS:
+	{
+		uint64_t bits;
+		size_t width = known.as.bits.state_count;
+		if (!width || width > 64 || !literal_bits_u64(model, &known, &bits) ||
+			pigen_data_type_signedness(model, known.data_type) != PIGEN_SIGN_SIGNED) return 0;
+		if (width < 64 && (bits & (UINT64_C(1) << (width-1))))
+			bits |= UINT64_MAX << width;
+		*value = signed_pattern(bits);
+		return 1;
+	}
+	case PIGEN_CONST_EXPR_SYMBOL:
+	{
+		const pigen_semantic_parameter *parameter = pigen_parameter_get(model,
+			pigen_symbol_parameter(model, known.as.symbol));
+		return parameter && evaluate_i64(model, pigen_expr_constant(model, parameter->value), value, remaining-1);
+	}
+	case PIGEN_CONST_EXPR_CONVERSION:
+		if (!evaluate_i64(model, known.as.conversion.operand, &result, remaining-1)) return 0;
+		break;
+	case PIGEN_CONST_EXPR_UNARY:
+		if (!evaluate_i64(model, known.as.unary.operand, &left, remaining-1)) return 0;
+		switch (known.as.unary.operation.operator)
+		{
+		case PIGEN_UNARY_POSITIVE: result = left; break;
+		case PIGEN_UNARY_NEGATE:
+			if (left == INT64_MIN) return 0;
+			result = -left; break;
+		case PIGEN_UNARY_BITWISE_NOT: result = signed_pattern(~(uint64_t)left); break;
+		case PIGEN_UNARY_LOGICAL_NOT: result = !left; break;
+		default: return 0;
+		}
+		break;
+	case PIGEN_CONST_EXPR_BINARY:
+		if (!evaluate_i64(model, known.as.binary.left, &left, remaining-1) ||
+			!evaluate_i64(model, known.as.binary.right, &right, remaining-1)) return 0;
+		switch (known.as.binary.operation.operator)
+		{
+		case PIGEN_BINARY_ADD:
+			if (__builtin_add_overflow(left, right, &result)) return 0;
+			break;
+		case PIGEN_BINARY_SUBTRACT:
+			if (__builtin_sub_overflow(left, right, &result)) return 0;
+			break;
+		case PIGEN_BINARY_MULTIPLY:
+			if (__builtin_mul_overflow(left, right, &result)) return 0;
+			break;
+		case PIGEN_BINARY_DIVIDE:
+		case PIGEN_BINARY_MODULO:
+			if (!right || (left == INT64_MIN && right == -1)) return 0;
+			result = known.as.binary.operation.operator == PIGEN_BINARY_DIVIDE ? left/right : left%right;
+			break;
+		default: return 0;
+		}
+		break;
+	default: return 0;
+	}
+	/* Apply the expression's resolved fixed-width interpretation. Mathematical
+	 * compiler integers and exact values have no truncation boundary. */
+	if (known.data_type.index != model->unsized_integer_data_type.index &&
+		pigen_data_type_numerical_interpretation(model, known.data_type) != PIGEN_NUMERICAL_EXACT_INTEGER)
+	{
+		uint64_t width, bits = (uint64_t)result;
+		if (!evaluate_u64(model, pigen_data_type_packed_width(model, known.data_type), &width, remaining-1) ||
+			!width || width > 64) return 0;
+		if (width < 64) bits &= (UINT64_C(1) << width)-1;
+		if (pigen_data_type_signedness(model, known.data_type) == PIGEN_SIGN_SIGNED)
+		{
+			if (width < 64 && (bits & (UINT64_C(1) << (width-1)))) bits |= UINT64_MAX << width;
+			result = signed_pattern(bits);
+		}
+		else
+		{
+			if (bits > INT64_MAX) return 0;
+			result = (int64_t)bits;
+		}
+	}
+	*value = result;
+	return 1;
+}
+
+int pigen_const_expr_evaluate_i64(pigen_semantic_model *model,
+	pigen_const_expr_id expression, int64_t *value)
+{
+	return model && evaluate_i64(model, expression, value,
+		model->constant_expression_count + 1);
+}
+
 static int evaluate_u64_raw(pigen_semantic_model *model,
 	pigen_const_expr_id expression, uint64_t *value, size_t remaining)
 {
@@ -1045,6 +1170,18 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 				default: return 0;
 			}
 		case PIGEN_CONST_EXPR_SELECT_WIDTH:
+			if (known->as.select_width.kind == PIGEN_SEMANTIC_SELECT_RANGE)
+			{
+				int64_t a, b;
+				if (evaluate_i64(model, known->as.select_width.left, &a, remaining-1) &&
+					evaluate_i64(model, known->as.select_width.right, &b, remaining-1))
+				{
+					uint64_t distance = a >= b ? (uint64_t)a - (uint64_t)b : (uint64_t)b - (uint64_t)a;
+					if (distance == UINT64_MAX) return 0;
+					*value = distance + 1;
+					return 1;
+				}
+			}
 			if (!evaluate_u64(model, known->as.select_width.right, &right,
 				remaining - 1)) return 0;
 			if (known->as.select_width.kind != PIGEN_SEMANTIC_SELECT_RANGE)
