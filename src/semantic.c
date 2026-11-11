@@ -945,6 +945,32 @@ static int evaluate_i64(pigen_semantic_model *model,
 			result = -left; break;
 		case PIGEN_UNARY_BITWISE_NOT: result = signed_pattern(~(uint64_t)left); break;
 		case PIGEN_UNARY_LOGICAL_NOT: result = !left; break;
+		case PIGEN_UNARY_REDUCTION_AND:
+		case PIGEN_UNARY_REDUCTION_NAND:
+		case PIGEN_UNARY_REDUCTION_OR:
+		case PIGEN_UNARY_REDUCTION_NOR:
+		case PIGEN_UNARY_REDUCTION_XOR:
+		case PIGEN_UNARY_REDUCTION_XNOR:
+		{
+			uint64_t width;
+			if (!evaluate_u64(model, pigen_data_type_packed_width(model,
+				known.as.unary.operation.operand_data_type), &width, remaining-1) || !width || width > 64) return 0;
+			uint64_t mask = width == 64 ? UINT64_MAX : (UINT64_C(1) << width)-1;
+			uint64_t bits = (uint64_t)left & mask;
+			pigen_unary_operator op = known.as.unary.operation.operator;
+			if (op == PIGEN_UNARY_REDUCTION_AND || op == PIGEN_UNARY_REDUCTION_NAND)
+				result = bits == mask;
+			else if (op == PIGEN_UNARY_REDUCTION_OR || op == PIGEN_UNARY_REDUCTION_NOR)
+				result = bits != 0;
+			else
+			{
+				result = 0;
+				while (bits) { result ^= 1; bits &= bits-1; }
+			}
+			if (op == PIGEN_UNARY_REDUCTION_NAND || op == PIGEN_UNARY_REDUCTION_NOR ||
+				op == PIGEN_UNARY_REDUCTION_XNOR) result = !result;
+			break;
+		}
 		default: return 0;
 		}
 		break;
@@ -978,6 +1004,37 @@ static int evaluate_i64(pigen_semantic_model *model,
 			if (!right || (left == INT64_MIN && right == -1)) return 0;
 			result = known.as.binary.operation.operator == PIGEN_BINARY_DIVIDE ? left/right : left%right;
 			break;
+		case PIGEN_BINARY_SHIFT_LEFT:
+		case PIGEN_BINARY_ARITH_SHIFT_LEFT:
+		case PIGEN_BINARY_SHIFT_RIGHT:
+		case PIGEN_BINARY_ARITH_SHIFT_RIGHT:
+		{
+			uint64_t width;
+			pigen_data_type_id operand_type = known.as.binary.operation.left_data_type;
+			if (!evaluate_u64(model, pigen_data_type_packed_width(model, operand_type), &width, remaining-1) ||
+				!width || width > 64) return 0;
+			uint64_t mask = width == 64 ? UINT64_MAX : (UINT64_C(1) << width)-1;
+			uint64_t bits = (uint64_t)left & mask;
+			pigen_binary_operator op = known.as.binary.operation.operator;
+			int sign_fill = op == PIGEN_BINARY_ARITH_SHIFT_RIGHT &&
+				pigen_data_type_signedness(model, operand_type) == PIGEN_SIGN_SIGNED &&
+				(bits & (UINT64_C(1) << (width-1)));
+			/* SV interprets a negative shift amount as an unsigned amount,
+			 * which exceeds these finite operand widths. */
+			if (right < 0 || (uint64_t)right >= width)
+				bits = sign_fill ? mask : 0;
+			else if (op == PIGEN_BINARY_SHIFT_LEFT || op == PIGEN_BINARY_ARITH_SHIFT_LEFT)
+				bits = (bits << (unsigned)right) & mask;
+			else
+			{
+				bits >>= (unsigned)right;
+				if (sign_fill && right) bits |= (mask << (width-(unsigned)right)) & mask;
+			}
+			if (pigen_data_type_signedness(model, known.data_type) == PIGEN_SIGN_SIGNED &&
+				width < 64 && (bits & (UINT64_C(1) << (width-1)))) bits |= UINT64_MAX << width;
+			result = signed_pattern(bits);
+			break;
+		}
 		case PIGEN_BINARY_LESS: result = left < right; break;
 		case PIGEN_BINARY_LESS_EQUAL: result = left <= right; break;
 		case PIGEN_BINARY_GREATER: result = left > right; break;

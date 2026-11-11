@@ -404,6 +404,40 @@ int main(void)
 			unsized_integer_data_type, boolean_type};
 		selected = pigen_const_expr_intern_binary(&model, logical, zero, invalid_branch);
 		assert(pigen_const_expr_evaluate_i64(&model, selected, &coordinate) && coordinate == 0);
+		pigen_data_type_id signed_byte = pigen_data_type_sized_logic(&model, 8, PIGEN_SIGN_SIGNED);
+		const struct { unsigned byte; pigen_binary_operator op; int amount; int expected; } shifts[] = {
+			{248,PIGEN_BINARY_ARITH_SHIFT_RIGHT,1,-4}, {248,PIGEN_BINARY_SHIFT_RIGHT,1,124},
+			{128,PIGEN_BINARY_ARITH_SHIFT_RIGHT,8,-1}, {128,PIGEN_BINARY_SHIFT_RIGHT,8,0},
+			{248,PIGEN_BINARY_SHIFT_LEFT,1,-16}, {64,PIGEN_BINARY_SHIFT_LEFT,1,-128},
+			{255,PIGEN_BINARY_ARITH_SHIFT_LEFT,8,0}, {255,PIGEN_BINARY_ARITH_SHIFT_RIGHT,-8,-1}
+		};
+		for (size_t i=0; i<sizeof shifts/sizeof shifts[0]; i++)
+		{
+			pigen_bit_state bits[8];
+			for (size_t bit=0; bit<8; bit++) bits[bit]=(shifts[i].byte & (1u<<bit)) ? PIGEN_BIT_ONE : PIGEN_BIT_ZERO;
+			pigen_const_expr_id operand = pigen_const_expr_intern_bits(&model, bits, 8, signed_byte);
+			pigen_const_expr_id amount = shifts[i].amount < 0 ? minus_eight :
+				pigen_const_expr_intern_integer(&model, (uint64_t)shifts[i].amount, unsized_integer_data_type);
+			pigen_binary_operation op = {shifts[i].op, signed_byte, unsized_integer_data_type, signed_byte};
+			pigen_const_expr_id shifted = pigen_const_expr_intern_binary(&model, op, operand, amount);
+			assert(pigen_const_expr_evaluate_i64(&model, shifted, &coordinate) && coordinate == shifts[i].expected);
+		}
+		const pigen_unary_operator reductions[] = {PIGEN_UNARY_REDUCTION_AND, PIGEN_UNARY_REDUCTION_NAND,
+			PIGEN_UNARY_REDUCTION_OR, PIGEN_UNARY_REDUCTION_NOR, PIGEN_UNARY_REDUCTION_XOR, PIGEN_UNARY_REDUCTION_XNOR};
+		const int all_ones[] = {1,0,1,0,0,1}, sign_only[] = {0,1,1,0,1,0};
+		for (unsigned sign=0; sign<2; sign++)
+		{
+			pigen_bit_state bits[8];
+			for (size_t bit=0; bit<8; bit++) bits[bit]=!sign || bit==7 ? PIGEN_BIT_ONE : PIGEN_BIT_ZERO;
+			pigen_const_expr_id operand = pigen_const_expr_intern_bits(&model, bits, 8, signed_byte);
+			for (size_t i=0; i<sizeof reductions/sizeof reductions[0]; i++)
+			{
+				pigen_unary_operation op = {reductions[i], signed_byte, boolean_type};
+				pigen_const_expr_id reduced = pigen_const_expr_intern_unary(&model, op, operand);
+				assert(pigen_const_expr_evaluate_i64(&model, reduced, &coordinate) && coordinate == (sign ? sign_only[i] : all_ones[i]));
+			}
+		}
+
 
 	}
 	signed_8 = pigen_data_type_signed_integer(&model, width_8);
