@@ -1,0 +1,15 @@
+module producer(input logic clk, input logic reset, output bit[8] buf o);
+ logic [7:0] count;
+ always_ff @(posedge clk) begin
+  if(reset) count<=0;
+  else count<=count+1;
+  o<=count;
+ end
+endmodule
+module consumer #(parameter W=8, MASK=0)(input logic clk, input logic reset, input bit[W] buf i, output bit[W] buf o);
+ always_ff @(posedge clk) o<=i ^ MASK;
+endmodule
+module endpoint_top(input logic clk, input logic reset, output bit[8] buf result);
+ producer a(clk,reset);
+ consumer #(.MASK({4'd0,4'd8})) b(.clk(clk),.reset(reset),.i({a.o[3:0], a.o[7:4]}),.o(result));
+endmodule

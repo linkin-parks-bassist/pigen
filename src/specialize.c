@@ -74,6 +74,26 @@ static size_t find_matching(const char *source, const pigen_tokens *tokens,
 	return limit;
 }
 
+/* Only commas outside grouped expressions separate list entries. */
+static size_t list_entry_end(const char *source, const pigen_tokens *tokens,
+	size_t first, size_t limit)
+{
+	size_t depth = 0;
+	for (size_t at = first; at < limit; at++)
+	{
+		const pigen_token *token = &tokens->items[at];
+		if (token_is_text(source, token, "(") || token_is_text(source, token, "[") ||
+			token_is_text(source, token, "{")) depth++;
+		else if (token_is_text(source, token, ")") || token_is_text(source, token, "]") ||
+			token_is_text(source, token, "}"))
+		{
+			if (depth) depth--;
+		}
+		else if (!depth && token_is_text(source, token, ",")) return at;
+	}
+	return limit;
+}
+
 static int module_has_pigen(const char *source, const pigen_tokens *tokens,
 	size_t first, size_t last)
 {
@@ -144,8 +164,7 @@ static int parse_module_parameters(const char *source, const pigen_tokens *token
 		size_t name_token = limit;
 		size_t p;
 
-		while (end < limit && !token_is_text(source, &tokens->items[end], ","))
-			end++;
+		end = list_entry_end(source, tokens, at, limit);
 		for (p = at; p < end; p++)
 			if (token_is_text(source, &tokens->items[p], "="))
 			{
@@ -202,24 +221,10 @@ static int parse_buffered_ports(const char *source, const pigen_tokens *tokens,
 	while (at < port_close)
 	{
 		size_t end = at;
-		size_t inner = 0;
 		int buffered = 0;
 		size_t name = port_close;
 
-		while (end < port_close)
-		{
-			if (token_is_text(source, &tokens->items[end], "(") ||
-				token_is_text(source, &tokens->items[end], "["))
-				inner++;
-			else if (token_is_text(source, &tokens->items[end], ")") ||
-				token_is_text(source, &tokens->items[end], "]"))
-			{
-				if (inner) inner--;
-			}
-			else if (!inner && token_is_text(source, &tokens->items[end], ","))
-				break;
-			end++;
-		}
+		end = list_entry_end(source, tokens, at, port_close);
 		for (size_t k = at; k < end; k++)
 			for (size_t t = 0; t < sizeof transfers / sizeof *transfers; t++)
 				if (token_is_text(source, &tokens->items[k], transfers[t]))
@@ -428,8 +433,7 @@ static int parse_instance_overrides(const char *source,
 		char *name = NULL;
 		char *expr = NULL;
 
-		while (end < last &&
-			!token_is_text(source, &tokens->items[end], ",")) end++;
+		end = list_entry_end(source, tokens, at, last);
 		if (at + 3 <= end && token_is_text(source, &tokens->items[at], ".") &&
 			token_is_identifier(&tokens->items[at + 1]) &&
 			token_is_text(source, &tokens->items[at + 2], "("))
@@ -497,8 +501,7 @@ static char *build_instance_text(const char *source, const pigen_tokens *tokens,
 		size_t end = at;
 		int first = at == open + 1;
 
-		while (end < close && !token_is_text(source, &tokens->items[end], ","))
-			end++;
+		end = list_entry_end(source, tokens, at, close);
 		if (!first) pigen_append(&out, ", ");
 		if (at + 3 < end && token_is_text(source, &tokens->items[at], ".") &&
 			token_is_identifier(&tokens->items[at + 1]) &&
@@ -1929,7 +1932,6 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 	size_t module_count = 0;
 	spec_replacement *replacements = NULL;
 	size_t replacement_count = 0;
-	size_t replacement_capacity = 0;
 	pigen_string clones = {0};
 	pigen_string output = {0};
 	size_t cursor = 0;
@@ -2147,13 +2149,8 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 			pigen_append(&clones, specialized);
 			free(specialized);
 		}
-		if (replacement_count == replacement_capacity)
-		{
-			replacement_capacity = replacement_capacity ?
-				replacement_capacity * 2 : 8;
-			replacements = pigen_resize(replacements,
-				replacement_capacity * sizeof(*replacements));
-		}
+		replacements = pigen_resize(replacements,
+			(replacement_count + 1) * sizeof(*replacements));
 		{
 			char *instance_text = build_instance_text(source, &tokens, module,
 				clone_name, close + 1, close + 2, instance_close);

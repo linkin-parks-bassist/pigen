@@ -1103,9 +1103,11 @@ fabric-anonymous-test: pigen
 
 child-port-endpoint-test: pigen
 	dir=$$(mktemp -d); status=0; \
-	for fixture in expression expression_alias expression_join; do \
+	for fixture in expression expression_alias expression_join expression_conditional expression_concat expression_parameter_concat; do \
 		tb=tests/child_port_expression_tb.sv; \
-		if [ "$$fixture" = expression_join ]; then tb=tests/child_port_expression_join_tb.sv; fi; \
+		case "$$fixture" in \
+			expression_join|expression_conditional|expression_concat|expression_parameter_concat) tb=tests/child_port_$${fixture}_tb.sv ;; \
+		esac; \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim $$tb rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
