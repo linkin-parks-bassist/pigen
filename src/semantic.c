@@ -1006,6 +1006,22 @@ static int evaluate_i64(pigen_semantic_model *model,
 				result = left == 1 ? 1 : left == -1 ? ((right & 1) ? -1 : 1) : 0;
 				break;
 			}
+			if (known.data_type.index != model->unsized_integer_data_type.index &&
+				pigen_data_type_numerical_interpretation(model, known.data_type) != PIGEN_NUMERICAL_EXACT_INTEGER)
+			{
+				uint64_t width;
+				if (!evaluate_u64(model, pigen_data_type_packed_width(model, known.data_type), &width, remaining-1) ||
+					!width || width > 64) return 0;
+				uint64_t base = (uint64_t)left, exponent = (uint64_t)right, bits = 1;
+				while (exponent)
+				{
+					if (exponent & 1) bits *= base;
+					exponent >>= 1;
+					if (exponent) base *= base;
+				}
+				result = signed_pattern(bits);
+				break;
+			}
 			result = 1;
 			while (right)
 			{
@@ -1271,6 +1287,24 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 				case PIGEN_BINARY_LOGICAL_OR:
 					*value = left || right; return 1;
 				case PIGEN_BINARY_POWER:
+				{
+					uint64_t width;
+					if (known->data_type.index != model->unsized_integer_data_type.index &&
+						pigen_data_type_numerical_interpretation(model, known->data_type) != PIGEN_NUMERICAL_EXACT_INTEGER &&
+						evaluate_u64(model, pigen_data_type_packed_width(model, known->data_type), &width, remaining-1) &&
+						width && width <= 64)
+					{
+						result = 1;
+						while (right)
+						{
+							if (right & 1) result *= left;
+							right >>= 1;
+							if (right) left *= left;
+						}
+						*value = result;
+						return 1;
+					}
+				}
 					result = 1;
 					while (right)
 					{

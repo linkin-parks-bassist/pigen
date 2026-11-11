@@ -442,6 +442,17 @@ int main(void)
 		pigen_binary_operation wide_xnor = {PIGEN_BINARY_BITWISE_XNOR, wide_vector, wide_vector, wide_vector};
 		beyond_word = pigen_const_expr_intern_binary(&model, wide_xnor, wide_one, wide_one);
 		assert(!pigen_const_expr_evaluate_u64(&model, beyond_word, &span));
+		pigen_bit_state negative_byte_bits[8] = {PIGEN_BIT_ZERO,PIGEN_BIT_ZERO,PIGEN_BIT_ZERO,
+			PIGEN_BIT_ONE,PIGEN_BIT_ONE,PIGEN_BIT_ONE,PIGEN_BIT_ONE,PIGEN_BIT_ONE};
+		pigen_const_expr_id negative_byte = pigen_const_expr_intern_bits(&model, negative_byte_bits, 8, signed_byte);
+		pigen_binary_operation byte_power = {PIGEN_BINARY_POWER, signed_byte, unsized_integer_data_type, signed_byte};
+		powered = pigen_const_expr_intern_binary(&model, byte_power, negative_byte, width_8);
+		assert(pigen_const_expr_evaluate_i64(&model, powered, &coordinate) && coordinate == 0);
+		pigen_data_type_id unsigned_byte = pigen_data_type_sized_logic(&model, 8, PIGEN_SIGN_UNSIGNED);
+		pigen_const_expr_id maximum_byte = pigen_const_expr_intern_integer(&model, 255, unsigned_byte);
+		byte_power = (pigen_binary_operation){PIGEN_BINARY_POWER, unsigned_byte, unsized_integer_data_type, unsigned_byte};
+		powered = pigen_const_expr_intern_binary(&model, byte_power, maximum_byte, width_8);
+		assert(pigen_const_expr_evaluate_u64(&model, powered, &span) && span == 1);
 		const pigen_unary_operator reductions[] = {PIGEN_UNARY_REDUCTION_AND, PIGEN_UNARY_REDUCTION_NAND,
 			PIGEN_UNARY_REDUCTION_OR, PIGEN_UNARY_REDUCTION_NOR, PIGEN_UNARY_REDUCTION_XOR, PIGEN_UNARY_REDUCTION_XNOR};
 		const int all_ones[] = {1,0,1,0,0,1}, sign_only[] = {0,1,1,0,1,0};
