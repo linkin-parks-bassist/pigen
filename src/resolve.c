@@ -2998,6 +2998,44 @@ static void resolve_endpoint_view_drivers(resolver *resolver)
 	}
 }
 
+/* Endpoint identities can differ while their externally bound payload overlaps.
+ * Validate the physical destinations of output views and driven input views. */
+static pigen_signal_id endpoint_view_destination(pigen_semantic_model *model,
+	const pigen_semantic_instance_connection *connection)
+{
+	if (connection->endpoint_view.index == PIGEN_INVALID_ID ||
+		(connection->direction != PIGEN_SEMANTIC_OUTPUT && !connection->endpoint_view_driven))
+		return INVALID_ID(pigen_signal_id);
+	const pigen_semantic_expr *value = ownership_expression(model, connection->value);
+	if (!value) return INVALID_ID(pigen_signal_id);
+	const pigen_semantic_lvalue *lvalue = pigen_lvalue_get(model,
+		pigen_lvalue_resolve(model, (pigen_expr_id){(uint32_t)(value-model->expressions)}));
+	return lvalue && lvalue->kind == PIGEN_LVALUE_PROJECTION ?
+		lvalue->as.projection.signal : INVALID_ID(pigen_signal_id);
+}
+
+static int validate_endpoint_view_destinations(resolver *resolver)
+{
+	pigen_semantic_model *model = resolver->model;
+	for (size_t later = 0; later < model->instance_connection_count; later++)
+	{
+		const pigen_semantic_instance_connection *b = &model->instance_connections[later];
+		pigen_signal_id destination = endpoint_view_destination(model, b);
+		if (destination.index == PIGEN_INVALID_ID) continue;
+		for (size_t earlier = 0; earlier < later; earlier++)
+		{
+			const pigen_semantic_instance_connection *a = &model->instance_connections[earlier];
+			if (a->endpoint_view.index == b->endpoint_view.index ||
+				endpoint_view_destination(model, a).index != destination.index) continue;
+			const pigen_semantic_signal *signal = pigen_signal_get(model, destination);
+			if (pigen_transfer_type_descriptor_get(signal->transfer_type)->is_static &&
+				ownership_disjoint(model, a->value, b->value)) continue;
+			return fail(resolver, b->span, "child endpoint aliases have overlapping producers");
+		}
+	}
+	return 1;
+}
+
 static int validate_signal_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
@@ -3006,7 +3044,8 @@ static int validate_signal_ownership(resolver *resolver)
 	resolve_endpoint_view_drivers(resolver);
 	if (!validate_instance_destination_ownership(resolver) ||
 		!validate_instance_consumer_ownership(resolver) ||
-		!validate_fabric_ownership(resolver)) return 0;
+		!validate_fabric_ownership(resolver) ||
+		!validate_endpoint_view_destinations(resolver)) return 0;
 
 	for (later_index = 0; later_index < model->transfer_count; later_index++)
 	{

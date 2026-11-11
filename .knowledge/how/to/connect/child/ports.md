@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T17:01:55+11:00"
+revised_at: "2026-11-11T17:03:55+11:00"
 ---
 
 Child ports are parent endpoints. `producer a(clk, reset); consumer b(.clk(clk), .reset(reset), .i(a.o), .o(result));` connects siblings. Parent transfers read `a.o` or write `b.i`; named/anonymous fabrics route `a.o -> b.i`. Explicit wires remain supported. Output transfers remain explicit, e.g. `output uint[8] buf o`. Use static `input wire reset` for broadcast reset; unqualified input bit remains abstract.
@@ -15,8 +15,8 @@ Computed inputs such as `.i(a.o + 8'd1)` become storage-free atomic transfers. A
 
 pigen_lower_rtl_endpoint_defaults zeros undriven generated input payload/valid and unconsumed output ready. Equations, updates, child connections and primitives count as drivers; borrowed controls retain ownership. Parent offers exclude their own destination readiness.
 
-Ownership recognizes views/payload wires. Duplicate consumers and child/local conflicts diagnose; fabrics enforce elastic exclusivity across blocks. Static fanout/peek remain legal. Child-output producer checks permit provably disjoint constant ranges, indexed selections and indices on static signals in shared coordinates; overlaps and unknown relationships conflict. Buffered signals retain whole-token exclusivity. General projected alias identity, concatenations, local/ordinary-SV drivers and transformed coordinate systems remain incomplete.
+Ownership recognizes views/payload wires. Duplicate consumers and child/local conflicts diagnose; fabrics enforce elastic exclusivity across blocks. Static fanout/peek remain legal. Producer checks compare physical destinations of output views and automatically driven input views, including sibling, transfer and fabric writers. Distinct views cannot hide overlaps. Provably disjoint constant ranges/indices/indexed selections on static signals are legal; unknown relationships conflict. Buffered signals retain whole-token exclusivity. Consumer aliases, concatenations, direct local/ordinary-SV writes and transformed coordinates remain incomplete.
 
-make child-slice-ownership-test simulates range/indexed slices under independent stalls, rejects overlaps and disjoint buffered-token producers. child-port-endpoint-test covers payloads, controls, routing/introspection and neighboring bits. child-ready-manual-test and child-valid-manual-test cover manual controls, scalar/selected parent-input controls and conflicting automatic owners.
+child-input-alias-ownership-test checks sibling/transfer/fabric writers, disjoint slices under independent stalls and overlapping input/output aliases. child-slice-ownership-test checks range/indexed slices and buffered exclusivity. child-port-endpoint-test covers payloads, controls, routing/introspection and neighboring bits. child-ready-manual-test and child-valid-manual-test cover manual/parent-input controls and automatic-owner conflicts.
 
-Remaining: broader projection ownership, other expressions, arrays/generate scopes and clock compatibility. Explicit-valid gate versus replacement policy remains unresolved. Specialization/count owners: how/does/specialization/reach/a/fixed/point.md and how/to/normalize/declaration/counts.md.
+Other expressions and arrays/generate scopes remain incomplete. Explicit-valid gate versus replacement policy remains unresolved. Specialization/count owners: how/does/specialization/reach/a/fixed/point.md and how/to/normalize/declaration/counts.md.
