@@ -512,6 +512,12 @@ static char *endpoint_instance_text(const pigen_syntax_tree *syntax,
 		}
 		id=connection->next_sibling;
 	}
+	for (size_t c = 0; c < instance->connection_count; c++)
+	{
+		const pigen_semantic_signal *port = pigen_signal_get(sem,
+			sem->instance_connections[instance->first_connection+c].port_signal);
+		if (port && !pigen_transfer_type_descriptor_get(port->transfer_type)->is_static) needed = 1;
+	}
 	if (!needed) return NULL;
 	append_semantic_span(&text,sem,pigen_symbol_get(sem,pigen_module_get(sem,instance->child_module)->symbol)->name);
 	pigen_append(&text," ");
@@ -562,7 +568,9 @@ static char *endpoint_instance_text(const pigen_syntax_tree *syntax,
 				}
 				if(explicit_control) continue;
 				pigen_append(&text,", .");append_semantic_span(&text,sem,port_symbol->name);pigen_append(&text,suffix);pigen_append(&text,"(");
-				if (!append_endpoint_view_name(&text,lowering,symbol,suffix)) { append_semantic_span(&text,sem,symbol->name);pigen_append(&text,suffix); } pigen_append(&text,")");
+				const pigen_semantic_signal *view = pigen_signal_get(sem, connection->endpoint_view);
+				const pigen_symbol *control_symbol = view ? pigen_symbol_get(sem, view->symbol) : symbol;
+				if (!append_endpoint_view_name(&text,lowering,control_symbol,suffix)) { append_semantic_span(&text,sem,symbol->name);pigen_append(&text,suffix); } pigen_append(&text,")");
 			}
 	}
 	pigen_append(&text,");");

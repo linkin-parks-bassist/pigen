@@ -1274,6 +1274,7 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 			const pigen_symbol *port = pigen_symbol_get(sem,connection->port_symbol);
 			size_t base_length=0;
 			const char *base=pigen_source_span_text(sem->sources,port->name,&base_length);
+			int bound[2] = {0, 0};
 			for(size_t d=0;d<instance->connection_count;d++)
 			{
 				const pigen_semantic_instance_connection *control=&sem->instance_connections[instance->first_connection+d];
@@ -1281,6 +1282,7 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				if(!name || length!=base_length+6 || memcmp(name,base,base_length)) continue;
 				int ready=!memcmp(name+base_length,"_ready",6);
 				if(!ready && memcmp(name+base_length,"_valid",6)) continue;
+				bound[ready] = 1;
 				const pigen_semantic_expr *expr=pigen_expr_get(sem,control->value);
 				if(!expr || expr->kind!=PIGEN_EXPR_SYMBOL) continue;
 				pigen_signal_id signal=pigen_symbol_signal(sem,expr->as.symbol);
@@ -1291,6 +1293,43 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 				pigen_rtl_expr_id expression=object_expression(lowering,record->type,object,control->span);
 				if(ready) { out->ready=expression; out->input_ready=object; out->source_ready=object; }
 				else { out->valid=expression; out->input_valid=object; }
+			}
+			/* Omitted controls belong to the endpoint view, even when its
+			 * payload is explicitly wired to a static parent declaration. */
+			for (int ready = 0; ready < 2; ready++)
+			{
+				if (bound[ready]) continue;
+				const pigen_semantic_signal *view = &sem->signals[signal_index];
+				char *view_name = signal_spelling(lowering, view);
+				if (!view_name) return -1;
+				pigen_rtl_type_id type = pigen_lower_rtl_type(lowering,
+					pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED));
+				pigen_rtl_object_id object = {PIGEN_INVALID_ID};
+				char *payload_name = signal_spelling(lowering, &sem->signals[payload.index]);
+				char *implicit_name = payload_name ? name_join(payload_name, ready ? "_ready" : "_valid") : NULL;
+				free(payload_name);
+				for (size_t s = 0; implicit_name && s < sem->signal_count; s++)
+				{
+					if (sem->signals[s].module.index != view->module.index ||
+						s >= lowering->lowered_endpoint_count) continue;
+					const pigen_symbol *candidate = pigen_symbol_get(sem, sem->signals[s].symbol);
+					size_t length = 0;
+					const char *name = pigen_source_span_text(sem->sources, candidate->name, &length);
+					if (name && length == strlen(implicit_name) && !memcmp(name, implicit_name, length))
+						object = lowering->lowered_endpoints[s].payload;
+				}
+				free(implicit_name);
+				if (object.index == PIGEN_INVALID_ID)
+					object = add_named_object(lowering,
+						rtl_module_for_semantic(lowering->rtl, sem, view->module), type,
+						PIGEN_SEMANTIC_INTERNAL, signal_index, connection->span,
+						view_name, ready ? "_ready" : "_valid");
+				free(view_name);
+				if (object.index == PIGEN_INVALID_ID) return -1;
+				pigen_rtl_expr_id expression = object_expression(lowering, type, object, connection->span);
+				if (expression.index == PIGEN_INVALID_ID) return -1;
+				if (ready) { out->ready = expression; out->input_ready = object; out->source_ready = object; }
+				else { out->valid = expression; out->input_valid = object; }
 			}
 			return 1;
 		}
