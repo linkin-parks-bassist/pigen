@@ -2623,6 +2623,56 @@ static int drive_destination(pigen_rtl_lowering *lowering,
 	return 1;
 }
 
+/* An explicit child-ready binding is still the readiness of its generated
+ * input boundary. Feed it back to structural and parent transfers. */
+static int lower_child_input_ready_bindings(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_rtl_module_id rtl_module)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	for (size_t i = 0; i < sem->instance_count; i++)
+	{
+		const pigen_semantic_instance *instance = &sem->instances[i];
+		if (instance->module.index != module.index) continue;
+		for (size_t c = 0; c < instance->connection_count; c++)
+		{
+			const pigen_semantic_instance_connection *payload =
+				&sem->instance_connections[instance->first_connection+c];
+			const pigen_symbol *port = pigen_symbol_get(sem, payload->port_symbol);
+			size_t n = 0, m = 0;
+			const char *name = pigen_source_span_text(sem->sources, payload->port_name, &n);
+			const char *base = pigen_source_span_text(sem->sources, port->name, &m);
+			if (payload->direction != PIGEN_SEMANTIC_INPUT || !name || !base ||
+				n != m || memcmp(name, base, n)) continue;
+			const pigen_semantic_expr *value = pigen_expr_get(sem, payload->value);
+			while (value && value->kind == PIGEN_EXPR_CONVERSION)
+				value = pigen_expr_get(sem, value->as.conversion.operand);
+			if (!value || value->kind != PIGEN_EXPR_SYMBOL) continue;
+			pigen_signal_id signal = pigen_symbol_signal(sem, value->as.symbol);
+			if (signal.index >= lowering->lowered_endpoint_count ||
+				!pigen_signal_is_instance_endpoint(sem, signal) ||
+				sem->signals[signal.index].direction != PIGEN_SEMANTIC_OUTPUT) continue;
+			const pigen_rtl_signal_endpoints *endpoint = &lowering->lowered_endpoints[signal.index];
+			const pigen_rtl_expr *ready = pigen_rtl_expr_get(lowering->rtl, endpoint->ready);
+			if (!ready || ready->kind != PIGEN_RTL_EXPR_OBJECT) continue;
+			pigen_rtl_object_id target = ready->object;
+			for (size_t d = 0; d < instance->connection_count; d++)
+			{
+				const pigen_semantic_instance_connection *control =
+					&sem->instance_connections[instance->first_connection+d];
+				size_t length = 0;
+				const char *control_name = pigen_source_span_text(sem->sources, control->port_name, &length);
+				if (!control_name || length != n+6 || memcmp(control_name, name, n) ||
+					memcmp(control_name+n, "_ready", 6)) continue;
+				pigen_rtl_expr_id expression = lower_expr(lowering, control->value);
+				if (expression.index == PIGEN_INVALID_ID ||
+					pigen_rtl_equation_add_with_owner(lowering->rtl, rtl_module,
+						target, expression, control->span).index == PIGEN_INVALID_ID) return -1;
+			}
+		}
+	}
+	return 0;
+}
+
 int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -2646,6 +2696,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	rtl_module = rtl_module_for_semantic(rtl, sem, module);
 	if (rtl_module.index == PIGEN_INVALID_ID)
 		return -1;
+	if (lower_child_input_ready_bindings(lowering, module, rtl_module)) return -1;
 	processes = pigen_module_processes(sem, module, &process_count);
 	if (!processes && process_count)
 		return -1;

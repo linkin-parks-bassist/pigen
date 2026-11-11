@@ -1108,7 +1108,7 @@ child-port-endpoint-test: pigen
 	vvp $$dir/sim | grep -Fq 'PASS unused child endpoints'; \
 	status=$$?; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); status=0; \
-	for fixture in expression expression_alias expression_join expression_conditional expression_concat expression_parameter_concat expression_packed_count expression_packed_depth; do \
+	for fixture in expression expression_ready expression_ready_select expression_alias expression_join expression_conditional expression_concat expression_parameter_concat expression_packed_count expression_packed_depth; do \
 		tb=tests/child_port_expression_tb.sv; \
 		case "$$fixture" in \
 			expression_packed_count|expression_packed_depth) tb=tests/child_port_expression_concat_tb.sv ;; \
