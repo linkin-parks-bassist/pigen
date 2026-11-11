@@ -2450,6 +2450,25 @@ static int validate_instance_destination_ownership(resolver *resolver)
 	return 1;
 }
 
+/* Explicit parent payload wires and instance.port share a consumer identity. */
+static int connection_consumes_endpoint(const pigen_semantic_model *model,
+	pigen_expr_id value, pigen_signal_id endpoint)
+{
+	const pigen_semantic_signal *signal = pigen_signal_get(model, endpoint);
+	if (resolve_expr_references_symbol(model, value, signal->symbol)) return 1;
+	for (size_t c = 0; c < model->instance_connection_count; c++)
+	{
+		const pigen_semantic_instance_connection *connection = &model->instance_connections[c];
+		if (connection->endpoint_view.index != endpoint.index) continue;
+		const pigen_semantic_expr *payload = pigen_expr_get(model, connection->value);
+		while (payload && payload->kind == PIGEN_EXPR_CONVERSION)
+			payload = pigen_expr_get(model, payload->as.conversion.operand);
+		if (payload && payload->kind == PIGEN_EXPR_SYMBOL &&
+			resolve_expr_references_symbol(model, value, payload->as.symbol)) return 1;
+	}
+	return 0;
+}
+
 static int validate_instance_consumer_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
@@ -2476,7 +2495,8 @@ static int validate_instance_consumer_ownership(resolver *resolver)
 				const pigen_semantic_signal *parent = &model->signals[signal];
 				if (parent->module.index != instance->module.index ||
 					pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static ||
-					!resolve_expr_references_symbol(model, connection->value, parent->symbol)) continue;
+					!connection_consumes_endpoint(model, connection->value,
+						(pigen_signal_id){(uint32_t)signal})) continue;
 				if (owned[signal])
 				{
 					free(owned);

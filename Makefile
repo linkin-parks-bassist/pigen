@@ -1109,7 +1109,7 @@ child-port-endpoint-test: pigen
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; \
 	if [ $$status -eq 0 ]; then \
-		for fixture in write missing consumers local_consumer explicit_consumers; do \
+		for fixture in write missing consumers local_consumer explicit_consumers wire_view_consumers; do \
 			if ./pigen tests/child_port_$${fixture}_error.pigen -o $$dir/error.sv 2>$$dir/error; then status=1; break; fi; \
 			grep -Eq 'transfer destination is not a writable variable or signal|transfer value requires a compatible expression|elastic endpoint has multiple child consumers|elastic endpoint has both child and local consumers' $$dir/error || { status=1; break; }; \
 		done; \
