@@ -479,6 +479,7 @@ int main(void)
 			pigen_const_expr_id reduced=pigen_const_expr_intern_unary(&model,op,operand);
 			const int expected[]={1,0,1,0,1,0};
 			assert(pigen_const_expr_evaluate_i64(&model,reduced,&coordinate) && coordinate==expected[r]);
+			assert(pigen_const_expr_evaluate_u64(&model,reduced,&span) && span==(uint64_t)expected[r]);
 		}
 
 		wide_bits[128]=PIGEN_BIT_X; wide_bits[0]=PIGEN_BIT_ZERO;

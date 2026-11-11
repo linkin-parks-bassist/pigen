@@ -888,6 +888,50 @@ static int64_t signed_pattern(uint64_t bits)
 		-1 - (int64_t)(UINT64_MAX - bits);
 }
 
+static int evaluate_literal_reduction(pigen_semantic_model *model,
+	pigen_const_expr known, int64_t *value, size_t remaining)
+{
+	int64_t result;
+	if (!remaining) return 0;
+		if (known.as.unary.operation.operator >= PIGEN_UNARY_REDUCTION_AND &&
+			known.as.unary.operation.operator <= PIGEN_UNARY_REDUCTION_XNOR)
+		{
+			const pigen_const_expr *operand = pigen_const_expr_get(model, known.as.unary.operand);
+			if (operand && operand->kind == PIGEN_CONST_EXPR_BITS)
+			{
+				size_t first = operand->as.bits.first_state, count = operand->as.bits.state_count;
+				uint64_t width;
+				if (!evaluate_u64(model, pigen_data_type_packed_width(model,
+					known.as.unary.operation.operand_data_type), &width, remaining-1) || width != count) return 0;
+				int zero = 0, one = 0, unknown = 0, parity = 0;
+				for (size_t i = 0; i < count; i++)
+				{
+					pigen_bit_state bit = model->literal_states[first+i];
+					zero |= bit == PIGEN_BIT_ZERO;
+					one |= bit == PIGEN_BIT_ONE;
+					unknown |= bit == PIGEN_BIT_X || bit == PIGEN_BIT_Z;
+					parity ^= bit == PIGEN_BIT_ONE;
+				}
+				pigen_unary_operator op = known.as.unary.operation.operator;
+				if (op == PIGEN_UNARY_REDUCTION_AND || op == PIGEN_UNARY_REDUCTION_NAND)
+				{
+					if (!zero && unknown) return 0;
+					result = !zero;
+				}
+				else if (op == PIGEN_UNARY_REDUCTION_OR || op == PIGEN_UNARY_REDUCTION_NOR)
+				{
+					if (!one && unknown) return 0;
+					result = one;
+				}
+				else { if (unknown) return 0; result = parity; }
+				if (op == PIGEN_UNARY_REDUCTION_NAND || op == PIGEN_UNARY_REDUCTION_NOR ||
+					op == PIGEN_UNARY_REDUCTION_XNOR) result = !result;
+				*value = result; return 1;
+			}
+		}
+	return 0;
+}
+
 static int evaluate_i64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, int64_t *value, size_t remaining)
 {
@@ -936,42 +980,7 @@ static int evaluate_i64(pigen_semantic_model *model,
 		if (!evaluate_i64(model, known.as.conversion.operand, &result, remaining-1)) return 0;
 		break;
 	case PIGEN_CONST_EXPR_UNARY:
-		if (known.as.unary.operation.operator >= PIGEN_UNARY_REDUCTION_AND &&
-			known.as.unary.operation.operator <= PIGEN_UNARY_REDUCTION_XNOR)
-		{
-			const pigen_const_expr *operand = pigen_const_expr_get(model, known.as.unary.operand);
-			if (operand && operand->kind == PIGEN_CONST_EXPR_BITS)
-			{
-				size_t first = operand->as.bits.first_state, count = operand->as.bits.state_count;
-				uint64_t width;
-				if (!evaluate_u64(model, pigen_data_type_packed_width(model,
-					known.as.unary.operation.operand_data_type), &width, remaining-1) || width != count) return 0;
-				int zero = 0, one = 0, unknown = 0, parity = 0;
-				for (size_t i = 0; i < count; i++)
-				{
-					pigen_bit_state bit = model->literal_states[first+i];
-					zero |= bit == PIGEN_BIT_ZERO;
-					one |= bit == PIGEN_BIT_ONE;
-					unknown |= bit == PIGEN_BIT_X || bit == PIGEN_BIT_Z;
-					parity ^= bit == PIGEN_BIT_ONE;
-				}
-				pigen_unary_operator op = known.as.unary.operation.operator;
-				if (op == PIGEN_UNARY_REDUCTION_AND || op == PIGEN_UNARY_REDUCTION_NAND)
-				{
-					if (!zero && unknown) return 0;
-					result = !zero;
-				}
-				else if (op == PIGEN_UNARY_REDUCTION_OR || op == PIGEN_UNARY_REDUCTION_NOR)
-				{
-					if (!one && unknown) return 0;
-					result = one;
-				}
-				else { if (unknown) return 0; result = parity; }
-				if (op == PIGEN_UNARY_REDUCTION_NAND || op == PIGEN_UNARY_REDUCTION_NOR ||
-					op == PIGEN_UNARY_REDUCTION_XNOR) result = !result;
-				break;
-			}
-		}
+		if (evaluate_literal_reduction(model, known, &result, remaining)) break;
 		if (!evaluate_i64(model, known.as.unary.operand, &left, remaining-1)) return 0;
 		switch (known.as.unary.operation.operator)
 		{
@@ -1247,6 +1256,13 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 		case PIGEN_CONST_EXPR_CONVERSION:
 			return evaluate_u64(model, known->as.conversion.operand, value,
 				remaining - 1);
+		case PIGEN_CONST_EXPR_UNARY:
+		{
+			int64_t reduced;
+			if (!evaluate_literal_reduction(model, *known, &reduced, remaining)) return 0;
+			*value = (uint64_t)reduced;
+			return 1;
+		}
 		case PIGEN_CONST_EXPR_BINARY:
 			if (!evaluate_u64(model, known->as.binary.left, &left,
 				remaining - 1) ||
