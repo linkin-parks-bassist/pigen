@@ -655,6 +655,16 @@ static pigen_analyzed_expr_id analyze(expression_analyzer *analyzer,
 						const pigen_semantic_expr *value;
 						const pigen_semantic_signal *signal;
 						if (connection->port_symbol.index != port.index) continue;
+						if (connection->endpoint_view.index != PIGEN_INVALID_ID)
+						{
+							signal = pigen_signal_get(analyzer->model, connection->endpoint_view);
+							node.kind = PIGEN_SYNTAX_EXPR_NAME;
+							node.as.symbol = signal->symbol;
+							node.data_type = signal->data_type;
+							node.shape = signal->shape;
+							node.constant = INVALID_ID(pigen_const_expr_id);
+							return append_node(analyzer, node);
+						}
 						value = pigen_expr_get(analyzer->model, connection->value);
 						while (value && value->kind == PIGEN_EXPR_CONVERSION)
 							value = pigen_expr_get(analyzer->model, value->as.conversion.operand);

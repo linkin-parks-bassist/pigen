@@ -1103,13 +1103,13 @@ fabric-anonymous-test: pigen
 
 child-port-endpoint-test: pigen
 	dir=$$(mktemp -d); status=0; \
-	for fixture in endpoint parent destination fabric forward module_order; do \
+	for fixture in endpoint parent destination fabric forward module_order explicit_alias explicit_parent; do \
 		./pigen tests/child_port_$$fixture.pigen -o $$dir/design.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/sim tests/child_port_endpoint_tb.sv rtl/pigen_primitives.sv $$dir/design.sv && \
 		vvp $$dir/sim | grep -Fq 'PASS child port endpoint' || { status=1; break; }; \
 	done; \
 	if [ $$status -eq 0 ]; then \
-		for fixture in write missing consumers local_consumer; do \
+		for fixture in write missing consumers local_consumer explicit_consumers; do \
 			if ./pigen tests/child_port_$${fixture}_error.pigen -o $$dir/error.sv 2>$$dir/error; then status=1; break; fi; \
 			grep -Eq 'transfer destination is not a writable variable or signal|transfer value requires a compatible expression|elastic endpoint has multiple child consumers|elastic endpoint has both child and local consumers' $$dir/error || { status=1; break; }; \
 		done; \
@@ -1119,5 +1119,8 @@ child-port-endpoint-test: pigen
 		iverilog -g2012 -s C -o $$dir/surface rtl/pigen_primitives.sv $$dir/surface.sv && \
 		./pigen tests/child_port_nested.pigen -o $$dir/nested.sv && \
 		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/nested tests/child_port_nested_tb.sv rtl/pigen_primitives.sv $$dir/nested.sv && \
-		vvp $$dir/nested | grep -Fq 'PASS child port endpoint' || status=1; \
+		vvp $$dir/nested | grep -Fq 'PASS child port endpoint' && \
+		./pigen tests/child_port_introspection.pigen -o $$dir/introspection.sv && \
+		iverilog -g2012 -s child_port_endpoint_tb -o $$dir/introspection tests/child_port_introspection_tb.sv rtl/pigen_primitives.sv $$dir/introspection.sv && \
+		vvp $$dir/introspection | grep -Fq 'PASS child port endpoint' || status=1; \
 	fi; rm -rf $$dir; exit $$status

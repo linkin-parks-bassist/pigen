@@ -1252,6 +1252,52 @@ done:
 	return ok;
 }
 
+/* Bind a typed child-port view to the explicitly connected parent triplet. */
+static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index,
+	pigen_rtl_signal_endpoints *out)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	for (size_t i = 0; i < sem->instance_count; i++)
+	{
+		const pigen_semantic_instance *instance = &sem->instances[i];
+		for (size_t c = 0; c < instance->connection_count; c++)
+		{
+			const pigen_semantic_instance_connection *connection = &sem->instance_connections[instance->first_connection+c];
+			const pigen_semantic_expr *value;
+			if (connection->endpoint_view.index != signal_index) continue;
+			value = pigen_expr_get(sem, connection->value);
+			while(value && value->kind==PIGEN_EXPR_CONVERSION) value=pigen_expr_get(sem,value->as.conversion.operand);
+			if(!value || value->kind!=PIGEN_EXPR_SYMBOL) return -1;
+			pigen_signal_id payload = pigen_symbol_signal(sem,value->as.symbol);
+			if(payload.index>=lowering->lowered_endpoint_count) return -1;
+			*out=lowering->lowered_endpoints[payload.index];
+			const pigen_symbol *port = pigen_symbol_get(sem,connection->port_symbol);
+			size_t base_length=0;
+			const char *base=pigen_source_span_text(sem->sources,port->name,&base_length);
+			for(size_t d=0;d<instance->connection_count;d++)
+			{
+				const pigen_semantic_instance_connection *control=&sem->instance_connections[instance->first_connection+d];
+				size_t length=0; const char *name=pigen_source_span_text(sem->sources,control->port_name,&length);
+				if(!name || length!=base_length+6 || memcmp(name,base,base_length)) continue;
+				int ready=!memcmp(name+base_length,"_ready",6);
+				if(!ready && memcmp(name+base_length,"_valid",6)) continue;
+				const pigen_semantic_expr *expr=pigen_expr_get(sem,control->value);
+				if(!expr || expr->kind!=PIGEN_EXPR_SYMBOL) continue;
+				pigen_signal_id signal=pigen_symbol_signal(sem,expr->as.symbol);
+				if(signal.index>=lowering->lowered_endpoint_count) return -1;
+				pigen_rtl_object_id object=lowering->lowered_endpoints[signal.index].payload;
+				const pigen_rtl_object *record=pigen_rtl_object_get(lowering->rtl,object);
+				if(!record) return -1;
+				pigen_rtl_expr_id expression=object_expression(lowering,record->type,object,control->span);
+				if(ready) { out->ready=expression; out->input_ready=object; out->source_ready=object; }
+				else { out->valid=expression; out->input_valid=object; }
+			}
+			return 1;
+		}
+	}
+	return 0;
+}
+
 int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -1299,6 +1345,14 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 		if (lowering->lowered_endpoint_count > i &&
 			lowering->lowered_endpoints[i].payload.index != PIGEN_INVALID_ID)
 			continue;
+		int view = lower_endpoint_view(lowering, i, &endpoints);
+		if (view < 0) return -1;
+		if (view)
+		{
+			if (!endpoint_map_ensure(lowering, i + 1)) return -1;
+			lowering->lowered_endpoints[i] = endpoints;
+			continue;
+		}
 		descriptor = pigen_transfer_type_descriptor_get(
 			owner_signal->transfer_type);
 		if (!descriptor)
@@ -2958,7 +3012,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 					endpoints->source_ready.index)
 				{ driven = 1; break; }
 			for (size_t c = 0; c < sem->instance_connection_count; c++)
-				if (expr_references_symbol(sem,
+				if (sem->instance_connections[c].endpoint_view.index == signal_index || expr_references_symbol(sem,
 					sem->instance_connections[c].value, signal->symbol))
 				{ driven = 1; break; }
 			if (!driven &&

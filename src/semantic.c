@@ -2734,6 +2734,7 @@ int pigen_instance_add_connection(pigen_semantic_model *model,
 	record = &model->instance_connections[
 		model->instance_connection_count++];
 	*record = (pigen_semantic_instance_connection){0};
+	record->endpoint_view = INVALID_ID(pigen_signal_id);
 	record->port_symbol = port_symbol;
 	record->port_signal = port_signal;
 	record->port_name = port_name;

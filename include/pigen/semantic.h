@@ -343,6 +343,8 @@ typedef struct {
 	pigen_expr_id value;
 	pigen_semantic_direction direction;
 	pigen_source_span span;
+	/* Typed child-port view when explicit wiring uses static parent nets. */
+	pigen_signal_id endpoint_view;
 } pigen_semantic_instance_connection;
 
 typedef enum {

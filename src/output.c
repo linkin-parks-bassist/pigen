@@ -466,6 +466,30 @@ static void append_semantic_span(pigen_string *text, const pigen_semantic_model 
 	if (bytes) pigen_append_range(text, bytes, length);
 }
 
+static int append_endpoint_view_name(pigen_string *text,
+	const pigen_rtl_lowering *lowering, const pigen_symbol *symbol, const char *suffix)
+{
+	pigen_signal_id signal = pigen_symbol_signal(lowering->semantics,
+		(pigen_symbol_id){(uint32_t)(symbol-lowering->semantics->symbols)});
+	int view = 0;
+	for(size_t c=0;c<lowering->semantics->instance_connection_count;c++)
+		if(lowering->semantics->instance_connections[c].endpoint_view.index==signal.index) view=1;
+	if(!view || signal.index>=lowering->lowered_endpoint_count) return 0;
+	const pigen_rtl_signal_endpoints *endpoint=&lowering->lowered_endpoints[signal.index];
+	pigen_rtl_object_id object=endpoint->payload;
+	if(suffix)
+	{
+		const pigen_rtl_expr *expr=pigen_rtl_expr_get(lowering->rtl,
+			!strcmp(suffix,"_ready")?endpoint->ready:endpoint->valid);
+		if(!expr || expr->kind!=PIGEN_RTL_EXPR_OBJECT) return 0;
+		object=expr->object;
+	}
+	const pigen_rtl_object *record=pigen_rtl_object_get(lowering->rtl,object);
+	if(!record || !record->name) return 0;
+	pigen_append(text,record->name);
+	return 1;
+}
+
 static char *endpoint_instance_text(const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, const pigen_syntax_node *node, uint32_t index)
 {
@@ -510,7 +534,7 @@ static char *endpoint_instance_text(const pigen_syntax_tree *syntax,
 		if(value && value->kind==PIGEN_EXPR_SYMBOL) symbol=pigen_symbol_get(sem,value->as.symbol);
 		if(c) pigen_append(&text,", ");
 		pigen_append(&text,".");append_semantic_span(&text,sem,port_name);pigen_append(&text,"(");
-		if(symbol) append_semantic_span(&text,sem,symbol->name);
+		if(symbol) { if (!append_endpoint_view_name(&text,lowering,symbol,NULL)) append_semantic_span(&text,sem,symbol->name); }
 		else
 		{
 			for(pigen_syntax_id id=node->first_child;id.index!=PIGEN_INVALID_ID;)
@@ -538,7 +562,7 @@ static char *endpoint_instance_text(const pigen_syntax_tree *syntax,
 				}
 				if(explicit_control) continue;
 				pigen_append(&text,", .");append_semantic_span(&text,sem,port_symbol->name);pigen_append(&text,suffix);pigen_append(&text,"(");
-				append_semantic_span(&text,sem,symbol->name);pigen_append(&text,suffix);pigen_append(&text,")");
+				if (!append_endpoint_view_name(&text,lowering,symbol,suffix)) { append_semantic_span(&text,sem,symbol->name);pigen_append(&text,suffix); } pigen_append(&text,")");
 			}
 	}
 	pigen_append(&text,");");
