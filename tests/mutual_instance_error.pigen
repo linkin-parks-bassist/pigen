@@ -1,0 +1,6 @@
+module first(input logic clk, input bit[8] buf i, output bit[8] buf o);
+ second child(.clk(clk),.i(i),.o(o));
+endmodule
+module second(input logic clk, input bit[8] buf i, output bit[8] buf o);
+ first child(.clk(clk),.i(i),.o(o));
+endmodule

@@ -2624,6 +2624,64 @@ static int validate_signal_ownership(resolver *resolver)
 	return 1;
 }
 
+/* Validate the resolved hierarchy with an explicit DFS stack, so deep but
+ * acyclic designs do not consume the host call stack. */
+static int validate_module_hierarchy(resolver *resolver)
+{
+	pigen_semantic_model *model = resolver->model;
+	size_t modules = model->module_count;
+	if (!modules || !model->instance_count) return 1;
+	size_t *first = pigen_resize(NULL, modules * sizeof(*first));
+	size_t *next = pigen_resize(NULL, model->instance_count * sizeof(*next));
+	size_t *stack = pigen_resize(NULL, modules * sizeof(*stack));
+	size_t *cursor = pigen_resize(NULL, modules * sizeof(*cursor));
+	unsigned char *color = pigen_resize(NULL, modules);
+	memset(color, 0, modules);
+	for (size_t m = 0; m < modules; m++) first[m] = SIZE_MAX;
+	for (size_t i = 0; i < model->instance_count; i++)
+	{
+		const pigen_semantic_instance *instance = &model->instances[i];
+		next[i] = first[instance->module.index];
+		first[instance->module.index] = i;
+	}
+	int valid = 1;
+	for (size_t root = 0; valid && root < modules; root++)
+	{
+		if (color[root]) continue;
+		size_t depth = 1;
+		stack[0] = root;
+		cursor[0] = first[root];
+		color[root] = 1;
+		while (valid && depth)
+		{
+			size_t edge = cursor[depth-1];
+			if (edge == SIZE_MAX)
+			{
+				color[stack[--depth]] = 2;
+				continue;
+			}
+			cursor[depth-1] = next[edge];
+			const pigen_semantic_instance *instance = &model->instances[edge];
+			size_t child = instance->child_module.index;
+			if (color[child] == 1)
+			{
+				valid = fail(resolver, instance->span, "recursive module instantiation cannot be elaborated");
+				break;
+			}
+			if (color[child] == 2) continue;
+			color[child] = 1;
+			stack[depth] = child;
+			cursor[depth++] = first[child];
+		}
+	}
+	free(color);
+	free(cursor);
+	free(stack);
+	free(next);
+	free(first);
+	return valid;
+}
+
 int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 	pigen_semantic_model *model, const pigen_resolve_policy *policy,
 	pigen_semantic_error *error)
@@ -2666,5 +2724,5 @@ int pigen_resolve_semantics(const pigen_syntax_tree *syntax,
 			!add_module(&resolver, node, child, 0)) return 0;
 		child = node->next_sibling;
 	}
-	return validate_signal_ownership(&resolver);
+	return validate_module_hierarchy(&resolver) && validate_signal_ownership(&resolver);
 }

@@ -1,0 +1,3 @@
+module recursive #(parameter W=8)(input logic clk, input bit[W] buf i, output bit[W] buf o);
+ recursive #(.W(W)) child(.clk(clk),.i(i),.o(o));
+endmodule

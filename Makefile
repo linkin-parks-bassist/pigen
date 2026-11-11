@@ -1142,6 +1142,13 @@ child-port-endpoint-test: pigen
 
 .PHONY: specialization-test
 specialization-test: pigen
+	dir=$$(mktemp -d); status=0; \
+	for fixture in recursive_instance recursive_parameter_instance mutual_instance; do \
+		printf 'preserve output\n' > $$dir/output.sv; \
+		if ./pigen tests/$${fixture}_error.pigen -o $$dir/output.sv 2>$$dir/error; then status=1; break; fi; \
+		grep -Fq 'recursive module instantiation cannot be elaborated' $$dir/error && \
+		grep -Fxq 'preserve output' $$dir/output.sv || { status=1; break; }; \
+	done; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); \
 	$(CC) $(CFLAGS) -o $$dir/check tests/specialization_test.c src/specialize.c src/lexer.c src/util.c $(LDLIBS) && \
 	$$dir/check && \

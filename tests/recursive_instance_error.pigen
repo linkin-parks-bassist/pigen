@@ -1,0 +1,3 @@
+module recursive(input logic clk, input bit[8] buf i, output bit[8] buf o);
+ recursive child(.clk(clk),.i(i),.o(o));
+endmodule
