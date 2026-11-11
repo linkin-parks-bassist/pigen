@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T18:10:46+11:00"
+revised_at: "2026-11-11T18:11:09+11:00"
 checked_at: "2026-10-04T16:19:56+11:00"
 ---
 
@@ -22,4 +22,4 @@ Accepted non-Pigen SV must preserve widths, signedness, events, reset and observ
 
 Related: [what is the systemverilog compatibility contract](systemverilog/compatibility/contract.md), [how does an atomic transfer fire](../../../how/does/an/atomic/transfer/fire.md).
 
-The contextual unqualified input bit exception is documented in the input/omission owners; ordinary SV types retain their own static policy. Full remaining acceptance gates, deferred choices and the quarantined prototype language are separate owners. Specified grammar and lowering requirements do not imply production support.
+The contextual unqualified input bit exception is documented in the input/omission owners; ordinary SV types retain their own static policy. Full remaining acceptance gates, deferred choices and the quarantined prototype language are separate owners. Token formatting is not syntax. Specified grammar and lowering requirements do not imply production support.
