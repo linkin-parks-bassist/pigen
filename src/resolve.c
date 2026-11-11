@@ -2745,7 +2745,7 @@ static pigen_expr_id partial_endpoint_alias(pigen_semantic_model *model,
 }
 
 /* Runtime coordinates use a widened signed domain so subtraction neither
-	* truncates a small index nor wraps an out-of-range value into the payload. */
+ * truncates a small index nor wraps an out-of-range value into the payload. */
 static pigen_expr_id dynamic_endpoint_alias(pigen_semantic_model *model,
 	pigen_expr_id value, const pigen_semantic_instance_connection *upstream,
 	pigen_data_type_id target_type, pigen_source_span span)
@@ -2772,16 +2772,17 @@ static pigen_expr_id dynamic_endpoint_alias(pigen_semantic_model *model,
 		!pigen_const_expr_evaluate_u64(model, pigen_data_type_packed_width(model, producer->data_type), &sw) ||
 		!pigen_const_expr_evaluate_u64(model, pigen_data_type_packed_width(model, endpoint->data_type), &ew) ||
 		!pigen_const_expr_evaluate_u64(model, pigen_data_type_packed_width(model, index_expr->data_type), &iw) ||
-		sw != ew || !iw || iw > 64) return INVALID_ID(pigen_expr_id);
+		sw != ew || !iw || iw > UINT64_MAX-3) return INVALID_ID(pigen_expr_id);
 	pigen_symbol_id symbol = endpoint->symbol;
 	pigen_data_type_id payload_type = endpoint->data_type;
 	pigen_data_type_id index_type = index_expr->data_type;
-	pigen_packed_dimension dimension = {pigen_const_expr_intern_integer(model, 66, pigen_data_type_unsized_integer(model)),
+	pigen_packed_dimension dimension = {pigen_const_expr_intern_integer(model, (iw > 64 ? iw : 64)+2, pigen_data_type_unsized_integer(model)),
 		pigen_const_expr_intern_integer(model, 0, pigen_data_type_unsized_integer(model))};
 	pigen_data_type_id wide = pigen_data_type_implicit(model, PIGEN_SIGN_SIGNED, &dimension, 1);
 	pigen_conversion conversion;
 	if (!pigen_data_type_resolve_assignment_conversion(model, index_type, wide, &conversion))
 		return INVALID_ID(pigen_expr_id);
+	index = resolve_input_aliases(model, index);
 	pigen_expr_id coordinate = pigen_expr_add_conversion(model, conversion, index, span);
 	pigen_expr_id source_right = pigen_expr_add_integer(model,
 		sr < 0 ? (uint64_t)(-(sr+1))+1 : (uint64_t)sr, wide, span);
@@ -2825,10 +2826,24 @@ static pigen_expr_id resolve_input_aliases(pigen_semantic_model *model,
 			if (upstream->direction != PIGEN_SEMANTIC_OUTPUT ||
 				upstream->endpoint_view.index == PIGEN_INVALID_ID) continue;
 			const pigen_semantic_signal *source = pigen_signal_get(model, upstream->endpoint_view);
-			if (source && source->data_type.index == expr.data_type.index &&
-				source->shape.index == expr.shape.index &&
+			if (source && source->shape.index == expr.shape.index &&
 				ownership_same_projection(model, value, upstream->value))
-				return pigen_expr_add_symbol(model, source->symbol, source->data_type, expr.span);
+			{
+				uint64_t source_width, value_width;
+				pigen_conversion conversion;
+				if (pigen_const_expr_evaluate_u64(model,
+					pigen_data_type_packed_width(model, source->data_type), &source_width) &&
+					pigen_const_expr_evaluate_u64(model,
+						pigen_data_type_packed_width(model, expr.data_type), &value_width) &&
+					source_width == value_width &&
+					pigen_data_type_resolve_assignment_conversion(model,
+						source->data_type, expr.data_type, &conversion))
+				{
+					pigen_expr_id mapped = pigen_expr_add_symbol(model, source->symbol, source->data_type, expr.span);
+					return conversion.kind == PIGEN_CONVERSION_IDENTITY ? mapped :
+						pigen_expr_add_conversion(model, conversion, mapped, expr.span);
+				}
+			}
 			pigen_expr_id mapped = partial_endpoint_alias(model, value, upstream, expr.data_type, expr.span);
 			if (mapped.index == PIGEN_INVALID_ID)
 				mapped = dynamic_endpoint_alias(model, value, upstream, expr.data_type, expr.span);
