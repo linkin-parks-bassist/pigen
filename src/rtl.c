@@ -498,6 +498,7 @@ pigen_rtl_equation_id pigen_rtl_equation_add(pigen_rtl_model *model,
 	result.index = (uint32_t)model->equation_count;
 	record = &model->equations[model->equation_count++];
 	*record = (pigen_rtl_equation){0};
+	record->destination_expression = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	record->origin = origin;
 	return result;
 }
@@ -725,11 +726,34 @@ pigen_rtl_equation_id pigen_rtl_equation_add_with_owner(
 	result.index = (uint32_t)model->equation_count;
 	record = &model->equations[model->equation_count++];
 	*record = (pigen_rtl_equation){0};
+	record->destination_expression = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	record->origin = span;
 	record->destination = destination;
 	record->value = value;
 	record->module = module;
 	owner->equations.count += 1;
+	return result;
+}
+
+pigen_rtl_equation_id pigen_rtl_equation_add_projection_with_owner(
+	pigen_rtl_model *model, pigen_rtl_module_id module,
+	pigen_rtl_expr_id destination, pigen_rtl_expr_id value,
+	pigen_source_span span)
+{
+	const pigen_rtl_expr *base = pigen_rtl_expr_get(model, destination);
+	while (base && (base->kind == PIGEN_RTL_EXPR_INDEX ||
+		base->kind == PIGEN_RTL_EXPR_SELECT))
+	{
+		if (!base->child_count || base->first_child >= model->expression_child_count)
+			return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
+		base = pigen_rtl_expr_get(model, model->expression_children[base->first_child]);
+	}
+	if (!base || base->kind != PIGEN_RTL_EXPR_OBJECT)
+		return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
+	pigen_rtl_equation_id result = pigen_rtl_equation_add_with_owner(model,
+		module, base->object, value, span);
+	if (result.index != PIGEN_INVALID_ID)
+		model->equations[result.index].destination_expression = destination;
 	return result;
 }
 

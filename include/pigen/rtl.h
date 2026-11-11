@@ -152,6 +152,7 @@ typedef struct {
 	pigen_rtl_object_id destination;
 	pigen_rtl_expr_id value;
 	pigen_rtl_module_id module; /* Invalid until owner resolution publishes it. */
+	pigen_rtl_expr_id destination_expression; /* Optional object projection. */
 } pigen_rtl_equation;
 
 typedef struct {
@@ -330,6 +331,10 @@ pigen_rtl_object_id pigen_rtl_object_add_with_owner(pigen_rtl_model *model,
 pigen_rtl_equation_id pigen_rtl_equation_add_with_owner(
 	pigen_rtl_model *model, pigen_rtl_module_id module,
 	pigen_rtl_object_id destination, pigen_rtl_expr_id value,
+	pigen_source_span span);
+pigen_rtl_equation_id pigen_rtl_equation_add_projection_with_owner(
+	pigen_rtl_model *model, pigen_rtl_module_id module,
+	pigen_rtl_expr_id destination, pigen_rtl_expr_id value,
 	pigen_source_span span);
 pigen_rtl_instance_id pigen_rtl_instance_add_with_owner(
 	pigen_rtl_model *model, pigen_rtl_module_id module,

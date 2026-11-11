@@ -1063,7 +1063,11 @@ static int emit_equation(struct buf *b, const pigen_rtl_model *rtl,
 	if (!dest_name)
 		return -1;
 	buf_append_str(b, "  assign ");
-	buf_append_str(b, dest_name);
+	if (equation->destination_expression.index != PIGEN_INVALID_ID)
+	{
+		if (emit_expr(b, rtl, equation->destination_expression) != 0) return -1;
+	}
+	else buf_append_str(b, dest_name);
 	buf_append_str(b, " = ");
 	if (emit_expr(b, rtl, equation->value) != 0)
 		return -1;
@@ -1372,6 +1376,11 @@ static int validate_record(const pigen_source_manager *sources,
 			return -1;
 		if (!object_name(rtl, dest))
 			return -1;
+		if (equation->destination_expression.index != PIGEN_INVALID_ID)
+		{
+			const pigen_rtl_expr *target = pigen_rtl_expr_get(rtl, equation->destination_expression);
+			if (!target || validate_expr(rtl, target) != 0) return -1;
+		}
 		value = pigen_rtl_expr_get(rtl, equation->value);
 		if (!value)
 			return -1;

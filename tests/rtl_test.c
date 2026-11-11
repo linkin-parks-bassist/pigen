@@ -685,6 +685,30 @@ int main(void)
 			model.instance_connection_count == conn_before + 3);
 	}
 
+	/* Projected equations retain their base owner and reject non-lvalues
+	 * and foreign owners without publishing an equation. */
+	{
+		pigen_rtl_module_id owner = pigen_rtl_module_add_with_owner(&model,
+			(pigen_module_id){900}, first);
+		pigen_rtl_object_id target = pigen_rtl_object_add_with_owner(&model, owner,
+			PIGEN_RTL_OBJECT_VARIABLE, type, PIGEN_SEMANTIC_INTERNAL,
+			INVALID_ID(pigen_signal_id), first);
+		pigen_rtl_expr_id base = pigen_rtl_expr_add_object(&model, type, target, first);
+		pigen_rtl_expr_id one = pigen_rtl_expr_add_integer(&model, type, 1, first);
+		pigen_rtl_expr_id bit = pigen_rtl_expr_add_index(&model, type, base, one, first);
+		size_t before = model.equation_count;
+		assert(IS_INVALID(pigen_rtl_equation_add_projection_with_owner(&model,
+			owner, one, one, first)));
+		assert(IS_INVALID(pigen_rtl_equation_add_projection_with_owner(&model,
+			(pigen_rtl_module_id){0}, bit, one, first)));
+		assert(model.equation_count == before && model.modules[owner.index].equations.count == 0);
+		pigen_rtl_equation_id projected = pigen_rtl_equation_add_projection_with_owner(
+			&model, owner, bit, one, first);
+		assert(!IS_INVALID(projected));
+		assert(SAME_ID(model.equations[projected.index].destination, target));
+		assert(SAME_ID(model.equations[projected.index].destination_expression, bit));
+	}
+
 	pigen_free_rtl_model(&model);
 	assert(!model.types && !model.type_count && !model.type_capacity);
 	assert(!model.expressions && !model.expression_count &&

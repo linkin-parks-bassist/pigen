@@ -1,13 +1,13 @@
 ---
 status: green
-revised_at: "2026-10-03T18:02:57+10:00"
+revised_at: "2026-11-11T16:35:41+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-Modules and resolved hardware. Module objects, instances, equations, processes and enabled updates with owner ranges. Instances own ordered parameters/connections; processes own updates. Semantic IDs are provenance and can be invalid for synthetic objects. Gate: complete module order/provenance; reject foreign destination equations, connections and updates without changing arena counts or owner ranges; make rtl-test.
+RTL modules own objects, instances, equations and processes through half-open arena ranges. Instances own ordered parameter/connection ranges; processes own ordered enabled updates. Semantic IDs are provenance and may be invalid for synthetic hardware. include/pigen/rtl.h and src/rtl.c define the records and constructors.
 
-Task 3 is implemented on master. The six _with_owner constructors in src/rtl.c validate owner identity and every referenced child before any arena is touched, so a failing add publishes nothing and leaves all arena counts and existing owner ranges unchanged. They publish half-open owner ranges: module over objects/instances/equations/processes, instance over ordered parameters/connections (copied into model-owned flat arenas with rollback on overflow or foreign-connection failure), and process over the trailing update range. The instance parameter/connection range_append helper guards size overflow and range/count divergence. The corrected test contract (synthetic-provenance orphan on the synthetic span, object-count assertions counting the block's five objects, final sweep counting three modules) passes; make rtl-test is green with both PASS lines, with Task 1/2 cases unaffected.
+Owner-carrying constructors validate their owner and referenced records before publishing. Foreign destination equations, instance connections and updates fail without changing arena counts or owner ranges. Instance range_append checks size overflow and range/count divergence; copied parameters/connections remain model-owned.
 
-The origin-only module/object/instance/equation/update/process constructors remain declared alongside the owner-carrying forms; they may be folded into or retired in favor of the _with_owner forms in a later task.
+Equations retain a base destination object and an optional destination_expression. Ordinary equations leave that expression invalid. pigen_rtl_equation_add_projection_with_owner accepts an object or index/select chain rooted in an object belonging to the requested module; literals and other non-lvalues fail without publication. The emitter validates and renders the selected target instead of assigning the whole base object. This supports child output-ready bindings to selected parent bits without overwriting neighbors.
 
-Task 4 (collision-safe names) is next.
+make rtl-test covers arena/owner contracts and projected-target rejection/publication. child-port-endpoint-test simulates selected ready targets through sibling and fabric connections, checking ordering under stalls and preservation of a separately driven neighboring bit. Origin-only constructors remain available alongside owner-carrying forms.

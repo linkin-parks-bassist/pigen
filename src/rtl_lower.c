@@ -1291,9 +1291,8 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 					expr = pigen_expr_get(sem, expr->as.conversion.operand);
 				if (!expr || expr->kind != PIGEN_EXPR_SYMBOL)
 				{
-					if (ready) continue;
-					/* The child may drive a selected bit of a parent vector.
-					 * Publish a scalar observation for endpoint consumers. */
+					/* Preserve selected control bindings through scalar endpoints:
+					 * observe child valid, drive child ready into its projection. */
 					const pigen_semantic_signal *view = &sem->signals[signal_index];
 					char *view_name = signal_spelling(lowering, view);
 					if (!view_name) return -1;
@@ -1301,14 +1300,23 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 						pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED));
 					pigen_rtl_module_id module = rtl_module_for_semantic(lowering->rtl, sem, view->module);
 					pigen_rtl_object_id object = add_named_object(lowering, module,
-						type, PIGEN_SEMANTIC_INTERNAL, signal_index, control->span, view_name, "_valid");
+						type, PIGEN_SEMANTIC_INTERNAL, signal_index, control->span, view_name, ready ? "_ready" : "_valid");
 					free(view_name);
 					pigen_rtl_expr_id expression = lower_expr(lowering, control->value);
-					if (object.index == PIGEN_INVALID_ID || expression.index == PIGEN_INVALID_ID ||
-						pigen_rtl_equation_add_with_owner(lowering->rtl, module,
+					if (object.index == PIGEN_INVALID_ID || expression.index == PIGEN_INVALID_ID) return -1;
+					pigen_rtl_expr_id scalar = object_expression(lowering, type, object, control->span);
+					if (ready)
+					{
+						if (pigen_rtl_equation_add_projection_with_owner(lowering->rtl, module,
+							expression, scalar, control->span).index == PIGEN_INVALID_ID) return -1;
+						out->ready = scalar; out->input_ready = object; out->source_ready = object;
+					}
+					else
+					{
+						if (pigen_rtl_equation_add_with_owner(lowering->rtl, module,
 							object, expression, control->span).index == PIGEN_INVALID_ID) return -1;
-					out->valid = object_expression(lowering, type, object, control->span);
-					out->input_valid = object;
+						out->valid = scalar; out->input_valid = object;
+					}
 					continue;
 				}
 				pigen_signal_id signal=pigen_symbol_signal(sem,expr->as.symbol);
