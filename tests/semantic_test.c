@@ -469,6 +469,30 @@ int main(void)
 			}
 		}
 
+		pigen_bit_state wide_bits[129];
+		for (size_t i=0;i<129;i++) wide_bits[i]=PIGEN_BIT_ONE;
+		pigen_data_type_id wide_reduction_type = pigen_data_type_sized_logic(&model,129,PIGEN_SIGN_UNSIGNED);
+		for (size_t r=0;r<sizeof reductions/sizeof reductions[0];r++)
+		{
+			pigen_const_expr_id operand=pigen_const_expr_intern_bits(&model,wide_bits,129,wide_reduction_type);
+			pigen_unary_operation op={reductions[r],wide_reduction_type,boolean_type};
+			pigen_const_expr_id reduced=pigen_const_expr_intern_unary(&model,op,operand);
+			const int expected[]={1,0,1,0,1,0};
+			assert(pigen_const_expr_evaluate_i64(&model,reduced,&coordinate) && coordinate==expected[r]);
+		}
+
+		wide_bits[128]=PIGEN_BIT_X; wide_bits[0]=PIGEN_BIT_ZERO;
+		pigen_const_expr_id unknown_wide=pigen_const_expr_intern_bits(&model,wide_bits,129,wide_reduction_type);
+		pigen_const_expr_id dominant=pigen_const_expr_intern_unary(&model,
+			(pigen_unary_operation){PIGEN_UNARY_REDUCTION_AND,wide_reduction_type,boolean_type},unknown_wide);
+		assert(pigen_const_expr_evaluate_i64(&model,dominant,&coordinate) && coordinate==0);
+		dominant=pigen_const_expr_intern_unary(&model,
+			(pigen_unary_operation){PIGEN_UNARY_REDUCTION_OR,wide_reduction_type,boolean_type},unknown_wide);
+		assert(pigen_const_expr_evaluate_i64(&model,dominant,&coordinate) && coordinate==1);
+		dominant=pigen_const_expr_intern_unary(&model,
+			(pigen_unary_operation){PIGEN_UNARY_REDUCTION_XOR,wide_reduction_type,boolean_type},unknown_wide);
+		assert(!pigen_const_expr_evaluate_i64(&model,dominant,&coordinate));
+
 
 	}
 	signed_8 = pigen_data_type_signed_integer(&model, width_8);
