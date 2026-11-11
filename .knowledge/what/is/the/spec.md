@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T18:30:59+11:00"
+revised_at: "2026-11-11T18:48:14+11:00"
 checked_at: "2026-10-04T16:19:56+11:00"
 ---
 
@@ -16,11 +16,11 @@ Every module input has payload/valid inbound and ready outbound. Unqualified inp
 
 A transfer has one guard and fire event across all ready destinations and distinct valid consuming sources. Projections consume complete base tokens, repeated reads deduplicate, co-slices preserve packed bit-stream order, buffered destinations are whole, and mixed static writes share the fire. Ownership requires exclusive buffered producers/consumers; self-consumption and unbroken ready cycles are errors. peek observes payload without token dependencies. Local synchronous validity actions compose in source order and cannot modify upstream input validity.
 
-Pigen actions bind to one synchronous clock edge; cross-domain/multi-edge/asynchronous-reset forms diagnose. Pipeline stages read immutable incoming fields and define outgoing packet state; fields are buf, yield exposes final outgoing value, complete procedural guards enable handshakes, reset bindings reset generated valid bits. Fabrics connect resolved child instance-port identities with per-connection payload compatibility, exclusive direct links or arbitrated routed links, blind interfaces, balanced three-port relative routing and registered-occupancy buffering. FSM state bodies are ordinary statements; goto is guarded/terminal and never implicitly waits for transfer.
+Pigen actions bind to one synchronous clock edge; cross-domain/multi-edge/asynchronous-reset forms diagnose. Pipeline stages read immutable incoming fields and define outgoing packet state; fields are buf, yield exposes final outgoing value, complete procedural guards enable handshakes, reset bindings reset generated valid bits. Fabrics connect resolved child instance-port identities with per-connection payload compatibility, exclusive direct links or arbitrated routed links, blind interfaces, balanced three-port relative routing and registered-occupancy buffering. FSMs admit level-zero and state-gated code. Executed goto schedules a state and ends this FSM for the edge; earlier effects remain, next edge restarts at top. It never waits implicitly (how/to/write/fsm/states.md).
 
 Child ports are parent-scope endpoints: `instance.port` is valid throughout the parent wherever its direction/type permit reads, writes or connections. Explicit wires remain supported. Partial positional connections (`A a(clk, reset);`) may leave data ports for endpoint use. Named connections accept sibling endpoints (`B b(.x_in(a.x_out));`). Anonymous `fabric begin b.x_out -> a.x_in; endfabric` is supported alongside named fabrics. Resolve instance/port identities, generate parent payload and applicable valid/ready nets, and apply type, direction and ownership checks.
 
-Accepted non-Pigen SV must preserve widths, signedness, events, reset and observable cycles; accidental unsupported forms are not deliberate language restrictions. Diagnose meaning-preservation failures at original file/line/column. Textual identity is unnecessary. These are intended requirements, not a claim the production prototype supports all forms. Detailed laws have separate semantic answer leaves.
+Accepted non-Pigen SV must preserve widths, signedness, events, reset and observable cycles; accidental unsupported forms are not deliberate language restrictions. Diagnose meaning-preservation failures at original file/line/column. Textual identity is unnecessary. Detailed laws have separate semantic answer leaves.
 
 Related: [what is the systemverilog compatibility contract](systemverilog/compatibility/contract.md), [how does an atomic transfer fire](../../../how/does/an/atomic/transfer/fire.md).
 
