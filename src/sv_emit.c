@@ -743,30 +743,53 @@ static int emit_opaque(struct buf *b, const pigen_source_manager *sources,
 	return b->failed ? -1 : 0;
 }
 
-/* The `[h:l]` packed range of a type, or nothing for a width-1 (scalar) type.
- * The range is the type width: `[width-1:0]`. */
-static int emit_range(struct buf *b, const pigen_rtl_type *type)
+/* Preserve declared packed coordinates; width is only a fallback for types
+ * without dimensions. A canonical [0:0] remains an ordinary scalar. */
+static int type_has_range(const pigen_rtl_type *type)
 {
-	uint64_t width = type->width;
-
-	if (width <= 1)
+	if (type->width == 1 && type->dimension_count == 1 &&
+		type->dimensions[0].left.expression.index == PIGEN_INVALID_ID &&
+		type->dimensions[0].right.expression.index == PIGEN_INVALID_ID &&
+		type->dimensions[0].left.value == 0 && type->dimensions[0].right.value == 0)
 		return 0;
-	buf_append_str(b, "[");
-	buf_append_ull(b, width - 1);
-	buf_append_str(b, ":0]");
+	return type->dimension_count || (type->width > 1 && !type->sv_keyword);
+}
+
+static int emit_range(struct buf *b, const pigen_rtl_model *rtl,
+	const pigen_rtl_type *type)
+{
+	if (type->dimension_count)
+	{
+		for (size_t i = 0; i < type->dimension_count; i++)
+		{
+			const pigen_rtl_packed_dimension *dimension = &type->dimensions[i];
+			buf_append_str(b, "[");
+			if (dimension->left.expression.index == PIGEN_INVALID_ID)
+				buf_append_int(b, dimension->left.value);
+			else if (emit_expr(b, rtl, dimension->left.expression) != 0) return -1;
+			buf_append_str(b, ":");
+			if (dimension->right.expression.index == PIGEN_INVALID_ID)
+				buf_append_int(b, dimension->right.value);
+			else if (emit_expr(b, rtl, dimension->right.expression) != 0) return -1;
+			buf_append_str(b, "]");
+		}
+	}
+	else
+	{
+		buf_append_str(b, "[");
+		buf_append_ull(b, type->width - 1);
+		buf_append_str(b, ":0]");
+	}
 	return b->failed ? -1 : 0;
 }
 
-/* A signal declaration: `  logic [h:l] name;` (internal) or the port header
- * line `  <direction> logic [h:l] name,` (direction right-aligned to six
- * columns). `logic` is ALWAYS present; `[h:l]` is the first packed dimension
- * range, present only when width > 1; `comma` ends a port. */
+/* Render the resolved base type and packed dimensions, followed by the
+ * object name and unpacked shape. Port directions occupy six columns. */
 static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 	const pigen_rtl_object *object, int is_port, int comma)
 {
 	const pigen_rtl_type *type;
 	const char *name;
-	uint64_t width;
 	const char *direction = NULL;
 	size_t pad;
 
@@ -776,7 +799,6 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 	name = object_name(rtl, object);
 	if (!name)
 		return -1;
-	width = type->width;
 
 	buf_append_str(b, "  ");
 	if (is_port)
@@ -818,10 +840,10 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 			break;
 		}
 	}
-	if (width > 1 && !type->sv_keyword)
+	if (type_has_range(type))
 	{
 		buf_append_str(b, " ");
-		if (emit_range(b, type) != 0)
+		if (emit_range(b, rtl, type) != 0)
 			return -1;
 	}
 	buf_append_str(b, " ");
@@ -835,12 +857,10 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 	return b->failed ? -1 : 0;
 }
 
-/* A data type spelling for a type parameter: `logic [w-1:0]` (`logic` at
- * width 1), signed when the type is signed. */
-static int emit_type(const struct buf *unused, struct buf *b,
+/* Primitive payload type parameters use the same packed shape as objects. */
+static int emit_type(const pigen_rtl_model *rtl, struct buf *b,
 	const pigen_rtl_type *type)
 {
-	(void)unused;
 	switch ((pigen_sv_integer_keyword)type->sv_keyword)
 	{
 		case PIGEN_SV_INTEGER_BYTE: buf_append_str(b, "byte"); break;
@@ -855,10 +875,10 @@ static int emit_type(const struct buf *unused, struct buf *b,
 				buf_append_str(b, " signed");
 			break;
 	}
-	if (type->width > 1 && !type->sv_keyword)
+	if (type_has_range(type))
 	{
 		buf_append_str(b, " ");
-		if (emit_range(b, type) != 0)
+		if (emit_range(b, rtl, type) != 0)
 			return -1;
 	}
 	return b->failed ? -1 : 0;
@@ -957,7 +977,7 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 				if (!type)
 					return -1;
 				buf_append_str(b, ".PAYLOAD_T(");
-				if (emit_type(NULL, b, type) != 0)
+				if (emit_type(rtl, b, type) != 0)
 					return -1;
 				buf_append_str(b, ")");
 				first_parameter = 0;
