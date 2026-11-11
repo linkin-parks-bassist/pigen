@@ -1302,6 +1302,17 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 			return 1;
 		}
 		case PIGEN_CONST_EXPR_BINARY:
+			if (known->as.binary.operation.operator == PIGEN_BINARY_POWER)
+			{
+				int64_t exponent;
+				if (evaluate_i64(model, known->as.binary.right, &exponent, remaining-1) && exponent < 0 &&
+					evaluate_u64(model, known->as.binary.left, &left, remaining-1))
+				{
+					if (!left) return 0;
+					*value = left == 1;
+					return 1;
+				}
+			}
 			if (known->as.binary.operation.operator == PIGEN_BINARY_LOGICAL_AND ||
 				known->as.binary.operation.operator == PIGEN_BINARY_LOGICAL_OR)
 			{
