@@ -374,6 +374,37 @@ int main(void)
 		range = pigen_const_expr_intern_select_width(&model, maximum, min_expr, PIGEN_SEMANTIC_SELECT_RANGE);
 		assert(!pigen_const_expr_evaluate_u64(&model, range, &span));
 		assert(!pigen_const_expr_evaluate_u64(&model, minus_eight, &span));
+		const pigen_binary_operator comparisons[] = {PIGEN_BINARY_LESS, PIGEN_BINARY_LESS_EQUAL,
+			PIGEN_BINARY_GREATER, PIGEN_BINARY_GREATER_EQUAL, PIGEN_BINARY_EQUAL,
+			PIGEN_BINARY_NOT_EQUAL, PIGEN_BINARY_CASE_EQUAL, PIGEN_BINARY_CASE_NOT_EQUAL,
+			PIGEN_BINARY_WILDCARD_EQUAL, PIGEN_BINARY_WILDCARD_NOT_EQUAL,
+			PIGEN_BINARY_LOGICAL_AND, PIGEN_BINARY_LOGICAL_OR};
+		const int expected[] = {1,1,0,0,0,1,0,1,0,1,1,1};
+		for (size_t i=0; i<sizeof comparisons/sizeof comparisons[0]; i++)
+		{
+			pigen_binary_operation op = {comparisons[i], unsized_integer_data_type,
+				unsized_integer_data_type, boolean_type};
+			pigen_const_expr_id compared = pigen_const_expr_intern_binary(&model, op, minus_eight, width_4);
+			assert(pigen_const_expr_evaluate_i64(&model, compared, &coordinate) && coordinate == expected[i]);
+		}
+		pigen_const_expr_id zero = pigen_const_expr_intern_integer(&model, 0, unsized_integer_data_type);
+		pigen_binary_operation divide = {PIGEN_BINARY_DIVIDE, unsized_integer_data_type,
+			unsized_integer_data_type, unsized_integer_data_type};
+		pigen_const_expr_id invalid_branch = pigen_const_expr_intern_binary(&model, divide, width_1, zero);
+		pigen_conditional_operation choose = {unsized_integer_data_type, unsized_integer_data_type,
+			unsized_integer_data_type, unsized_integer_data_type};
+		pigen_const_expr_id selected = pigen_const_expr_intern_conditional(&model, choose,
+			minus_eight, minus_eight, invalid_branch);
+		assert(pigen_const_expr_evaluate_i64(&model, selected, &coordinate) && coordinate == -8);
+		selected = pigen_const_expr_intern_conditional(&model, choose, zero, invalid_branch, width_8);
+		assert(pigen_const_expr_evaluate_u64(&model, selected, &span) && span == 8);
+		selected = pigen_const_expr_intern_conditional(&model, choose, width_1, invalid_branch, width_8);
+		assert(!pigen_const_expr_evaluate_i64(&model, selected, &coordinate));
+		pigen_binary_operation logical = {PIGEN_BINARY_LOGICAL_AND, unsized_integer_data_type,
+			unsized_integer_data_type, boolean_type};
+		selected = pigen_const_expr_intern_binary(&model, logical, zero, invalid_branch);
+		assert(pigen_const_expr_evaluate_i64(&model, selected, &coordinate) && coordinate == 0);
+
 	}
 	signed_8 = pigen_data_type_signed_integer(&model, width_8);
 	same_signed_8 = pigen_data_type_signed_integer(&model, width_8);
@@ -959,12 +990,9 @@ int main(void)
 		assert(upper && upper->kind == PIGEN_CONST_EXPR_BINARY &&
 			upper->as.binary.operation.operator == PIGEN_BINARY_SUBTRACT);
 		width = pigen_const_expr_get(&model, upper->as.binary.left);
-		assert(width && width->kind == PIGEN_CONST_EXPR_SELECT_WIDTH &&
-			width->as.select_width.kind == PIGEN_SEMANTIC_SELECT_RANGE &&
-			width->as.select_width.left.index ==
-				pigen_expr_constant(&model, left_bound).index &&
-			width->as.select_width.right.index ==
-				pigen_expr_constant(&model, right_bound).index);
+		/* Equivalent types may reuse an earlier constant representation. The
+		 * selected dimension must have eight elements, regardless of its DAG. */
+		assert(width && evaluate_width(&model, upper->as.binary.left) == 8);
 		assert(selected_dimensions[1].left.index == dimension.left.index);
 		assert(selected_dimensions[1].right.index == dimension.right.index);
 	}

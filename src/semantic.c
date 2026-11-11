@@ -948,9 +948,20 @@ static int evaluate_i64(pigen_semantic_model *model,
 		default: return 0;
 		}
 		break;
+	case PIGEN_CONST_EXPR_CONDITIONAL:
+		if (!evaluate_i64(model, known.as.conditional.condition, &left, remaining-1) ||
+			!evaluate_i64(model, left ? known.as.conditional.when_true : known.as.conditional.when_false,
+				&result, remaining-1)) return 0;
+		break;
 	case PIGEN_CONST_EXPR_BINARY:
-		if (!evaluate_i64(model, known.as.binary.left, &left, remaining-1) ||
-			!evaluate_i64(model, known.as.binary.right, &right, remaining-1)) return 0;
+		if (!evaluate_i64(model, known.as.binary.left, &left, remaining-1)) return 0;
+		if ((known.as.binary.operation.operator == PIGEN_BINARY_LOGICAL_AND && !left) ||
+			(known.as.binary.operation.operator == PIGEN_BINARY_LOGICAL_OR && left))
+		{
+			result = !!left;
+			break;
+		}
+		if (!evaluate_i64(model, known.as.binary.right, &right, remaining-1)) return 0;
 		switch (known.as.binary.operation.operator)
 		{
 		case PIGEN_BINARY_ADD:
@@ -967,6 +978,22 @@ static int evaluate_i64(pigen_semantic_model *model,
 			if (!right || (left == INT64_MIN && right == -1)) return 0;
 			result = known.as.binary.operation.operator == PIGEN_BINARY_DIVIDE ? left/right : left%right;
 			break;
+		case PIGEN_BINARY_LESS: result = left < right; break;
+		case PIGEN_BINARY_LESS_EQUAL: result = left <= right; break;
+		case PIGEN_BINARY_GREATER: result = left > right; break;
+		case PIGEN_BINARY_GREATER_EQUAL: result = left >= right; break;
+		case PIGEN_BINARY_EQUAL:
+		case PIGEN_BINARY_CASE_EQUAL:
+		case PIGEN_BINARY_WILDCARD_EQUAL: result = left == right; break;
+		case PIGEN_BINARY_NOT_EQUAL:
+		case PIGEN_BINARY_CASE_NOT_EQUAL:
+		case PIGEN_BINARY_WILDCARD_NOT_EQUAL: result = left != right; break;
+		case PIGEN_BINARY_LOGICAL_AND: result = left && right; break;
+		case PIGEN_BINARY_LOGICAL_OR: result = left || right; break;
+		case PIGEN_BINARY_BITWISE_AND: result = signed_pattern((uint64_t)left & (uint64_t)right); break;
+		case PIGEN_BINARY_BITWISE_OR: result = signed_pattern((uint64_t)left | (uint64_t)right); break;
+		case PIGEN_BINARY_BITWISE_XOR: result = signed_pattern((uint64_t)left ^ (uint64_t)right); break;
+		case PIGEN_BINARY_BITWISE_XNOR: result = signed_pattern(~((uint64_t)left ^ (uint64_t)right)); break;
 		default: return 0;
 		}
 		break;
@@ -1083,6 +1110,15 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 			return parameter && evaluate_u64(model,
 				pigen_expr_constant(model, parameter->value), value,
 				remaining - 1);
+		}
+		case PIGEN_CONST_EXPR_CONDITIONAL:
+		{
+			int64_t condition;
+			if (evaluate_i64(model, known->as.conditional.condition, &condition, remaining-1))
+				left = condition != 0;
+			else if (!evaluate_u64(model, known->as.conditional.condition, &left, remaining-1)) return 0;
+			return evaluate_u64(model, left ? known->as.conditional.when_true : known->as.conditional.when_false,
+				value, remaining-1);
 		}
 		case PIGEN_CONST_EXPR_CONVERSION:
 			return evaluate_u64(model, known->as.conversion.operand, value,
@@ -1245,7 +1281,8 @@ static int evaluate_u64(pigen_semantic_model *model,
 	pigen_const_expr_kind kind = known->kind;
 	pigen_data_type_id type = known->data_type;
 	if (!evaluate_u64_raw(model, expression, value, remaining)) return 0;
-	if ((kind == PIGEN_CONST_EXPR_BINARY || kind == PIGEN_CONST_EXPR_CONVERSION) &&
+	if ((kind == PIGEN_CONST_EXPR_BINARY || kind == PIGEN_CONST_EXPR_CONVERSION ||
+		kind == PIGEN_CONST_EXPR_CONDITIONAL) &&
 		type.index != model->unsized_integer_data_type.index &&
 		pigen_data_type_numerical_interpretation(model, type) != PIGEN_NUMERICAL_EXACT_INTEGER)
 	{
