@@ -1916,6 +1916,13 @@ static int child_port_at(pigen_semantic_model *model,
 static int ownership_same_projection(pigen_semantic_model *model,
 	pigen_expr_id left, pigen_expr_id right);
 
+static int resolve_expr_references_symbol(const pigen_semantic_model *model,
+	pigen_expr_id expression, pigen_symbol_id symbol);
+
+static pigen_expr_id partial_endpoint_alias(pigen_semantic_model *model,
+	pigen_expr_id value, const pigen_semantic_instance_connection *upstream,
+	pigen_data_type_id target_type, pigen_source_span span);
+
 static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 	pigen_syntax_id syntax_id, const pigen_syntax_node *node, int phase)
 {
@@ -2224,6 +2231,19 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 			{
 				/* A wire already driven by an elastic output retains that
 				 * upstream endpoint identity, including write protection. */
+				/* Earlier sibling outputs may already target the preliminary
+				 * input view. Retain it so physical producer overlap is checked. */
+				const pigen_semantic_signal *existing = pigen_signal_get(model, connection->endpoint_view);
+				int driven = 0;
+				for (size_t d = 0; existing && d < model->instance_connection_count; d++)
+				{
+					const pigen_semantic_instance_connection *candidate = &model->instance_connections[d];
+					if (candidate->direction == PIGEN_SEMANTIC_OUTPUT &&
+						resolve_expr_references_symbol(model, candidate->value, existing->symbol))
+						driven = 1;
+				}
+				if (driven) continue;
+				int reused = 0;
 				for (size_t d = 0; d < model->instance_connection_count; d++)
 				{
 					const pigen_semantic_instance_connection *upstream = &model->instance_connections[d];
@@ -2233,9 +2253,24 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 					if (source && source->data_type.index == port.data_type.index &&
 						source->shape.index == port.shape.index &&
 						ownership_same_projection(model, connection->value, upstream->value))
+					{
 						connection->endpoint_view = upstream->endpoint_view;
+						reused = 1;
+					}
 				}
-				if (connection->endpoint_view.index != PIGEN_INVALID_ID) continue;
+				if (reused) continue;
+				for (size_t d = 0; d < model->instance_connection_count; d++)
+				{
+					const pigen_semantic_instance_connection *upstream = &model->instance_connections[d];
+					pigen_expr_id mapped = partial_endpoint_alias(model, connection->value,
+						upstream, port.data_type, connection->span);
+					if (mapped.index == PIGEN_INVALID_ID) continue;
+					connection->value = mapped;
+					connection->endpoint_view = INVALID_ID(pigen_signal_id);
+					reused = 1;
+					break;
+				}
+				if (reused) continue;
 			}
 			if (connection->endpoint_view.index != PIGEN_INVALID_ID) continue;
 			char name[96];
@@ -2604,6 +2639,96 @@ static int ownership_same_projection(pigen_semantic_model *model,
 		ownership_selection(model, a, &abase, &alow, &ahigh) &&
 		ownership_selection(model, b, &bbase, &blow, &bhigh) &&
 		alow == blow && ownership_same_projection(model, abase, bbase);
+}
+
+/* One packed dimension supplies a bit-coordinate system. Unpacked shapes
+ * and wider packed elements require structural projection, not flat offsets. */
+static int packed_coordinate_range(pigen_semantic_model *model,
+	pigen_data_type_id type, pigen_shape_id shape, int64_t *left, int64_t *right)
+{
+	const pigen_semantic_shape *dimensions = pigen_shape_get(model, shape);
+	if (!dimensions || dimensions->dimension_count || pigen_data_type_dimension_count(model, type) > 1) return 0;
+	if (pigen_data_type_dimension_count(model, type))
+	{
+		const pigen_packed_dimension *packed = pigen_data_type_dimensions(model, type);
+		return packed && pigen_const_expr_evaluate_i64(model, packed[0].left, left) &&
+			pigen_const_expr_evaluate_i64(model, packed[0].right, right);
+	}
+	uint64_t width;
+	if (!pigen_const_expr_evaluate_u64(model, pigen_data_type_packed_width(model, type), &width) ||
+		!width || width > INT64_MAX) return 0;
+	*left = (int64_t)width-1; *right = 0;
+	return 1;
+}
+
+static pigen_expr_id coordinate_literal(pigen_semantic_model *model, int64_t value, pigen_source_span span)
+{
+	if (value >= 0) return pigen_expr_add_integer(model, (uint64_t)value,
+		pigen_data_type_unsized_integer(model), span);
+	pigen_integer_id magnitude = pigen_integer_intern_u64(model, (uint64_t)(-(value+1))+1);
+	return pigen_expr_add_exact_integer(model, pigen_integer_negate(model, magnitude), span);
+}
+
+static pigen_expr_id partial_endpoint_alias(pigen_semantic_model *model,
+	pigen_expr_id value, const pigen_semantic_instance_connection *upstream,
+	pigen_data_type_id target_type, pigen_source_span span)
+{
+	if (upstream->direction != PIGEN_SEMANTIC_OUTPUT || upstream->endpoint_view.index == PIGEN_INVALID_ID)
+		return INVALID_ID(pigen_expr_id);
+	const pigen_semantic_expr *consumer = ownership_expression(model, value);
+	const pigen_semantic_expr *producer = ownership_expression(model, upstream->value);
+	if (!consumer || !producer || (consumer->kind != PIGEN_EXPR_SELECT && consumer->kind != PIGEN_EXPR_INDEX))
+		return INVALID_ID(pigen_expr_id);
+	pigen_expr_id base, source_base;
+	int64_t left, right, source_left, source_right, ignored_left, ignored_right;
+	int indexed = consumer->kind == PIGEN_EXPR_INDEX;
+	if (indexed)
+	{
+		base = consumer->as.index.base;
+		if (!pigen_const_expr_evaluate_i64(model, pigen_expr_constant(model, consumer->as.index.index), &left))
+			return INVALID_ID(pigen_expr_id);
+		right = left;
+	}
+	else if (!ownership_ordered_selection(model, consumer, &base, &left, &right)) return INVALID_ID(pigen_expr_id);
+	if (producer->kind == PIGEN_EXPR_SELECT)
+	{
+		if (!ownership_ordered_selection(model, producer, &source_base, &source_left, &source_right))
+			return INVALID_ID(pigen_expr_id);
+	}
+	else
+	{
+		source_base = (pigen_expr_id){(uint32_t)(producer-model->expressions)};
+		if (!packed_coordinate_range(model, producer->data_type, producer->shape, &source_left, &source_right))
+			return INVALID_ID(pigen_expr_id);
+	}
+	const pigen_semantic_expr *source_expression = pigen_expr_get(model, source_base);
+	if (!ownership_same_projection(model, base, source_base) || !source_expression ||
+		!packed_coordinate_range(model, source_expression->data_type, source_expression->shape, &ignored_left, &ignored_right))
+		return INVALID_ID(pigen_expr_id);
+	int64_t low = source_left < source_right ? source_left : source_right;
+	int64_t high = source_left > source_right ? source_left : source_right;
+	if (left < low || left > high || right < low || right > high ||
+		(!indexed && left != right && (left > right) != (source_left > source_right))) return INVALID_ID(pigen_expr_id);
+	const pigen_semantic_signal *endpoint = pigen_signal_get(model, upstream->endpoint_view);
+	int64_t endpoint_left, endpoint_right;
+	uint64_t width;
+	if (!endpoint || !packed_coordinate_range(model, endpoint->data_type, endpoint->shape, &endpoint_left, &endpoint_right) ||
+		!pigen_const_expr_evaluate_u64(model, pigen_data_type_packed_width(model, endpoint->data_type), &width) ||
+		(uint64_t)high-(uint64_t)low != width-1 || width > INT64_MAX) return INVALID_ID(pigen_expr_id);
+	uint64_t left_offset = source_left >= source_right ? (uint64_t)left-(uint64_t)source_right : (uint64_t)source_right-(uint64_t)left;
+	uint64_t right_offset = source_left >= source_right ? (uint64_t)right-(uint64_t)source_right : (uint64_t)source_right-(uint64_t)right;
+	int64_t mapped_left = endpoint_left >= endpoint_right ? endpoint_right+(int64_t)left_offset : endpoint_right-(int64_t)left_offset;
+	int64_t mapped_right = endpoint_left >= endpoint_right ? endpoint_right+(int64_t)right_offset : endpoint_right-(int64_t)right_offset;
+	pigen_expr_id source = pigen_expr_add_symbol(model, endpoint->symbol, endpoint->data_type, span);
+	pigen_expr_id l = coordinate_literal(model, mapped_left, span);
+	pigen_expr_id projected = indexed ? pigen_expr_add_index(model, source, l, span) :
+		pigen_expr_add_select(model, source, l, coordinate_literal(model, mapped_right, span), PIGEN_SEMANTIC_SELECT_RANGE, span);
+	const pigen_semantic_expr *result = pigen_expr_get(model, projected);
+	pigen_conversion conversion;
+	if (!result || !pigen_data_type_resolve_assignment_conversion(model, result->data_type, target_type, &conversion))
+		return INVALID_ID(pigen_expr_id);
+	return conversion.kind == PIGEN_CONVERSION_IDENTITY ? projected :
+		pigen_expr_add_conversion(model, conversion, projected, span);
 }
 
 static int ownership_disjoint(pigen_semantic_model *model,
