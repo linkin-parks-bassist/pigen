@@ -102,6 +102,8 @@ static pigen_rtl_object_id connection_payload(pigen_rtl_lowering *lowering,
 
 	if (!connection || connection->value.index == PIGEN_INVALID_ID)
 		return (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	if (connection->endpoint_view.index < lowering->lowered_endpoint_count)
+		return lowering->lowered_endpoints[connection->endpoint_view.index].payload;
 	value = pigen_expr_get(lowering->semantics, connection->value);
 	while (value && value->kind == PIGEN_EXPR_CONVERSION)
 		value = pigen_expr_get(lowering->semantics,

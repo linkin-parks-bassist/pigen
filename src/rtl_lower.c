@@ -1270,10 +1270,34 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 			if (connection->endpoint_view.index != signal_index) continue;
 			value = pigen_expr_get(sem, connection->value);
 			while(value && value->kind==PIGEN_EXPR_CONVERSION) value=pigen_expr_get(sem,value->as.conversion.operand);
-			if(!value || value->kind!=PIGEN_EXPR_SYMBOL) return -1;
-			pigen_signal_id payload = pigen_symbol_signal(sem,value->as.symbol);
+			pigen_signal_id payload = {PIGEN_INVALID_ID};
+			if (value && value->kind == PIGEN_EXPR_SYMBOL)
+				payload = pigen_symbol_signal(sem, value->as.symbol);
+			else
+			{
+				const pigen_semantic_lvalue *projection = pigen_lvalue_get(sem,
+					pigen_lvalue_resolve(sem, connection->value));
+				if (projection && projection->kind == PIGEN_LVALUE_PROJECTION)
+					payload = projection->as.projection.signal;
+			}
 			if(payload.index>=lowering->lowered_endpoint_count) return -1;
 			*out=lowering->lowered_endpoints[payload.index];
+			if (!value || value->kind != PIGEN_EXPR_SYMBOL)
+			{
+				const pigen_semantic_signal *view = &sem->signals[signal_index];
+				char *name = signal_spelling(lowering, view);
+				if (!name) return -1;
+				pigen_rtl_type_id type = pigen_lower_rtl_type(lowering, view->data_type);
+				pigen_rtl_module_id module = rtl_module_for_semantic(lowering->rtl, sem, view->module);
+				pigen_rtl_object_id object = add_named_object(lowering, module, type,
+					PIGEN_SEMANTIC_INTERNAL, signal_index, connection->span, name, NULL);
+				free(name);
+				pigen_rtl_expr_id expression = lower_expr(lowering, connection->value);
+				if (object.index == PIGEN_INVALID_ID || expression.index == PIGEN_INVALID_ID ||
+					pigen_rtl_equation_add_with_owner(lowering->rtl, module,
+						object, expression, connection->span).index == PIGEN_INVALID_ID) return -1;
+				out->payload = out->input_payload = object;
+			}
 			const pigen_symbol *port = pigen_symbol_get(sem,connection->port_symbol);
 			size_t base_length=0;
 			const char *base=pigen_source_span_text(sem->sources,port->name,&base_length);

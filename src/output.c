@@ -556,7 +556,7 @@ static char *endpoint_instance_text(const pigen_syntax_tree *syntax,
 			}
 		}
 		pigen_append(&text,")");
-		if(payload && symbol && port && !pigen_transfer_type_descriptor_get(port->transfer_type)->is_static)
+		if(payload && (symbol || connection->endpoint_view.index != PIGEN_INVALID_ID) && port && !pigen_transfer_type_descriptor_get(port->transfer_type)->is_static)
 			for(size_t control=0;control<2;control++)
 			{
 				const char *suffix=control?"_ready":"_valid";

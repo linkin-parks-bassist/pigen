@@ -2188,13 +2188,22 @@ static int resolve_instance(resolver *resolver, pigen_module_id module_id,
 				memcmp(port_name, connection_name, port_length)) continue;
 			while (expression && expression->kind == PIGEN_EXPR_CONVERSION)
 				expression = pigen_expr_get(model, expression->as.conversion.operand);
-			if (!expression || expression->kind != PIGEN_EXPR_SYMBOL) continue;
-			parent = pigen_signal_get(model, pigen_symbol_signal(model, expression->as.symbol));
+			pigen_signal_id parent_id = INVALID_ID(pigen_signal_id);
+			if (expression && expression->kind == PIGEN_EXPR_SYMBOL)
+				parent_id = pigen_symbol_signal(model, expression->as.symbol);
+			else if (phase == 1)
+			{
+				const pigen_semantic_lvalue *projection = pigen_lvalue_get(model,
+					pigen_lvalue_resolve(model, connection->value));
+				if (projection && projection->kind == PIGEN_LVALUE_PROJECTION)
+					parent_id = projection->as.projection.signal;
+			}
+			parent = pigen_signal_get(model, parent_id);
 			if (!parent || (phase != 1 && parent->direction == PIGEN_SEMANTIC_INPUT)) continue;
 			if (!pigen_transfer_type_descriptor_get(parent->transfer_type)->is_static)
 			{
 				if (phase != 1) continue;
-				pigen_signal_id parent_id = pigen_symbol_signal(model, expression->as.symbol);
+				if (!expression || expression->kind != PIGEN_EXPR_SYMBOL) continue;
 				int explicit_control = 0;
 				if (!pigen_signal_is_instance_endpoint(model, parent_id)) continue;
 				for (size_t d = 0; d < record->connection_count; d++)
