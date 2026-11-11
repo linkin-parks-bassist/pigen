@@ -1,9 +1,9 @@
 ---
 status: green
-revised_at: "2026-11-11T15:34:31+11:00"
+revised_at: "2026-11-11T15:36:27+11:00"
 ---
 
-Clocked case-to-if rewriting uses case equality (`===`) and up to 16 specialization passes. `make -j8 --output-sync=target verify` passes, including the mixed-case simulation for matching, default and unknown selectors. General case rewriting remains preliminary: selector evaluation, complex labels, nested controls and ordinary-SV preservation need discriminating witnesses before broader correctness claims.
+Clocked case rewriting is limited to bodies identified as containing Pigen actions. Ordinary cases retain their original selector evaluation and control flow. Mixed cases use case equality (`===`), parenthesized operands, concatenated/comma-separated labels and complete if/else branch statements. Simulation witnesses cover single evaluation of an ordinary side-effecting selector, matching/default/unknown mixed selectors, concatenated labels and unbraced if/else bodies. Full `make -j8 --output-sync=target verify` passes. Remaining case gaps include mixed selector evaluation, common case width/signedness, nested case variants and bounded specialization convergence.
 
 The structured frontend is the production compiler and lowers datapath, pipeline, FSM, acceptance behavior, buffered inline and standalone fabric routing, validity actions, grouped storage producers and concatenation destinations, with broad ordinary-SV preservation. The language is still incomplete.
 

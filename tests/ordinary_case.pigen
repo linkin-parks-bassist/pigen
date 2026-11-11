@@ -1,0 +1,14 @@
+module ordinary_case(input logic clk, output integer calls, output logic [7:0] value);
+ initial begin calls=0; value=0; end
+ function integer select_once();
+  calls=calls+1;
+  select_once=2;
+ endfunction
+ always @(posedge clk) begin
+  case(select_once())
+   1: value<=10;
+   2: value<=20;
+   default: value<=30;
+  endcase
+ end
+endmodule
