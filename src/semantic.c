@@ -892,7 +892,35 @@ static int64_t signed_pattern(uint64_t bits)
 static int literal_truth(pigen_semantic_model *model,
 	pigen_const_expr_id expression, int64_t *value)
 {
-	const pigen_const_expr *literal = pigen_const_expr_get(model, expression);
+	const pigen_const_expr *literal = NULL;
+	for (size_t remaining = model->constant_expression_count+1; remaining; remaining--)
+	{
+		literal = pigen_const_expr_get(model, expression);
+		if (!literal) return 0;
+		if (literal->kind == PIGEN_CONST_EXPR_SYMBOL)
+		{
+			const pigen_semantic_parameter *parameter = pigen_parameter_get(model,
+				pigen_symbol_parameter(model, literal->as.symbol));
+			if (!parameter) return 0;
+			expression = pigen_expr_constant(model, parameter->value);
+			continue;
+		}
+		if (literal->kind == PIGEN_CONST_EXPR_CONVERSION)
+		{
+			pigen_conversion conversion = literal->as.conversion.conversion;
+			pigen_const_expr_id operand = literal->as.conversion.operand;
+			uint64_t source_width, target_width;
+			if (pigen_data_type_state_domain(model, conversion.source_data_type) !=
+				pigen_data_type_state_domain(model, conversion.target_data_type) ||
+				!evaluate_u64(model, pigen_data_type_packed_width(model, conversion.source_data_type), &source_width, remaining) ||
+				!evaluate_u64(model, pigen_data_type_packed_width(model, conversion.target_data_type), &target_width, remaining) ||
+				source_width != target_width) return 0;
+			expression = operand;
+			continue;
+		}
+		break;
+	}
+	literal = pigen_const_expr_get(model, expression);
 	if (!literal || literal->kind != PIGEN_CONST_EXPR_BITS) return 0;
 	int unknown = 0;
 	for (size_t i = 0; i < literal->as.bits.state_count; i++)

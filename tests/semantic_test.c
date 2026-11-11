@@ -521,6 +521,14 @@ int main(void)
 		wide_or.operator=PIGEN_BINARY_LOGICAL_AND;
 		wide_logical=pigen_const_expr_intern_binary(&model,wide_or,wide_condition,invalid_branch);
 		assert(!pigen_const_expr_evaluate_u64(&model,wide_logical,&span));
+		pigen_data_type_id signed_wide_truth=pigen_data_type_sized_logic(&model,129,PIGEN_SIGN_SIGNED);
+		pigen_conversion truth_conversion;
+		assert(pigen_data_type_resolve_assignment_conversion(&model,wide_reduction_type,signed_wide_truth,&truth_conversion));
+		pigen_const_expr_id cast_truth=pigen_const_expr_intern_conversion(&model,truth_conversion,wide_condition);
+		wide_choice=pigen_const_expr_intern_conditional(&model,
+			(pigen_conditional_operation){signed_wide_truth,unsized_integer_data_type,unsized_integer_data_type,unsized_integer_data_type},
+			cast_truth,width_8,invalid_branch);
+		assert(pigen_const_expr_evaluate_u64(&model,wide_choice,&span) && span==8);
 		wide_bits[128]=PIGEN_BIT_ZERO;
 		wide_condition=pigen_const_expr_intern_bits(&model,wide_bits,129,wide_reduction_type);
 		wide_choice=pigen_const_expr_intern_conditional(&model,wide_choose,wide_condition,width_8,width_1);
