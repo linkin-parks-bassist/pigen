@@ -5,10 +5,10 @@ import re
 from native_axi_core_fabric_test import run, ROOT
 
 
-def case(full, seed, switched=False, stored=False):
+def case(full, seed, switched=False):
     count=2 if switched and not full else 3
     family = 'axi4' if full else 'axi4_lite'
-    directory = ROOT / 'build/native-core-contention' / (f'{family}-{seed}'+('-switched' if switched else '')+('-stored' if stored else ''))
+    directory = ROOT / 'build/native-core-contention' / (f'{family}-{seed}'+('-switched' if switched else ''))
     directory.mkdir(parents=True, exist_ok=True)
     (directory / 'commands.log').write_text('')
     original = (ROOT / ('cores/axi4/bridge.pigen' if full else 'cores/axil/registers.pigen')).read_text()
@@ -22,12 +22,6 @@ def case(full, seed, switched=False, stored=False):
     bindings = ''.join(f',.{p}({p})' for p in ('write_request', 'write_reply', 'read_request', 'read_reply')) if full else ''
     source += f'real_target target(.clk(clk),.reset(reset){bindings});\n'
     source += 'fabric requests begin\n' + ''.join(f's{i} -> target.s_axi;\n' for i in range(count)) + 'endfabric\nendmodule\n'
-    if stored:
-        assert not switched
-        target_protocol = family + ('[addr=32,id=4]' if full else '[addr=32]')
-        source = source.replace('real_target target(', f'uint[32] {target_protocol} fifo[3] middle;\nreal_target target(', 1)
-        source = source.replace(f'.reset(reset){bindings});', f'.reset(reset){bindings},.s_axi(middle));', 1)
-        source = source.replace('-> target.s_axi;', '-> middle;')
     if switched:
         # Keep the actual core untouched; the SV bench connects every target pin.
         target_protocol=family+('[addr=32,id=4]' if full else '[addr=32]')
@@ -178,7 +172,7 @@ end
     tb.write_text(text)
     run(['iverilog','-g2012','-s','tb','-o',sim,sv,tb,ROOT/'rtl/pigen_primitives.sv'],directory)
     assert 'PASS contended real core' in run(['vvp',sim],directory)
-    print(f'PASS real {family} core, {count} competing masters switched={switched} stored={stored} seed={seed}: IDs, masked memory, bursts/errors, stalls and queued reset{"; independent switched targets" if switched else ""}')
+    print(f'PASS real {family} core, {count} competing masters switched={switched} seed={seed}: IDs, masked memory, bursts/errors, stalls and queued reset{"; independent switched targets" if switched else ""}')
 
 
 def switched_bench(text,fields,full,count):
@@ -322,5 +316,4 @@ if __name__ == '__main__':
     for full in (False,True):
         for seed in (1,17,4919):
             case(full,seed)
-            case(full,seed,stored=True)
             case(full,seed,switched=True)

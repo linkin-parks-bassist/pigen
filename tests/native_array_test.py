@@ -7,7 +7,7 @@ import tempfile
 from native_protocol_test import ROOT, channels, run, ordinary_package_source, foreign_axi_module
 
 
-def case(directory, family, mode, native_alias=False, internal_fabric=False, type_keys=False, package=False, ordinary_package=False, external=False, data=32, qualifier=None, clocked_foreach=None, compiler=None):
+def case(directory, family, mode, native_alias=False, type_keys=False, package=False, ordinary_package=False, external=False, data=32, qualifier=None, clocked_foreach=None, compiler=None):
     case_oracle = ""
     if package: native_alias = True
     authored_mode = mode
@@ -45,7 +45,7 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
                   'case_generate_signed', 'case_generate_wide', 'case_generate_ternary',
                   'case_generate_none', 'case_generate_priority', 'case_generate_conditional')
     if mode in case_modes:
-        mode = requested_mode = 'generate_parameters_storage'
+        mode = requested_mode = 'generate_parameters'
     if mode in implicit_modes:
         mode = implicit_modes[mode]
         requested_mode = mode
@@ -66,9 +66,9 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
     shape = '[-2:-1][2]'
     ports = f'input wire clk,input wire reset,input {protocol} fifo[3] s{shape},output {protocol} skid m{shape}'
     if pipeline_exit:
-        assert mode in ('direct','aggregate','projection','parameter','fabric_child','internal_child')
+        assert mode in ('direct','aggregate','projection','parameter','fabric_child')
         ports+=',input logic pause'
-    if mode in ('generate_assign', 'generate_assign_implicit', 'generate_assign_named', 'generate_assign_child', 'generate_comb', 'generate_comb_implicit', 'generate_comb_child', 'generate_constants', 'generate_elastic', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_storage', 'generate_parameters_typed', 'generate_parameters_nested', 'scope_constants', 'scope_elastic'):
+    if mode in ('generate_assign', 'generate_assign_implicit', 'generate_assign_named', 'generate_assign_child', 'generate_comb', 'generate_comb_implicit', 'generate_comb_child', 'generate_constants', 'generate_elastic', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_typed', 'generate_parameters_nested', 'scope_constants', 'scope_elastic'):
         ports += f',output uint[8] wire tags{shape}'
         if mode in ('generate_elastic','scope_elastic'): ports += f',output bit wire tag_valid{shape}'
     if requested_mode == 'retained_external': ports += f',output uint[8] wire tags{shape}'
@@ -121,11 +121,7 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
         for channel in fields_by_channel:
             member = 'beat' if channel == 't' else channel
             incoming, outgoing = ('m', 's') if channel in ('b', 'r') else ('s', 'm')
-            if mode == 'generate_internal':
-                lines += [f'middle.{member} <= {incoming}[ROW][COL].{member};',
-                          f'{outgoing}[ROW][COL].{member} <= middle.{member};']
-            else:
-                lines.append(f'{outgoing}[a][b].{member} <= {incoming}[a][b].{member};')
+            lines.append(f'{outgoing}[a][b].{member} <= {incoming}[a][b].{member};')
         source = f'module native_array({ports});\n'
         if mode in ('generate_assign', 'generate_assign_implicit', 'generate_assign_named', 'generate_assign_child', 'generate_comb', 'generate_comb_implicit', 'generate_comb_child'):
             source += "wire [7:0] mapped; assign mapped=8'h55;\n"
@@ -163,9 +159,9 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
             source += 'if(0) begin wire [7:0] unused; assign unused=missing_name; end\n'
         if mode in ('generate_assign_child','generate_comb_child'):
             source += 'scalar_leaf leaf(.clk(clk),.reset(reset),.s(s[a][b]),.m(m[a][b]),.seen(tags[a][b]));\n'
-        elif mode in ('generate_instance', 'generate_siblings', 'generate_child_fabric', 'generate_projections', 'generate_constants', 'generate_elastic', 'generate_signed', 'generate_packed', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_storage', 'generate_parameters_typed', 'generate_parameters_nested'):
+        elif mode in ('generate_instance', 'generate_siblings', 'generate_child_fabric', 'generate_projections', 'generate_constants', 'generate_elastic', 'generate_signed', 'generate_packed', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_typed', 'generate_parameters_nested'):
             controls = '.clk(clk),.reset(reset)'
-            if mode in ('generate_instance', 'generate_constants', 'generate_elastic', 'generate_signed', 'generate_packed', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_storage', 'generate_parameters_typed', 'generate_parameters_nested'):
+            if mode in ('generate_instance', 'generate_constants', 'generate_elastic', 'generate_signed', 'generate_packed', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_typed', 'generate_parameters_nested'):
                 extra = ",.tag(uint[8]'(a*4+b)),.seen(tags[a][b])" if mode == 'generate_constants' else ',.seen(tags[a][b])' if mode.startswith('generate_parameters') else ''
                 if mode in ('generate_elastic','scope_elastic'):
                     source += "uint[8] buf token; always @(posedge clk) if(!reset) token <= uint[8]'(a*4+b);\n"
@@ -173,7 +169,6 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
                 configuration = '#(.TAG(a*4+b),.W(32)) ' if mode.startswith('generate_parameters') else ''
                 if mode == 'generate_parameters_typed': configuration = "#(.TAG(int[8]'(256+a*4+b)),.W(32)) "
                 if mode == 'generate_parameters_positional': configuration = '#(a*4+b,,32) '
-                if mode == 'generate_parameters_storage': configuration = '#(.TAG(a*4+b),.W(32),.DEPTH((a+2)*2+b+2)) '
                 source += f'scalar_leaf {configuration}leaf({controls},.s(s[a][b]),.m(m[a][b]){extra});\n'
                 if mode in ('generate_elastic','scope_elastic'):
                     source += 'assign tags[a][b]=peek(leaf.extra_out); assign tag_valid[a][b]=valid(leaf.extra_out);\n'
@@ -195,13 +190,6 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
                 source += 'always @(posedge clk) if(!reset) begin\n' + '\n'.join(transfers) + '\nend\n'
         elif mode == 'generate_fabric':
             source += 'fabric begin s[a][b] -> m[a][b]; endfabric\n'
-        elif mode == 'generate_internal_child':
-            source += f'{protocol} fifo[2] middle; {protocol} skid other;\n'
-            source += 'scalar_leaf leaf(.clk(clk),.reset(reset),.s(middle),.m(other));\n'
-            source += 'fabric begin s[a][b] -> middle; other -> m[a][b]; endfabric\n'
-        elif mode == 'generate_internal':
-            source += f'localparam ROW=a; localparam COL=b; typedef bit [31:0] local_word; local_word {family}[{options}] fifo[2] middle;\n'
-            source += 'always @(posedge clk) if(!reset) begin\n' + '\n'.join(lines) + '\nend\n'
         else:
             body = 'always @(posedge clk) if(!reset) begin\n' + '\n'.join(lines) + '\nend\n'
             source += 'if(a == -2 && b == 1) begin : selected\n' + body + 'end else begin : other\n' + body + 'end\n'
@@ -209,7 +197,7 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
         source += 'end end endgenerate\nendmodule\n'
         if mode in ('generate_assign_implicit','generate_comb_implicit'):
             source = source.replace('generate for(', 'for(', 1).replace('endgenerate', '', 1)
-        if mode in ('generate_internal_child','generate_comb_child','generate_assign_child', 'generate_instance', 'generate_siblings', 'generate_child_fabric', 'generate_projections', 'generate_constants', 'generate_elastic', 'generate_signed', 'generate_packed', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_storage', 'generate_parameters_typed', 'generate_parameters_nested'):
+        if mode in ('generate_comb_child','generate_assign_child', 'generate_instance', 'generate_siblings', 'generate_child_fabric', 'generate_projections', 'generate_constants', 'generate_elastic', 'generate_signed', 'generate_packed', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_typed', 'generate_parameters_nested'):
             leaf_ports = f'input wire clk,input wire reset,input {protocol} s,output {protocol} m'
             if mode in ('generate_constants','generate_assign_child','generate_comb_child'): leaf_ports += ',input uint[8] wire tag,output uint[8] wire seen'
             if mode.startswith('generate_parameters'): leaf_ports += ',output uint[8] wire seen'
@@ -219,15 +207,13 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
             if mode.startswith('generate_parameters'): leaf_ports = leaf_ports.replace('uint[32]', 'uint[W]')
             leaf = f'module scalar_leaf {configuration}({leaf_ports});\n'
             if mode.startswith('generate_parameters'): leaf += "assign seen=uint[8]'(NEXT-1);\n"
-            if mode == 'generate_parameters_storage': leaf += f'{protocol} fifo[DEPTH] middle;\n'
             if mode in ('generate_constants','generate_assign_child','generate_comb_child'): leaf += 'assign seen=tag;\n'
             leaf += 'always @(posedge clk) if(!reset) begin\n'
             if mode in ('generate_elastic','scope_elastic'): leaf += 'extra_out <= extra_in;\n'
             for channel in fields_by_channel:
                 member = 'beat' if channel == 't' else channel
                 incoming, outgoing = ('m', 's') if channel in ('b', 'r') else ('s', 'm')
-                if mode == 'generate_parameters_storage': leaf += f'middle.{member} <= {incoming}.{member}; {outgoing}.{member} <= middle.{member};\n'
-                else: leaf += f'{outgoing}.{member} <= {incoming}.{member};\n'
+                leaf += f'{outgoing}.{member} <= {incoming}.{member};\n'
             leaf += 'end\nendmodule\n'
             if mode == 'generate_parameters_nested':
                 helper = leaf.replace('module scalar_leaf ', 'module nested_helper ')
@@ -240,17 +226,6 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
             source = source.replace('module native_array(', 'module shadow_bank #(parameter a=49,parameter b=24)(')
             source = source.replace('uint[32]', 'uint[a+15]').replace('addr=40', 'addr=b+17').replace('user=7', 'user=b-16')
             source += f'module native_array({ports}); shadow_bank #(.a(17),.b(23)) bank(.clk(clk),.reset(reset),.s(s),.m(m)); endmodule\n'
-
-    elif mode == 'internal':
-        transfers = []
-        for a, b in coordinates:
-            for channel in fields_by_channel:
-                member = 'beat' if channel == 't' else channel
-                incoming, outgoing = ('m', 's') if channel in ('b', 'r') else ('s', 'm')
-                transfers += [f'middle[{a}][{b}].{member} <= {incoming}[{a}][{b}].{member};',
-                              f'{outgoing}[{a}][{b}].{member} <= middle[{a}][{b}].{member};']
-        source = f'module native_array({ports});\n{protocol} fifo[2] middle{shape};\n'
-        source += 'always @(posedge clk) if(!reset) begin\n' + '\n'.join(transfers) + '\nend\nendmodule\n'
     elif mode.startswith('fabric_'):
         arrow = '>' if mode == 'fabric_direct' else '->'
         if mode == 'fabric_child':
@@ -277,14 +252,10 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
                            f'{destination}[{a}][{b}].{member} <= leaf.{destination}[{a}][{b}].{member};']
         source += f'module native_array({ports});\narray_leaf leaf(.clk(clk),.reset(reset));\n'
         source += 'always @(posedge clk) if(!reset) begin\n' + '\n'.join(parent) + '\nend\nendmodule\n'
-    elif mode in ('aggregate', 'positional', 'siblings', 'parameter', 'internal_child'):
+    elif mode in ('aggregate', 'positional', 'siblings', 'parameter'):
         source = source.replace('module native_array(', 'module array_leaf(')
         source += f'module native_array({ports});\n'
-        if mode == 'internal_child':
-            source += f'{protocol} fifo[2] middle{shape}; {protocol} skid other{shape};\n'
-            source += 'array_leaf leaf(.clk(clk),.reset(reset),.s(middle),.m(other));\n'
-            source += 'fabric begin s -> middle; other -> m; endfabric\n'
-        elif mode == 'parameter':
+        if mode == 'parameter':
             source = source.replace('module array_leaf(', 'module array_leaf #(parameter LANES=3)(', 1)
             first, second = source.split('module native_array(', 1)
             source = first.replace('[-2:-1][2]', '[-2:-1][LANES]') + 'module native_array(' + second
@@ -312,8 +283,7 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
     if mode.startswith('scope_'):
         source = f'module native_array({ports});\n'
         source += 'generate for(genvar a=-2;a<=-1;a++) begin : rows for(genvar b=1;b>=0;b--) begin : columns\n'
-        if mode == 'scope_local': source += f'{protocol} fifo[2] middle;\n'
-        elif mode == 'scope_fabric':
+        if mode == 'scope_fabric':
             source += 'scalar_leaf first(.clk(clk),.reset(reset),.s(s[a][b])); scalar_leaf second(.clk(clk),.reset(reset),.m(m[a][b]));\n'
         elif mode == 'scope_elastic':
             source += 'uint[8] buf token; scalar_leaf child(.clk(clk),.reset(reset),.extra_in(token));\n'
@@ -343,19 +313,15 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
             for channel in fields_by_channel:
                 member = 'beat' if channel == 't' else channel
                 incoming,outgoing = ('m','s') if channel in ('b','r') else ('s','m')
-                if mode == 'scope_local':
-                    transfers += [f'{path}.middle.{member} <= {incoming}[{a}][{b}].{member};',
-                                  f'{outgoing}[{a}][{b}].{member} <= {path}.middle.{member};']
-                else:
-                    suffix = '[0]' if mode in ('scope_array', 'scope_array_binding') else ''
-                    if mode == 'scope_array_binding':
-                        if channel in ('b','r'):
-                            transfers += [f'final_{lane}.m[0].{member} <= m[{a}][{b}].{member};',f's[{a}][{b}].{member} <= {path}.child.s[0].{member};']
-                        else:
-                            transfers += [f'{path}.child.s[0].{member} <= s[{a}][{b}].{member};',f'm[{a}][{b}].{member} <= final_{lane}.m[0].{member};']
+                suffix = '[0]' if mode in ('scope_array', 'scope_array_binding') else ''
+                if mode == 'scope_array_binding':
+                    if channel in ('b','r'):
+                        transfers += [f'final_{lane}.m[0].{member} <= m[{a}][{b}].{member};',f's[{a}][{b}].{member} <= {path}.child.s[0].{member};']
                     else:
-                        transfers += [f'{path}.child.{incoming}{suffix}.{member} <= {incoming}[{a}][{b}].{member};',
-                                      f'{outgoing}[{a}][{b}].{member} <= {path}.child.{outgoing}{suffix}.{member};']
+                        transfers += [f'{path}.child.s[0].{member} <= s[{a}][{b}].{member};',f'm[{a}][{b}].{member} <= final_{lane}.m[0].{member};']
+                else:
+                    transfers += [f'{path}.child.{incoming}{suffix}.{member} <= {incoming}[{a}][{b}].{member};',
+                                  f'{outgoing}[{a}][{b}].{member} <= {path}.child.{outgoing}{suffix}.{member};']
         if mode == 'scope_relative':
             transfers = []
             for channel in fields_by_channel:
@@ -655,14 +621,6 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
         else:
             source=re.sub(r'\b([sm])\[(-2|-1)\]\[(1|0)\]',
                           lambda match: match[1]+'[~'+('1' if match[2]=='-2' else '0')+'][~'+('(-2)' if match[3]=='1' else '(-1)')+']',source)
-    if internal_fabric:
-        assert mode in ('internal', 'generate_internal')
-        arrow = '>' if internal_fabric == 'direct' else '->'
-        left, right = ('s[ROW][COL]', 'm[ROW][COL]') if mode == 'generate_internal' else ('s', 'm')
-        source, replaced = re.subn(r'always @\(posedge clk\) if\(!reset\) begin\n.*?\nend\n',
-                                  f'fabric begin {left} {arrow} middle; middle {arrow} {right}; endfabric\n',
-                                  source, count=1, flags=re.S)
-        assert replaced == 1
     type_definitions = ''
     if type_keys:
         native_alias = True
@@ -737,7 +695,7 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
         source=ordinary_package_source(source,32,ordinary_package)
     foreign_sources = []
     if external:
-        assert mode in ('aggregate', 'positional', 'internal_child', 'projection', 'fabric_child', 'scalar_binding')
+        assert mode in ('aggregate', 'positional', 'projection', 'fabric_child', 'scalar_binding')
         child = 'scalar_leaf' if mode == 'scalar_binding' else 'array_leaf'
         source, replaced = re.subn(r'module ' + child + r'([^;]*);.*?endmodule',
                                    lambda m: 'extern module ' + child + m[1] + ';', source, count=1, flags=re.S)
@@ -812,7 +770,7 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
                          (exit_kind=='continue' or lane==0))
                 capacity.append(f'if(sent_{tag}{"<=" if earlier else "!="}{3 if incoming=="s" else 2})'
                                 f'$fatal(1,"{tag} pipeline effects disagreed with exit ordering/ingress capacity");')
-    if mode in ('generate_assign', 'generate_assign_implicit', 'generate_assign_named', 'generate_assign_child', 'generate_comb', 'generate_comb_implicit', 'generate_comb_child', 'generate_constants', 'generate_elastic', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_storage', 'generate_parameters_typed', 'generate_parameters_nested', 'scope_constants', 'scope_elastic', 'retained_external'):
+    if mode in ('generate_assign', 'generate_assign_implicit', 'generate_assign_named', 'generate_assign_child', 'generate_comb', 'generate_comb_implicit', 'generate_comb_child', 'generate_constants', 'generate_elastic', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_typed', 'generate_parameters_nested', 'scope_constants', 'scope_elastic', 'retained_external'):
         declarations.append('wire bit [7:0] tags[-2:-1][1:0];')
         connections.append('.tags(tags)')
         if mode in ('generate_elastic','scope_elastic'):
@@ -841,7 +799,7 @@ def case(directory, family, mode, native_alias=False, internal_fabric=False, typ
         run(['iverilog', '-g2012', '-s', 'tb', '-o', sim, sv, tb, ROOT/'rtl/pigen_primitives.sv', *foreign_sources], directory)
         output=run(['vvp', sim], directory)
     assert 'PASS independent AXI array lanes' in output
-    print(f'PASS native array {family} {authored_mode} internal_fabric={internal_fabric} type_keys={type_keys}: {257*4*len(fields_by_channel)} stalled records and queued reset')
+    print(f'PASS native array {family} {authored_mode} type_keys={type_keys}: {257*4*len(fields_by_channel)} stalled records and queued reset')
 
 
 def negatives(root):
@@ -1175,7 +1133,7 @@ def qualified_pipeline_tests(root):
 
 def void_collection_tests(root):
     for mode, keys in [('direct', False), ('aggregate', False), ('scalar_binding', False),
-                       ('internal_child', False), ('fabric_child', False), ('array_row_binding', False),
+                       ('fabric_child', False), ('array_row_binding', False),
                        ('array_slice_fabric', False), ('array_keyed_flat', True), ('array_keyed_generate', 'generated')]:
         directory = root / f'void_collection_{mode}'
         directory.mkdir()
@@ -1184,7 +1142,7 @@ def void_collection_tests(root):
 
 def external_collection_tests(root):
     for family in ('axi4_stream', 'axi4_lite', 'axi4'):
-        for mode in ('aggregate', 'positional', 'internal_child', 'projection', 'fabric_child', 'scalar_binding'):
+        for mode in ('aggregate', 'positional', 'projection', 'fabric_child', 'scalar_binding'):
             directory = root / f'external_{family}_{mode}'
             directory.mkdir()
             case(directory, family, mode, external=True)
@@ -1231,20 +1189,11 @@ def main():
                 directory = root/f'type_key_{family}_{kind}'
                 directory.mkdir()
                 case(directory, family, mode, type_keys=kind)
-            for mode in ('internal_child', 'generate_internal_child'):
-                directory = root/f'alias_{family}_{mode}'
-                directory.mkdir()
-                case(directory, family, mode, native_alias=True)
-            for mode in ('internal', 'generate_internal'):
-                for route in ('direct', 'routed'):
-                    directory = root/f'internal_fabric_{family}_{mode}_{route}'
-                    directory.mkdir()
-                    case(directory, family, mode, internal_fabric=route)
             for mode in ('generate_parameters_nested', 'fabric_array_generated', 'array_keyed_generate'):
                 directory = root/f'alias_{family}_{mode}'
                 directory.mkdir()
                 case(directory, family, mode, native_alias=True)
-            for mode in ('query_coordinate_direct','query_coordinate_scalar','query_coordinate_projection','query_coordinate_fabric','query_coordinate_fabric_child','array_query_slice','generate_static_init','empty_coordinate_direct','empty_coordinate_scalar','empty_coordinate_projection','empty_coordinate_fabric','empty_coordinate_fabric_child','array_empty_slice','generate_foreach','generate_named_comb','generate_named_foreach','replicated_coordinate_direct','replicated_coordinate_scalar','replicated_coordinate_projection','replicated_coordinate_fabric','replicated_coordinate_fabric_child','array_replicated_slice','fill_coordinate_direct', 'fill_coordinate_scalar', 'fill_coordinate_projection', 'fill_coordinate_fabric', 'fill_coordinate_fabric_child', 'array_fill_slice', 'coordinate_direct', 'coordinate_scalar', 'coordinate_projection', 'coordinate_fabric', 'coordinate_fabric_child', 'direct', 'internal', 'scalar_binding', 'projection', 'aggregate', 'positional', 'siblings', 'parameter', 'array_row_binding', 'array_slice_binding', 'array_slice_up', 'array_slice_down', 'array_column_binding', 'array_rebased_binding', 'array_slice_fabric', 'array_proper_slice', 'array_row_generate', 'array_slice_generate', 'array_concat_scalar', 'array_concat_mixed', 'array_concat_rows', 'array_concat_child', 'array_pattern_scalar', 'array_pattern_rows', 'array_pattern_nested', 'array_pattern_generate', 'array_keyed_flat', 'array_keyed_nested', 'array_keyed_default', 'array_keyed_generate', 'array_default_scalar', 'array_default_subarray', 'array_default_generate', 'array_repeat_scalar', 'array_repeat_rows', 'array_repeat_nested', 'array_repeat_generate', 'fabric_direct', 'fabric_routed', 'fabric_child', 'fabric_array_direct', 'fabric_array_routed', 'fabric_array_child', 'fabric_array_generated', 'fabric_array_scoped_child', 'fabric_array_standalone', 'generate_process', 'generate_assign', 'generate_assign_implicit', 'generate_assign_named', 'generate_assign_child', 'generate_comb', 'generate_comb_implicit', 'generate_comb_child', 'generate_fsm', 'generate_fsm_implicit', 'generate_pipeline', 'generate_pipeline_implicit', 'generate_pipeline_hierarchy', 'generate_internal', 'generate_fabric', 'generate_instance', 'generate_siblings', 'generate_child_fabric', 'generate_projections', 'generate_constants', 'generate_elastic', 'generate_signed', 'generate_packed', 'generate_shadow', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_storage', 'generate_parameters_typed', 'generate_parameters_nested', 'scope_child', 'scope_local', 'scope_fabric', 'scope_binding', 'scope_array', 'scope_block', 'scope_constants', 'scope_array_binding', 'scope_elastic', 'scope_relative', 'generate_external', 'generate_external_local', 'generate_external_reuse', 'generate_external_shadow', 'retained_external', 'implicit_process', 'implicit_fabric', 'implicit_child', 'implicit_block', 'implicit_named', 'implicit_external', 'implicit_retained', 'implicit_if', 'implicit_named_block', 'implicit_unbraced', 'implicit_conditional_loop', 'case_generate', 'case_generate_implicit', 'case_generate_default', 'case_generate_xz', 'case_generate_signed', 'case_generate_wide', 'case_generate_ternary', 'case_generate_none', 'case_generate_priority', 'case_generate_conditional'):
+            for mode in ('query_coordinate_direct','query_coordinate_scalar','query_coordinate_projection','query_coordinate_fabric','query_coordinate_fabric_child','array_query_slice','generate_static_init','empty_coordinate_direct','empty_coordinate_scalar','empty_coordinate_projection','empty_coordinate_fabric','empty_coordinate_fabric_child','array_empty_slice','generate_foreach','generate_named_comb','generate_named_foreach','replicated_coordinate_direct','replicated_coordinate_scalar','replicated_coordinate_projection','replicated_coordinate_fabric','replicated_coordinate_fabric_child','array_replicated_slice','fill_coordinate_direct', 'fill_coordinate_scalar', 'fill_coordinate_projection', 'fill_coordinate_fabric', 'fill_coordinate_fabric_child', 'array_fill_slice', 'coordinate_direct', 'coordinate_scalar', 'coordinate_projection', 'coordinate_fabric', 'coordinate_fabric_child', 'direct', 'scalar_binding', 'projection', 'aggregate', 'positional', 'siblings', 'parameter', 'array_row_binding', 'array_slice_binding', 'array_slice_up', 'array_slice_down', 'array_column_binding', 'array_rebased_binding', 'array_slice_fabric', 'array_proper_slice', 'array_row_generate', 'array_slice_generate', 'array_concat_scalar', 'array_concat_mixed', 'array_concat_rows', 'array_concat_child', 'array_pattern_scalar', 'array_pattern_rows', 'array_pattern_nested', 'array_pattern_generate', 'array_keyed_flat', 'array_keyed_nested', 'array_keyed_default', 'array_keyed_generate', 'array_default_scalar', 'array_default_subarray', 'array_default_generate', 'array_repeat_scalar', 'array_repeat_rows', 'array_repeat_nested', 'array_repeat_generate', 'fabric_direct', 'fabric_routed', 'fabric_child', 'fabric_array_direct', 'fabric_array_routed', 'fabric_array_child', 'fabric_array_generated', 'fabric_array_scoped_child', 'fabric_array_standalone', 'generate_process', 'generate_assign', 'generate_assign_implicit', 'generate_assign_named', 'generate_assign_child', 'generate_comb', 'generate_comb_implicit', 'generate_comb_child', 'generate_fsm', 'generate_fsm_implicit', 'generate_pipeline', 'generate_pipeline_implicit', 'generate_pipeline_hierarchy', 'generate_fabric', 'generate_instance', 'generate_siblings', 'generate_child_fabric', 'generate_projections', 'generate_constants', 'generate_elastic', 'generate_signed', 'generate_packed', 'generate_shadow', 'generate_parameters', 'generate_parameters_positional', 'generate_parameters_typed', 'generate_parameters_nested', 'scope_child', 'scope_fabric', 'scope_binding', 'scope_array', 'scope_block', 'scope_constants', 'scope_array_binding', 'scope_elastic', 'scope_relative', 'generate_external', 'generate_external_local', 'generate_external_reuse', 'generate_external_shadow', 'retained_external', 'implicit_process', 'implicit_fabric', 'implicit_child', 'implicit_block', 'implicit_named', 'implicit_external', 'implicit_retained', 'implicit_if', 'implicit_named_block', 'implicit_unbraced', 'implicit_conditional_loop', 'case_generate', 'case_generate_implicit', 'case_generate_default', 'case_generate_xz', 'case_generate_signed', 'case_generate_wide', 'case_generate_ternary', 'case_generate_none', 'case_generate_priority', 'case_generate_conditional'):
                 directory = root/f'{family}_{mode}'
                 directory.mkdir()
                 case(directory, family, mode)

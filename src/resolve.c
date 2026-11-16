@@ -585,8 +585,11 @@ static int add_protocol_declaration(resolver *resolver, pigen_module_id module,
 	pigen_transfer_type storage = PIGEN_TRANSFER_TYPE_BUF;
 	pigen_expr_id argument = INVALID_ID(pigen_expr_id);
 	pigen_syntax_direction direction = declaration->as.signal_declaration.direction;
-	if (scope.index != pigen_module_get(model, module)->scope.index && direction != PIGEN_DIRECTION_INTERNAL)
-		return fail_location(resolver, declaration->location, "generated AXI declarations must be internal endpoints");
+	if (direction == PIGEN_DIRECTION_INTERNAL)
+		return fail_location(resolver, declaration->location,
+			"AXI declarations are only allowed on module or fabric input/output ports; use child.port to access a child AXI boundary");
+	if (scope.index != pigen_module_get(model, module)->scope.index)
+		return fail_location(resolver, declaration->location, "AXI ports require module or fabric scope");
 	if (direction == PIGEN_DIRECTION_INOUT)
 		return fail_location(resolver, declaration->location,
 			"AXI endpoint role uses input for target or output for initiator");
@@ -640,7 +643,7 @@ static int add_protocol_declaration(resolver *resolver, pigen_module_id module,
 			pigen_semantic_protocol_endpoint endpoint = {
 				.syntax = id, .module = module, .type = type,
 				.role = direction == PIGEN_DIRECTION_INPUT ? PIGEN_PROTOCOL_TARGET : PIGEN_PROTOCOL_INITIATOR,
-				.is_port = direction != PIGEN_DIRECTION_INTERNAL, .span = is_array ? lane_name : declaration->location.source_span
+				.is_port = 1, .span = is_array ? lane_name : declaration->location.source_span
 			};
 			if (pigen_symbol_declare(model, scope, PIGEN_SYMBOL_PROTOCOL_ENDPOINT,
 				INVALID_ID(pigen_data_type_id), lane_name, endpoint.span, &endpoint.symbol, NULL) != PIGEN_DECLARE_OK)
@@ -676,7 +679,7 @@ static int add_protocol_declaration(resolver *resolver, pigen_module_id module,
 					channel_name, channel_name, &symbol, NULL) != PIGEN_DECLARE_OK) { free(lanes); return 0; }
 				pigen_protocol_role source;
 				if (!pigen_protocol_channel_source(protocol.family, channel, &source)) { free(lanes); return 0; }
-				pigen_semantic_direction channel_direction = !endpoint.is_port ? PIGEN_SEMANTIC_INTERNAL :
+				pigen_semantic_direction channel_direction =
 					source == endpoint.role ? PIGEN_SEMANTIC_OUTPUT : PIGEN_SEMANTIC_INPUT;
 				endpoint.channels[channel] = pigen_signal_add(model, id, module, symbol, record,
 					pigen_semantic_scalar_shape(model), argument, storage, channel_direction, channel_name);
@@ -691,7 +694,7 @@ static int add_protocol_declaration(resolver *resolver, pigen_module_id module,
 			pigen_semantic_protocol_array array = {
 				.syntax = id, .module = module, .symbol = array_symbol, .type = type,
 				.role = direction == PIGEN_DIRECTION_INPUT ? PIGEN_PROTOCOL_TARGET : PIGEN_PROTOCOL_INITIATOR,
-				.is_port = direction != PIGEN_DIRECTION_INTERNAL, .shape = shape,
+				.is_port = 1, .shape = shape,
 				.span = declaration->location.source_span
 			};
 			if (pigen_protocol_array_add(model, &array, lanes, lane_count).index == PIGEN_INVALID_ID)
@@ -4700,13 +4703,6 @@ static int add_combinational_process(resolver *resolver,pigen_module_id module,
 	resolver->model->processes[process.index].body=body;return 1;
 }
 
-/* Internal channel storage has both producer and consumer sides. Port and
- * child views retain the direction established by their module boundary. */
-static int owned_internal_protocol_endpoint(const pigen_semantic_protocol_endpoint *endpoint,pigen_module_id module)
-{
-	return endpoint && endpoint->module.index==module.index && !endpoint->is_port && !endpoint->is_instance_view;
-}
-
 static int connect_protocol_aggregate(resolver *resolver, pigen_protocol_endpoint_id view_id,
 	pigen_protocol_endpoint_id other_id, pigen_syntax_id syntax, pigen_syntax_location location)
 {
@@ -4715,7 +4711,7 @@ static int connect_protocol_aggregate(resolver *resolver, pigen_protocol_endpoin
 	const pigen_semantic_protocol_endpoint *other = pigen_protocol_endpoint_get(model, other_id);
 	if (!view || !other || view->module.index != other->module.index ||
 		view->type.index != other->type.index ||
-		(view->role == other->role && !owned_internal_protocol_endpoint(other,view->module)))
+		view->role == other->role)
 		return fail_location(resolver, location, "AXI child connection requires a complementary native endpoint with the complete compatible protocol contract");
 	if (!view->binding.is_bound || !other->binding.is_bound ||
 		view->binding.domain.index != other->binding.domain.index ||
@@ -6272,8 +6268,7 @@ static int add_fabric_protocol_edge(resolver *resolver,pigen_module_id module,pi
 	if (!src || !dst || !pigen_protocol_can_route(pigen_protocol_type_get(model, src->type),
 		pigen_protocol_type_get(model, dst->type), 1) ||
 		source.index==destination.index ||
-		(src->role != PIGEN_PROTOCOL_TARGET && !owned_internal_protocol_endpoint(src,module)) ||
-		(dst->role != PIGEN_PROTOCOL_INITIATOR && !owned_internal_protocol_endpoint(dst,module)))
+		src->role != PIGEN_PROTOCOL_TARGET || dst->role != PIGEN_PROTOCOL_INITIATOR)
 		return fail_location(resolver, edge->location, "AXI fabric requires compatible native initiator-to-target endpoints");
 	if (!src->binding.is_bound || !dst->binding.is_bound ||
 		src->binding.domain.index != dst->binding.domain.index ||
@@ -6340,15 +6335,9 @@ static int add_fabric_protocol_edge(resolver *resolver,pigen_module_id module,pi
 		for (size_t u = 0; u < transfer->signal_use_count; u++)
 			for (pigen_protocol_channel channel = 0; channel < PIGEN_CHANNEL_COUNT; channel++)
 			{
-				int reverse=channel==PIGEN_CHANNEL_B || channel==PIGEN_CHANNEL_R;
-				unsigned source_role=owned_internal_protocol_endpoint(src,module) ?
-					(reverse ? PIGEN_TRANSFER_SIGNAL_WRITE : PIGEN_TRANSFER_CONSUMER) :
-					(PIGEN_TRANSFER_CONSUMER | PIGEN_TRANSFER_SIGNAL_WRITE);
-				unsigned destination_role=owned_internal_protocol_endpoint(dst,module) ?
-					(reverse ? PIGEN_TRANSFER_CONSUMER : PIGEN_TRANSFER_SIGNAL_WRITE) :
-					(PIGEN_TRANSFER_CONSUMER | PIGEN_TRANSFER_SIGNAL_WRITE);
-				if ((uses[u].signal.index == src->channels[channel].index && (uses[u].roles & source_role)) ||
-					(uses[u].signal.index == dst->channels[channel].index && (uses[u].roles & destination_role)))
+				unsigned roles = PIGEN_TRANSFER_CONSUMER | PIGEN_TRANSFER_SIGNAL_WRITE;
+				if ((uses[u].signal.index == src->channels[channel].index && (uses[u].roles & roles)) ||
+					(uses[u].signal.index == dst->channels[channel].index && (uses[u].roles & roles)))
 					return fail_location(resolver, edge->location, "AXI fabric endpoint has another transfer owner");
 			}
 	}

@@ -12,7 +12,7 @@ def native_transport(root):
     for family in ('axi4_stream','axi4_lite','axi4'):
         for mode,form in (('direct','flat'),('aggregate','nested'),
                           ('projection','qualified'),('parameter','flat'),
-                          ('fabric_child','fsm'),('internal_child','nested')):
+                          ('fabric_child','fsm'),('scalar_binding','nested')):
             directory=root/f'{family}_{mode}'
             directory.mkdir()
             case(directory,family,mode,native_alias=True,clocked_foreach=form)

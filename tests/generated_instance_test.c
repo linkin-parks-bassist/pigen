@@ -74,10 +74,10 @@ static void check_source_references(const char *family)
 	int stream=!strcmp(family,"axi4_stream");
 	snprintf(protocol,sizeof protocol,"uint[32] %s[%s]",family,stream ? "id=2,last=1" : !strcmp(family,"axi4") ? "addr=40,id=2,awuser=3" : "addr=40");
 	snprintf(text,sizeof text,"module mapped(input wire clk,input wire reset,input uint[8] wire flag,input %s s[-1:0],output %s m[-1:0]);"
-		"if(1) begin for(genvar i=-1;i<1;i++) begin : lanes %s fifo[3] local_bus[1:0];"
+		"if(1) begin for(genvar i=-1;i<1;i++) begin : lanes uint[32] buf local_bus;"
 		"leaf child(.clk(clk),.reset(reset),.s(first.m),.m(m[i]),.tap(flag)); leaf first(.clk(clk),.reset(reset),.s(s[i]),.tap(flag)); end end endmodule "
 		"module leaf(input wire clk,input wire reset,input %s s,output %s m,input uint[8] wire tap); always @(posedge clk) if(!reset) begin %s end endmodule",
-		protocol,protocol,protocol,protocol,protocol,stream ? "m<=s;" : "m.aw<=s.aw;m.w<=s.w;s.b<=m.b;m.ar<=s.ar;s.r<=m.r;");
+		protocol,protocol,protocol,protocol,stream ? "m<=s;" : "m.aw<=s.aw;m.w<=s.w;s.b<=m.b;m.ar<=s.ar;s.r<=m.r;");
 	pigen_source_manager sources={0};pigen_source_id input=pigen_source_add(&sources,"source_references.pigen",text,strlen(text));
 	pigen_preprocess_result pre={0};pigen_preprocess_error pe={0};
 	pigen_syntax_tree syntax={0};pigen_syntax_error se={0};
@@ -94,7 +94,7 @@ static void check_source_references(const char *family)
 		assert(pigen_lower_rtl_module(&lowering,id).index!=PIGEN_INVALID_ID);
 	}
 	char local[128],pin[128],alias[128],child_pin[128];
-	snprintf(local,sizeof local,"genblk1.lanes[-1].local_bus[1].%s",stream ? "beat" : "aw");
+	snprintf(local,sizeof local,"genblk1.lanes[-1].local_bus");
 	snprintf(pin,sizeof pin,"s[-1].%s.%s",stream ? "beat" : "aw",stream ? "data" : "addr");
 	snprintf(alias,sizeof alias,"genblk1.lanes[-1].child.s.%s",stream ? "beat" : "aw");
 	snprintf(child_pin,sizeof child_pin,"genblk1.lanes[-1].child.s.%s.%s",stream ? "beat" : "aw",stream ? "data" : "addr");

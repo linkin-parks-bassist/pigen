@@ -7,7 +7,7 @@ import tempfile
 from native_protocol_test import ROOT, run, channels
 
 
-def case(directory, family, data, count, bare=False, exclusive=False, extra_id_bits=0, direct=False, boundary=False, standalone=False, collections=False, mapped=False, switched=False, tree=False, internal=False):
+def case(directory, family, data, count, bare=False, exclusive=False, extra_id_bits=0, direct=False, boundary=False, standalone=False, collections=False, mapped=False, switched=False, tree=False, ):
     full = family == "axi4"
     fields = channels(family, data)
     if bare:
@@ -51,15 +51,6 @@ def case(directory, family, data, count, bare=False, exclusive=False, extra_id_b
             source += f"relay source{i}(.ACLK(ACLK),.ARESETn(ARESETn),.s(s{i}));\n"
             source += f"fabric link{i} begin source{i}.m {'>' if direct else '->'} sink.s; endfabric\n"
     source += "endfabric\n" if standalone else "endmodule\n"
-    if internal:
-        assert boundary and not (standalone or collections or mapped or switched or tree or direct)
-        top = source.index('module native_merge(')
-        body = source.index(');\n', top) + 3
-        source = source[:body] + f'{target_protocol} fifo[3] middle;\n' + source[body:]
-        for i in range(count):
-            source = source.replace(f's{i} -> m;', f's{i} -> middle;')
-        end = source.rindex('endmodule\n')
-        source = source[:end] + 'fabric outgoing begin middle -> m; endfabric\n' + source[end:]
     if mapped:
         source=source.replace(" -> m;", " -> m at [0:40'hffffffffff];").replace(" -> sink.s;", " -> sink.s at [0:40'hffffffffff];")
     if switched:
@@ -344,7 +335,7 @@ def case(directory, family, data, count, bare=False, exclusive=False, extra_id_b
     run(["iverilog", "-g2012", "-s", "tb", "-o", binary, sv, tb,
          ROOT / "rtl/pigen_primitives.sv"], directory)
     assert "PASS native AXI memory fabric" in run(["vvp", binary], directory)
-    print(f"PASS {family} data={data} sources={count} bare={bare} exclusive={exclusive} collections={collections} mapped={mapped} switched={switched} tree={tree} internal={internal}: tagged IDs, complete fields, stalls, transactions and queued reset")
+    print(f"PASS {family} data={data} sources={count} bare={bare} exclusive={exclusive} collections={collections} mapped={mapped} switched={switched} tree={tree}: tagged IDs, complete fields, stalls, transactions and queued reset")
 
 
 def negatives(directory):
@@ -390,10 +381,6 @@ def main():
     try:
         negatives(root)
         hierarchy_negatives(root)
-        for family in ('axi4_lite', 'axi4'):
-            directory = root / f'internal_merge_{family}'
-            directory.mkdir()
-            case(directory, family, 32, 3, boundary=True, internal=True, exclusive=family=='axi4')
         for family, data, count, bare in [("axi4_lite", 32, 2, False), ("axi4_lite", 64, 3, False),
                                           ("axi4", 32, 2, False), ("axi4", 128, 3, False),
                                           ("axi4", 64, 3, True)]:

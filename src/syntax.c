@@ -5662,6 +5662,28 @@ static int check_retained_native_forward_uses(syntax_parser *parser)
   }
   if(node->kind!=PIGEN_SYNTAX_RETAINED) continue;
   size_t first=node->location.extent.first.index,last=node->location.extent.after.index;
+  /* Retained procedural/SV bodies must not bypass the boundary-only AXI
+   * declaration rule. Type definitions and type expressions remain legal. */
+  for(size_t t=first;t<last;t++)
+  {
+   if(token_is(parser,t,"typedef"))
+   {t=top_level_token(parser,t,last,";");continue;}
+   if(t && (token_is(parser,t-1,".") || token_is(parser,t-1,"::"))) continue;
+   if(protocol_at(parser,t)==PIGEN_PROTOCOL_NONE &&
+      protocol_alias_at(parser,node->parent,t)==PIGEN_PROTOCOL_NONE) continue;
+   size_t next=protocol_alias_after(parser,t);
+   while(next<last && token_is(parser,next,"["))
+   {size_t end=matching_bracket(parser,next,last);if(end==last)break;next=end+1;}
+   pigen_transfer_type storage;
+   if(transfer_type_at(parser,next,&storage))
+   {
+    next++;
+    if(token_is(parser,next,"["))
+    {size_t end=matching_bracket(parser,next,last);if(end<last)next=end+1;}
+   }
+   if(next<last && identifier(parser,next) && !token_is(parser,next,"inside") && !token_is(parser,next,"dist"))
+    return fail(parser,t,"AXI declarations are only allowed on module or fabric input/output ports; use child.port to access a child AXI boundary");
+  }
   /* A leading unresolved type followed by a declarator is a declaration,
    * whereas a module instantiation has a connection list after its name. */
   size_t type=first;

@@ -101,7 +101,7 @@ PACKED_DATA_ALIASES = {
 def packed_data_alias_tests(root):
     for family, storage in (("axi4_stream", "buf"), ("axi4_lite", "fifo[3]"), ("axi4", "skid")):
         for mode in PACKED_DATA_ALIASES:
-            for hierarchy in (False, "internal_both_routed"):
+            for hierarchy in (False, 'fabric_routed'):
                 directory = root / f"{mode}_{family}_{hierarchy}"
                 directory.mkdir()
                 case(directory, family, 64, storage, hierarchy=hierarchy, data_typedef=mode)
@@ -143,13 +143,13 @@ def foreign_axi_module(directory, family, data, storage, clock, reset, active_lo
 
 def external_axi_tests(root):
     for family, storage in (("axi4_stream", "buf"), ("axi4_lite", "fifo[3]"), ("axi4", "skid")):
-        for hierarchy in ("aggregate", "internal_both_routed"):
+        for hierarchy in ('aggregate', True):
             for parameterized in (False, True):
                 directory = root / f"external_{family}_{hierarchy}_{parameterized}"
                 directory.mkdir()
                 case(directory, family, 64 if parameterized else 32, storage, binding="low",
                      hierarchy=hierarchy, external="parameterized" if parameterized else "default")
-        for hierarchy in ("aggregate", "internal_both_routed"):
+        for hierarchy in ('aggregate', True):
             directory = root / f"external_generated_{family}_{hierarchy}"
             directory.mkdir()
             case(directory, family, 64, storage, binding="low", hierarchy=hierarchy,
@@ -278,7 +278,7 @@ def qualified_if_combinational_tests(root):
 def qualified_if_fsm_tests(root):
     for family in ("axi4_stream", "axi4_lite", "axi4"):
         for qualifier in ("unique", "unique0", "priority"):
-            for storage, hierarchy in (("buf", False), ("fifo[3]", "internal_both_routed"),
+            for storage, hierarchy in (("buf", False), ('fifo[3]', 'fabric_routed'),
                                        ("skid", "fabric_routed")):
                 directory=root / f"qualified_fsm_{family}_{qualifier}_{storage}_{hierarchy}"
                 directory.mkdir()
@@ -344,7 +344,7 @@ def qualified_if_fsm_oracles(root):
 def qualified_if_channel_tests(root):
     for family in ("axi4_stream", "axi4_lite", "axi4"):
         for qualifier in ("unique", "unique0", "priority"):
-            for storage, hierarchy in (("buf", False), ("fifo[3]", "internal_both_routed"),
+            for storage, hierarchy in (("buf", False), ('fifo[3]', 'fabric_routed'),
                                        ("skid", "fabric_routed")):
                 directory=root / f"qualified_transport_{family}_{qualifier}_{storage}_{hierarchy}"
                 directory.mkdir()
@@ -354,13 +354,13 @@ def qualified_if_channel_tests(root):
 def four_state_channel_tests(root):
     for family in ("axi4_stream", "axi4_lite", "axi4"):
         for storage in ("buf", "fifo[3]", "skid"):
-            for hierarchy in (False, "internal_both_routed"):
+            for hierarchy in (False, 'fabric_routed'):
                 for alias in (False, True):
                     directory = root / f"four_state_{family}_{storage}_{hierarchy}_{alias}"
                     directory.mkdir()
                     case(directory, family, 32, storage, hierarchy=hierarchy, alias=alias, four_state=True)
     for family in ("axi4_stream", "axi4"):
-        for hierarchy in (False, "internal_both_routed"):
+        for hierarchy in (False, 'fabric_routed'):
             directory = root / f"four_state_wide_{family}_{hierarchy}"
             directory.mkdir()
             case(directory, family, 128, "fifo[3]", hierarchy=hierarchy, alias=True, four_state=True)
@@ -368,12 +368,12 @@ def four_state_channel_tests(root):
 
 def signed_four_state_channel_tests(root):
     for family, storage in (("axi4_stream", "buf"), ("axi4_lite", "fifo[3]"), ("axi4", "skid")):
-        for hierarchy in (False, "internal_both_routed"):
+        for hierarchy in (False, 'fabric_routed'):
             directory = root / f"signed_four_state_{family}_{hierarchy}"
             directory.mkdir()
             case(directory, family, 32, storage, hierarchy=hierarchy, alias=True, signed=True, four_state=True)
     for family in ("axi4_stream", "axi4"):
-        for hierarchy in (False, "internal_both_routed"):
+        for hierarchy in (False, 'fabric_routed'):
             directory = root / f"signed_four_state_wide_{family}_{hierarchy}"
             directory.mkdir()
             case(directory, family, 128, "fifo[3]", hierarchy=hierarchy, alias=True, signed=True, four_state=True)
@@ -385,7 +385,7 @@ def void_stream_token_tests(root):
             directory = root / f"void_token_{storage}_{routed}"
             directory.mkdir()
             source, sv, tb, sim = [directory / name for name in ("token.pigen", "token.sv", "tb.sv", "sim")]
-            body = (f"token_t {storage} middle;fabric begin s -> middle;middle -> m;endfabric" if routed else
+            body = ("fabric begin s -> m;endfabric" if routed else
                     "always @(posedge clk)if(!reset)m<=s;")
             source.write_text(f"typedef void axi4_stream token_t;module tokens(input wire clk,input wire reset,"
                               f"input token_t {storage} s,output token_t {storage} m);{body}\nendmodule")
@@ -432,14 +432,14 @@ def void_stream_token_tests(root):
 
 def void_stream_tests(root):
     for storage in ("buf", "fifo[3]", "skid"):
-        for hierarchy in (False, "aggregate", "internal_both_routed"):
+        for hierarchy in (False, "aggregate"):
             for alias in (False, True):
                 directory = root / f"void_stream_{storage}_{hierarchy}_{alias}"
                 directory.mkdir()
                 case(directory, "axi4_stream", 0, storage, hierarchy=hierarchy, alias=alias)
         directory = root / f"void_stream_external_{storage}"
         directory.mkdir()
-        case(directory, "axi4_stream", 0, storage, binding="low", hierarchy="internal_both_routed", external="default")
+        case(directory, "axi4_stream", 0, storage, binding="low", hierarchy=True, external="default")
 
     void_stream_token_tests(root)
 
@@ -655,11 +655,7 @@ def case(directory, family, data, storage="buf", signed=False, binding="default"
     source += "\n".join(record_types) + "\n" + "\n".join(observations)
     reset_released = reset_name if active_low else "!" + reset_name
     if fabric:
-        if fabric in ("internal_direct", "internal_routed"):
-            arrow = ">" if fabric == "internal_direct" else "->"
-            source += f"\n{protocol} middle;\nfabric begin s {arrow} middle; middle {arrow} m; endfabric\nendmodule\n"
-        else:
-            source += "\nfabric begin s " + (">" if fabric == "direct" else "->") + " m; endfabric\nendmodule\n"
+        source += "\nfabric begin s " + (">" if fabric == "direct" else "->") + " m; endfabric\nendmodule\n"
     elif construction in ("inquiry_peek_fsm","inquiry_valid_fsm","inquiry_ready_fsm","inquiry_accepts_fsm","query_fsm", "bits_fsm", "zero_fsm", "fsm", "fill_fsm", "compound_fill_fsm", "selected_fill_fsm", "called_fill_fsm", "conditional_fsm", "cast_fsm"):
         source += f"\nfsm @(posedge {clock_name}) begin\nif (!({reset_released})) goto transfer;\nstate transfer: begin\n"
         source += "\n".join(transfers) + "\nend\nend\nendmodule\n"
@@ -694,20 +690,7 @@ def case(directory, family, data, storage="buf", signed=False, binding="default"
                                      f"m.{selection} <= leaf.m.{selection};"]
         source = leaf + "module native_relay (\n" + ",\n".join(ports) + ");\n"
         controls = f".{clock_name}({clock_name}),.{reset_name}({reset_name})"
-        if str(hierarchy).startswith("internal_"):
-            mode = str(hierarchy).removesuffix("_routed")
-            arrow = "->" if str(hierarchy).endswith("_routed") else ">"
-            source += f"{protocol} middle;\n"
-            if mode == "internal_input":
-                source += f"native_leaf leaf({controls},.s(middle),.m(m));\nfabric begin s {arrow} middle; endfabric\n"
-            elif mode == "internal_output":
-                source += f"native_leaf leaf({controls},.s(s),.m(middle));\nfabric begin middle {arrow} m; endfabric\n"
-            elif mode == "internal_both":
-                source += f"{protocol} other;\nnative_leaf leaf({controls},.s(middle),.m(other));\nfabric begin s {arrow} middle; other {arrow} m; endfabric\n"
-            else:
-                assert mode == "internal_siblings"
-                source += f"native_leaf second({controls},.s(middle),.m(m));\nnative_leaf first({controls},.s(s),.m(middle));\n"
-        elif hierarchy == "inverted":
+        if hierarchy == "inverted":
             source += f"native_leaf leaf(.{clock_name}({clock_name}),.{reset_name}(!{reset_name}),.s(s),.m(m));\n"
         elif hierarchy == "aggregate":
             source += f"native_leaf leaf({controls},.s(s),.m(m));\n"
@@ -738,24 +721,14 @@ def case(directory, family, data, storage="buf", signed=False, binding="default"
             source, count = re.subn(r"(native_leaf(?: #\([^;]*?\))? leaf\([^;]*\);)",
                                     r"if(1) begin : foreign_scope \1 end", source, count=1)
             assert count == 1
+            if hierarchy is True:
+                source=source.replace("leaf.s.","foreign_scope.leaf.s.").replace("leaf.m.","foreign_scope.leaf.m.")
 
     if alias:
         timing = "" if binding == "default" else f"[clock={clock_name},{'resetn' if active_low else 'reset'}={reset_name}]"
-        if alias == "local":
-            assert not hierarchy and not fabric and not construction
-            source = source.replace(");\n", f");\ntypedef {alias_contract} native_bus_t;\n"
-                                    "typedef native_bus_t copied_bus_t;\n"
-                                    f"copied_bus_t{timing} {storage} middle;\n", 1)
-            for ch in channel_fields:
-                selection = "beat" if ch == "t" else ch
-                incoming, outgoing = ("m", "s") if ch in ("b", "r") else ("s", "m")
-                source = source.replace(f"{outgoing}.{selection} <= {incoming}.{selection};",
-                                        f"middle.{selection} <= {incoming}.{selection};\n"
-                                        f"{outgoing}.{selection} <= middle.{selection};")
-        else:
-            source = (f"typedef {alias_contract} native_bus_t;\n"
-                      "typedef native_bus_t copied_bus_t;\n" +
-                      source.replace(protocol, f"copied_bus_t{timing} {storage}"))
+        source = (f"typedef {alias_contract} native_bus_t;\n"
+                  "typedef native_bus_t copied_bus_t;\n" +
+                  source.replace(protocol, f"copied_bus_t{timing} {storage}"))
         if str(alias).startswith("package"):
             source = source[source.index("module "):].replace("copied_bus_t", "bus_defs::copied_bus_t")
             contract = alias_contract.replace(f"{numerical}[{data}]", f"{numerical}[DATA_BITS]").replace("addr=40", "addr=ADDRESS_BITS")
@@ -787,8 +760,6 @@ def case(directory, family, data, storage="buf", signed=False, binding="default"
             entry = "bus_defs::copied_bus_t" if explicit else "bus_defs::*"
             if "body" in str(alias):
                 source = re.sub(r"(module \w+[^;]*;)", r"\1\nimport bus_defs::*; typedef copied_bus_t local_bus_t;", source)
-                source = source.replace(f"bus_defs::copied_bus_t{timing} {storage} middle;", f"local_bus_t{timing} {storage} middle;")
-                source = source.replace(f"bus_defs::copied_bus_t{timing} {storage} other;", f"local_bus_t{timing} {storage} other;")
             elif "package_import_package" in str(alias):
                 source = source.replace("endpackage\n", "endpackage\npackage imported_buses; import bus_defs::*; typedef copied_bus_t shared_t; endpackage\n", 1)
                 source = source.replace("bus_defs::copied_bus_t", "imported_buses::shared_t")
@@ -866,16 +837,7 @@ def case(directory, family, data, storage="buf", signed=False, binding="default"
         physical_output_bits += 2 + total
         reset_scoreboard += [f"sent_{ch}=0; got_{ch}=0; stalled_{ch}=0;"]
         chain = hierarchy in ("siblings", "fabric_direct", "fabric_routed")
-        internal_fabric = fabric in ("internal_direct", "internal_routed")
-        capacity = (6 if chain else 4 if hierarchy else 3 if alias == "local" or internal_fabric else 2) * {"buf": 1, "skid": 2, "fifo[3]": 3}[storage]
-        if str(hierarchy).startswith("internal_"):
-            mode = str(hierarchy).removesuffix("_routed")
-            depth = 7 if mode == "internal_siblings" else 6 if mode == "internal_both" else 5
-            capacity = depth * {"buf": 1, "skid": 2, "fifo[3]": 3}[storage]
-            if str(hierarchy).endswith("_routed"):
-                capacity += 4 if mode == "internal_both" else 2
-        if fabric == "internal_routed":
-            capacity += 4
+        capacity = (6 if chain else 4 if hierarchy else 2) * {"buf": 1, "skid": 2, "fifo[3]": 3}[storage]
         if hierarchy == "fabric_routed" or fabric == "routed":
             capacity += 2
         capacity_checks.append(f'if(sent_{ch}!={capacity} || got_{ch}!=0) $fatal(1,"{ch} native capacity mismatch sent=%0d got=%0d",sent_{ch},got_{ch});')
@@ -940,56 +902,6 @@ def case(directory, family, data, storage="buf", signed=False, binding="default"
         output = run(["vvp", binary], directory)
     assert "PASS native" in output
     print(f"PASS {family} data={data} storage={storage} signed={signed} binding={binding} hierarchy={hierarchy} construction={construction} alias={alias} fabric={fabric}: {257*len(channel_fields)} stalled channel records, reset and interface isolation")
-
-
-def internal_child_negatives(directory):
-    for family, options, bad_options in [("axi4_stream", "last=1", "last=0"),
-                                         ("axi4_lite", "addr=40", "addr=32"),
-                                         ("axi4", "addr=40,id=4", "addr=32,id=4")]:
-        protocol = f"bit[32] {family}[{options}]"
-        leaf = f"module leaf(input wire clk,input wire reset,input {protocol} s,output {protocol} m); fabric begin s > m; endfabric endmodule\n"
-        header = f"module bad(input wire clk,input wire reset,input wire other_clk,input {protocol} s,output {protocol} m);\n"
-        cases = [
-            ("consumers", f"{protocol} middle; leaf a(.clk(clk),.reset(reset),.s(middle)); leaf b(.clk(clk),.reset(reset),.s(middle)); fabric begin s > middle; endfabric", "nonexclusive consumers"),
-            ("producers", f"{protocol} middle; leaf a(.clk(clk),.reset(reset),.m(middle)); leaf b(.clk(clk),.reset(reset),.m(middle)); fabric begin middle > m; endfabric", "nonexclusive producers"),
-            ("clock", f"bit[32] {family}[{options},clock=other_clk] middle; leaf a(.clk(clk),.reset(reset),.s(middle));", "compatible clock domains"),
-            ("contract", f"bit[32] {family}[{bad_options}] middle; leaf a(.clk(clk),.reset(reset),.s(middle));", "complete compatible protocol contract"),
-            ("ordinary", "bit[32] buf middle; leaf a(.clk(clk),.reset(reset),.s(middle));", "complete compatible protocol contract"),
-            ("boundary", "leaf a(.clk(clk),.reset(reset),.s(m));", "complete compatible protocol contract"),
-        ]
-        for name, body, diagnostic in cases:
-            source = directory / f"internal_child_bad_{family}_{name}.pigen"
-            output = source.with_suffix(".sv")
-            source.write_text(leaf + header + body + "\nendmodule\n")
-            output.write_text("preserve output\n")
-            result = run([ROOT / "pigen", source, "-o", output], directory, expect=False)
-            assert diagnostic in result, result
-            assert output.read_text() == "preserve output\n"
-
-
-def internal_fabric_negatives(directory):
-    for family, options in [("axi4_stream", "last=1"), ("axi4_lite", "addr=40"), ("axi4", "addr=40,id=4")]:
-        protocol = f"bit[32] {family}[{options}]"
-        header = f"module bad(input wire clk,input wire reset,input wire other_clk,input {protocol} s,output {protocol} m);\n"
-        channel = "beat" if family == "axi4_stream" else "aw"
-        cases = [
-            ("source", f"{protocol} middle;", "fabric begin m > middle; endfabric", "initiator-to-target"),
-            ("destination", f"{protocol} middle;", "fabric begin middle > s; endfabric", "initiator-to-target"),
-            ("self", f"{protocol} middle;", "fabric begin middle > middle; endfabric", "initiator-to-target"),
-            ("clock", f"bit[32] {family}[{options},clock=other_clk] middle;",
-             "fabric begin s > middle; middle > m; endfabric", "compatible clock domains"),
-            ("owner", f"{protocol} middle;",
-             f"always @(posedge clk) if(!reset) middle.{channel} <= s.{channel}; "
-             "fabric begin s > middle; middle > m; endfabric", "another transfer owner"),
-        ]
-        for name, declaration, body, diagnostic in cases:
-            source = directory / f"internal_bad_{family}_{name}.pigen"
-            output = source.with_suffix(".sv")
-            source.write_text(header + declaration + "\n" + body + "\nendmodule\n")
-            output.write_text("preserve output\n")
-            result = run([ROOT / "pigen", source, "-o", output], directory, expect=False)
-            assert diagnostic in result, result
-            assert output.read_text() == "preserve output\n"
 
 
 def alias_negatives(directory):
@@ -1664,13 +1576,13 @@ def named_type_example_tests(directory):
     sv = directory / "named_types.sv"
     run([ROOT / "pigen", example, "-o", sv, "--no-diagram"], directory)
     for top in ("native_axis_named_types", "native_axil_named_types", "native_axi4_named_types",
-                "native_axis_stored_child", "native_axil_stored_child", "native_axi4_stored_child"):
+                "native_axis_boundary_child", "native_axil_boundary_child", "native_axi4_boundary_child"):
         run(["verilator", "--lint-only", "--top-module", top, sv,
              ROOT / "rtl/pigen_primitives.sv"], directory)
     for family, core, data in [("axi4_lite", "native_axil_named_types", 32),
                                ("axi4", "native_axi4_named_types", 64),
-                               ("axi4_lite", "native_axil_stored_child", 32),
-                               ("axi4", "native_axi4_stored_child", 64)]:
+                               ("axi4_lite", "native_axil_boundary_child", 32),
+                               ("axi4", "native_axi4_boundary_child", 64)]:
         for address, identity in [(24, 2), (48, 6)]:
             protocol = f"bit[{data}] {family}[addr={address}" + (f",id={identity}" if family == "axi4" else "") + "]"
             overrides = f".ADDRESS_BITS({address})" + (f",.ID_BITS({identity})" if family == "axi4" else "")
@@ -2032,7 +1944,7 @@ def data_typedef_emission_tests(root):
     run(["iverilog","-g2012","-s","tb","-o",directory/"sim",sv,tb],directory)
     assert "PASS parameterized" in run(["vvp",directory/"sim"],directory)
     for family,storage in [("axi4_stream","buf"),("axi4_lite","fifo[3]"),("axi4","skid")]:
-        for mode in (False,"internal_both_routed"):
+        for mode in (False, 'fabric_routed'):
             for dtype in ("named","inline","inline_macro","inline_retained","inline_mutable"):
                 directory=root/f"typedef_pins_{family}_{mode}_{dtype}"
                 directory.mkdir()
@@ -2169,8 +2081,6 @@ def main():
         boundary_fabric_negatives(root)
         negatives(root)
         alias_negatives(root)
-        internal_fabric_negatives(root)
-        internal_child_negatives(root)
         alias_shadow_tests(root)
         forward_alias_tests(root)
         package_type_tests(root)
@@ -2201,11 +2111,11 @@ def main():
         computed_record_resize_test(root)
         for family, storage in [("axi4_stream", "buf"), ("axi4_lite", "fifo[3]"), ("axi4", "skid")]:
             for ordinary,mode in [("qualified","aggregate"),("header","fabric_direct"),("unit","fabric_routed"),
-                                  ("record","aggregate"),("transitive","internal_both_routed")]:
+                                  ("record","aggregate"),('transitive', 'fabric_routed')]:
                 directory=root/f"ordinary_{ordinary}_{family}"
                 directory.mkdir()
                 case(directory,family,32,storage,binding="low",hierarchy=mode,ordinary_package=ordinary)
-            for ordinary,mode in [("mixed","aggregate"),("mixed_transitive","internal_both_routed"),("retained_export","internal_both_routed"),("forward_call","internal_both_routed")]:
+            for ordinary,mode in [("mixed","aggregate"),('mixed_transitive', 'fabric_routed'),('retained_export', 'fabric_routed'),('forward_call', 'fabric_routed')]:
                 directory=root/f"ordinary_{ordinary}_{family}"
                 directory.mkdir()
                 case(directory,family,32,storage,binding="low",hierarchy=mode,ordinary_package=ordinary)
@@ -2225,7 +2135,7 @@ def main():
                 directory.mkdir()
                 case(directory,family,32,storage,binding="low",construction=kind)
             for kind, mode in [("unit","aggregate"),("explicit","fabric_direct"),("header_parameterized","aggregate"),
-                               ("header_explicit","fabric_routed"),("body","internal_both_routed"),("package","aggregate")]:
+                               ("header_explicit","fabric_routed"),('body', 'fabric_routed'),("package","aggregate")]:
                 directory = root/f"import_{family}_{kind}"
                 directory.mkdir()
                 case(directory,family,32,storage,binding="low",hierarchy=mode,alias="package_import_"+kind)
@@ -2236,18 +2146,6 @@ def main():
             directory = root/f"package_{family}_parameterized"
             directory.mkdir()
             case(directory,family,32,storage,binding="low",hierarchy="aggregate",alias="package_parameterized")
-            for mode in ("internal_input", "internal_output", "internal_both", "internal_siblings", "internal_input_routed", "internal_both_routed"):
-                directory = root / f"binding_{mode}_{family}"
-                directory.mkdir()
-                case(directory, family, 32, storage, binding="low", hierarchy=mode, alias=True)
-            for mode in ("internal_direct", "internal_routed"):
-                for alias in (False, True):
-                    directory = root / f"{mode}_{family}_alias_{alias}"
-                    directory.mkdir()
-                    case(directory, family, 32, storage, binding="low", fabric=mode, alias=alias)
-            directory = root / f"alias_local_{family}"
-            directory.mkdir()
-            case(directory, family, 32, storage, binding="low", alias="local")
             for mode in (False, "aggregate", "fabric_direct"):
                 directory = root / f"alias_{mode}_{family}"
                 directory.mkdir()

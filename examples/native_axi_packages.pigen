@@ -50,7 +50,5 @@ fabric native_axi4_package(
     output public_buses::memory_t m
 ) begin
     import public_buses::copied_memory_t;
-    copied_memory_t fifo[3] middle;
-    s -> middle;
-    middle -> m;
+    s -> m;
 endfabric

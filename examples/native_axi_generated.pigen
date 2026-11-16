@@ -10,10 +10,8 @@ module native_axis_generated #(
 );
   generate
     for (genvar lane = 0; lane < LANES; lane++) begin : lanes
-      uint[DATA_W] axi4_stream[keep=1,last=1] buf pending;
       always @(posedge clk) if (!reset) begin
-        pending <= s[lane];
-        m[lane] <= pending;
+        m[lane] <= s[lane];
       end
     end
   endgenerate
@@ -92,12 +90,10 @@ module native_axis_configured_lane #(
   input wire clk,
   input wire reset,
   input uint[32] axi4_stream[keep=1,last=1] s,
-  output uint[32] axi4_stream[keep=1,last=1] m
+  output uint[32] axi4_stream[keep=1,last=1] fifo[DEPTH] m
 );
-  uint[32] axi4_stream[keep=1,last=1] fifo[DEPTH] queue;
   always @(posedge clk) if (!reset) begin
-    queue <= s;
-    m <= queue;
+    m <= s;
   end
 endmodule
 

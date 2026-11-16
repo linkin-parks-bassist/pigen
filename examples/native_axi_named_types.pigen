@@ -6,8 +6,7 @@ module native_axis_named_types(
     input stream_word_t fifo[2] s,
     output stream_word_t skid m
 );
-    stream_word_t buf middle;
-    fabric begin s -> middle; middle -> m; endfabric
+    fabric begin s -> m; endfabric
 endmodule
 
 module native_axil_named_types #(parameter ADDRESS_BITS=40)(
@@ -17,11 +16,7 @@ module native_axil_named_types #(parameter ADDRESS_BITS=40)(
     output bit[32] axi4_lite[addr=ADDRESS_BITS] m
 );
     typedef bit[32] axi4_lite[addr=ADDRESS_BITS] register_bus_t;
-    register_bus_t fifo[2] middle;
-    fabric begin
-        s -> middle;
-        middle -> m;
-    endfabric
+    fabric begin s -> m; endfabric
 endmodule
 
 fabric native_axi4_named_types #(parameter ADDRESS_BITS=40,parameter ID_BITS=4)(
@@ -32,46 +27,38 @@ fabric native_axi4_named_types #(parameter ADDRESS_BITS=40,parameter ID_BITS=4)(
 ) begin
     typedef bit[64] axi4[addr=ADDRESS_BITS,id=ID_BITS] memory_bus_t;
     typedef memory_bus_t copied_memory_bus_t;
-    copied_memory_bus_t skid middle;
-    s -> middle;
-    middle -> m;
+    s -> m;
 endfabric
 
-module native_axis_stored_child(
+module native_axis_boundary_child(
     input wire clk,
     input wire reset,
     input stream_word_t fifo[2] s,
     output stream_word_t skid m
 );
-    stream_word_t fifo[3] middle;
-    native_axis_named_types child(.clk(clk),.reset(reset),.s(middle),.m(m));
-    fabric begin s -> middle; endfabric
+    native_axis_named_types child(.clk(clk),.reset(reset),.s(s),.m(m));
 endmodule
 
-module native_axil_stored_child #(parameter ADDRESS_BITS=40)(
+module native_axil_boundary_child #(parameter ADDRESS_BITS=40)(
     input wire clk,
     input wire reset,
     input bit[32] axi4_lite[addr=ADDRESS_BITS] s,
     output bit[32] axi4_lite[addr=ADDRESS_BITS] m
 );
     typedef bit[32] axi4_lite[addr=ADDRESS_BITS] register_bus_t;
-    register_bus_t fifo[3] middle;
     native_axil_named_types #(.ADDRESS_BITS(ADDRESS_BITS)) child(
-        .clk(clk),.reset(reset),.s(middle),.m(m)
+        .clk(clk),.reset(reset),.s(s),.m(m)
     );
-    fabric begin s -> middle; endfabric
 endmodule
 
-module native_axi4_stored_child #(parameter ADDRESS_BITS=40,parameter ID_BITS=4)(
+module native_axi4_boundary_child #(parameter ADDRESS_BITS=40,parameter ID_BITS=4)(
     input wire clk,
     input wire reset,
     input bit[64] axi4[addr=ADDRESS_BITS,id=ID_BITS] s,
     output bit[64] axi4[addr=ADDRESS_BITS,id=ID_BITS] m
 );
     typedef bit[64] axi4[addr=ADDRESS_BITS,id=ID_BITS] memory_bus_t;
-    memory_bus_t fifo[3] middle;
     native_axi4_named_types #(.ADDRESS_BITS(ADDRESS_BITS),.ID_BITS(ID_BITS)) child(
-        .clk(clk),.reset(reset),.s(middle),.m(m)
+        .clk(clk),.reset(reset),.s(s),.m(m)
     );
-    fabric begin s -> middle; endfabric
 endmodule

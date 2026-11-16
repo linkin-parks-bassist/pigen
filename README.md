@@ -242,12 +242,16 @@ fabric begin
 endfabric
 ```
 
-A fabric can connect parent ports, child endpoints and internal storage. `->`
+A fabric can connect parent ports, child endpoints and ordinary internal storage. `->`
 selects buffered routing, while `>` selects an exclusive direct connection.
 Ordinary elastic merges arbitrate round-robin. Typed standalone fabrics have
 module-style ports and parameters so an interconnect can itself be a child.
 The parameter-only standalone form also provides balanced three-port router
 networks and SVG diagrams; `--diagram PATH` selects the output path.
+
+AXI declarations belong on module and fabric input/output ports. Parent logic
+accesses a child boundary through `child.bus`, then constructs or unpacks channel
+records using ordinary transfers. Standalone internal AXI declarations are rejected.
 
 AXI ports use the same declaration and child-connection model. Their transfer
 types describe the full protocol contract, including its channel directions and

@@ -286,7 +286,7 @@ static void check_namespace(const char *body,int expected)
 
 static void check_namespaces(void)
 {
-	const char *endpoint="uint[32] axi4_stream unused;";
+	const char *endpoint="uint[32] buf unused;";
 	char body[2048];
 	snprintf(body,sizeof body,"if(0) begin : same %s end if(0) begin : same %s end",endpoint,endpoint);
 	check_namespace(body,0);
@@ -591,12 +591,12 @@ static void check_external_names(void)
 {
 	const char *text="module names #(parameter genblk2=0)(input wire clk,input wire reset,input wire genblk02,input wire genblk002);"
 		"if(0) begin : retained logic ordinary; end "
-		"if(1) begin uint[32] axi4_lite a; end "
-		"if(0) begin : named uint[32] axi4_lite disabled; end "
+		"if(1) begin uint[32] buf a; end "
+		"if(0) begin : named uint[32] buf disabled; end "
 		"generate if(0) begin logic ordinary; end endgenerate "
-		"for(genvar i=-1;i<2;i++) begin : lanes localparam genblk1=0; if(1) begin uint[32] axi4_lite local_bus; end end "
-		"if(1) for(genvar j=0;j<2;j++) begin : inner uint[32] axi4_lite loop_bus; end "
-		"if(0) begin uint[32] axi4_lite skipped; end else if(1) case(0) 0:begin uint[32] axi4_lite selected; end endcase "
+		"for(genvar i=-1;i<2;i++) begin : lanes localparam genblk1=0; if(1) begin uint[32] buf local_bus; end end "
+		"if(1) for(genvar j=0;j<2;j++) begin : inner uint[32] buf loop_bus; end "
+		"if(0) begin uint[32] buf skipped; end else if(1) case(0) 0:begin uint[32] buf selected; end endcase "
 		"if(0) begin : genblk0002 logic later; end initial begin : genblk00002 end "
 		"if(0) begin : \\escaped.block logic raw; end if(0) begin : \\genblk000002 logic raw; end endmodule";
 	pigen_source_manager sources={0};pigen_source_id input=pigen_source_add(&sources,"external_names.pigen",text,strlen(text));
@@ -632,7 +632,7 @@ static void check_external_names(void)
 static void check_external_names_are_not_source_paths(void)
 {
 	const char *text="module hidden(input wire clk,input wire reset,output uint[32] axi4_stream m);"
-		"if(1) begin uint[32] axi4_stream private_bus; end "
+		"if(1) begin uint[32] buf private_bus; end "
 		"always @(posedge clk) if(!reset) m<=genblk1.private_bus; endmodule";
 	pigen_source_manager sources={0};pigen_source_id input=pigen_source_add(&sources,"external_lookup.pigen",text,strlen(text));
 	pigen_preprocess_result pre={0};pigen_preprocess_error pe={0};
@@ -804,8 +804,8 @@ int main(void)
 	const char *source =
 		"module generated(input wire clk,input wire reset,input uint[32] axi4_lite s[4],output uint[32] axi4_lite m[4]);\n"
 		"generate for(genvar i=0;i<4;i++) begin : lanes\n"
-		"localparam K=i; uint[32] axi4_lite local_bus;\n"
-		"always @(posedge clk) if(!reset) begin local_bus.aw <= s[K].aw; m[K].aw <= local_bus.aw; end\n"
+		"localparam K=i; uint[32] buf local_bus;\n"
+		"always @(posedge clk) if(!reset) begin local_bus <= s[K].aw.addr; m[K].aw <= '{addr:local_bus,prot:0}; end\n"
 		"if(0) begin : excluded uint[999999999] axi4_stream invalid_width; end\n"
 		"end endgenerate endmodule\n";
 	pigen_source_manager sources={0};
@@ -831,8 +831,8 @@ int main(void)
 		assert(iterator && iterator->is_local);
 		assert(pigen_const_expr_evaluate_i64(&model,pigen_expr_constant(&model,iterator->value),&value) && value==(int64_t)i);
 		locals[i]=pigen_symbol_lookup_text(&model,scope->scope,"local_bus",9);
-		pigen_protocol_endpoint_id endpoint=pigen_symbol_protocol_endpoint(&model,locals[i]);
-		assert(endpoint.index!=PIGEN_INVALID_ID && pigen_protocol_endpoint_get(&model,endpoint)->binding.is_bound);
+		pigen_signal_id signal=pigen_symbol_signal(&model,locals[i]);
+		assert(signal.index!=PIGEN_INVALID_ID && pigen_signal_get(&model,signal)->domain.index!=PIGEN_INVALID_ID);
 		assert(pigen_symbol_lookup_text(&model,scope->scope,"invalid_width",13).index==PIGEN_INVALID_ID);
 		assert(pigen_symbol_lookup_text(&model,scope->scope,"clk",3).index==
 			pigen_symbol_lookup_text(&model,model.modules[0].scope,"clk",3).index);

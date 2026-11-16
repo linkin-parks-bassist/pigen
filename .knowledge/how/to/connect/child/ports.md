@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-16T04:50:03+11:00"
+revised_at: "2026-11-17T10:33:29+11:00"
 ---
 
 Child ports are parent endpoints: siblings connect with `.i(a.o)`, parent transfers read `a.o` or write `b.i`, and fabrics route `a.o -> b.i`. Explicit wires remain supported. Child outputs accept concatenations of writable parent projections; read-only and overlapping destinations diagnose (does/a/child/output/support/concatenated/parent/connections.md). Output transfers stay explicit, e.g. `output uint[8] buf o`. Broadcast reset uses `input wire reset`; unqualified input bit remains abstract.
@@ -23,6 +23,6 @@ Ownership checks views and physical destinations: duplicate consumers, child/loc
 
 Evidence: child-port-endpoint-test covers coordinate directions, negative endpoints, signed/unsigned 128-bit indices, out-of-range indices, composite expressions, unequal-rate payload/index joins, forward references and duplicate owners. child-input-alias-ownership-test, child-slice-ownership-test, child-ready-manual-test and child-valid-manual-test cover physical/control ownership.
 
-Native AXI supports named/positional scalar/array bindings, selections, concatenations, projections and forward siblings with checked timing. Internal storage/fabric bindings: how/are/internal/native/axi/child/bindings/resolved.md. Construction: how/are/native/axi/collection/concatenations/resolved.md; how/are/native/axi/collection/assignment/patterns/resolved.md. Generated children/named paths: how/are/generated/child/instances/lowered.md and how/are/named/generate/scope/paths/resolved.md. Collections: how/are/native/axi/endpoint/arrays/represented.md; how/are/native/axi/collection/selections/resolved.md. Syntax: how/to/write/native/axi/declarations.md.
+Native AXI supports named/positional scalar/array bindings, selections, concatenations, projections and forward siblings with checked timing. AXI declarations are boundary-only. Parent code drives or consumes child.port channels and unpacks records into ordinary transfer types; standalone internal AXI storage is forbidden. Boundary access: how/are/internal/native/axi/child/bindings/resolved.md. Construction: how/are/native/axi/collection/concatenations/resolved.md; how/are/native/axi/collection/assignment/patterns/resolved.md. Generated children/named paths: how/are/generated/child/instances/lowered.md and how/are/named/generate/scope/paths/resolved.md. Collections: how/are/native/axi/endpoint/arrays/represented.md; how/are/native/axi/collection/selections/resolved.md. Syntax: how/to/write/native/axi/declarations.md.
 
 Remaining: nested mappings, partial-region dynamic selections, spanning producers, unresolved bounds, multidimensional mappings, local/ordinary-SV writer auditing and broader ordinary array/generate contexts. Specialization/count owners: how/does/specialization/reach/a/fixed/point.md and how/to/normalize/declaration/counts.md.

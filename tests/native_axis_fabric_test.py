@@ -7,7 +7,7 @@ import tempfile
 from native_protocol_test import ROOT, run
 
 
-def case(directory, count, has_last, boundary=False, standalone=False, actual_core=False, collections=False, internal=False, metadata=False):
+def case(directory, count, has_last, boundary=False, standalone=False, actual_core=False, collections=False, metadata=False):
     fields = [("data", 32), ("keep", 4), ("strb", 4), ("id", 4),
               ("dest", 3), ("user", 7)] + ([("last", 1)] if has_last else [])
     config = "keep=1,strb=1,id=4,dest=3,user=7,clock=ACLK,resetn=ARESETn"
@@ -46,17 +46,6 @@ def case(directory, count, has_last, boundary=False, standalone=False, actual_co
             # Distinct blocks exercise cross-block destination grouping.
             source += f"fabric link{i} begin source{i}.m -> sink.s; endfabric\n"
     source += "endfabric\n" if standalone else "endmodule\n"
-    if internal:
-        assert boundary and not actual_core and not collections
-        top = source.index(('fabric' if standalone else 'module') + ' native_merge(')
-        marker = ') begin\n' if standalone else ');\n'
-        body = source.index(marker, top) + len(marker)
-        source = source[:body] + f'{protocol} fifo[3] middle;\n' + source[body:]
-        for i in range(count):
-            source = source.replace(f's{i} -> m;', f's{i} -> middle;')
-        end = source.rindex('endfabric\n' if standalone else 'endmodule\n')
-        outgoing = 'middle -> m;\n' if standalone else 'fabric outgoing begin middle -> m; endfabric\n'
-        source = source[:end] + outgoing + source[end:]
     pigen, sv, tb, binary = [directory / name for name in ("merge.pigen", "merge.sv", "tb.sv", "sim")]
     pigen.write_text(source)
     run([ROOT / "pigen", pigen, "-o", sv, "--no-diagram"], directory)
@@ -117,16 +106,16 @@ def case(directory, count, has_last, boundary=False, standalone=False, actual_co
     run(["iverilog", "-g2012", "-s", "tb", "-o", binary, sv, tb,
          ROOT / "rtl/pigen_primitives.sv"], directory)
     assert "PASS native packet fabric" in run(["vvp", binary], directory)
-    print(f"PASS native AXI4-Stream fabric sources={count} last={has_last} real_fifo={actual_core} collections={collections} internal={internal}: {250*count} beats, sidebands, packet ownership, stalls and queued reset")
+    print(f"PASS native AXI4-Stream fabric sources={count} last={has_last} real_fifo={actual_core} collections={collections}: {250*count} beats, sidebands, packet ownership, stalls and queued reset")
 
 
 def metadata_fabric_tests(root):
     for has_last in (False, True):
-        for mode in ('child', 'boundary', 'standalone', 'internal'):
+        for mode in ('child', 'boundary', 'standalone'):
             directory = root / f'metadata_{has_last}_{mode}'
             directory.mkdir()
             case(directory, 3, has_last, boundary=mode != 'child', standalone=mode == 'standalone',
-                 internal=mode == 'internal', metadata=True)
+                 metadata=True)
     directory = root / 'metadata_collection'
     directory.mkdir()
     case(directory, 3, True, boundary=True, collections=True, metadata=True)
@@ -165,11 +154,6 @@ def main():
     root = Path(tempfile.mkdtemp(prefix="pigen-native-axis-fabric-"))
     try:
         metadata_fabric_tests(root)
-        for has_last in (False, True):
-            for standalone in (False, True):
-                directory = root / f'internal_{has_last}_{standalone}'
-                directory.mkdir()
-                case(directory, 3, has_last, boundary=True, standalone=standalone, internal=True)
         negatives(root)
         for count, has_last in [(2, True), (3, True), (5, True), (3, False)]:
             directory = root / f"{count}_{has_last}"

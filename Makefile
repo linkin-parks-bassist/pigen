@@ -25,6 +25,7 @@ protocol-semantic-test:
 	rm -rf $$dir; exit $$status
 
 native-protocol-test: pigen
+	python3 tests/native_boundary_policy_test.py
 	python3 tests/native_protocol_test.py
 	python3 tests/native_array_test.py
 	python3 tests/native_axis_fabric_test.py

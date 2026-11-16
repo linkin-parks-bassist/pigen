@@ -16,7 +16,7 @@ def run(args, directory):
     return result.stdout
 
 
-def case(directory, family, hops, direct, seed, boundary=False, standalone=False, internal=False, stored_input=False):
+def case(directory, family, hops, direct, seed, boundary=False, standalone=False):
     full = family == 'axi4'
     stream = family == 'axi4_stream'
     name = 'pigen_axis_fifo' if stream else 'pigen_axi4_bridge' if full else 'pigen_axil_registers'
@@ -31,32 +31,22 @@ def case(directory, family, hops, direct, seed, boundary=False, standalone=False
         dst, src = ('s', 'm') if channel in ('b', 'r') else ('m', 's')
         relay += f'{dst}.{channel} <= {src}.{channel};\n'
     relay += 'end\nendmodule\n'
-    if internal:
-        arrow = '>' if direct else '->'
-        relay = f'module link(input wire clk,input wire reset,input {protocol} s,output {protocol} m);\n'
-        relay += f'{protocol} fifo[3] middle;\nfabric begin s {arrow} middle; middle {arrow} m; endfabric\nendmodule\n'
     if standalone:
         typed = protocol.replace('uint[32]', 'uint[WIDTH]')
-        body = (f'typedef {typed} local_bus_t; typedef local_bus_t copied_bus_t;\n'
-                f'copied_bus_t fifo[3] middle[1];\ns {">" if direct else "->"} middle[0]; middle[0] {">" if direct else "->"} m;\n') if internal else 's -> m;\n'
+        body = 's -> m;\n'
         relay = f'fabric link #(parameter WIDTH=64)(input wire clk,input wire reset,input {typed} s,output {typed} m) begin\n{body}endfabric\n'
     wrapper = header + '\n'
-    if stored_input:
-        wrapper += f'{protocol} fifo[3] stored;\n'
     backend = ',.m_axis(m_axis)' if stream else ''
     if full:
         backend = ''.join(f',.{port}({port})' for port in ('write_request', 'write_reply', 'read_request', 'read_reply'))
-    binding = f',.{"s_axis" if stream else "s_axi"}(stored)' if stored_input else ''
-    wrapper += f'target_core target(.clk(clk),.reset(reset){backend}{binding});\n'
+    wrapper += f'target_core target(.clk(clk),.reset(reset){backend});\n'
     for i in range(hops):
         ingress = (',.s(s_axis)' if stream else ',.s(s_axi)') if i == 0 and not boundary else ''
         wrapper += f'link {"#(.WIDTH(32)) " if standalone else ""}hop{i}(.clk(clk),.reset(reset){ingress});\n'
         destination = f'hop{i+1}.s' if i + 1 < hops else 'target.s_axis' if stream else 'target.s_axi'
-        if stored_input and i + 1 == hops: destination = 'stored'
         wrapper += f'fabric route{i} begin hop{i}.m {">" if direct else "->"} {destination}; endfabric\n'
     if boundary:
         destination = 'hop0.s' if hops else 'target.s_axis' if stream else 'target.s_axi'
-        if stored_input and not hops: destination = 'stored'
         wrapper += f'fabric ingress begin {"s_axis" if stream else "s_axi"} {">" if direct else "->"} {destination}; endfabric\n'
     wrapper += 'endmodule\n'
     source = directory / 'core.pigen'; sv = directory / 'core.sv'
@@ -71,7 +61,7 @@ def case(directory, family, hops, direct, seed, boundary=False, standalone=False
          sv, ROOT / 'rtl/pigen_primitives.sv', bench], directory)
     result = run(['vvp', sim], directory)
     assert 'PASS ' in result, result
-    print(f'PASS {family} real core: {hops} {"direct" if direct else "routed"} hops boundary={boundary} standalone={standalone} internal={internal} stored_input={stored_input} seed={seed}: independent transactions, stalls, errors and reset')
+    print(f'PASS {family} real core: {hops} {"direct" if direct else "routed"} hops boundary={boundary} standalone={standalone} seed={seed}: independent transactions, stalls, errors and reset')
 
 
 STREAM_BENCH = r"""
@@ -131,19 +121,6 @@ def main():
     root = parser.parse_args().out.resolve()
     root.mkdir(parents=True, exist_ok=True)
     for family in ('axi4_stream', 'axi4_lite', 'axi4'):
-        for direct in (True, False):
-            for seed in (1, 17, 4919):
-                directory = root / f'{family}-stored-input-{direct}-{seed}'
-                directory.mkdir(exist_ok=True)
-                (directory / 'commands.log').write_text('')
-                case(directory, family, 0, direct, seed, boundary=True, stored_input=True)
-        for direct in (True, False):
-            for seed in (1, 17, 4919):
-                for standalone in (False, True):
-                    directory = root / f'{family}-internal-{direct}-{standalone}-{seed}'
-                    directory.mkdir(exist_ok=True)
-                    (directory / 'commands.log').write_text('')
-                    case(directory, family, 1, direct, seed, boundary=True, internal=True, standalone=standalone)
         for hops, direct, boundary, standalone in ((1, True, False, False), (1, False, False, False), (2, False, False, False), (0, True, True, False), (0, False, True, False), (1, False, True, False), (1, False, False, True)):
             for seed in (1, 17, 4919):
                 directory = root / f'{family}-{hops}-{direct}-{boundary}-{standalone}-{seed}'

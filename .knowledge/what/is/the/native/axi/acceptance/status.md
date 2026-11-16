@@ -1,25 +1,20 @@
 ---
 status: green
-revised_at: "2026-11-17T06:15:57+11:00"
+revised_at: "2026-11-17T10:52:08+11:00"
 ---
 
-Native AXI4-Stream, AXI4-Lite and full AXI4 module inputs/outputs and fabrics are implemented and verified against what/are/the/native/axi/transfer/requirements.md. Broader SystemVerilog feature work is separate unless a concrete interface/fabric use establishes a dependency.
+Native AXI4-Stream, AXI4-Lite and full AXI4 support module/fabric input/output ports, child views and protocol-aware fabrics. Standalone internal AXI declarations reject, including native aliases, arrays, selected generate scopes and procedural bodies. Complete contracts and boundary channel storage remain native transfer semantics (what/are/the/native/axi/transfer/requirements.md).
 
-| Requirement | Acceptance evidence |
-| --- | --- |
-| Native contracts and complete fields | protocol_test.c checks full field layouts and legal DATA widths; native_protocol_test.py supplies an independent standard-pin schema; how/are/native/axi/protocol/contracts/represented.md |
-| Module/child/external-IP boundaries and incompatible-connection rejection | Scalar/array/collection hierarchy profiles; external_axi_tests mutates width, role, clock, sideband and address contracts and checks preserved output; how/are/native/axi/endpoints/mapped/to/external/systemverilog/ip.md |
-| Independent handshakes, buffering, stalls/reset and DATA types | buf/fifo/skid, four-state/sign profiles, omitted-TDATA Stream and independent scalar-pin foreign queues; how/are/native/axi/payload/states/preserved.md; how/to/write/axi/streams/without/data.md |
-| Fabric ownership, legal transactions and response provenance | Colliding/absent IDs, cumulative tags, exclusives, fan-in, mapped switching, real-core bursts/contention and independent target progress; how/to/verify/native/axi/core/fabric/composition.md |
-| Parameterized addresses and instance overrides | BASE/STRIDE/WINDOW_BYTES, 40/64-bit routes and overlap rejection; how/does/native/memory/mapped/address/routing/work.md |
-| Generated endpoint/child/fabric composition | All-family array, named-scope, external-IP, parameterized-child and typed-standalone profiles; how/are/native/axi/endpoint/arrays/represented.md |
+Boundary-only compiler SHA-256: a6db03056c440b518bbbc880cb27bbd6583f39d6c1415c9f937f3f04e602089a.
 
-Current verification covers every make verify target in completed phases. The umbrella run /tmp/pigen-axi-boundaries-verify.log ended with SIGTERM/143, which is not a passing command. Before interruption, native_protocol_test.py's final PASS and Make advancing to native_array_test.py were observed in its live output spool; that deleted spool's tail was not retained in the redirected log.
+Acceptance evidence:
+- tests/native_boundary_policy_test.py passes 30 rejection cases, all-family child/sibling/routed transport, and 97 ordinary Lite read requests/replies through a real child with DATA/RESP unpacking, stalls and decode errors (/tmp/pigen-boundary-policy.log).
+- Native declaration/typing/record/payload checks pass in phases: functions before external_axi_tests are covered by /tmp/pigen-boundary-protocol-rerun.log; the corrected external-boundary profiles and remaining main recipe pass in /tmp/pigen-boundary-protocol-tail.log. The first log terminates at an obsolete generated-external test assumption and is not an uninterrupted suite pass.
+- tests/native_array_test.py passes all retained scalar/collection, generated child, typed-standalone and boundary profiles (/tmp/pigen-boundary-array-rerun.log). Internal-storage profiles were removed rather than retained as supported syntax.
+- Stream merge/demux/routing, memory-mapped merge/demux, projections and real-core contention scripts exit zero in /tmp/pigen-boundary-batches-hzm9v61e/status.json. Its protocol/array/core-fabric entries contain superseded runner/fixture failures; use the dedicated passing evidence above and /tmp/pigen-boundary-core-fabric.log for 63 real-core direct/routed/multi-hop/standalone profiles.
+- Generated-scope and source-reference model fixtures use ordinary local buffers and pass focused checks (/tmp/pigen-boundary-models-rerun.log and the generated-instance result in /tmp/pigen-boundary-models.log).
+- All native example files compile after migrating local buses to boundary storage and child bindings (/tmp/pigen-boundary-examples-77yi5eop).
 
-The remaining nine native-protocol recipe scripts each exited 0, and make -j8 --output-sync=target --old-file=native-protocol-test verify exited 0 for the other targets, including 122/122 core cases. Commands, exit codes and logs are recorded in /tmp/pigen-axi-final-batches-4yofyxk0/status.json. All ten native-protocol recipe scripts are accounted for; the excluded target is covered by those script results.
+Repository-wide requalification is not established by an uninterrupted passing command. The make verify invocation in /tmp/pigen-boundary-verify-final.log ended with SIGTERM/143 after many passing targets, including 122/122 core cases. Native-protocol, generate-semantic and generated-instance were excluded and checked independently above. The remaining clocked-case recipe is independently rerun in /tmp/pigen-boundary-clocked-case.log; its exit must be checked before claiming current coverage. Earlier full-gate and sanitizer baselines predate this restriction and cannot substitute for current results.
 
-Verified compiler SHA-256 is ccc7dab4b38583ad7f243afa39ebd0cb5c78c9dae444ca529a6f95cd79510d44. Tests ran at source fingerprint 9a6a60cced558d14847b4fe16554b08a5781e36b82bec337567a394fda02621b. Publication removes trailing whitespace in two Python tests with unchanged ASTs (/tmp/pigen-publish-whitespace-check.json), yielding fingerprint 0c717b6513a9bb1d705a73c3b6751841ad8f2da184ebd9f6cba0954fabbfe082. The compiler also passes argument checks, 75 observation simulations under ASan/UBSan and syntax/semantic/resolver/output models (how/are/retained/native/axi/observations/represented.md).
-
-Limits remain explicit: exact contracts except defined routing ID adaptation; no implicit width/protocol conversion or arbitrary foreign pin renaming; synchronous sampled reset is qualified; memory-mapped routing retains global addresses and selects a whole burst by its starting address. These are finite simulation profiles.
-
-Memory-mapped and Stream fabrics use different routing machinery but currently share fabric syntax. A separate memory-mapped spelling remains open. The unfinished general generated-retained experiment is outside production.
+Verified profiles include independent handshakes, complete fields, buf/fifo/skid capacity, X/Z and signed DATA, reset, exact child contracts, parameterized address maps, ID provenance, legal bursts, contention and independent switched-target progress. Limits remain exact contracts except defined ID adaptation, synchronous reset, global addresses and start-of-burst target selection. Memory-mapped and Stream routing remain separate implementations sharing fabric syntax. Broader SV work and the separate production pipeline defect are not AXI completion gates.

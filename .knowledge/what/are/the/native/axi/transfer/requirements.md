@@ -1,11 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-17T10:21:43+11:00"
+revised_at: "2026-11-17T10:33:29+11:00"
 ---
 
 Pigen must support AXI4-Stream, AXI4-Lite and full AXI4 as native transfer types alongside existing transfers. Earlier AXI versions are outside this requirement. Declarations, transfers and child-module connections should feel natural within Pigen's implicit handshake model.
 
-David prioritizes module inputs/outputs and fabrics. He is considering restricting AXI declarations to boundaries because complete protocol endpoints are heavy for internal datapaths. The design must still let parent logic drive and consume a child's AXI channels and unpack channel records into ordinary transfer types. Whether to ban standalone internal AXI declarations remains open; no such restriction is implemented. Existing child.port endpoint access offers a candidate surface without declaring a second internal bus. what/is/the/proposed/native/axi/type/model.md owns the model.
+David prioritizes module inputs/outputs and fabrics. AXI declarations are restricted to module/fabric input/output boundaries because complete protocol endpoints are heavy for internal datapaths. The design must still let parent logic drive and consume a child's AXI channels and unpack channel records into ordinary transfer types. Standalone internal AXI declarations are forbidden. Parent code uses existing child.port endpoint access without declaring a second internal bus. Preserve type aliases for boundary contracts and remove unsupported internal-storage role exceptions and test/example modes. what/is/the/proposed/native/axi/type/model.md owns the model.
 
 General SystemVerilog expansion is separate work unless a concrete module-boundary or fabric use establishes a dependency. Do not make broader compatibility work an AXI completion gate.
 
