@@ -1,13 +1,10 @@
 ---
 status: green
-revised_at: "2026-10-22T05:30:31+11:00"
+revised_at: "2026-11-17T10:17:00+11:00"
 ---
 
-pigen_data_type_concatenation interns a data type keyed only on the summed packed width of its members, so two concatenations with the same total width but different member orders are the same interned type: any owner-level type-identity or sizing check over a concatenation is order-insensitive. The same class holds for the structured pipeline's outgoing packet, whose aggregate is an unsigned sized vector of the summed packed widths of the yielded fields in source order (src/pipeline_identity.c): the field-to-bit mapping (which yielded field occupies which bits) is unobservable through the data type and through any route-level or owner-level check.
+pigen_data_type_concatenation interns a type by total packed width. Reordering members without changing that width produces the same interned type, so type identity cannot establish field-to-bit order. Pipeline output aggregates likewise use an unsigned vector with the summed width of yielded fields (src/pipeline_identity.c).
 
-The order law is therefore enforced structurally rather than rejected at the contract level: each concatenation child is written whole, packed bit-stream order left to right, and no contract-level negative witness exists for member order. The order dimension is pinned by emission, per path:
+The mapping follows source order: the first member occupies the most significant bits. Check expression structure or emitted values to establish this property. tests/pipeline_lower_test.c has an emitted-member-order section that lowers yield {x, y}, locates its concatenation and renders it through pigen_sv_render_expression to check source order. tests/pipeline_output_test.c also checks yielded member identities and ordering. A width-only check cannot substitute for those assertions.
 
-- Route / quarantined-prototype path: pinned today by the emitted SV and the pipeline-test / pipeline-scope-test golden witnesses, which drive the production pigen binary whose pipeline path is the textual prototype (src/pipeline.c).
-- Structured pipeline path: no pin exists yet because the structured pipeline is not lowered to SV (src/rtl_lower.c has no PIGEN_SYNTAX_PIPELINE handling). Its owner is the step-(c) parent-module lowering of the pipeline subsystem, whose green manifest and emitted-SV / golden witness pin the established outgoing packet's member order (source order, first yielded field the MSB) once the lowering exists.
-
-A width-correct but misordered aggregate passes every registered structured test today; catching it requires the step-(c) emission witness, not a route-level negative witness.
+Production pipelines resolve through src/resolve.c; src/pipeline.c is a quarantined textual reference. The separately tested src/pipeline_lower.c service does not establish complete production pipeline behavior. In particular, repeated-name stage updates currently reject as described in how/do/pipeline/stage/reads/work.md.

@@ -1,18 +1,257 @@
 # Pigen
 
-Pigen (short for **pi**peline **gen**erator) extends SystemVerilog with typed,
-ready/valid transfers for synchronous hardware. It provides native AXI4-Stream,
-AXI4-Lite and full AXI4 module interfaces and fabrics alongside the `buf`, `port`,
-`fifo` and `skid` transfer types.
+Pigen (short for **pi**peline **gen**erator) is a SystemVerilog extension for
+building synchronous, ready/valid hardware. It adds the transfer types `buf`,
+`port`, `fifo`, `skid`, `axi4_stream`, `axi4_lite`, and `axi4` alongside the static
+`wire`, `reg`, and `logic`.
+Non-blocking assignment performs the appropriate handshake, so
+`destination <= source` says what moves where without separately rebuilding
+valid, ready, occupancy, and enable logic.
 
-Declarations keep payload type, transfer behaviour and array shape explicit.
-The compiler generates the storage, handshake connections and arbitration
-specified by those declarations and connections, then emits synthesizable
-SystemVerilog.
+The aim is an ennicening of Verilog. The hardware is still there: widths,
+clocks, storage, timing boundaries and cycle behaviour remain explicit. What
+Pigen takes away is the repeated flow-control bookkeeping that tends to bury the
+actual design.
 
-## Native AXI module interfaces
+## Transfer types
 
-Declare an AXI endpoint as a transfer type:
+Every signal has a transfer type. It defines the signal's validity, readiness,
+storage, consumption, and production laws. For a ready/valid channel, payload and `valid`
+travel from producer to consumer while `ready` travels back. Pigen creates and
+connects the handshake implicitly as part of the transfer operation.
+
+`valid` means that the producer is offering a value. `ready` means that the
+consumer can accept it. When both are high on a clock edge, the consumer
+accepts the offered value. That event is a *transfer*.
+
+The transfer type determines how the signal is stored and how its handshake
+behaves. Existing Verilog signals are statics in the same model, so all of
+these transfer types participate in the same operation.
+
+| Transfer type | Valid behaviour | Ready behaviour | What it is |
+| --- | --- | --- | --- |
+| `wire` | Always valid | Never a destination | An always-offered combinational value |
+| `reg`, `logic` | Always valid | Always ready | An always-available static signal; reading it does not consume it |
+| `buf` | Valid when occupied | Ready when it can accept | A one-entry elastic register |
+| `port` | A one-cycle pulse | Always ready | A registered result offered for one cycle |
+| `fifo` | Valid when non-empty | Ready when non-full | An ordered, depth-N queue |
+| `skid` | Valid when non-empty | Ready when non-full | A two-entry skid buffer with registered backpressure |
+| `axi4_stream` | Valid when a beat is offered | Ready when a beat can be accepted | An AXI4-Stream channel with typed sidebands |
+| `axi4_lite` | Per-channel validity | Per-channel readiness | An AXI4-Lite interface with AW, W, B, AR and R channels |
+| `axi4` | Per-channel validity | Per-channel readiness | A full AXI4 interface with bursts, IDs and channel sidebands |
+
+`wire`, `reg`, and `logic` are static transfer types, or statics. Their constant
+laws are the trivial cases of the same transfer algebra.
+The compiler folds their constant handshake behavior out of generated hardware
+where the connection context permits.
+
+## Data types
+
+The data type says what bits a signal carries and how operations interpret
+them; the transfer type says how that value exists in time. Pigen's current
+primitive data types are signed `int[n]`, unsigned `uint[n]`, and one-bit
+`bit`. A count after `bit` is compact packed-width notation, so `bit[8]` is a
+neutral eight-bit value and `bit[32]` is a neutral 32-bit value.
+
+Every runtime datum is a signal with three independent components:
+
+```text
+signal = data type × transfer type × declarator shape
+```
+
+Declarations put the data type first, then the transfer type and any argument,
+then the signal name and its declarator shape:
+
+```systemverilog
+bit[32] wire address;
+int[16] buf sample;
+uint[24] port result;
+bit[8] logic tag;
+int[16] fifo[8] pending[lanes];
+```
+
+In the last declaration, `int[16]` is the data type, `fifo[8]` is a FIFO
+transfer type with depth eight, and `[lanes]` is the declarator shape. FIFO
+depth is storage behavior, not a payload or array dimension.
+
+An unqualified Pigen module input has an abstract transfer type specialized by
+its connection, while an explicit transfer type constrains what may connect to
+it. Internal and output `int[n]` and `uint[n]` signals require an explicit
+realization; `bit` may use its data-type-owned static default where the
+specification permits. Ordinary SystemVerilog `byte` remains its distinct
+signed eight-bit integral type. It is neither a Pigen primitive nor an alias
+for `bit[8]`. The precise rules are in [language specification](.knowledge/what/is/the/spec.md).
+
+## The transfer is the fundamental unit
+
+In Pigen, `<=` means **transfer this value**.
+
+```systemverilog
+outgoing <= incoming;
+```
+
+The transfer happens on a clock edge when `incoming` is valid and `outgoing` is
+ready. Otherwise nothing happens: the source is not consumed and the
+destination is not changed.
+
+This rule does not depend on whether either end is a wire, register, buffer,
+port, FIFO, skid buffer or AXI channel. Those are all sources and destinations of the same
+operation. They differ in their ready/valid behaviour and in the storage they
+imply, but they do not require different assignment operators or different
+control structures.
+
+The transfer operation includes its handshake automatically and implicitly.
+This is the central idea of Pigen. A wire and a FIFO are very different pieces
+of hardware, but a transfer involving either means the same thing. The
+handshake may be tied high, last one cycle, or remain stalled for ten cycles;
+the surrounding logic does not need a special case.
+
+Here is a complete elastic path:
+
+```systemverilog
+module packet_path
+    (
+        input  logic        clk,
+        input  logic        reset,
+        input  bit[32] buf  incoming,
+        output bit[32] buf  outgoing
+    );
+
+    bit[32] buf     decoded;
+    bit[32] skid    timing_break;
+    bit[32] fifo[8] pending;
+
+    always_ff @(posedge clk) begin
+        decoded      <= incoming;
+        timing_break <= decoded;
+        pending      <= timing_break;
+        outgoing     <= pending;
+    end
+endmodule
+```
+
+Each line says what moves where. Pigen generates the occupancy bits, enables,
+backpressure and queue control needed to make it true.
+
+## Transfers compose
+
+The handshake applies to a whole expression, not one operand at a time:
+
+```systemverilog
+result <= sample * coefficient + bias;
+```
+
+This waits until all three inputs are valid and `result` is ready, then consumes
+the inputs together. Pigen treats it as one atomic join.
+
+Concatenation gives the corresponding way to join, split and co-slice values:
+
+```systemverilog
+packet <= {header, body};
+{opcode, payload} <= packet;
+{upper, lower} <= {wide_packet[15:8], wide_packet[7:0]};
+```
+
+The last two examples are each one transfer and one consumption of the source,
+even though several destinations receive pieces of it. Every destination must
+be ready before anything moves. This is how one token can be deliberately
+partitioned or duplicated into correlated outputs without accidentally
+creating several independent consumers.
+
+For related updates that are clearer as statements, a transfer block says the
+same thing explicitly:
+
+```systemverilog
+transfer begin
+    output_packet <= result;
+    history       <= result;
+end
+```
+
+The block fires as a unit. Either both destinations accept the value or neither
+does.
+
+By default, a buffered signal has one producer and one consumer. That rule
+is what makes backpressure and token ownership unambiguous. Multiple syntactic
+routes are allowed when Pigen can prove they are mutually exclusive; deliberate
+fan-out belongs in one co-sliced transfer or transfer block, where its atomicity
+is visible.
+
+## Control can ask whether a transfer happened
+
+Ordinary `if`, `else` and `case` statements can guard transfers. Pigen also
+provides a compact form for the common case where control should advance only
+when a value really moved:
+
+```systemverilog
+when (destination <= source) begin
+    count <= count + 1;
+end
+```
+
+This performs the transfer and enters the branch on the cycle it is accepted.
+It is the operational counterpart of `accepts(destination, source)`, and avoids
+writing a transfer in one place and a subtly different handshake test in
+another. `valid`, `ready`, `accepts`, `peek`, `validate`, `invalidate` and
+`flush` are available when control logic needs to inspect or manage signal
+state directly.
+
+## Pipeline blocks
+
+A pipeline uses a fixed field namespace to describe successive transformations.
+Each stage reads the value of `x` at that point in the pipeline, and a transfer
+into `x` defines the value passed to the following stage. The language model is:
+
+```systemverilog
+pipeline packet begin
+    uint[32] x;
+
+    stage begin x <= incoming; end
+    stage begin x <= x + 32'd1; end
+    stage begin x <= x * 32'd2; end
+
+    yield x;
+endpipeline
+
+outgoing <= packet;
+```
+
+The same name refers to a different register at each stage boundary. This gives
+procedural-looking mutability across stages while keeping one field namespace.
+Within a stage, reads see its incoming packet; writes become visible in the next
+stage. Several packets can occupy different stages at once, each carrying its
+own value of `x`. Elastic handshakes control their progress through stalls.
+Pipeline fields use `buf` storage, which their declarations may omit, and `yield`
+exposes the final value as a buffered transfer source.
+
+**Current implementation gap:** the compiler rejects the repeated-field example
+above with “buffered transfer cannot source its destination.” Production currently
+resolves those stage versions to one semantic signal. Distinct-name pipeline
+examples run, but do not establish this defining behavior. The
+[pipeline stage contract and implementation gap](.knowledge/how/do/pipeline/stage/reads/work.md)
+tracks the required correction.
+
+## Module connections and fabrics
+
+Module ports carry their transfer type with them. Connecting compatible child
+ports connects their payload and handshake signals together:
+
+```systemverilog
+fabric begin
+    producer.m -> consumer.s;
+endfabric
+```
+
+A fabric can connect parent ports, child endpoints and internal storage. `->`
+selects buffered routing, while `>` selects an exclusive direct connection.
+Ordinary elastic merges arbitrate round-robin. Typed standalone fabrics have
+module-style ports and parameters so an interconnect can itself be a child.
+The parameter-only standalone form also provides balanced three-port router
+networks and SVG diagrams; `--diagram PATH` selects the output path.
+
+AXI ports use the same declaration and child-connection model. Their transfer
+types describe the full protocol contract, including its channel directions and
+sidebands:
 
 ```systemverilog
 module stream_stage (
@@ -25,34 +264,15 @@ module stream_stage (
 endmodule
 ```
 
-This module exposes standard `s_tdata`, `s_tkeep`, `s_tlast`, `s_tvalid` and
-`s_tready` pins, with corresponding `m_` pins on its output. A transfer carries
-the complete beat, including its enabled sidebands. Each channel has its own
-storage and handshake.
+Here `m <= s` transfers a complete beat, including KEEP and LAST, when both
+ends can participate. The generated module exposes standard AXI pins.
+Native endpoints use `buf` storage by default and also accept `fifo[N]` or
+`skid`. Child connections check the declared widths, fields and timing bindings.
 
-The three native families are:
-
-| Transfer type | Channels | Configuration |
-| --- | --- | --- |
-| `axi4_stream` | One beat channel | DATA type, KEEP, STRB, LAST, ID, DEST and USER |
-| `axi4_lite` | AW, W, B, AR and R | DATA and address widths |
-| `axi4` | AW, W, B, AR and R | DATA, address and ID widths, with per-channel USER fields |
-
-`input` declares a target/receiver interface, while `output` declares an
-initiator/transmitter interface. On memory-mapped buses, B and R travel in the
-reverse direction from AW, W and AR. Whole-bus child connections preserve those
-directions automatically:
-
-```systemverilog
-stream_stage relay (.clk(clk), .reset(reset), .s(source), .m(destination));
-```
-
-Child bindings check the complete protocol contract, including channel fields,
-widths, sidebands and timing bindings. Native typedefs and package imports let
-modules share those contracts. Arrays, selected lanes, generated children and
-sibling connections use the same endpoint identities.
-
-Within a module, channels can be transferred independently:
+For memory-mapped AXI, `input` declares a target and `output` an initiator.
+AW, W and AR travel toward the target, while B and R return toward the initiator.
+Each channel has its own transfer event, so a relay expresses the five directions
+as follows:
 
 ```systemverilog
 m.aw <= s.aw;
@@ -62,26 +282,15 @@ m.ar <= s.ar;
 s.r  <= m.r;
 ```
 
-Fields such as `s.aw.addr`, `s.w.data` and `s.r.resp` retain their declared types.
-Named record patterns construct complete channel values. A target whose DATA
-type matches `value` can reply with `s.r <= '{data:value, resp:0};`.
-Channel-level `valid`, `ready` and `peek`
-provide handshake and payload observations.
+Whole-interface child bindings connect those channels together with their
+correct directions. [Native declarations](.knowledge/how/to/write/native/axi/declarations.md)
+cover channel records, storage and clock/reset configuration; the
+[relay examples](examples/native_axi_relay.pigen) show all three families.
 
-Native endpoints accept `buf`, `fifo[N]` or `skid` storage, with `buf` as the
-default. Clock/reset bindings default to `clk` and active-high `reset`. Use
-`clock=ACLK,resetn=ARESETn` for named active-low reset inputs. Channel storage
-samples reset on the bound rising edge.
+### Memory-mapped fabrics
 
-Separately compiled SV IP can be connected through a provisional `extern module`
-contract that declares its native ports. The [external-IP example](examples/native_axi_external.pigen)
-includes a matching [ordinary SV implementation](examples/native_axi_external_ip.sv).
-
-## Memory-mapped interconnects
-
-AXI4-Lite and AXI4 fabrics decode address windows and preserve write address/data
-association through the response. Address maps accept parameters and per-instance
-overrides:
+AXI4-Lite and AXI4 interconnects route transactions through address windows.
+Address maps accept parameters and per-instance overrides:
 
 ```systemverilog
 module register_map #(
@@ -101,152 +310,22 @@ module register_map #(
 endmodule
 ```
 
-Windows are inclusive and must be disjoint. Routing preserves global addresses
-and selects the target from the starting address of each transaction. Unmapped
-requests receive DECERR. Contending initiators share target arbitration, while
-responses return to the correct source. Full AXI4 fabrics add source identity to
-target IDs and check that the target contract provides enough ID bits.
+Windows are inclusive and disjoint. Routing preserves global addresses and
+selects the target from the transaction's starting address. Arbitration preserves
+write address/data association and returns responses to their source; unmapped
+requests receive DECERR. The current implementation allows one outstanding write
+and an independent read per target, with full AXI4 bursts held through completion.
+See [address routing](.knowledge/how/does/native/memory/mapped/address/routing/work.md)
+for the detailed contract.
 
-The current memory-mapped fabric permits one outstanding write and an independent
-read per target. It preserves legal bursts through completion, including response
-backpressure. Width or protocol conversion requires a defined adapter.
+AXI4-Stream fabrics route by TDEST and retain packet ownership through arbitration.
+Stream and memory-mapped interconnects currently share the `fabric` spelling,
+with distinct routing implementations for their protocol semantics.
 
-## Stream and ordinary fabrics
+## FSM blocks
 
-AXI-Stream fabrics use stream routing and arbitration. Repeated outgoing links
-select destinations through source-local `TDEST` route order, while merges retain
-packet ownership and source identity. Memory-mapped and Stream fabrics currently
-share the `fabric` spelling, with separate routing implementations.
-
-An inline fabric can connect parent ports, child endpoints or internal storage:
-
-```systemverilog
-fabric begin
-    producer.m -> consumer.s;
-endfabric
-```
-
-`->` selects a buffered routed connection, while `>` selects an exclusive direct
-connection. Typed standalone fabrics have module-style ports and parameters so
-that a design can instantiate an interconnect as a child.
-
-Ordinary elastic child ports also support inline direct links and buffered,
-round-robin merges. The parameter-only standalone fabric form provides balanced
-three-port router networks and SVG diagrams. Use `--diagram PATH` to select its
-SVG output or `--no-diagram` to suppress diagrams.
-
-The [native relay and switch examples](examples/native_axi_relay.pigen) cover all
-three families, including parameterized memory maps. Additional examples show
-[generated connections](examples/native_axi_generated.pigen),
-[named contracts](examples/native_axi_named_types.pigen) and
-[package contracts](examples/native_axi_packages.pigen).
-
-## Data and transfer types
-
-Every runtime signal has three independent components:
-
-```text
-signal = data type × transfer type × declarator shape
-```
-
-Declarations put the data type first, followed by the transfer type, name and
-shape:
-
-```systemverilog
-bit[32] wire address;
-int[16] buf sample;
-uint[24] port result;
-bit[8] logic tag;
-int[16] fifo[8] pending[lanes];
-```
-
-In the last declaration, `int[16]` is signed DATA, `fifo[8]` specifies queue depth
-and `[lanes]` gives the declarator shape. `uint[n]` is unsigned and `bit[n]` is a
-two-state packed value. Packed records and ordinary SV integral types retain
-their type, shape and signedness rules.
-
-| Transfer type | Behaviour |
-| --- | --- |
-| `wire`, `reg`, `logic` | Static values whose reads do not consume tokens |
-| `buf` | A one-entry elastic register |
-| `port` | A registered value offered for one cycle |
-| `fifo[N]` | An ordered queue with depth N |
-| `skid` | A two-entry buffer with registered backpressure |
-
-An unqualified Pigen module input has an abstract transfer type specialized by
-its connection. An explicit transfer type constrains compatible peers. Internal
-and output `int[n]` and `uint[n]` declarations specify their realization.
-
-## Atomic transfers
-
-For an elastic source and destination, `destination <= source` transfers on a
-clock edge when the source is valid and the destination is ready. An expression
-joins its consuming inputs into that same event:
-
-```systemverilog
-result <= sample * coefficient + bias;
-```
-
-This consumes the inputs together when `result` can accept the computed value.
-Concatenations provide atomic joining, splitting and co-slicing:
-
-```systemverilog
-packet <= {header, body};
-{opcode, payload} <= packet;
-{upper, lower} <= {wide_packet[15:8], wide_packet[7:0]};
-```
-
-Each statement consumes its source tokens once and waits for every destination.
-Related statement updates can share one transfer event through a transfer block:
-
-```systemverilog
-transfer begin
-    output_packet <= result;
-    history <= result;
-end
-```
-
-Buffered ownership requires exclusive producers and consumers unless the compiler
-can establish mutually exclusive routes. Atomic fan-out is expressed through one
-co-sliced transfer or transfer block.
-
-A complete elastic path can use several storage forms:
-
-```systemverilog
-module packet_path (
-    input wire clk,
-    input wire reset,
-    input bit[32] buf incoming,
-    output bit[32] buf outgoing
-);
-    bit[32] buf decoded;
-    bit[32] skid timing_break;
-    bit[32] fifo[8] pending;
-
-    always @(posedge clk) begin
-        decoded <= incoming;
-        timing_break <= decoded;
-        pending <= timing_break;
-        outgoing <= pending;
-    end
-endmodule
-```
-
-## Transfer events and FSMs
-
-`when` runs its body on the cycle a transfer fires:
-
-```systemverilog
-when (destination <= source) begin
-    count <= count + 1;
-end
-```
-
-`if` tests a computed condition, including relational `<=`. Control logic can
-also use `valid`, `ready`, `accepts`, `peek`, `validate`, `invalidate` and `flush`.
-
-FSM state labels gate ordinary statements on one clock. Reset uses ordinary
-control code:
+An `fsm` describes a synchronous state register whose active state gates ordinary
+statements. Transfers use the same handshake semantics as the datapath:
 
 ```systemverilog
 fsm @(posedge clk) begin
@@ -260,38 +339,27 @@ fsm @(posedge clk) begin
 end
 ```
 
-An executed `goto` schedules the next state and terminates this FSM invocation
-for the current edge. Earlier effects remain effective, and the next edge
-restarts execution at the top with the destination state active.
+An executed `goto` selects the next state and terminates the current invocation.
+Earlier effects remain effective, and execution restarts at the top on the next
+clock edge with the destination state active.
 
-## Elastic pipelines
+States, reset behaviour and transitions are explicit. The useful difference is
+that the state machine speaks the same transfer language as the datapath: it
+can wait on validity, readiness or an accepted transfer without rebuilding the
+handshake by hand.
 
-A pipeline carries declared fields through elastic stage boundaries:
+## SystemVerilog remains SystemVerilog
 
-```systemverilog
-module increment_pipeline (
-    input wire clk,
-    input wire reset,
-    input uint[32] buf incoming,
-    output uint[32] buf outgoing
-);
-    always @(posedge clk) begin
-        pipeline packet begin
-            uint[32] first;
-            uint[32] second;
-            stage begin first <= incoming; end
-            stage begin second <= first + 32'd1; end
-            yield second;
-        endpipeline
-        outgoing <= packet;
-    end
-endmodule
-```
+Pigen extends SystemVerilog. Modules, ports,
+parameters, packed and unpacked arrays, expressions, functions, testbenches and
+ordinary procedural logic remain available. Pigen constructs can sit beside
+plain SystemVerilog, so a design can use them where they help without requiring
+the whole codebase to be rewritten.
 
-Pipeline fields use `buf` storage, which may be omitted from their declarations.
-`yield` exposes the final value as a buffered source. Guards and backpressure
-control stage acceptance, while `pipeline_reset(packet)` clears the bound packet
-state.
+There is a strict compatibility contract: accepted non-Pigen SystemVerilog
+retains its widths, signedness, scheduling, reset and cycle behaviour when
+processed by Pigen. Pigen syntax may change freely while the project is young;
+unrelated SystemVerilog does not.
 
 ## Build and verification
 
@@ -299,7 +367,7 @@ Build with a C17 compiler and Make:
 
 ```sh
 make -j8 pigen
-./pigen examples/native_axi_relay.pigen -o native_axi_relay.sv --no-diagram
+./pigen design.pigen -o generated.sv --no-diagram
 ```
 
 Generated designs use [rtl/pigen_primitives.sv](rtl/pigen_primitives.sv). Compile
