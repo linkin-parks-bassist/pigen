@@ -1,0 +1,14 @@
+---
+status: green
+revised_at: "2026-11-16T04:48:28+11:00"
+---
+
+Owned internal native storage can bind directly to child input/output aggregates: declare `bus_t fifo[3] middle;`, connect `leaf child(.s(middle),.m(m));`, and feed it with `fabric begin s -> middle; endfabric`. A second internal bus can receive the child's output, or one internal bus can connect sibling children. Stream, Lite and full AXI retain independent channel handshakes, including reversed B/R. Scalar, collection and generated-scope bindings preserve canonical endpoint identities.
+
+src/resolve.c:owned_internal_protocol_endpoint identifies storage owned by the current module with neither is_port nor is_instance_view. connect_protocol_aggregate preserves exact module/protocol/timing checks; it ignores nominal role equality only for that owned internal argument. Port and child-view directions remain fixed. Channel transfers derive source/destination from each child view's signal direction, so internal storage exposes the producer/consumer side needed by the port without changing endpoint role or cloning objects.
+
+add_fabric_protocol_edge checks transfer ownership per side for owned internal endpoints. Forward channels consume the edge source and produce the destination; B/R reverse those roles. A transfer conflicts only when it uses that same side, allowing fabric producers and child consumers to share storage, and vice versa. Ports and instance views retain the prior conservative check against either consuming or writing transfer ownership. Normal signal ownership still rejects nonexclusive duplicate child producers/consumers; observational reads remain non-consuming.
+
+Evidence: tests/native_protocol_test.py scores aliased buses through child inputs, outputs, both sides, forward sibling declarations and direct/routed fabrics for all families with buf/fifo/skid, independent stalls, capacity checks, queued reset and pin isolation. Negatives preserve output for duplicate consumers/producers, incompatible fields/clocks, ordinary tokens and wrong boundary roles. tests/native_array_test.py checks multidimensional collections and generated local storage bound to children across all families. tests/native_axi_core_fabric_test.py feeds actual cores through stored child inputs with direct/routed fabrics and three seeds. tests/native_core_contention_test.py merges competing requests into stored buses bound to the actual Lite/full cores, scoring IDs, memory/backend behavior, bursts/errors, stalls and reset. examples/native_axi_named_types.pigen includes all-family stored-child wrappers and parameterized address/ID overrides.
+
+Whole-bus transit without a direct child binding uses the same storage predicate (how/are/internal/native/axi/endpoints/connected/through/fabrics.md). Other native language contexts remain under the full AXI goal.

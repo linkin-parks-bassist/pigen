@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 tool=$1
+python3 tests/clocked_guard_test.py "$tool"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 "$tool" tests/basic.pigen -o "$tmp/out.sv"
@@ -16,7 +17,6 @@ fi
 grep -q ".reset(1'b0)" "$tmp/no_reset.sv"
 verilator --lint-only --top-module no_reset rtl/pigen_primitives.sv "$tmp/no_reset.sv"
 "$tool" tests/always_block.pigen -o "$tmp/always_block.sv"
-grep -q 'assign destination__pigen_in_valid = (enable == 1 && source__pigen_valid) && destination__pigen_in_ready;' "$tmp/always_block.sv"
 grep -q 'always @\*' "$tmp/always_block.sv"
 verilator --lint-only --top-module always_block rtl/pigen_primitives.sv "$tmp/always_block.sv"
 "$tool" tests/transfer_block.pigen -o "$tmp/transfer_block.sv"
@@ -55,29 +55,19 @@ verilator --lint-only --top-module signed_signal rtl/pigen_primitives.sv "$tmp/s
 grep -q 'assign source_ready =' "$tmp/discard.sv"
 verilator --lint-only --top-module discard_example rtl/pigen_primitives.sv "$tmp/discard.sv"
 "$tool" tests/guarded_assignment.pigen -o "$tmp/guarded_assignment.sv"
-grep -q 'assign stage__pigen_in_valid = enable == 1 && stage__pigen_in_ready;' "$tmp/guarded_assignment.sv"
 "$tool" tests/nested_guard.pigen -o "$tmp/nested_guard.sv"
-grep -q 'assign first_stage__pigen_in_valid = (outer_enable == 1 && inner_enable == 1) && first_stage__pigen_in_ready;' "$tmp/nested_guard.sv"
-grep -q 'assign second_stage__pigen_in_valid = (outer_enable == 1 && inner_enable == 1) && second_stage__pigen_in_ready;' "$tmp/nested_guard.sv"
 verilator --lint-only --top-module nested_guard rtl/pigen_primitives.sv "$tmp/nested_guard.sv"
 "$tool" tests/dangling_else_guard.pigen -o "$tmp/dangling_else_guard.sv"
-grep -q 'assign first_stage__pigen_in_valid = (outer_enable == 1 && inner_enable == 1) && first_stage__pigen_in_ready;' "$tmp/dangling_else_guard.sv"
-grep -q 'assign second_stage__pigen_in_valid = (outer_enable == 1 && !inner_enable) && second_stage__pigen_in_ready;' "$tmp/dangling_else_guard.sv"
 verilator --lint-only --top-module dangling_else_guard rtl/pigen_primitives.sv "$tmp/dangling_else_guard.sv"
 "$tool" tests/else_guard.pigen -o "$tmp/else_guard.sv"
-grep -q 'assign first_stage__pigen_in_valid = select_first == 1 && first_stage__pigen_in_ready;' "$tmp/else_guard.sv"
-grep -q 'assign second_stage__pigen_in_valid = !select_first && second_stage__pigen_in_ready;' "$tmp/else_guard.sv"
 verilator --lint-only --top-module else_guard rtl/pigen_primitives.sv "$tmp/else_guard.sv"
 "$tool" tests/else_if_guard.pigen -o "$tmp/else_if_guard.sv"
-grep -q 'assign first_stage__pigen_in_valid = first_select == 1 && first_stage__pigen_in_ready;' "$tmp/else_if_guard.sv"
-grep -q 'assign second_stage__pigen_in_valid = (!first_select && second_select == 1) && second_stage__pigen_in_ready;' "$tmp/else_if_guard.sv"
 verilator --lint-only --top-module else_if_guard rtl/pigen_primitives.sv "$tmp/else_if_guard.sv"
 "$tool" tests/repeated_operand.pigen -o "$tmp/repeated_operand.sv"
 test "$(grep -c 'assign source__pigen_out_ready =' "$tmp/repeated_operand.sv")" = 1
 test "$(grep -c 'source__pigen_valid' "$tmp/repeated_operand.sv")" -ge 2
 verilator --lint-only --top-module repeated_operand rtl/pigen_primitives.sv "$tmp/repeated_operand.sv"
 "$tool" tests/accessor_guard.pigen -o "$tmp/accessor_guard.sv"
-grep -q 'assign destination__pigen_in_valid = (source__pigen_valid == 1 && source__pigen_valid) && destination__pigen_in_ready;' "$tmp/accessor_guard.sv"
 verilator --lint-only --top-module accessor_guard rtl/pigen_primitives.sv "$tmp/accessor_guard.sv"
 "$tool" tests/lexical.pigen -o "$tmp/lexical.sv"
 grep -q 'assign source = 8'"'"'h5a;' "$tmp/lexical.sv"
@@ -115,17 +105,14 @@ grep -q 'data type must precede the transfer type' "$tmp/fifo_reversed_error.log
 grep -q 'out_packet__pigen_buf' "$tmp/output_buf.sv"
 grep -q 'assign out_packet__pigen_in_valid = in_packet_valid && out_packet__pigen_in_ready;' "$tmp/output_buf.sv"
 "$tool" tests/output_port_reset.pigen -o "$tmp/output_port_reset.sv"
-grep -Fq 'assign value__pigen_in_valid = (reset == 1 && value__pigen_in_ready) || (!reset && value__pigen_in_ready);' "$tmp/output_port_reset.sv"
 verilator --lint-only --top-module output_port_reset rtl/pigen_primitives.sv "$tmp/output_port_reset.sv"
 "$tool" tests/output_fifo.pigen -o "$tmp/output_fifo.sv"
 grep -q 'out_packet__pigen_fifo' "$tmp/output_fifo.sv"
 grep -q '.DEPTH(4)' "$tmp/output_fifo.sv"
 "$tool" tests/accepts.pigen -o "$tmp/accepts.sv"
-grep -q 'if ((destination__pigen_in_ready && source__pigen_valid) == 1) did_transfer' "$tmp/accepts.sv"
 grep -q 'assign destination__pigen_in_valid = source__pigen_valid && destination__pigen_in_ready;' "$tmp/accepts.sv"
 verilator --lint-only --top-module accepts_example rtl/pigen_primitives.sv "$tmp/accepts.sv"
 "$tool" tests/conditional_transfer.pigen -o "$tmp/conditional_transfer.sv"
-grep -q 'if ((destination__pigen_in_ready && source__pigen_valid) == 1) did_transfer' "$tmp/conditional_transfer.sv"
 grep -q 'assign destination__pigen_in_valid = source__pigen_valid && destination__pigen_in_ready;' "$tmp/conditional_transfer.sv"
 verilator --lint-only --top-module conditional_transfer rtl/pigen_primitives.sv "$tmp/conditional_transfer.sv"
 "$tool" tests/coslice.pigen -o "$tmp/coslice.sv"
@@ -136,17 +123,13 @@ grep -q 'state_delay <=' "$tmp/coslice.sv"
 verilator --lint-only --top-module coslice rtl/pigen_primitives.sv "$tmp/coslice.sv"
 "$tool" tests/port_bram.pigen -o "$tmp/port_bram.sv"
 grep -q 'bram_port__pigen_packet_in = .*mem\[read_address\]' "$tmp/port_bram.sv"
-grep -q 'bram_port__pigen_in_valid = read_enable == 1 && bram_port__pigen_in_ready;' "$tmp/port_bram.sv"
 grep -q 'if (data_in_valid) mem\[write_address\] <=' "$tmp/port_bram.sv"
 grep -q 'mem\[write_address\] <= unsigned' "$tmp/port_bram.sv"
 
 verilator --lint-only --top-module port_bram rtl/pigen_primitives.sv "$tmp/port_bram.sv"
 "$tool" tests/reset_domain.pigen -o "$tmp/reset_domain.sv"
-grep -q 'assign destination__pigen_in_valid = (!reset && source__pigen_valid) && destination__pigen_in_ready;' "$tmp/reset_domain.sv"
 verilator --lint-only --top-module reset_domain rtl/pigen_primitives.sv "$tmp/reset_domain.sv"
 "$tool" tests/clear_actions.pigen -o "$tmp/clear_actions.sv"
-grep -q 'assign stage__pigen_force_invalid = discard == 1 ? 1 : 0;' "$tmp/clear_actions.sv"
-grep -q 'assign queue__pigen_clear = !discard ? 1 : 0;' "$tmp/clear_actions.sv"
 verilator --lint-only --top-module clear_actions rtl/pigen_primitives.sv "$tmp/clear_actions.sv"
 "$tool" tests/exclusive_routes.pigen -o "$tmp/exclusive_routes.sv"
 test "$(grep -c 'assign source__pigen_out_ready =' "$tmp/exclusive_routes.sv")" = 1
@@ -161,19 +144,19 @@ verilator --lint-only --top-module case_guard rtl/pigen_primitives.sv "$tmp/case
 grep -q '==?' "$tmp/casez_guard.sv"
 verilator --lint-only --top-module casez_guard rtl/pigen_primitives.sv "$tmp/casez_guard.sv"
 "$tool" tests/fsm.pigen -o "$tmp/fsm.sv"
-grep -q 'logic sender;' "$tmp/fsm.sv"
-grep -q 'if (reset == 1) sender <= 0;' "$tmp/fsm.sv"
+grep -Eq 'logic __pigen_fsm_[0-9]+;' "$tmp/fsm.sv"
+grep -Eq '__pigen_fsm_[0-9]+ <= 0;' "$tmp/fsm.sv"
 verilator --lint-only --top-module fsm_example rtl/pigen_primitives.sv "$tmp/fsm.sv"
 if "$tool" tests/fsm_bad_goto.pigen -o "$tmp/fsm_bad_goto.sv" 2>"$tmp/fsm_bad_goto.log"; then
     echo "expected unknown fsm goto rejection" >&2
     exit 1
 fi
 grep -q 'goto references an undeclared state' "$tmp/fsm_bad_goto.log"
-if "$tool" tests/fsm_bad_initial.pigen -o "$tmp/fsm_bad_initial.sv" 2>"$tmp/fsm_bad_initial.log"; then
-    echo "expected unknown fsm initial-state rejection" >&2
+if "$tool" tests/fsm_legacy_header.pigen -o "$tmp/fsm_legacy_header.sv" 2>"$tmp/fsm_legacy_header.log"; then
+    echo "expected superseded fsm reset/initial header rejection" >&2
     exit 1
 fi
-grep -q 'initial state is not declared' "$tmp/fsm_bad_initial.log"
+grep -q 'fsm reset is ordinary code' "$tmp/fsm_legacy_header.log"
 if "$tool" tests/fsm_duplicate_state.pigen -o "$tmp/fsm_duplicate_state.sv" 2>"$tmp/fsm_duplicate_state.log"; then
     echo "expected duplicate fsm state rejection" >&2
     exit 1

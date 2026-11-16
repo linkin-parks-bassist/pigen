@@ -1,0 +1,16 @@
+---
+status: green
+revised_at: "2026-11-16T02:29:05+11:00"
+---
+
+Selected typed always_comb processes support for loops with assignment-list or explicitly initialized typed-variable headers, optional condition and step, nested scopes and ordered blocking bodies. Header variable declarations share one type and accept comma-separated names with initializers. Steps accept ordered blocking assignments, compound updates and prefix/postfix increments. Malformed headers, nonblocking steps and references to a header variable after its loop reject. Explicit automatic block-local initialization outside headers follows how/are/automatic/procedural/initializers/represented.md; static startup initialization follows how/are/static/procedural/initializers/represented.md.
+
+src/syntax.c creates PROCEDURAL_FOR using procedural_loop.control and three children in order: initializer BLOCK, step BLOCK, body. The assignment parser is shared with ordinary statements, with explicit token ranges rather than reconstructed source. An omitted condition retains INVALID syntax and resolves to constant true. Header declarations precede initializer assignments in their list; each initializer executes on loop entry, not at module initialization.
+
+src/resolve.c creates a fresh procedural scope for each FOR. Initializer declarations resolve directly in that scope before the condition, steps and body. Nested loops may shadow header variables; body blocks use their own existing lexical scopes. pigen_resolve_control_expression owns SV signedness and native expression sizing while preserving Pigen numerical arithmetic (how/are/combinational/controls/resolved.md).
+
+Semantic and RTL FOR nodes carry a valid condition and exactly three children in initializer/step/body order. The first two are BLOCKs with only ASSIGN children. Constructors enforce these contracts and ownership before publication. Driver queries inspect all phases, including concatenated child inputs. rtl_lower.c preserves the FOR tree. Fixed foreach uses this same phase contract with a private ordinal counter (how/are/combinational/foreach/loops/represented.md).
+
+sv_emit.c validates before publication and renders initializer, while(condition), body then ordered step block. This preserves supported control flow and avoids the independently reproduced failures in why/does/icarus/reject/some/for/loop/headers.md. Continue exits the iteration-body block and reaches the ordered step phase; break exits the whole loop and skips steps (how/are/combinational/loop/exits/represented.md).
+
+Evidence: tests/generate_semantic_test.c checks phase ownership, optional controls and invalid construction. tests/rtl_test.c and tests/sv_emit_test.c check constructor rejection, driver queries and failed output publication. tests/cores/continuous_intrinsics* compares header shadowing, negative indices, native overflow, zero iterations, omitted phases, empty bodies and dependent comma steps with independent references. Its uint8 iterator starting at 254 with i+1<256 executes once, checking lossless numerical addition. tests/native_array_test.py exercises generated header shadowing for all AXI families under stalls/reset, with scope, buffered-use and malformed-header negatives. General loop boundaries: how/are/combinational/loops/represented.md.

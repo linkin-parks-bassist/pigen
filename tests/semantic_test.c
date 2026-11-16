@@ -57,6 +57,31 @@ static void assert_numerical_width(pigen_semantic_model *model,
 	assert(actual_width == width);
 }
 
+static void assert_sv_division_types(void)
+{
+	pigen_source_manager sources={0};
+	pigen_semantic_model model;
+	pigen_semantic_init(&model,&sources);
+	pigen_data_type_id left=pigen_data_type_sized_integral(&model,8,PIGEN_SIGN_SIGNED,PIGEN_DATA_TYPE_STATE_FOUR);
+	pigen_data_type_id right=pigen_data_type_sized_integral(&model,16,PIGEN_SIGN_UNSIGNED,PIGEN_DATA_TYPE_STATE_TWO);
+	for(size_t i=0;i<2;i++)
+	{
+		pigen_binary_resolution resolution;
+		assert(pigen_data_type_resolve_binary_operation(&model,i ? PIGEN_BINARY_MODULO : PIGEN_BINARY_DIVIDE,left,right,&resolution));
+		assert(evaluate_width(&model,pigen_data_type_packed_width(&model,resolution.operation.result_data_type))==16);
+		assert(pigen_data_type_signedness(&model,resolution.operation.result_data_type)==PIGEN_SIGN_UNSIGNED);
+		assert(pigen_data_type_state_domain(&model,resolution.operation.result_data_type)==PIGEN_DATA_TYPE_STATE_FOUR);
+		assert(evaluate_width(&model,pigen_data_type_packed_width(&model,resolution.operation.left_data_type))==8);
+		assert(pigen_data_type_signedness(&model,resolution.operation.left_data_type)==PIGEN_SIGN_UNSIGNED);
+		assert(pigen_data_type_state_domain(&model,resolution.operation.left_data_type)==PIGEN_DATA_TYPE_STATE_FOUR);
+	}
+	pigen_data_type_id numerical=pigen_data_type_unsigned_integer(&model,pigen_data_type_packed_width(&model,left));
+	pigen_binary_resolution rejected;
+	assert(!pigen_data_type_resolve_binary_operation(&model,PIGEN_BINARY_DIVIDE,numerical,right,&rejected));
+	assert(!pigen_data_type_resolve_binary_operation(&model,PIGEN_BINARY_MODULO,right,numerical,&rejected));
+	pigen_free_semantic_model(&model);
+}
+
 static void assert_small_exact_range_table(pigen_semantic_model *model,
 	pigen_data_type_id unsized_integer_data_type)
 {
@@ -151,8 +176,293 @@ static void assert_small_exact_range_table(pigen_semantic_model *model,
 	}
 }
 
+static void assert_procedural_scope_bindings(void)
+{
+	const char text[]="parent block local sibling";
+	pigen_source_manager sources={0};
+	pigen_source_id source=pigen_source_add(&sources,"blocks.pigen",text,strlen(text));
+	pigen_source_span whole={source,0,strlen(text)};
+	pigen_source_span name=occurrence(source,text,"block",0);
+	pigen_source_span local=occurrence(source,text,"local",0);
+	pigen_source_span sibling=occurrence(source,text,"sibling",0);
+	pigen_semantic_model model;
+	pigen_semantic_init(&model,&sources);
+	pigen_scope_id root=pigen_scope_add(&model,INVALID_ID(pigen_scope_id),whole);
+	pigen_scope_id child=pigen_scope_add(&model,root,whole);
+	pigen_scope_id other=pigen_scope_add(&model,root,whole);
+	pigen_symbol_id block,inside,outside,duplicate;
+	pigen_data_type_id type=pigen_data_type_sized_logic(&model,8,PIGEN_SIGN_UNSIGNED);
+	assert(pigen_symbol_declare(&model,root,PIGEN_SYMBOL_PROCEDURAL_SCOPE,INVALID_ID(pigen_data_type_id),name,whole,&block,NULL)==PIGEN_DECLARE_OK);
+	assert(!pigen_symbol_bind_procedural_scope(&model,block,child));
+	model.scopes[child.index].is_procedural=1;
+	model.scopes[other.index].is_procedural=1;
+	assert(pigen_symbol_bind_procedural_scope(&model,block,child));
+	assert(pigen_symbol_bind_procedural_scope(&model,block,child));
+	assert(!pigen_symbol_bind_procedural_scope(&model,block,other));
+	assert(!pigen_symbol_bind_procedural_scope(NULL,block,child));
+	assert(pigen_symbol_declare(&model,child,PIGEN_SYMBOL_SIGNAL,type,local,whole,&inside,NULL)==PIGEN_DECLARE_OK);
+	assert(pigen_symbol_declare(&model,root,PIGEN_SYMBOL_SIGNAL,type,sibling,whole,&outside,NULL)==PIGEN_DECLARE_OK);
+	assert(!pigen_symbol_bind_procedural_scope(&model,outside,child));
+	assert(pigen_symbol_lookup_local(&model,child,local).index==inside.index);
+	assert(pigen_symbol_lookup_local(&model,child,sibling).index==PIGEN_INVALID_ID);
+	assert(pigen_symbol_lookup(&model,child,sibling).index==outside.index);
+	assert(pigen_symbol_declare(&model,root,PIGEN_SYMBOL_SIGNAL,type,name,whole,&duplicate,NULL)==PIGEN_DECLARE_DUPLICATE);
+	assert(model.symbols[block.index].object.scope.index==child.index);
+	pigen_free_semantic_model(&model);pigen_free_sources(&sources);
+}
+
+static void assert_package_import_bindings(void)
+{
+ const char text[]="first second word_t other relay helper";pigen_source_manager sources={0};pigen_semantic_model model;
+ pigen_source_id source=pigen_source_add(&sources,"imports.pigen",text,strlen(text));
+ pigen_source_span span={source,0,strlen(text)},word=occurrence(source,text,"word_t",0),other=occurrence(source,text,"other",0);
+ pigen_semantic_init(&model,&sources);
+ pigen_scope_id root=pigen_scope_add(&model,INVALID_ID(pigen_scope_id),span);model.compilation_scope=root;
+ pigen_symbol_id packages[2],members[2],outer;
+ for(size_t i=0;i<2;i++)
+ {
+  pigen_source_span name=occurrence(source,text,i ? "second" : "first",0);
+  assert(pigen_symbol_declare(&model,root,PIGEN_SYMBOL_PACKAGE,INVALID_ID(pigen_data_type_id),name,span,&packages[i],NULL)==PIGEN_DECLARE_OK);
+  pigen_scope_id scope=pigen_scope_add(&model,root,span);
+  assert(pigen_symbol_bind_package_scope(&model,packages[i],scope));
+  pigen_data_type_id type=pigen_data_type_sized_integral(&model,i ? 16 : 8,PIGEN_SIGN_UNSIGNED,PIGEN_DATA_TYPE_STATE_TWO);
+  assert(pigen_symbol_declare(&model,scope,PIGEN_SYMBOL_TYPEDEF,type,word,span,&members[i],NULL)==PIGEN_DECLARE_OK);
+ }
+ pigen_data_type_id local=pigen_data_type_sized_integral(&model,24,PIGEN_SIGN_UNSIGNED,PIGEN_DATA_TYPE_STATE_TWO);
+ assert(pigen_symbol_declare(&model,root,PIGEN_SYMBOL_TYPEDEF,local,word,span,&outer,NULL)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_declare(&model,root,PIGEN_SYMBOL_TYPEDEF,local,other,span,NULL,NULL)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_lookup_package_member(&model,root,occurrence(source,text,"first",0),other).index==PIGEN_INVALID_ID);
+ pigen_scope_id unused=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,unused,packages[0],word,1,10,span)==PIGEN_DECLARE_OK);
+ size_t imports=model.import_count;
+ assert(pigen_symbol_lookup(&model,unused,word).index==members[0].index);
+ assert(pigen_symbol_lookup_text(&model,unused,"word_t",6).index==members[0].index);
+ assert(model.import_count==imports); /* Pure queries do not activate wildcard candidates. */
+ pigen_scope_id call_scope=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,call_scope,packages[0],word,1,10,span)==PIGEN_DECLARE_OK);
+ assert(pigen_import_package(&model,call_scope,packages[1],word,0,20,span)==PIGEN_DECLARE_OK);
+ int call_ambiguous=1;imports=model.import_count;
+ assert(pigen_symbol_resolve_call_text_at(&model,call_scope,"word_t",6,11,&call_ambiguous).index==members[1].index);
+ assert(!call_ambiguous && model.import_count==imports);
+ assert(pigen_symbol_lookup_text_at(&model,call_scope,"word_t",6,11).index==members[0].index);
+ pigen_scope_id future_call=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,future_call,packages[0],word,1,20,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_resolve_call_text_at(&model,future_call,"word_t",6,11,&call_ambiguous).index==outer.index);
+ assert(!call_ambiguous);
+ pigen_scope_id frozen_call=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,frozen_call,packages[0],word,1,10,span)==PIGEN_DECLARE_OK);
+ assert(pigen_import_package(&model,frozen_call,packages[1],word,1,20,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_resolve_call_text_at(&model,frozen_call,"word_t",6,21,&call_ambiguous).index==PIGEN_INVALID_ID);
+ assert(call_ambiguous);
+ imports=model.import_count;
+ assert(pigen_symbol_resolve_call_text_at(&model,frozen_call,"word_t",6,11,&call_ambiguous).index==members[0].index);
+ assert(!call_ambiguous && model.import_count==imports+1);
+ assert(model.imports[model.import_count-1].at==11);
+ assert(pigen_symbol_resolve_call_text_at(&model,frozen_call,"word_t",6,21,&call_ambiguous).index==members[0].index);
+ assert(!call_ambiguous);
+ pigen_scope_id nested_call=pigen_scope_add(&model,frozen_call,span);
+ assert(pigen_import_package(&model,nested_call,packages[1],word,0,30,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_resolve_call_text_at(&model,nested_call,"word_t",6,11,&call_ambiguous).index==members[1].index);
+ assert(!call_ambiguous);
+ assert(pigen_symbol_resolve_call_text_at(NULL,nested_call,"word_t",6,11,&call_ambiguous).index==PIGEN_INVALID_ID);
+ assert(pigen_symbol_declare(&model,unused,PIGEN_SYMBOL_TYPEDEF,local,word,span,NULL,NULL)==PIGEN_DECLARE_OK);
+ pigen_scope_id frozen=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,frozen,packages[0],word,1,10,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_resolve_at(&model,frozen,word,9).index==outer.index);
+ imports=model.import_count;
+ assert(pigen_symbol_lookup_at(&model,frozen,word,9).index==outer.index);
+ assert(pigen_symbol_lookup_at(&model,frozen,word,11).index==members[0].index);
+ assert(pigen_symbol_lookup_text_at(&model,frozen,"word_t",6,11).index==members[0].index);
+ assert(model.import_count==imports);
+ size_t symbols=model.symbol_count;
+ assert(pigen_symbol_resolve_at(&model,frozen,word,11).index==members[0].index);
+ assert(model.symbol_count==symbols);
+ assert(pigen_import_package(&model,frozen,packages[1],word,1,12,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_resolve_at(&model,frozen,word,13).index==members[0].index);
+ assert(pigen_symbol_declare(&model,frozen,PIGEN_SYMBOL_TYPEDEF,local,word,span,NULL,NULL)==PIGEN_DECLARE_DUPLICATE);
+ pigen_scope_id ambiguous=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,ambiguous,packages[0],word,1,10,span)==PIGEN_DECLARE_OK);
+ assert(pigen_import_package(&model,ambiguous,packages[1],word,1,12,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_lookup(&model,ambiguous,word).index==PIGEN_INVALID_ID);
+ assert(pigen_symbol_import_ambiguous(&model,ambiguous,word,13));
+ assert(pigen_import_package(&model,ambiguous,packages[0],word,0,14,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_resolve_at(&model,ambiguous,word,15).index==members[0].index);
+ imports=model.import_count;
+ assert(pigen_import_package(&model,ambiguous,packages[0],word,0,16,span)==PIGEN_DECLARE_OK);
+ assert(model.import_count==imports);
+ assert(pigen_import_package(&model,ambiguous,packages[1],word,0,17,span)==PIGEN_DECLARE_DUPLICATE);
+ pigen_source_span relay_name=occurrence(source,text,"relay",0);
+ pigen_symbol_id relay;
+ assert(pigen_symbol_declare(&model,root,PIGEN_SYMBOL_PACKAGE,INVALID_ID(pigen_data_type_id),relay_name,span,&relay,NULL)==PIGEN_DECLARE_OK);
+ pigen_scope_id exported=pigen_scope_add(&model,root,span);
+ assert(pigen_symbol_bind_package_scope(&model,relay,exported));
+ assert(pigen_export_package(&model,exported,packages[0],word,0,9,span)==PIGEN_DECLARE_INVALID);
+ assert(pigen_import_package(&model,exported,packages[0],word,1,10,span)==PIGEN_DECLARE_OK);
+ assert(pigen_export_package(&model,exported,packages[0],word,1,11,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_lookup_package_member(&model,root,relay_name,word).index==PIGEN_INVALID_ID);
+ assert(pigen_symbol_resolve_at(&model,exported,word,12).index==members[0].index);
+ symbols=model.symbol_count;
+ assert(pigen_export_package(&model,exported,packages[0],word,1,13,span)==PIGEN_DECLARE_OK);
+ assert(model.symbol_count==symbols+1);
+ assert(pigen_symbol_lookup_package_member(&model,root,relay_name,word).index==members[0].index);
+ assert(pigen_export_package(&model,exported,packages[0],word,0,14,span)==PIGEN_DECLARE_OK);
+ assert(model.symbol_count==symbols+1);
+ assert(pigen_import_package(&model,exported,packages[0],word,0,15,span)==PIGEN_DECLARE_OK);
+ pigen_scope_id diamond=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,diamond,packages[0],word,1,16,span)==PIGEN_DECLARE_OK);
+ assert(pigen_import_package(&model,diamond,relay,word,1,16,span)==PIGEN_DECLARE_OK);
+ assert(!pigen_symbol_import_ambiguous(&model,diamond,word,17));
+ assert(pigen_symbol_resolve_at(&model,diamond,word,17).index==members[0].index);
+ pigen_scope_id named=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,named,packages[0],word,1,10,span)==PIGEN_DECLARE_OK);
+ assert(pigen_export_package(&model,named,packages[0],word,0,11,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_lookup_local(&model,named,word).index==members[0].index);
+ assert(pigen_symbol_declare(&model,named,PIGEN_SYMBOL_TYPEDEF,local,word,span,NULL,NULL)==PIGEN_DECLARE_DUPLICATE);
+ assert(pigen_export_package(&model,named,packages[1],word,0,12,span)==PIGEN_DECLARE_INVALID);
+ pigen_scope_id all=pigen_scope_add(&model,root,span);
+ assert(pigen_import_package(&model,all,packages[0],word,0,10,span)==PIGEN_DECLARE_OK);
+ assert(pigen_export_package(&model,all,INVALID_ID(pigen_symbol_id),word,1,11,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_lookup_local(&model,all,word).index==members[0].index);
+ pigen_source_span helper=occurrence(source,text,"helper",0);
+ pigen_scope_id first_scope=pigen_symbol_get(&model,packages[0])->object.scope;
+ pigen_symbol_id routine;
+ size_t signals=model.signal_count,parameters=model.parameter_count;
+ assert(pigen_symbol_declare(&model,first_scope,PIGEN_SYMBOL_RETAINED_SUBROUTINE,
+  INVALID_ID(pigen_data_type_id),helper,span,&routine,NULL)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_get(&model,routine)->data_type.index==PIGEN_INVALID_ID);
+ assert(pigen_symbol_signal(&model,routine).index==PIGEN_INVALID_ID);
+ assert(pigen_symbol_declare(&model,first_scope,PIGEN_SYMBOL_RETAINED_SUBROUTINE,
+  local,other,span,NULL,NULL)==PIGEN_DECLARE_INVALID);
+ assert(pigen_import_package(&model,exported,packages[0],helper,0,18,span)==PIGEN_DECLARE_OK);
+ assert(pigen_export_package(&model,exported,packages[0],helper,0,19,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_lookup_package_member(&model,root,relay_name,helper).index==routine.index);
+ assert(pigen_import_package(&model,diamond,relay,helper,0,20,span)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_resolve_at(&model,diamond,helper,21).index==routine.index);
+ pigen_token_id call_name={123};
+ assert(!pigen_retained_call_bind(NULL,call_name,routine,0));
+ assert(!pigen_retained_call_bind(&model,INVALID_ID(pigen_token_id),routine,0));
+ assert(!pigen_retained_call_bind(&model,call_name,members[0],0));
+ assert(pigen_retained_call_bind(&model,call_name,model.scopes[exported.index].last_symbol,0));
+ assert(model.retained_call_count==1 && model.retained_calls[0].name.index==call_name.index);
+ assert(model.retained_calls[0].package.index==packages[0].index && model.retained_calls[0].target.index==routine.index);
+ assert(pigen_retained_call_bind(&model,call_name,routine,0) && model.retained_call_count==1);
+ pigen_symbol_id other_routine;
+ assert(pigen_symbol_declare(&model,pigen_symbol_get(&model,packages[1])->object.scope,PIGEN_SYMBOL_RETAINED_SUBROUTINE,
+  INVALID_ID(pigen_data_type_id),helper,span,&other_routine,NULL)==PIGEN_DECLARE_OK);
+ assert(!pigen_retained_call_bind(&model,call_name,other_routine,0) && model.retained_call_count==1);
+ assert(!pigen_retained_call_bind(&model,call_name,routine,1) && model.retained_call_count==1);
+ assert(!pigen_retained_call_bind(&model,(pigen_token_id){124},routine,2));
+ assert(pigen_retained_call_bind(&model,(pigen_token_id){124},routine,1));
+ assert(model.retained_call_count==2 && model.retained_calls[1].bare==1);
+ pigen_scope_id retained=pigen_scope_add(&model,frozen,span);
+ pigen_symbol_id retained_local;
+ assert(pigen_symbol_declare(&model,retained,PIGEN_SYMBOL_RETAINED_LOCAL,
+  INVALID_ID(pigen_data_type_id),word,span,&retained_local,NULL)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_lookup_at(&model,retained,word,22).index==retained_local.index);
+ assert(pigen_symbol_signal(&model,retained_local).index==PIGEN_INVALID_ID);
+ assert(pigen_symbol_get(&model,retained_local)->data_type.index==PIGEN_INVALID_ID);
+ assert(pigen_symbol_declare(&model,retained,PIGEN_SYMBOL_RETAINED_LOCAL,
+  local,other,span,NULL,NULL)==PIGEN_DECLARE_INVALID);
+ assert(model.signal_count==signals && model.parameter_count==parameters);
+ pigen_free_semantic_model(&model);pigen_free_sources(&sources);
+}
+
+static void assert_packed_type_matching(void)
+{
+ pigen_source_manager sources={0};const char text[]="bit logic R S copy lo missing";
+ pigen_source_id source=pigen_source_add(&sources,"matching.pigen",text,strlen(text));
+ pigen_source_span span={source,0,strlen(text)};pigen_semantic_model model;
+ pigen_semantic_init(&model,&sources);
+ pigen_scope_id scope=pigen_scope_add(&model,INVALID_ID(pigen_scope_id),span);
+ pigen_data_type_id integer=pigen_data_type_unsized_integer(&model);
+ pigen_const_expr_id zero=pigen_const_expr_intern_integer(&model,0,integer);
+ pigen_const_expr_id thirty_one=pigen_const_expr_intern_integer(&model,31,integer);
+ pigen_const_expr_id thirty_two=pigen_const_expr_intern_integer(&model,32,integer);
+ pigen_data_type_argument count={.kind=PIGEN_DATA_TYPE_ARGUMENT_COUNT,.as.count=thirty_two};
+ pigen_source_span bit=occurrence(source,text,"bit",0),logic=occurrence(source,text,"logic",0);
+ pigen_data_type_id flat=pigen_data_type_from_spelling(&model,bit,PIGEN_SIGN_IMPLICIT,&count,1);
+ pigen_data_type_id numeric=pigen_data_type_unsigned_integer(&model,thirty_two);
+ pigen_data_type_id four=pigen_data_type_from_spelling(&model,logic,PIGEN_SIGN_UNSIGNED,&count,1);
+ pigen_data_type_id sign=pigen_data_type_from_spelling(&model,bit,PIGEN_SIGN_SIGNED,&count,1);
+ pigen_data_type_argument reverse={.kind=PIGEN_DATA_TYPE_ARGUMENT_RANGE,.as.range={zero,thirty_one}};
+ pigen_data_type_id reversed=pigen_data_type_from_spelling(&model,bit,PIGEN_SIGN_UNSIGNED,&reverse,1);
+ pigen_data_type_argument dims[]={{.kind=PIGEN_DATA_TYPE_ARGUMENT_COUNT,.as.count=pigen_const_expr_intern_integer(&model,4,integer)},
+  {.kind=PIGEN_DATA_TYPE_ARGUMENT_COUNT,.as.count=pigen_const_expr_intern_integer(&model,8,integer)}};
+ pigen_data_type_id matrix=pigen_data_type_from_spelling(&model,bit,PIGEN_SIGN_UNSIGNED,dims,2);
+ assert(pigen_data_type_matches(&model,flat,numeric)==1);
+ assert(pigen_data_type_matches(&model,flat,four)==0);
+ assert(pigen_data_type_matches(&model,flat,sign)==0);
+ assert(pigen_data_type_matches(&model,flat,reversed)==0);
+ assert(pigen_data_type_matches(&model,flat,matrix)==0);
+ pigen_symbol_id r,s,copy,missing;
+ assert(pigen_symbol_declare(&model,scope,PIGEN_SYMBOL_TYPEDEF,flat,occurrence(source,text,"R",0),span,&r,NULL)==PIGEN_DECLARE_OK);
+ assert(pigen_symbol_declare(&model,scope,PIGEN_SYMBOL_TYPEDEF,flat,occurrence(source,text,"S",0),span,&s,NULL)==PIGEN_DECLARE_OK);
+ pigen_data_type_id record=pigen_data_type_alias(&model,r,flat,PIGEN_SIGN_IMPLICIT,NULL,0);
+ pigen_data_type_id other=pigen_data_type_alias(&model,s,flat,PIGEN_SIGN_IMPLICIT,NULL,0);
+ assert(pigen_struct_member_add(&model,r,occurrence(source,text,"lo",0),flat,0));
+ assert(pigen_struct_member_add(&model,s,occurrence(source,text,"lo",0),flat,0));
+ assert(pigen_symbol_declare(&model,scope,PIGEN_SYMBOL_TYPEDEF,record,occurrence(source,text,"copy",0),span,&copy,NULL)==PIGEN_DECLARE_OK);
+ pigen_data_type_id alias=pigen_data_type_alias(&model,copy,record,PIGEN_SIGN_IMPLICIT,NULL,0);
+ assert(pigen_data_type_matches(&model,record,alias)==1);
+ assert(pigen_data_type_matches(&model,record,other)==0);
+ assert(pigen_data_type_matches(&model,record,flat)==0);
+ assert(pigen_symbol_declare(&model,scope,PIGEN_SYMBOL_PARAMETER,numeric,occurrence(source,text,"missing",0),span,&missing,NULL)==PIGEN_DECLARE_OK);
+ pigen_data_type_argument unknown={.kind=PIGEN_DATA_TYPE_ARGUMENT_RANGE,
+  .as.range={pigen_const_expr_intern_symbol(&model,missing,numeric),zero}};
+ pigen_data_type_id unresolved=pigen_data_type_from_spelling(&model,bit,PIGEN_SIGN_UNSIGNED,&unknown,1);
+ assert(pigen_data_type_matches(&model,flat,unresolved)==-1);
+ assert(pigen_data_type_matches(&model,flat,INVALID_ID(pigen_data_type_id))==-1);
+ pigen_free_semantic_model(&model);pigen_free_sources(&sources);
+}
+
+static void assert_unpacked_pattern_shapes(void)
+{
+ pigen_source_manager sources={0};const char text[]="patterns";
+ pigen_source_id source=pigen_source_add(&sources,"patterns.pigen",text,strlen(text));
+ pigen_source_span span={source,0,strlen(text)};pigen_semantic_model model;
+ pigen_semantic_init(&model,&sources);
+ pigen_data_type_id type=pigen_data_type_sized_logic(&model,8,PIGEN_SIGN_UNSIGNED);
+ pigen_bit_state bits[]={PIGEN_BIT_X,PIGEN_BIT_Z,PIGEN_BIT_ZERO,PIGEN_BIT_ONE,PIGEN_BIT_ZERO,PIGEN_BIT_ONE,PIGEN_BIT_ZERO,PIGEN_BIT_ONE};
+ pigen_expr_id value=pigen_expr_add_bits(&model,bits,8,type,span),leaf=value;
+ assert(pigen_const_expr_evaluate_bit(&model,pigen_expr_constant(&model,leaf),0,&bits[0]) && bits[0]==PIGEN_BIT_X);
+ assert(pigen_const_expr_evaluate_bit(&model,pigen_expr_constant(&model,leaf),1,&bits[1]) && bits[1]==PIGEN_BIT_Z);
+ pigen_const_expr_id two=pigen_const_expr_intern_integer(&model,2,pigen_data_type_unsized_integer(&model));
+ pigen_shape_dimension dimensions[13];
+ for(size_t i=0;i<13;i++) dimensions[i]=(pigen_shape_dimension){.form=PIGEN_SHAPE_DIMENSION_COUNT,.as.count=two};
+ pigen_shape_id shapes[14];shapes[13]=pigen_shape_intern(&model,dimensions,13);
+ /* Suffix interning must copy dimensions before growing their own arena. */
+ for(size_t rank=13;rank;rank--) shapes[rank-1]=pigen_shape_element(&model,shapes[rank]);
+ assert(shapes[0].index==pigen_semantic_scalar_shape(&model).index);
+ int64_t left,right;size_t count;
+ assert(pigen_shape_dimension_bounds(&model,shapes[13],12,&left,&right,&count) && left==1 && right==0 && count==2);
+ assert(!pigen_shape_dimension_bounds(&model,shapes[13],13,&left,&right,&count));
+ for(size_t rank=1;rank<=13;rank++)
+ {
+  pigen_expr_id children[]={value,value};
+  value=pigen_expr_add_array_pattern(&model,type,shapes[rank],children,2,span);
+  assert(value.index!=PIGEN_INVALID_ID);
+  assert(model.expressions[value.index].shape.index==shapes[rank].index);
+  assert(model.expressions[value.index].constant.index==PIGEN_INVALID_ID);
+ }
+ const pigen_semantic_expr *pattern=pigen_expr_get(&model,value);
+ size_t first=pattern->as.sequence.first_child,before=model.expression_count,children_before=model.expression_child_count;
+ pigen_expr_id *owned=model.expression_children+first;
+ assert(pigen_expr_add_array_pattern(&model,type,shapes[13],owned,1,span).index==PIGEN_INVALID_ID);
+ assert(pigen_expr_add_array_pattern(&model,type,shapes[12],owned,2,span).index==PIGEN_INVALID_ID);
+ assert(model.expression_count==before && model.expression_child_count==children_before);
+ pigen_expr_id copied=pigen_expr_add_array_pattern(&model,type,shapes[13],owned,2,span);
+ assert(copied.index!=PIGEN_INVALID_ID);
+ assert(model.expression_children[model.expressions[copied.index].as.sequence.first_child].index==model.expression_children[first].index);
+ pigen_free_semantic_model(&model);pigen_free_sources(&sources);
+}
+
 int main(void)
 {
+ assert_package_import_bindings();
+	assert_packed_type_matching();
+	assert_unpacked_pattern_shapes();
+	assert_procedural_scope_bindings();
+	assert_sv_division_types();
 	const char text[] =
 		"module sample;\n"
 		"  logic [7:0] value;\n"
@@ -495,6 +805,13 @@ int main(void)
 
 		wide_bits[128]=PIGEN_BIT_X; wide_bits[0]=PIGEN_BIT_ZERO;
 		pigen_const_expr_id unknown_wide=pigen_const_expr_intern_bits(&model,wide_bits,129,wide_reduction_type);
+		pigen_bit_state inspected;
+		assert(pigen_const_expr_evaluate_bit(&model,unknown_wide,128,&inspected) && inspected==PIGEN_BIT_X);
+		assert(pigen_const_expr_evaluate_bit(&model,unknown_wide,0,&inspected) && inspected==PIGEN_BIT_ZERO);
+		assert(pigen_const_expr_evaluate_bit(&model,unknown_wide,1,&inspected) && inspected==PIGEN_BIT_ONE);
+		assert(!pigen_const_expr_evaluate_bit(&model,unknown_wide,129,&inspected));
+		assert(!pigen_const_expr_evaluate_bit(NULL,unknown_wide,0,&inspected));
+		assert(!pigen_const_expr_evaluate_bit(&model,unknown_wide,0,NULL));
 		pigen_const_expr_id dominant=pigen_const_expr_intern_unary(&model,
 			(pigen_unary_operation){PIGEN_UNARY_REDUCTION_AND,wide_reduction_type,boolean_type},unknown_wide);
 		assert(pigen_const_expr_evaluate_i64(&model,dominant,&coordinate) && coordinate==0);

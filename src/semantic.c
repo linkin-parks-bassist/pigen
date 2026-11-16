@@ -29,6 +29,9 @@ static int macro_name_allowed(const pigen_semantic_model *model,
 	return file && file->path && !strncmp(file->path, "<pigen-macro>", 13);
 }
 
+static int scope_is_within(const pigen_semantic_model *model,
+	pigen_scope_id scope, pigen_scope_id ancestor);
+
 static int spans_equal(pigen_source_span left, pigen_source_span right)
 {
 	return left.source.index == right.source.index && left.start == right.start &&
@@ -169,6 +172,30 @@ const pigen_shape_dimension *pigen_shape_dimensions(
 	return model->shape_dimensions + known->first_dimension;
 }
 
+int pigen_shape_dimension_bounds(pigen_semantic_model *model,pigen_shape_id shape,
+ size_t dimension,int64_t *left,int64_t *right,size_t *count)
+{
+ const pigen_semantic_shape *known=pigen_shape_get(model,shape);
+ const pigen_shape_dimension *dimensions=pigen_shape_dimensions(model,shape);
+ if(!known || !dimensions || dimension>=known->dimension_count || !left || !right || !count) return 0;
+ pigen_shape_dimension value=dimensions[dimension];uint64_t length;
+ if(value.form==PIGEN_SHAPE_DIMENSION_COUNT)
+ {
+  if(!pigen_const_expr_evaluate_u64(model,value.as.count,&length) || !length || length>INT64_MAX) return 0;
+  *left=(int64_t)length-1;*right=0;
+ }
+ else
+ {
+  if(!pigen_const_expr_evaluate_i64(model,value.as.range.left,left) ||
+   !pigen_const_expr_evaluate_i64(model,value.as.range.right,right)) return 0;
+  uint64_t distance=*left<*right ? (uint64_t)*right-(uint64_t)*left : (uint64_t)*left-(uint64_t)*right;
+  if(distance==UINT64_MAX) return 0;
+  length=distance+1;
+ }
+ if(length>SIZE_MAX) return 0;
+ *count=(size_t)length;return 1;
+}
+
 pigen_shape_id pigen_shape_element(pigen_semantic_model *model,
 	pigen_shape_id shape)
 {
@@ -178,8 +205,11 @@ pigen_shape_id pigen_shape_element(pigen_semantic_model *model,
 
 	if (!known || !known->dimension_count || !dimensions)
 		return INVALID_ID(pigen_shape_id);
-	return pigen_shape_intern(model, dimensions + 1,
-		known->dimension_count - 1);
+	size_t count=known->dimension_count-1;
+	pigen_shape_dimension *copy=count ? pigen_resize(NULL,count*sizeof(*copy)) : NULL;
+	if(count) memcpy(copy,dimensions+1,count*sizeof(*copy));
+	pigen_shape_id result=pigen_shape_intern(model,copy,count);
+	free(copy);return result;
 }
 
 static int const_expressions_equal(const pigen_semantic_model *model,
@@ -347,7 +377,7 @@ pigen_const_expr_id pigen_const_expr_intern_exact_integer(
 static int conversion_is_semantic(pigen_conversion conversion)
 {
 	return conversion.kind > PIGEN_CONVERSION_IDENTITY &&
-		conversion.kind <= PIGEN_CONVERSION_INTEGER_TO_VECTOR;
+		conversion.kind <= PIGEN_CONVERSION_FOUR_TO_TWO;
 }
 
 pigen_const_expr_id pigen_const_expr_intern_conversion(
@@ -1215,6 +1245,263 @@ static int evaluate_i64(pigen_semantic_model *model,
 	return 1;
 }
 
+static int constant_type_width(pigen_semantic_model *model,pigen_data_type_id type,
+	uint64_t *width,size_t remaining)
+{
+	if(pigen_data_type_numerical_interpretation(model,type)==PIGEN_NUMERICAL_EXACT_INTEGER)
+	{
+		pigen_integer_id value=pigen_data_type_exact_value(model,type);
+		*width=pigen_integer_signed_width(model,value);return *width!=0;
+	}
+	return evaluate_u64(model,pigen_data_type_packed_width(model,type),width,remaining) && *width;
+}
+
+static int constant_truth_state(pigen_semantic_model *model,pigen_const_expr_id expression,
+	size_t remaining,pigen_bit_state *state);
+
+static int constant_bit(pigen_semantic_model *model,pigen_const_expr_id expression,
+	uint64_t bit,size_t remaining,pigen_bit_state *state)
+{
+	const pigen_const_expr *record=pigen_const_expr_get(model,expression);
+	if(!record || !remaining) return 0;
+	pigen_const_expr known=*record;uint64_t width;
+	if(!constant_type_width(model,known.data_type,&width,remaining-1)) return 0;
+	if(bit>=width)
+	{
+		if(pigen_data_type_signedness(model,known.data_type)==PIGEN_SIGN_SIGNED)
+			return constant_bit(model,expression,width-1,remaining-1,state);
+		*state=PIGEN_BIT_ZERO;return 1;
+	}
+	switch(known.kind)
+	{
+	case PIGEN_CONST_EXPR_BITS:
+		if(bit>=known.as.bits.state_count) return 0;
+		*state=model->literal_states[known.as.bits.first_state+(size_t)bit];return 1;
+	case PIGEN_CONST_EXPR_EXACT_INTEGER:
+	{
+		if(known.as.exact_integer.index>=model->integer_count) return 0;
+		pigen_integer value=model->integers[known.as.exact_integer.index];
+		size_t limb=(size_t)(bit/32);uint32_t word=limb<value.limb_count ? model->integer_limbs[value.first_limb+limb] : 0;
+		if(value.negative)
+		{
+			int borrow=1;
+			for(size_t i=0;i<limb && i<value.limb_count;i++) if(model->integer_limbs[value.first_limb+i]) {borrow=0;break;}
+			word=~(word-(uint32_t)borrow);
+		}
+		*state=(word>>(bit%32))&1;return 1;
+	}
+	case PIGEN_CONST_EXPR_SYMBOL:
+	{
+		const pigen_semantic_parameter *parameter=pigen_parameter_get(model,pigen_symbol_parameter(model,known.as.symbol));
+		if(!parameter || !constant_bit(model,pigen_expr_constant(model,parameter->value),bit,remaining-1,state)) return 0;
+		if(pigen_data_type_state_domain(model,known.data_type)==PIGEN_DATA_TYPE_STATE_TWO && *state>PIGEN_BIT_ONE) *state=PIGEN_BIT_ZERO;
+		return 1;
+	}
+	case PIGEN_CONST_EXPR_CONVERSION:
+	{
+		pigen_conversion conversion=known.as.conversion.conversion;uint64_t source_width;
+		if(!constant_type_width(model,conversion.source_data_type,&source_width,remaining-1)) return 0;
+		if(bit>=source_width && pigen_data_type_signedness(model,conversion.source_data_type)!=PIGEN_SIGN_SIGNED) *state=PIGEN_BIT_ZERO;
+		else if(!constant_bit(model,known.as.conversion.operand,bit>=source_width ? source_width-1 : bit,remaining-1,state)) return 0;
+		if(pigen_data_type_state_domain(model,known.data_type)==PIGEN_DATA_TYPE_STATE_TWO && *state>PIGEN_BIT_ONE) *state=PIGEN_BIT_ZERO;
+		return 1;
+	}
+	case PIGEN_CONST_EXPR_CONCATENATION:
+	{
+		for(size_t i=known.as.sequence.child_count;i--;)
+		{
+			pigen_const_expr_id child=model->constant_expression_children[known.as.sequence.first_child+i];
+			const pigen_const_expr *part=pigen_const_expr_get(model,child);uint64_t bits;
+			if(!part || !constant_type_width(model,part->data_type,&bits,remaining-1)) return 0;
+			if(bit<bits) return constant_bit(model,child,bit,remaining-1,state);
+			bit-=bits;
+		}
+		return 0;
+	}
+	case PIGEN_CONST_EXPR_INDEX:
+	case PIGEN_CONST_EXPR_SELECT:
+	{
+		int indexed=known.kind==PIGEN_CONST_EXPR_INDEX;
+		pigen_const_expr_id base=indexed ? known.as.index.base : known.as.select.base;
+		const pigen_const_expr *source=pigen_const_expr_get(model,base);
+		if(!source) return 0;
+		pigen_data_type_id type=source->data_type;
+		const pigen_packed_dimension *dimensions=pigen_data_type_dimensions(model,type);
+		if(!dimensions || !pigen_data_type_dimension_count(model,type)) return 0;
+		pigen_packed_dimension dimension=dimensions[0];
+		int64_t left,right,coordinate;uint64_t total;
+		if(!evaluate_i64(model,dimension.left,&left,remaining-1) || !evaluate_i64(model,dimension.right,&right,remaining-1) ||
+			!constant_type_width(model,type,&total,remaining-1)) return 0;
+		uint64_t distance=left>=right ? (uint64_t)left-(uint64_t)right : (uint64_t)right-(uint64_t)left;
+		if(distance==UINT64_MAX || total%(distance+1)) return 0;
+		uint64_t element=total/(distance+1);
+		if(!element) return 0;
+		pigen_const_expr_id start=indexed ? known.as.index.index :
+			known.as.select.kind==PIGEN_SEMANTIC_SELECT_RANGE ? known.as.select.right : known.as.select.left;
+		if(!evaluate_i64(model,start,&coordinate,remaining-1))
+		{
+			const pigen_const_expr *index=pigen_const_expr_get(model,start);uint64_t bits;
+			if(!index || !constant_type_width(model,index->data_type,&bits,remaining-1)) return 0;
+			for(uint64_t i=0;i<bits;i++)
+			{
+				pigen_bit_state digit;
+				if(!constant_bit(model,start,i,remaining-1,&digit)) return 0;
+				if(digit>PIGEN_BIT_ONE) {*state=PIGEN_BIT_X;return 1;}
+			}
+			return 0;
+		}
+		if(!indexed)
+		{
+			uint64_t step=bit/element;
+			if(step>INT64_MAX) return 0;
+			int64_t offset=left>=right ? (int64_t)step : -(int64_t)step;
+			if(known.as.select.kind!=PIGEN_SEMANTIC_SELECT_RANGE)
+			{
+				int64_t count;
+				if(!evaluate_i64(model,known.as.select.right,&count,remaining-1) || count<=0) return 0;
+				int64_t delta=count-1;
+				if(known.as.select.kind==PIGEN_SEMANTIC_SELECT_INDEXED_UP && left<right)
+					offset=delta-(int64_t)step;
+				if(known.as.select.kind==PIGEN_SEMANTIC_SELECT_INDEXED_DOWN && left>=right)
+					offset=(int64_t)step-delta;
+			}
+			if((offset>0 && coordinate>INT64_MAX-offset) || (offset<0 && coordinate<INT64_MIN-offset))
+			{*state=PIGEN_BIT_X;return 1;}
+			coordinate+=offset;
+		}
+		int64_t low=left<right ? left : right,high=left>right ? left : right;
+		if(coordinate<low || coordinate>high) {*state=PIGEN_BIT_X;return 1;}
+		uint64_t ordinal=left>=right ? (uint64_t)coordinate-(uint64_t)right : (uint64_t)right-(uint64_t)coordinate;
+		return constant_bit(model,base,ordinal*element+bit%element,remaining-1,state);
+	}
+	case PIGEN_CONST_EXPR_CONDITIONAL:
+	{
+		pigen_bit_state condition;
+		if(!constant_truth_state(model,known.as.conditional.condition,remaining-1,&condition)) return 0;
+		if(condition<=PIGEN_BIT_ONE)
+			return constant_bit(model,condition==PIGEN_BIT_ONE ? known.as.conditional.when_true : known.as.conditional.when_false,bit,remaining-1,state);
+		pigen_bit_state a,b;
+		if(!constant_bit(model,known.as.conditional.when_true,bit,remaining-1,&a) ||
+			!constant_bit(model,known.as.conditional.when_false,bit,remaining-1,&b)) return 0;
+		*state=a==b ? a : PIGEN_BIT_X;return 1;
+	}
+	case PIGEN_CONST_EXPR_UNARY:
+		if(known.as.unary.operation.operator==PIGEN_UNARY_POSITIVE)
+			return constant_bit(model,known.as.unary.operand,bit,remaining-1,state);
+		if(known.as.unary.operation.operator==PIGEN_UNARY_LOGICAL_NOT)
+		{
+			if(!constant_truth_state(model,known.as.unary.operand,remaining-1,state)) return 0;
+			if(*state<=PIGEN_BIT_ONE) *state=(pigen_bit_state)!*state;
+			return 1;
+		}
+		if(known.as.unary.operation.operator>=PIGEN_UNARY_REDUCTION_AND && known.as.unary.operation.operator<=PIGEN_UNARY_REDUCTION_XNOR)
+		{
+			const pigen_const_expr *operand=pigen_const_expr_get(model,known.as.unary.operand);uint64_t bits;
+			if(!operand || !constant_type_width(model,operand->data_type,&bits,remaining-1)) return 0;
+			int zero=0,one=0,unknown=0,parity=0;
+			for(uint64_t i=0;i<bits;i++)
+			{
+				pigen_bit_state value;if(!constant_bit(model,known.as.unary.operand,i,remaining-1,&value)) return 0;
+				zero|=value==PIGEN_BIT_ZERO;one|=value==PIGEN_BIT_ONE;unknown|=value>PIGEN_BIT_ONE;parity^=value==PIGEN_BIT_ONE;
+			}
+			pigen_unary_operator op=known.as.unary.operation.operator;
+			if(op==PIGEN_UNARY_REDUCTION_AND || op==PIGEN_UNARY_REDUCTION_NAND) *state=zero ? PIGEN_BIT_ZERO : unknown ? PIGEN_BIT_X : PIGEN_BIT_ONE;
+			else if(op==PIGEN_UNARY_REDUCTION_OR || op==PIGEN_UNARY_REDUCTION_NOR) *state=one ? PIGEN_BIT_ONE : unknown ? PIGEN_BIT_X : PIGEN_BIT_ZERO;
+			else *state=unknown ? PIGEN_BIT_X : (pigen_bit_state)parity;
+			if((op==PIGEN_UNARY_REDUCTION_NAND || op==PIGEN_UNARY_REDUCTION_NOR || op==PIGEN_UNARY_REDUCTION_XNOR) && *state<=PIGEN_BIT_ONE) *state=(pigen_bit_state)!*state;
+			return 1;
+		}
+		if(known.as.unary.operation.operator==PIGEN_UNARY_NEGATE)
+		{
+			int carry=1;pigen_bit_state current=PIGEN_BIT_ZERO;
+			for(uint64_t i=0;i<width;i++)
+			{
+				pigen_bit_state value;
+				if(!constant_bit(model,known.as.unary.operand,i,remaining-1,&value)) return 0;
+				if(value>PIGEN_BIT_ONE) {*state=PIGEN_BIT_X;return 1;}
+				if(i<bit && value==PIGEN_BIT_ONE) carry=0;
+				if(i==bit) current=value;
+			}
+			*state=carry ? current : (pigen_bit_state)!current;return 1;
+		}
+		if(known.as.unary.operation.operator==PIGEN_UNARY_BITWISE_NOT)
+		{
+			if(!constant_bit(model,known.as.unary.operand,bit,remaining-1,state)) return 0;
+			*state=*state<=PIGEN_BIT_ONE ? (pigen_bit_state)!*state : PIGEN_BIT_X;return 1;
+		}
+		break;
+	case PIGEN_CONST_EXPR_BINARY:
+	{
+		pigen_binary_operator op=known.as.binary.operation.operator;
+		if(op==PIGEN_BINARY_BITWISE_AND || op==PIGEN_BINARY_BITWISE_OR || op==PIGEN_BINARY_BITWISE_XOR || op==PIGEN_BINARY_BITWISE_XNOR)
+		{
+			pigen_bit_state a,b;
+			if(!constant_bit(model,known.as.binary.left,bit,remaining-1,&a) || !constant_bit(model,known.as.binary.right,bit,remaining-1,&b)) return 0;
+			if(op==PIGEN_BINARY_BITWISE_AND && (a==PIGEN_BIT_ZERO || b==PIGEN_BIT_ZERO)) *state=PIGEN_BIT_ZERO;
+			else if(op==PIGEN_BINARY_BITWISE_OR && (a==PIGEN_BIT_ONE || b==PIGEN_BIT_ONE)) *state=PIGEN_BIT_ONE;
+			else if(a>PIGEN_BIT_ONE || b>PIGEN_BIT_ONE) *state=PIGEN_BIT_X;
+			else if(op==PIGEN_BINARY_BITWISE_AND) *state=a&b;
+			else if(op==PIGEN_BINARY_BITWISE_OR) *state=a|b;
+			else *state=(pigen_bit_state)((a^b)^(op==PIGEN_BINARY_BITWISE_XNOR));
+			return 1;
+		}
+		break;
+	}
+	default: break;
+	}
+	int64_t signed_value;uint64_t value;int negative=0;
+	if(evaluate_i64(model,expression,&signed_value,remaining-1)) {value=(uint64_t)signed_value;negative=signed_value<0;}
+	else if(!evaluate_u64(model,expression,&value,remaining-1)) return 0;
+	*state=bit<64 ? (pigen_bit_state)((value>>bit)&1) :
+		(pigen_bit_state)(pigen_data_type_signedness(model,known.data_type)==PIGEN_SIGN_SIGNED && negative);
+	return 1;
+}
+
+int pigen_const_expr_evaluate_bit(pigen_semantic_model *model,
+	pigen_const_expr_id expression,uint64_t bit,pigen_bit_state *state)
+{
+	const pigen_const_expr *known=model ? pigen_const_expr_get(model,expression) : NULL;
+	uint64_t width;
+	if (!known || !state || !constant_type_width(model,known->data_type,&width,
+		model->constant_expression_count+1) || bit>=width) return 0;
+	return constant_bit(model,expression,bit,model->constant_expression_count+1,state);
+}
+
+static int constant_truth_state(pigen_semantic_model *model,pigen_const_expr_id expression,
+	size_t remaining,pigen_bit_state *state)
+{
+	const pigen_const_expr *known=pigen_const_expr_get(model,expression);uint64_t width;
+	if(!known || !remaining || !constant_type_width(model,known->data_type,&width,remaining-1)) return 0;
+	int one=0,unknown=0;
+	for(uint64_t i=0;i<width;i++)
+	{
+		pigen_bit_state bit;
+		if(!constant_bit(model,expression,i,remaining-1,&bit)) return 0;
+		one|=bit==PIGEN_BIT_ONE;unknown|=bit>PIGEN_BIT_ONE;
+	}
+	*state=one ? PIGEN_BIT_ONE : unknown ? PIGEN_BIT_X : PIGEN_BIT_ZERO;return 1;
+}
+
+int pigen_const_expr_case_equal(pigen_semantic_model *model,
+	pigen_const_expr_id left,pigen_const_expr_id right,size_t width,int signed_comparison,int *equal)
+{
+	if(!model || !equal || !width) return 0;
+	const pigen_const_expr *a=pigen_const_expr_get(model,left),*b=pigen_const_expr_get(model,right);
+	uint64_t aw,bw;size_t remaining=model->constant_expression_count+1;
+	if(!a || !b) return 0;
+	pigen_data_type_id at=a->data_type,bt=b->data_type;
+	if(!constant_type_width(model,at,&aw,remaining) || !constant_type_width(model,bt,&bw,remaining) || aw>width || bw>width) return 0;
+	int matched=1;
+	for(size_t bit=0;bit<width;bit++)
+	{
+		pigen_bit_state av=PIGEN_BIT_ZERO,bv=PIGEN_BIT_ZERO;
+		if((bit<aw || signed_comparison) && !constant_bit(model,left,bit<aw ? bit : aw-1,remaining,&av)) return 0;
+		if((bit<bw || signed_comparison) && !constant_bit(model,right,bit<bw ? bit : bw-1,remaining,&bv)) return 0;
+		matched&=av==bv;
+	}
+	*equal=matched;return 1;
+}
+
 int pigen_const_expr_evaluate_i64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, int64_t *value)
 {
@@ -1259,6 +1546,21 @@ static int evaluate_u64_raw(pigen_semantic_model *model,
 				known->as.bits.state_count && model->literal_states[known->as.bits.first_state +
 				known->as.bits.state_count - 1] == PIGEN_BIT_ONE) return 0;
 			return literal_bits_u64(model, known, value);
+		case PIGEN_CONST_EXPR_INDEX:
+		case PIGEN_CONST_EXPR_SELECT:
+		{
+			uint64_t width; pigen_data_type_id type=known->data_type;
+			if(!constant_type_width(model,type,&width,remaining-1) || width>64) return 0;
+			uint64_t bits=0;
+			for(uint64_t bit=0;bit<width;bit++)
+			{
+				pigen_bit_state state;
+				if(!constant_bit(model,expression,bit,remaining-1,&state) || state>PIGEN_BIT_ONE) return 0;
+				if(state==PIGEN_BIT_ONE) bits|=UINT64_C(1)<<bit;
+			}
+			if(pigen_data_type_signedness(model,type)==PIGEN_SIGN_SIGNED && ((bits>>(width-1))&1)) return 0;
+			*value=bits;return 1;
+		}
 		case PIGEN_CONST_EXPR_CONCATENATION:
 			result = 0;
 			for (i = 0; i < known->as.sequence.child_count; i++)
@@ -1971,10 +2273,11 @@ pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 	index_shape = pigen_shape_get(model, index_expression->shape);
 	if (!base_shape || !index_shape || index_shape->dimension_count)
 		return INVALID_ID(pigen_expr_id);
+	size_t unpacked=base_shape->dimension_count;
 	base_constant = base_expression->constant;
 	index_constant = index_expression->constant;
 	expression.kind = PIGEN_EXPR_INDEX;
-	if (base_shape->dimension_count)
+	if (unpacked)
 	{
 		expression.data_type = base_expression->data_type;
 		expression.shape = pigen_shape_element(model, base_expression->shape);
@@ -1988,7 +2291,7 @@ pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 	if (expression.data_type.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
 	expression.span = span;
-	expression.constant = base_shape->dimension_count ?
+	expression.constant = unpacked ?
 		INVALID_ID(pigen_const_expr_id) :
 		base_constant.index == PIGEN_INVALID_ID ||
 		index_constant.index == PIGEN_INVALID_ID ?
@@ -2004,9 +2307,9 @@ pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 	return add_expression(model, expression);
 }
 
-pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
+static pigen_expr_id add_select(pigen_semantic_model *model,
 	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
-	pigen_select_kind kind, pigen_source_span span)
+	pigen_select_kind kind, pigen_data_type_id result_type, pigen_source_span span)
 {
 	const pigen_semantic_expr *base_expression = pigen_expr_get(model, base);
 	const pigen_semantic_expr *left_expression = pigen_expr_get(model, left);
@@ -2019,6 +2322,7 @@ pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 	pigen_const_expr_id right_constant;
 	pigen_const_expr_id type_left;
 	pigen_semantic_expr expression = {0};
+	pigen_data_type_id raw_type;
 
 	if (!base_expression || !left_expression || !right_expression ||
 		!pigen_select_kind_is_valid(kind))
@@ -2043,15 +2347,37 @@ pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 	expression.data_type = pigen_data_type_packed_select(model, base_expression->data_type,
 		type_left, right_constant, kind);
 	expression.shape = base_expression->shape;
+	raw_type = expression.data_type;
 	if (expression.data_type.index == PIGEN_INVALID_ID)
 		return INVALID_ID(pigen_expr_id);
+	if (result_type.index != PIGEN_INVALID_ID && expression.data_type.index != result_type.index)
+	{
+		uint64_t selected_bits, result_bits;
+		if (!pigen_const_expr_evaluate_u64(model,
+			pigen_data_type_packed_width(model, expression.data_type), &selected_bits) ||
+			!pigen_const_expr_evaluate_u64(model,
+				pigen_data_type_packed_width(model, result_type), &result_bits) ||
+			selected_bits != result_bits ||
+			pigen_data_type_state_domain(model, expression.data_type) !=
+				pigen_data_type_state_domain(model, result_type)) return INVALID_ID(pigen_expr_id);
+		expression.data_type = result_type;
+	}
 	expression.span = span;
 	expression.constant =
 		base_constant.index == PIGEN_INVALID_ID ||
 		left_constant.index == PIGEN_INVALID_ID ?
 		INVALID_ID(pigen_const_expr_id) :
 		pigen_const_expr_intern_select(model, base_constant, left_constant,
-			right_constant, kind, expression.data_type);
+			right_constant, kind, raw_type);
+	/* The constant select owner validates the raw packed type. Preserve a
+	 * typed member's interpretation with an explicit constant conversion. */
+	if (expression.constant.index != PIGEN_INVALID_ID && raw_type.index != expression.data_type.index)
+	{
+		pigen_conversion conversion;
+		if (!pigen_data_type_resolve_explicit_conversion(model, raw_type, expression.data_type, &conversion))
+			return INVALID_ID(pigen_expr_id);
+		expression.constant = pigen_const_expr_intern_conversion(model, conversion, expression.constant);
+	}
 	if (base_constant.index != PIGEN_INVALID_ID &&
 		left_constant.index != PIGEN_INVALID_ID &&
 		expression.constant.index == PIGEN_INVALID_ID)
@@ -2061,6 +2387,37 @@ pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 	expression.as.select.right = right;
 	expression.as.select.kind = kind;
 	return add_expression(model, expression);
+}
+
+pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
+	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
+	pigen_select_kind kind, pigen_source_span span)
+{
+	return add_select(model, base, left, right, kind, INVALID_ID(pigen_data_type_id), span);
+}
+
+pigen_expr_id pigen_expr_add_typed_select(pigen_semantic_model *model,
+	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
+	pigen_select_kind kind, pigen_data_type_id result_type, pigen_source_span span)
+{
+	if (!pigen_data_type_exists(model, result_type)) return INVALID_ID(pigen_expr_id);
+	return add_select(model, base, left, right, kind, result_type, span);
+}
+
+pigen_expr_id pigen_expr_add_member_select(pigen_semantic_model *model,
+	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
+	pigen_data_type_id result_type, pigen_source_span name, pigen_source_span span)
+{
+	if (!model || !pigen_source_span_valid(model->sources,name) || name.start == name.end)
+		return INVALID_ID(pigen_expr_id);
+	pigen_expr_id result = pigen_expr_add_typed_select(model,base,left,right,
+		PIGEN_SEMANTIC_SELECT_RANGE,result_type,span);
+	if (result.index != PIGEN_INVALID_ID && model->expressions[result.index].kind == PIGEN_EXPR_SELECT)
+	{
+		model->expressions[result.index].as.select.is_member = 1;
+		model->expressions[result.index].as.select.member_name = name;
+	}
+	return result;
 }
 
 const pigen_expr_id *pigen_expr_children(
@@ -2095,6 +2452,47 @@ static size_t append_expression_children(pigen_semantic_model *model,
 		children, count * sizeof(*children));
 	model->expression_child_count = needed;
 	return first;
+}
+
+pigen_expr_id pigen_expr_add_evaluated_value(pigen_semantic_model *model,
+	pigen_expr_id value,pigen_expr_id evaluated,int before,pigen_source_span span)
+{
+	const pigen_semantic_expr *v=pigen_expr_get(model,value),*e=pigen_expr_get(model,evaluated);
+	const pigen_semantic_shape *vs=v ? pigen_shape_get(model,v->shape) : NULL,*es=e ? pigen_shape_get(model,e->shape) : NULL;
+	if (!v || !e || !vs || !es || vs->dimension_count || es->dimension_count ||
+		!pigen_data_type_is_integral(model,v->data_type) || !pigen_data_type_is_integral(model,e->data_type) ||
+		(before!=0 && before!=1)) return INVALID_ID(pigen_expr_id);
+	pigen_semantic_expr node={0};node.kind=PIGEN_EXPR_EVALUATED_VALUE;
+	node.data_type=v->data_type;node.shape=v->shape;node.span=span;
+	node.constant=INVALID_ID(pigen_const_expr_id);node.lvalue=INVALID_ID(pigen_lvalue_id);
+	node.as.evaluation.value=value;node.as.evaluation.evaluated=evaluated;node.as.evaluation.before=before;
+	return add_expression(model,node);
+}
+
+pigen_expr_id pigen_expr_add_array_pattern(pigen_semantic_model *model,
+ pigen_data_type_id type,pigen_shape_id shape,const pigen_expr_id *children,
+ size_t count,pigen_source_span span)
+{
+ int64_t left,right;size_t length;
+ if(!model || !children || !count || count>SIZE_MAX/sizeof(*children) ||
+  !pigen_data_type_exists(model,type) || !pigen_shape_dimension_bounds(model,shape,0,&left,&right,&length) || count!=length)
+  return INVALID_ID(pigen_expr_id);
+ pigen_shape_id element=pigen_shape_element(model,shape);
+ for(size_t i=0;i<count;i++)
+ {
+  const pigen_semantic_expr *child=pigen_expr_get(model,children[i]);
+  if(!child || child->data_type.index!=type.index || child->shape.index!=element.index) return INVALID_ID(pigen_expr_id);
+ }
+ pigen_expr_id *copy=pigen_resize(NULL,count*sizeof(*copy));memcpy(copy,children,count*sizeof(*copy));
+ size_t first=append_expression_children(model,copy,count);free(copy);
+ if(first==SIZE_MAX) return INVALID_ID(pigen_expr_id);
+ pigen_semantic_expr expression={0};expression.kind=PIGEN_EXPR_ARRAY_PATTERN;
+ expression.data_type=type;expression.shape=shape;expression.span=span;
+ expression.constant=INVALID_ID(pigen_const_expr_id);expression.lvalue=INVALID_ID(pigen_lvalue_id);
+ expression.as.sequence.first_child=first;expression.as.sequence.child_count=count;
+ pigen_expr_id result=add_expression(model,expression);
+ if(result.index==PIGEN_INVALID_ID) model->expression_child_count=first;
+ return result;
 }
 
 pigen_expr_id pigen_expr_add_concatenation(pigen_semantic_model *model,
@@ -2514,6 +2912,22 @@ const pigen_semantic_lvalue *pigen_lvalue_get(
 	return &model->lvalues[lvalue.index];
 }
 
+const pigen_semantic_struct_member *pigen_struct_member_for_type(
+	const pigen_semantic_model *model, pigen_data_type_id type, pigen_source_span name)
+{
+	if (!model) return NULL;
+	for (size_t depth = 0; depth < model->data_type_count; depth++)
+	{
+		if (pigen_data_type_dimension_count(model,type)) return NULL;
+		pigen_symbol_id alias = pigen_data_type_alias_symbol(model, type);
+		if (alias.index == PIGEN_INVALID_ID) return NULL;
+		const pigen_semantic_struct_member *member = pigen_struct_member_find(model, alias, name);
+		if (member) return member;
+		type = pigen_data_type_alias_target(model, type);
+	}
+	return NULL;
+}
+
 const pigen_lvalue_id *pigen_lvalue_children(
 	const pigen_semantic_model *model, size_t first, size_t count)
 {
@@ -2543,7 +2957,7 @@ pigen_scope_id pigen_scope_add(pigen_semantic_model *model,
 	}
 	result = (pigen_scope_id){(uint32_t)model->scope_count};
 	model->scopes[model->scope_count++] = (pigen_scope){parent,
-		INVALID_ID(pigen_symbol_id), span};
+		INVALID_ID(pigen_symbol_id), span, 0};
 	return result;
 }
 
@@ -2570,6 +2984,17 @@ static pigen_symbol_id lookup_local(const pigen_semantic_model *model,
 	return INVALID_ID(pigen_symbol_id);
 }
 
+static pigen_symbol_id lookup_bound_import(const pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name)
+{
+ for(size_t i=0;i<model->import_count;i++)
+ {
+  const pigen_semantic_import *item=&model->imports[i];
+  const pigen_symbol *symbol=pigen_symbol_get(model,item->target);
+  if(item->scope.index==scope.index && item->wildcard!=1 && symbol && same_name(model,symbol->name,name)) return item->target;
+ }
+ return INVALID_ID(pigen_symbol_id);
+}
+
 pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_symbol_kind kind, pigen_data_type_id type,
 	pigen_source_span name, pigen_source_span declaration,
@@ -2584,17 +3009,20 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 	if (shadowed) *shadowed = INVALID_ID(pigen_symbol_id);
 	if (!pigen_scope_get(model, scope) ||
 		((kind == PIGEN_SYMBOL_SIGNAL || kind == PIGEN_SYMBOL_PARAMETER ||
-			kind == PIGEN_SYMBOL_TYPEDEF) &&
+			kind == PIGEN_SYMBOL_TYPEDEF || kind == PIGEN_SYMBOL_PROTOCOL_TYPE || kind == PIGEN_SYMBOL_GENVAR) &&
 			!pigen_data_type_exists(model, type)) ||
 		((kind == PIGEN_SYMBOL_MODULE || kind == PIGEN_SYMBOL_PIPELINE ||
 			kind == PIGEN_SYMBOL_STAGE || kind == PIGEN_SYMBOL_FSM ||
-			kind == PIGEN_SYMBOL_FABRIC) && type.index != PIGEN_INVALID_ID) ||
-		kind < PIGEN_SYMBOL_SIGNAL || kind > PIGEN_SYMBOL_INSTANCE ||
+			kind == PIGEN_SYMBOL_FABRIC || kind == PIGEN_SYMBOL_PROTOCOL_ENDPOINT ||
+			kind == PIGEN_SYMBOL_PROTOCOL_ARRAY || kind == PIGEN_SYMBOL_PROCEDURAL_SCOPE || kind == PIGEN_SYMBOL_PACKAGE || kind == PIGEN_SYMBOL_RETAINED_SUBROUTINE || kind == PIGEN_SYMBOL_RETAINED_LOCAL) &&
+			type.index != PIGEN_INVALID_ID) ||
+		kind < PIGEN_SYMBOL_SIGNAL || kind > PIGEN_SYMBOL_RETAINED_LOCAL ||
 		!pigen_source_span_valid(model->sources, name) || name.start == name.end ||
 		!pigen_source_span_valid(model->sources, declaration) ||
 		!macro_name_allowed(model, declaration, name) || !id_capacity_available(model->symbol_count))
 		return PIGEN_DECLARE_INVALID;
 	existing = lookup_local(model, scope, name);
+	if(existing.index==PIGEN_INVALID_ID) existing=lookup_bound_import(model,scope,name);
 	if (existing.index != PIGEN_INVALID_ID)
 	{
 		if (declared) *declared = existing;
@@ -2616,6 +3044,7 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 	symbol.data_type = type;
 	symbol.name = name;
 	symbol.declaration = declaration;
+	symbol.alias_of = INVALID_ID(pigen_symbol_id);
 	switch (kind)
 	{
 		case PIGEN_SYMBOL_MODULE:
@@ -2642,6 +3071,22 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 		case PIGEN_SYMBOL_INSTANCE:
 			symbol.object.instance = INVALID_ID(pigen_instance_id);
 			break;
+		case PIGEN_SYMBOL_PROTOCOL_ENDPOINT:
+			symbol.object.protocol_endpoint = INVALID_ID(pigen_protocol_endpoint_id);
+			break;
+		case PIGEN_SYMBOL_PROTOCOL_ARRAY:
+			symbol.object.protocol_array = INVALID_ID(pigen_protocol_array_id);
+			break;
+		case PIGEN_SYMBOL_PROTOCOL_TYPE:
+			symbol.object.protocol_type=INVALID_ID(pigen_protocol_type_id);
+			break;
+		case PIGEN_SYMBOL_PACKAGE:
+		case PIGEN_SYMBOL_PROCEDURAL_SCOPE:
+			symbol.object.scope = INVALID_ID(pigen_scope_id);
+			break;
+		case PIGEN_SYMBOL_GENVAR:
+		case PIGEN_SYMBOL_RETAINED_SUBROUTINE:
+		case PIGEN_SYMBOL_RETAINED_LOCAL:
 		case PIGEN_SYMBOL_TYPEDEF:
 			symbol.object.module = INVALID_ID(pigen_module_id);
 			break;
@@ -2652,42 +3097,353 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 	return PIGEN_DECLARE_OK;
 }
 
-pigen_symbol_id pigen_symbol_lookup(const pigen_semantic_model *model,
-	pigen_scope_id scope, pigen_source_span name)
+static pigen_symbol_id canonical_symbol(const pigen_semantic_model *model,pigen_symbol_id id)
 {
-	while (pigen_scope_get(model, scope))
+	for(size_t count=0;count<model->symbol_count;count++)
 	{
-		pigen_symbol_id result = lookup_local(model, scope, name);
-		if (result.index != PIGEN_INVALID_ID)
-			return result;
-		scope = model->scopes[scope.index].parent;
+		const pigen_symbol *symbol=pigen_symbol_get(model,id);
+		if(!symbol) break;
+		if(symbol->alias_of.index==PIGEN_INVALID_ID) return id;
+		id=symbol->alias_of;
 	}
 	return INVALID_ID(pigen_symbol_id);
 }
 
-pigen_symbol_id pigen_symbol_lookup_text(pigen_semantic_model *model,
-	pigen_scope_id scope, const char *text, size_t length)
+static pigen_scope_id procedural_root(const pigen_semantic_model *model,pigen_scope_id scope)
 {
-	while (model && pigen_scope_get(model, scope))
+	pigen_scope_id root=INVALID_ID(pigen_scope_id);
+	while(pigen_scope_get(model,scope) && model->scopes[scope.index].is_procedural)
+	{root=scope;scope=model->scopes[scope.index].parent;}
+	return root;
+}
+
+pigen_declare_result pigen_symbol_bind_procedural_alias(pigen_semantic_model *model,
+	pigen_scope_id scope,pigen_symbol_id target,pigen_symbol_id *declared)
+{
+	if(declared) *declared=INVALID_ID(pigen_symbol_id);
+	if(!model || !declared) return PIGEN_DECLARE_INVALID;
+	target=canonical_symbol(model,target);
+	const pigen_symbol *found=pigen_symbol_get(model,target);
+	if(!found || (found->kind!=PIGEN_SYMBOL_SIGNAL && found->kind!=PIGEN_SYMBOL_PARAMETER && found->kind!=PIGEN_SYMBOL_TYPEDEF && found->kind!=PIGEN_SYMBOL_PROTOCOL_TYPE)) return PIGEN_DECLARE_INVALID;
+	if(found->kind==PIGEN_SYMBOL_SIGNAL)
 	{
-		size_t i = model->symbol_count;
-
-		while (i--)
-		{
-			const pigen_symbol *symbol = &model->symbols[i];
-			size_t name_length = 0;
-			const char *name;
-
-			if (symbol->scope.index != scope.index) continue;
-			name = pigen_source_span_text(model->sources, symbol->name,
-				&name_length);
-			if (name && name_length == length &&
-				!memcmp(name, text, length))
-				return (pigen_symbol_id){(uint32_t)i};
-		}
-		scope = model->scopes[scope.index].parent;
+		const pigen_semantic_signal *signal=pigen_signal_get(model,found->object.signal);
+		if(signal && signal->is_automatic) return PIGEN_DECLARE_INVALID;
 	}
-	return INVALID_ID(pigen_symbol_id);
+	pigen_symbol original=*found;
+	pigen_scope_id root=procedural_root(model,scope);
+	if(root.index==PIGEN_INVALID_ID || root.index!=procedural_root(model,original.scope).index) return PIGEN_DECLARE_INVALID;
+	pigen_declare_result result=pigen_symbol_declare(model,scope,original.kind,original.data_type,original.name,original.declaration,declared,NULL);
+	if(result==PIGEN_DECLARE_OK) model->symbols[declared->index].alias_of=target;
+	return result;
+}
+
+int pigen_symbol_bind_procedural_scope(pigen_semantic_model *model,
+	pigen_symbol_id symbol,pigen_scope_id scope)
+{
+	if (!model) return 0;
+	const pigen_symbol *owner=pigen_symbol_get(model,symbol);
+	const pigen_scope *child=pigen_scope_get(model,scope);
+	if (!owner || owner->kind!=PIGEN_SYMBOL_PROCEDURAL_SCOPE || !child ||
+		!child->is_procedural || child->parent.index!=owner->scope.index ||
+		(owner->object.scope.index!=PIGEN_INVALID_ID && owner->object.scope.index!=scope.index)) return 0;
+	model->symbols[symbol.index].object.scope=scope;
+	return 1;
+}
+
+int pigen_symbol_bind_package_scope(pigen_semantic_model *model,pigen_symbol_id symbol,pigen_scope_id scope)
+{
+ const pigen_symbol *owner=pigen_symbol_get(model,symbol);
+ const pigen_scope *child=pigen_scope_get(model,scope);
+ if(!owner || owner->kind!=PIGEN_SYMBOL_PACKAGE || !child || child->parent.index!=owner->scope.index ||
+    (owner->object.scope.index!=PIGEN_INVALID_ID && owner->object.scope.index!=scope.index)) return 0;
+ model->symbols[symbol.index].object.scope=scope;return 1;
+}
+
+pigen_symbol_id pigen_symbol_lookup_package_member(const pigen_semantic_model *model,
+ pigen_scope_id scope,pigen_source_span package,pigen_source_span member)
+{
+ const pigen_symbol *owner=pigen_symbol_get(model,pigen_symbol_lookup(model,scope,package));
+ return owner && owner->kind==PIGEN_SYMBOL_PACKAGE ?
+  pigen_symbol_lookup_local(model,owner->object.scope,member) : INVALID_ID(pigen_symbol_id);
+}
+
+pigen_symbol_id pigen_symbol_lookup_local(const pigen_semantic_model *model,
+	pigen_scope_id scope,pigen_source_span name)
+{
+	return model && pigen_scope_get(model,scope) ? canonical_symbol(model,lookup_local(model,scope,name)) :
+		INVALID_ID(pigen_symbol_id);
+}
+
+static int import_record(pigen_semantic_model *model,pigen_semantic_import item)
+{
+ if(model->import_count==model->import_capacity)
+ {
+  model->import_capacity=model->import_capacity ? model->import_capacity*2 : 16;
+  model->imports=pigen_resize(model->imports,model->import_capacity*sizeof(*model->imports));
+ }
+ model->imports[model->import_count++]=item;return 1;
+}
+
+pigen_declare_result pigen_import_package(pigen_semantic_model *model,pigen_scope_id scope,
+ pigen_symbol_id package,pigen_source_span member,int wildcard,size_t at,pigen_source_span span)
+{
+ if(!model || !pigen_scope_get(model,scope) || (wildcard!=0 && wildcard!=1) ||
+    !pigen_source_span_valid(model->sources,span)) return PIGEN_DECLARE_INVALID;
+ const pigen_symbol *owner=pigen_symbol_get(model,package);
+ if(!owner || owner->kind!=PIGEN_SYMBOL_PACKAGE || !pigen_scope_get(model,owner->object.scope)) return PIGEN_DECLARE_INVALID;
+ pigen_scope_id package_scope=owner->object.scope;
+ pigen_symbol_id target=wildcard ? INVALID_ID(pigen_symbol_id) : pigen_symbol_lookup_local(model,package_scope,member);
+ if(!wildcard)
+ {
+  if(target.index==PIGEN_INVALID_ID) return PIGEN_DECLARE_INVALID;
+  pigen_symbol_id local=lookup_local(model,scope,member);
+  if(local.index!=PIGEN_INVALID_ID)
+   return model->symbols[local.index].alias_of.index!=PIGEN_INVALID_ID &&
+    canonical_symbol(model,local).index==target.index ? PIGEN_DECLARE_OK : PIGEN_DECLARE_DUPLICATE;
+  pigen_symbol_id previous=lookup_bound_import(model,scope,member);
+  if(previous.index!=PIGEN_INVALID_ID) return previous.index==target.index ? PIGEN_DECLARE_OK : PIGEN_DECLARE_DUPLICATE;
+ }
+ for(size_t i=0;i<model->import_count;i++)
+  if(model->imports[i].scope.index==scope.index && model->imports[i].package_scope.index==package_scope.index &&
+     model->imports[i].wildcard==wildcard && model->imports[i].target.index==target.index) return PIGEN_DECLARE_OK;
+ import_record(model,(pigen_semantic_import){scope,package_scope,target,wildcard,at,span});return PIGEN_DECLARE_OK;
+}
+
+/* Export bindings are package-local aliases of the original declaration;
+ * contracts, DATA identities and constant objects are never copied. */
+static pigen_declare_result export_alias(pigen_semantic_model *model,pigen_scope_id scope,
+ pigen_symbol_id target,pigen_source_span span)
+{
+ target=canonical_symbol(model,target);
+ const pigen_symbol *original=pigen_symbol_get(model,target);
+ if(!original || !id_capacity_available(model->symbol_count)) return PIGEN_DECLARE_INVALID;
+ pigen_symbol_id prior=lookup_local(model,scope,original->name);
+ if(prior.index!=PIGEN_INVALID_ID)
+  return canonical_symbol(model,prior).index==target.index ? PIGEN_DECLARE_OK : PIGEN_DECLARE_DUPLICATE;
+ pigen_symbol alias=*original;
+ alias.scope=scope;alias.previous_in_scope=model->scopes[scope.index].last_symbol;
+ alias.alias_of=target;alias.declaration=span;
+ if(model->symbol_count==model->symbol_capacity)
+ {
+  model->symbol_capacity=model->symbol_capacity ? model->symbol_capacity*2 : 32;
+  model->symbols=pigen_resize(model->symbols,model->symbol_capacity*sizeof(*model->symbols));
+ }
+ model->scopes[scope.index].last_symbol=(pigen_symbol_id){(uint32_t)model->symbol_count};
+ model->symbols[model->symbol_count++]=alias;return PIGEN_DECLARE_OK;
+}
+
+pigen_declare_result pigen_export_package(pigen_semantic_model *model,pigen_scope_id scope,
+ pigen_symbol_id package,pigen_source_span member,int wildcard,size_t at,pigen_source_span span)
+{
+ if(!model || !pigen_scope_get(model,scope) || (wildcard!=0 && wildcard!=1) ||
+  !pigen_source_span_valid(model->sources,span)) return PIGEN_DECLARE_INVALID;
+ const pigen_symbol *owner=pigen_symbol_get(model,package);
+ if((package.index!=PIGEN_INVALID_ID && (!owner || owner->kind!=PIGEN_SYMBOL_PACKAGE)) || (!wildcard && !owner))
+  return PIGEN_DECLARE_INVALID;
+ pigen_scope_id source=owner ? owner->object.scope : INVALID_ID(pigen_scope_id);
+ if(owner && !pigen_scope_get(model,source)) return PIGEN_DECLARE_INVALID;
+ if(!wildcard)
+ {
+  pigen_symbol_id target=pigen_symbol_lookup_local(model,source,member);
+  if(target.index==PIGEN_INVALID_ID) return PIGEN_DECLARE_INVALID;
+  int candidate=0;
+  for(size_t i=0;i<model->import_count;i++)
+  {
+   const pigen_semantic_import *item=&model->imports[i];
+   if(item->scope.index==scope.index && item->package_scope.index==source.index && item->at<=at &&
+    (item->wildcard==1 || item->target.index==target.index)) {candidate=1;break;}
+  }
+  if(!candidate) return PIGEN_DECLARE_INVALID;
+  pigen_declare_result result=pigen_import_package(model,scope,package,member,0,at,span);
+  return result==PIGEN_DECLARE_OK ? export_alias(model,scope,target,span) : result;
+ }
+ size_t count=model->import_count;
+ for(size_t i=0;i<count;i++)
+ {
+  pigen_semantic_import binding=model->imports[i];
+  if(binding.scope.index!=scope.index || binding.wildcard==1 || binding.at>at) continue;
+  const pigen_symbol *target=pigen_symbol_get(model,binding.target);
+  if(!target) continue;
+  if(owner)
+  {
+   if(pigen_symbol_lookup_local(model,source,target->name).index!=binding.target.index) continue;
+   int route=0;
+   for(size_t j=0;j<count;j++)
+   {
+    const pigen_semantic_import *item=&model->imports[j];
+    if(item->scope.index==scope.index && item->package_scope.index==source.index && item->at<=at &&
+     (item->wildcard==1 || item->target.index==binding.target.index)) {route=1;break;}
+   }
+   if(!route) continue;
+  }
+  pigen_declare_result result=export_alias(model,scope,binding.target,span);
+  if(result!=PIGEN_DECLARE_OK) return result;
+ }
+ return PIGEN_DECLARE_OK;
+}
+
+static int symbol_name_text(const pigen_semantic_model *model,pigen_symbol_id id,const char *text,size_t length)
+{
+ const pigen_symbol *symbol=pigen_symbol_get(model,id);
+ size_t n=0;const char *name=symbol ? pigen_source_span_text(model->sources,symbol->name,&n) : NULL;
+ return name && n==length && !memcmp(name,text,length);
+}
+
+static pigen_symbol_id lookup_local_text(const pigen_semantic_model *model,pigen_scope_id scope,const char *text,size_t length)
+{
+ for(pigen_symbol_id id=model->scopes[scope.index].last_symbol;id.index!=PIGEN_INVALID_ID;id=model->symbols[id.index].previous_in_scope)
+  if(symbol_name_text(model,id,text,length)) return canonical_symbol(model,id);
+ return INVALID_ID(pigen_symbol_id);
+}
+
+static pigen_symbol_id lookup_imports_text(const pigen_semantic_model *model,pigen_scope_id scope,
+ const char *text,size_t length,size_t bound_at,size_t at,int *potential,int *ambiguous)
+{
+ *potential=0;*ambiguous=0;
+ for(size_t i=0;i<model->import_count;i++)
+ {
+  const pigen_semantic_import *item=&model->imports[i];
+  if(item->at<=bound_at && item->scope.index==scope.index && item->wildcard!=1 && symbol_name_text(model,item->target,text,length)) return item->target;
+ }
+ pigen_symbol_id selected=INVALID_ID(pigen_symbol_id);
+ for(size_t i=0;i<model->import_count;i++)
+ {
+  const pigen_semantic_import *item=&model->imports[i];
+  if(item->at>at || item->scope.index!=scope.index || item->wildcard!=1) continue;
+  pigen_symbol_id candidate=lookup_local_text(model,item->package_scope,text,length);
+  if(candidate.index==PIGEN_INVALID_ID) continue;
+  if(selected.index!=PIGEN_INVALID_ID && selected.index!=candidate.index) {*ambiguous=1;return INVALID_ID(pigen_symbol_id);}
+  selected=candidate;
+ }
+ *potential=selected.index!=PIGEN_INVALID_ID;return selected;
+}
+
+static pigen_symbol_id lookup_name_text(const pigen_semantic_model *model,pigen_scope_id scope,const char *text,size_t length,
+ size_t at,pigen_scope_id *binding_scope,int *potential)
+{
+ *potential=0;*binding_scope=INVALID_ID(pigen_scope_id);
+ while(pigen_scope_get(model,scope))
+ {
+  pigen_symbol_id result=lookup_local_text(model,scope,text,length);
+  if(result.index!=PIGEN_INVALID_ID) return result;
+  int ambiguous=0;
+  result=lookup_imports_text(model,scope,text,length,at,at,potential,&ambiguous);
+  if(ambiguous) return INVALID_ID(pigen_symbol_id);
+  if(result.index!=PIGEN_INVALID_ID) {*binding_scope=scope;return result;}
+  scope=model->scopes[scope.index].parent;
+ }
+ return INVALID_ID(pigen_symbol_id);
+}
+
+static pigen_symbol_id resolve_name_text(pigen_semantic_model *model,pigen_scope_id scope,const char *text,size_t length,size_t at)
+{
+ pigen_scope_id binding_scope;int potential;
+ pigen_symbol_id result=lookup_name_text(model,scope,text,length,at,&binding_scope,&potential);
+ if(potential && result.index!=PIGEN_INVALID_ID)
+  import_record(model,(pigen_semantic_import){binding_scope,INVALID_ID(pigen_scope_id),result,2,at,model->symbols[result.index].declaration});
+ return result;
+}
+
+pigen_symbol_id pigen_symbol_resolve_call_text_at(pigen_semantic_model *model,
+ pigen_scope_id scope,const char *text,size_t length,size_t at,int *ambiguous)
+{
+ if(ambiguous) *ambiguous=0;
+ if(!model || !text) return INVALID_ID(pigen_symbol_id);
+ while(pigen_scope_get(model,scope))
+ {
+  pigen_symbol_id result=lookup_local_text(model,scope,text,length);
+  if(result.index!=PIGEN_INVALID_ID) return result;
+  int potential=0,collision=0;
+  result=lookup_imports_text(model,scope,text,length,SIZE_MAX,at,&potential,&collision);
+  if(collision) {if(ambiguous) *ambiguous=1;return INVALID_ID(pigen_symbol_id);}
+  if(result.index!=PIGEN_INVALID_ID)
+  {
+   if(potential) import_record(model,(pigen_semantic_import){scope,INVALID_ID(pigen_scope_id),result,2,at,
+    model->symbols[result.index].declaration});
+   return result;
+  }
+  scope=model->scopes[scope.index].parent;
+ }
+ return INVALID_ID(pigen_symbol_id);
+}
+
+int pigen_retained_call_bind(pigen_semantic_model *model,pigen_token_id name,pigen_symbol_id target,int bare)
+{
+ if(!model || name.index==PIGEN_INVALID_ID || (bare!=0 && bare!=1)) return 0;
+ target=canonical_symbol(model,target);
+ const pigen_symbol *routine=pigen_symbol_get(model,target);
+ if(!routine || routine->kind!=PIGEN_SYMBOL_RETAINED_SUBROUTINE) return 0;
+ pigen_symbol_id package=INVALID_ID(pigen_symbol_id);
+ for(size_t i=0;i<model->symbol_count;i++)
+  if(model->symbols[i].kind==PIGEN_SYMBOL_PACKAGE && model->symbols[i].object.scope.index==routine->scope.index)
+  {package=(pigen_symbol_id){(uint32_t)i};break;}
+ if(package.index==PIGEN_INVALID_ID) return 0;
+ for(size_t i=0;i<model->retained_call_count;i++)
+  if(model->retained_calls[i].name.index==name.index) return model->retained_calls[i].target.index==target.index && model->retained_calls[i].bare==bare;
+ if(model->retained_call_count==model->retained_call_capacity)
+ {
+  model->retained_call_capacity=model->retained_call_capacity ? model->retained_call_capacity*2 : 16;
+  model->retained_calls=pigen_resize(model->retained_calls,model->retained_call_capacity*sizeof(*model->retained_calls));
+ }
+ model->retained_calls[model->retained_call_count++]=(pigen_semantic_retained_call){name,package,target,bare};
+ return 1;
+}
+
+pigen_symbol_id pigen_symbol_lookup_text_at(const pigen_semantic_model *model,
+ pigen_scope_id scope,const char *text,size_t length,size_t at)
+{
+ if(!model || !text) return INVALID_ID(pigen_symbol_id);
+ pigen_scope_id binding_scope;int potential;
+ return lookup_name_text(model,scope,text,length,at,&binding_scope,&potential);
+}
+
+pigen_symbol_id pigen_symbol_lookup_at(const pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name,size_t at)
+{
+ size_t length=0;const char *text=model ? pigen_source_span_text(model->sources,name,&length) : NULL;
+ return pigen_symbol_lookup_text_at(model,scope,text,length,at);
+}
+
+pigen_symbol_id pigen_symbol_lookup(const pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name)
+{
+ return pigen_symbol_lookup_at(model,scope,name,SIZE_MAX);
+}
+
+pigen_symbol_id pigen_symbol_resolve(pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name)
+{
+ size_t length=0;const char *text=model ? pigen_source_span_text(model->sources,name,&length) : NULL;
+ return text ? resolve_name_text(model,scope,text,length,SIZE_MAX) : INVALID_ID(pigen_symbol_id);
+}
+
+pigen_symbol_id pigen_symbol_resolve_at(pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name,size_t at)
+{
+ size_t length=0;const char *text=model ? pigen_source_span_text(model->sources,name,&length) : NULL;
+ return text ? resolve_name_text(model,scope,text,length,at) : INVALID_ID(pigen_symbol_id);
+}
+
+pigen_symbol_id pigen_symbol_resolve_text_at(pigen_semantic_model *model,pigen_scope_id scope,const char *text,size_t length,size_t at)
+{return model && text ? resolve_name_text(model,scope,text,length,at) : INVALID_ID(pigen_symbol_id);}
+
+int pigen_symbol_import_ambiguous(const pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name,size_t at)
+{
+ size_t n=0;const char *text=model ? pigen_source_span_text(model->sources,name,&n) : NULL;
+ if(!text) return 0;
+ while(pigen_scope_get(model,scope))
+ {
+  if(lookup_local_text(model,scope,text,n).index!=PIGEN_INVALID_ID) return 0;
+  int potential,ambiguous;pigen_symbol_id result=lookup_imports_text(model,scope,text,n,at,at,&potential,&ambiguous);
+  if(ambiguous) return 1;
+  if(result.index!=PIGEN_INVALID_ID) return 0;
+  scope=model->scopes[scope.index].parent;
+ }
+ return 0;
+}
+
+pigen_symbol_id pigen_symbol_lookup_text(pigen_semantic_model *model,pigen_scope_id scope,const char *text,size_t length)
+{
+ if(!model || !text) return INVALID_ID(pigen_symbol_id);
+ pigen_scope_id binding_scope;int potential;
+ return lookup_name_text(model,scope,text,length,SIZE_MAX,&binding_scope,&potential);
 }
 
 const pigen_symbol *pigen_symbol_get(const pigen_semantic_model *model,
@@ -2729,7 +3485,8 @@ pigen_module_id pigen_module_add(pigen_semantic_model *model,
 	}
 	result = (pigen_module_id){(uint32_t)model->module_count};
 	model->modules[model->module_count++] = (pigen_semantic_module){
-		syntax, symbol_id, scope, span};
+		syntax, symbol_id, scope, span, INVALID_ID(pigen_module_id),
+		INVALID_ID(pigen_module_id), 0};
 	symbol->object.module = result;
 	return result;
 }
@@ -2745,10 +3502,15 @@ pigen_parameter_id pigen_parameter_add(pigen_semantic_model *model,
 		&model->symbols[symbol_id.index] : NULL;
 	pigen_parameter_id result;
 
-	if (!module || !expression || !symbol ||
+	int package_parameter=0;
+	if(!module && module_id.index==PIGEN_INVALID_ID && symbol)
+	 for(size_t i=0;i<model->symbol_count;i++)
+	  if(model->symbols[i].kind==PIGEN_SYMBOL_PACKAGE && model->symbols[i].object.scope.index==symbol->scope.index)
+	   {package_parameter=1;break;}
+	if ((!module && !package_parameter) || !expression || !symbol ||
 		symbol->kind != PIGEN_SYMBOL_PARAMETER ||
 		symbol->object.parameter.index != PIGEN_INVALID_ID ||
-		symbol->scope.index != module->scope.index ||
+		(module && !scope_is_within(model, symbol->scope, module->scope)) ||
 		!spans_equal(symbol->declaration, span) ||
 		pigen_expr_constant(model, value).index == PIGEN_INVALID_ID ||
 		syntax.index == PIGEN_INVALID_ID || (is_local != 0 && is_local != 1) ||
@@ -2780,6 +3542,76 @@ static int scope_is_within(const pigen_semantic_model *model,
 	return 0;
 }
 
+pigen_generate_scope_id pigen_generate_scope_add(pigen_semantic_model *model,
+	const pigen_semantic_generate_scope *scope)
+{
+	if(!model || !scope) return INVALID_ID(pigen_generate_scope_id);
+	const pigen_semantic_module *module=pigen_module_get(model,scope->module);
+	const pigen_scope *lexical=pigen_scope_get(model,scope->scope);
+	if(!module || !lexical || scope->scope.index==module->scope.index ||
+		!scope_is_within(model,scope->scope,module->scope) || scope->syntax.index==PIGEN_INVALID_ID ||
+		scope->control.index==PIGEN_INVALID_ID || !pigen_source_span_valid(model->sources,scope->span) ||
+		(scope->is_iteration!=0 && scope->is_iteration!=1) || !id_capacity_available(model->generate_scope_count))
+		return INVALID_ID(pigen_generate_scope_id);
+	if((scope->external_name!=NULL)!=(scope->external_ordinal!=0) ||
+		(scope->external_name && !scope->external_name[0])) return INVALID_ID(pigen_generate_scope_id);
+	if(scope->name.source.index!=PIGEN_INVALID_ID && !pigen_source_span_valid(model->sources,scope->name))
+		return INVALID_ID(pigen_generate_scope_id);
+	if(scope->is_iteration)
+	{
+		const pigen_symbol *iterator=pigen_symbol_get(model,scope->iterator);
+		const pigen_semantic_parameter *parameter=pigen_parameter_get(model,pigen_symbol_parameter(model,scope->iterator));
+		int64_t value;
+		if(!iterator || iterator->scope.index!=scope->scope.index || !parameter ||
+			parameter->module.index!=scope->module.index || !parameter->is_local ||
+			!pigen_const_expr_evaluate_i64(model,pigen_expr_constant(model,parameter->value),&value) || value!=scope->index)
+			return INVALID_ID(pigen_generate_scope_id);
+	}
+	else if(scope->iterator.index!=PIGEN_INVALID_ID) return INVALID_ID(pigen_generate_scope_id);
+	for(size_t i=0;i<model->generate_scope_count;i++)
+	{
+		const pigen_semantic_generate_scope *other=&model->generate_scopes[i];
+		if(other->scope.index==scope->scope.index) return INVALID_ID(pigen_generate_scope_id);
+		if(scope->name.source.index!=PIGEN_INVALID_ID && other->name.source.index!=PIGEN_INVALID_ID &&
+			model->scopes[other->scope.index].parent.index==lexical->parent.index && same_name(model,other->name,scope->name) &&
+			!(scope->is_iteration && other->is_iteration && scope->control.index==other->control.index && scope->index!=other->index))
+			return INVALID_ID(pigen_generate_scope_id);
+	}
+	if(model->generate_scope_count==model->generate_scope_capacity)
+	{
+		model->generate_scope_capacity=model->generate_scope_capacity ? model->generate_scope_capacity*2 : 16;
+		model->generate_scopes=pigen_resize(model->generate_scopes,model->generate_scope_capacity*sizeof(*model->generate_scopes));
+	}
+	pigen_generate_scope_id id={(uint32_t)model->generate_scope_count};
+	model->generate_scopes[model->generate_scope_count]=*scope;
+	if(scope->external_name) model->generate_scopes[model->generate_scope_count].external_name=pigen_copy_range(scope->external_name,strlen(scope->external_name));
+	model->generate_scope_count++;
+	return id;
+}
+
+const pigen_semantic_generate_scope *pigen_generate_scope_get(
+	const pigen_semantic_model *model,pigen_generate_scope_id scope)
+{
+	return model && scope.index<model->generate_scope_count ? &model->generate_scopes[scope.index] : NULL;
+}
+
+int pigen_generate_item_add(pigen_semantic_model *model,const pigen_semantic_generate_item *item)
+{
+	if(!model || !item || item->syntax.index==PIGEN_INVALID_ID) return 0;
+	const pigen_semantic_module *module=pigen_module_get(model,item->module);
+	const pigen_semantic_generate_scope *owner=pigen_generate_scope_get(model,item->owner);
+	if(!module || !scope_is_within(model,item->scope,module->scope) ||
+		(owner && (owner->module.index!=item->module.index || owner->scope.index!=item->scope.index)) ||
+		(!owner && (item->owner.index!=PIGEN_INVALID_ID || item->scope.index!=module->scope.index))) return 0;
+	if(model->generate_item_count==model->generate_item_capacity)
+	{
+		model->generate_item_capacity=model->generate_item_capacity ? model->generate_item_capacity*2 : 32;
+		model->generate_items=pigen_resize(model->generate_items,model->generate_item_capacity*sizeof(*model->generate_items));
+	}
+	model->generate_items[model->generate_item_count++]=*item;
+	return 1;
+}
+
 pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module_id,
 	pigen_symbol_id symbol_id, pigen_data_type_id data_type,
@@ -2796,7 +3628,7 @@ pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 
 	if (!module || !symbol || symbol->kind != PIGEN_SYMBOL_SIGNAL ||
 		symbol->object.signal.index != PIGEN_INVALID_ID ||
-		!scope_is_within(model, symbol->scope, module->scope) ||
+		(module && !scope_is_within(model, symbol->scope, module->scope)) ||
 		symbol->data_type.index != data_type.index ||
 		!spans_equal(symbol->declaration, span) ||
 		!pigen_data_type_exists(model, data_type) ||
@@ -2826,9 +3658,442 @@ pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 	model->signals[model->signal_count++] = (pigen_semantic_signal){
 		syntax, module_id, symbol_id, data_type, shape, transfer_argument,
 		transfer_type,
-		direction, INVALID_ID(pigen_clock_domain_id), span};
+		direction, INVALID_ID(pigen_clock_domain_id), span, INVALID_ID(pigen_expr_id),
+		0, INVALID_ID(pigen_expr_id)};
 	symbol->object.signal = result;
 	return result;
+}
+
+int pigen_symbol_bind_protocol_type(pigen_semantic_model *model,pigen_symbol_id id,pigen_protocol_type_id type)
+{
+ const pigen_symbol *symbol=pigen_symbol_get(model,id);
+ const pigen_protocol *protocol=pigen_protocol_type_get(model,type);uint64_t width;
+ if(!symbol || symbol->kind!=PIGEN_SYMBOL_PROTOCOL_TYPE || symbol->alias_of.index!=PIGEN_INVALID_ID || !protocol ||
+  !pigen_const_expr_evaluate_u64(model,pigen_data_type_packed_width(model,symbol->data_type),&width) ||
+  width!=protocol->data_bits || (symbol->object.protocol_type.index!=PIGEN_INVALID_ID && symbol->object.protocol_type.index!=type.index)) return 0;
+ model->symbols[id.index].object.protocol_type=type;return 1;
+}
+
+pigen_protocol_type_id pigen_symbol_protocol_type(const pigen_semantic_model *model,pigen_symbol_id id)
+{
+ if(!model) return INVALID_ID(pigen_protocol_type_id);
+ const pigen_symbol *symbol=pigen_symbol_get(model,canonical_symbol(model,id));
+ if(!symbol || symbol->kind!=PIGEN_SYMBOL_PROTOCOL_TYPE || !pigen_protocol_type_get(model,symbol->object.protocol_type))
+  return INVALID_ID(pigen_protocol_type_id);
+ return symbol->object.protocol_type;
+}
+
+pigen_protocol_type_id pigen_protocol_type_intern(pigen_semantic_model *model,
+	const pigen_protocol *protocol)
+{
+	pigen_protocol_type_id result;
+	if (!model || !pigen_protocol_is_valid(protocol))
+		return INVALID_ID(pigen_protocol_type_id);
+	for (size_t i = 0; i < model->protocol_type_count; i++)
+		if (pigen_protocol_equal(protocol, &model->protocol_types[i]))
+			return (pigen_protocol_type_id){(uint32_t)i};
+	if (!id_capacity_available(model->protocol_type_count))
+		return INVALID_ID(pigen_protocol_type_id);
+	if (model->protocol_type_count == model->protocol_type_capacity)
+	{
+		model->protocol_type_capacity = model->protocol_type_capacity ?
+			model->protocol_type_capacity * 2 : 8;
+		model->protocol_types = pigen_resize(model->protocol_types,
+			model->protocol_type_capacity * sizeof(*model->protocol_types));
+	}
+	result = (pigen_protocol_type_id){(uint32_t)model->protocol_type_count};
+	model->protocol_types[model->protocol_type_count++] = *protocol;
+	return result;
+}
+
+const pigen_protocol *pigen_protocol_type_get(const pigen_semantic_model *model,
+	pigen_protocol_type_id type)
+{
+	return model && type.index < model->protocol_type_count ?
+		&model->protocol_types[type.index] : NULL;
+}
+
+pigen_protocol_endpoint_id pigen_protocol_endpoint_add(pigen_semantic_model *model,
+	const pigen_semantic_protocol_endpoint *endpoint)
+{
+	const pigen_semantic_module *module;
+	const pigen_protocol *protocol;
+	pigen_symbol *symbol;
+	pigen_protocol_endpoint_id result;
+	if (!model || !endpoint) return INVALID_ID(pigen_protocol_endpoint_id);
+	module = pigen_module_get(model, endpoint->module);
+	protocol = pigen_protocol_type_get(model, endpoint->type);
+	symbol = endpoint->symbol.index < model->symbol_count ?
+		&model->symbols[endpoint->symbol.index] : NULL;
+	if (!module || !protocol || !symbol ||
+		symbol->kind != PIGEN_SYMBOL_PROTOCOL_ENDPOINT ||
+		endpoint->binding.is_bound != 0 ||
+		symbol->object.protocol_endpoint.index != PIGEN_INVALID_ID ||
+		((module && !scope_is_within(model, symbol->scope, module->scope)) ||
+		 (endpoint->is_port && symbol->scope.index != module->scope.index)) ||
+		!spans_equal(symbol->declaration, endpoint->span) ||
+		endpoint->syntax.index == PIGEN_INVALID_ID ||
+		!pigen_source_span_valid(model->sources, endpoint->span) ||
+		(endpoint->is_port != 0 && endpoint->is_port != 1) ||
+		(endpoint->is_instance_view != 0 && endpoint->is_instance_view != 1) ||
+		(endpoint->is_instance_view && endpoint->is_port) ||
+		(endpoint->role != PIGEN_PROTOCOL_INITIATOR &&
+			endpoint->role != PIGEN_PROTOCOL_TARGET) ||
+		!id_capacity_available(model->protocol_endpoint_count))
+		return INVALID_ID(pigen_protocol_endpoint_id);
+	if (endpoint->is_instance_view)
+	{
+		const pigen_semantic_instance *instance = pigen_instance_get(model, endpoint->instance);
+		const pigen_semantic_protocol_endpoint *child = pigen_protocol_endpoint_get(model, endpoint->child_endpoint);
+		if (!instance || !child || !child->is_port ||
+			instance->module.index != endpoint->module.index ||
+			instance->child_module.index != child->module.index ||
+			child->type.index != endpoint->type.index || child->role == endpoint->role ||
+			pigen_instance_protocol_endpoint(model, endpoint->instance, endpoint->child_endpoint).index != PIGEN_INVALID_ID)
+			return INVALID_ID(pigen_protocol_endpoint_id);
+	}
+	for (pigen_protocol_channel channel = PIGEN_CHANNEL_BEAT;
+		channel < PIGEN_CHANNEL_COUNT; channel++)
+	{
+		pigen_protocol_channel_layout layout;
+		pigen_protocol_role source;
+		const pigen_semantic_signal *signal;
+		const pigen_semantic_shape *shape;
+		const pigen_transfer_type_descriptor *storage;
+		pigen_semantic_direction direction;
+		uint64_t bits;
+		if (!pigen_protocol_channel_source(protocol->family, channel, &source))
+		{
+			if (endpoint->channels[channel].index != PIGEN_INVALID_ID)
+				return INVALID_ID(pigen_protocol_endpoint_id);
+			continue;
+		}
+		signal = pigen_signal_get(model, endpoint->channels[channel]);
+		shape = signal ? pigen_shape_get(model, signal->shape) : NULL;
+		storage = signal ? pigen_transfer_type_descriptor_get(signal->transfer_type) : NULL;
+		direction = !endpoint->is_port && !endpoint->is_instance_view ? PIGEN_SEMANTIC_INTERNAL :
+			source == endpoint->role ? PIGEN_SEMANTIC_OUTPUT : PIGEN_SEMANTIC_INPUT;
+		if (!signal || signal->module.index != endpoint->module.index ||
+			signal->direction != direction || !shape || shape->dimension_count ||
+			!storage || storage->is_static ||
+			storage->realization == PIGEN_TRANSFER_REALIZATION_PULSE_REGISTER ||
+			!pigen_protocol_layout(protocol, channel, &layout) ||
+			!pigen_const_expr_evaluate_u64(model,
+				pigen_data_type_packed_width(model, signal->data_type), &bits) ||
+			bits != (layout.payload_bits ? layout.payload_bits : 1))
+			return INVALID_ID(pigen_protocol_endpoint_id);
+		if (endpoint->is_instance_view)
+		{
+			const pigen_semantic_instance *instance = pigen_instance_get(model, endpoint->instance);
+			const pigen_semantic_protocol_endpoint *child = pigen_protocol_endpoint_get(model, endpoint->child_endpoint);
+			int mapped = 0;
+			for (size_t c = 0; c < instance->connection_count; c++)
+			{
+				const pigen_semantic_instance_connection *connection = &model->instance_connections[instance->first_connection+c];
+				const pigen_semantic_expr *value = pigen_expr_get(model, connection->value);
+				if (connection->port_signal.index == child->channels[channel].index &&
+					value && value->kind == PIGEN_EXPR_SYMBOL &&
+					pigen_symbol_signal(model, value->as.symbol).index == endpoint->channels[channel].index)
+					mapped = 1;
+			}
+			if (!mapped || !pigen_signal_is_instance_endpoint(model, endpoint->channels[channel]))
+				return INVALID_ID(pigen_protocol_endpoint_id);
+		}
+		for (size_t prior = 0; prior < (size_t)channel; prior++)
+			if (endpoint->channels[prior].index == endpoint->channels[channel].index)
+				return INVALID_ID(pigen_protocol_endpoint_id);
+		for (size_t i = 0; i < model->protocol_endpoint_count; i++)
+			for (size_t j = 0; j < PIGEN_CHANNEL_COUNT; j++)
+				if (model->protocol_endpoints[i].channels[j].index ==
+					endpoint->channels[channel].index)
+					return INVALID_ID(pigen_protocol_endpoint_id);
+	}
+	if (model->protocol_endpoint_count == model->protocol_endpoint_capacity)
+	{
+		model->protocol_endpoint_capacity = model->protocol_endpoint_capacity ?
+			model->protocol_endpoint_capacity * 2 : 8;
+		model->protocol_endpoints = pigen_resize(model->protocol_endpoints,
+			model->protocol_endpoint_capacity * sizeof(*model->protocol_endpoints));
+	}
+	result = (pigen_protocol_endpoint_id){(uint32_t)model->protocol_endpoint_count};
+	model->protocol_endpoints[model->protocol_endpoint_count++] = *endpoint;
+	symbol->object.protocol_endpoint = result;
+	return result;
+}
+
+const pigen_semantic_protocol_endpoint *pigen_protocol_endpoint_get(
+	const pigen_semantic_model *model, pigen_protocol_endpoint_id endpoint)
+{
+	return model && endpoint.index < model->protocol_endpoint_count ?
+		&model->protocol_endpoints[endpoint.index] : NULL;
+}
+
+pigen_protocol_endpoint_id pigen_instance_protocol_endpoint(
+	const pigen_semantic_model *model, pigen_instance_id instance,
+	pigen_protocol_endpoint_id child_endpoint)
+{
+	if (model) for (size_t e = 0; e < model->protocol_endpoint_count; e++)
+	{
+		const pigen_semantic_protocol_endpoint *view = &model->protocol_endpoints[e];
+		if (view->is_instance_view && view->instance.index == instance.index &&
+			view->child_endpoint.index == child_endpoint.index)
+			return (pigen_protocol_endpoint_id){(uint32_t)e};
+	}
+	return INVALID_ID(pigen_protocol_endpoint_id);
+}
+
+pigen_protocol_endpoint_id pigen_symbol_protocol_endpoint(
+	const pigen_semantic_model *model, pigen_symbol_id symbol_id)
+{
+	const pigen_symbol *symbol = model ? pigen_symbol_get(model, symbol_id) : NULL;
+	const pigen_semantic_protocol_endpoint *endpoint;
+	if (!symbol || symbol->kind != PIGEN_SYMBOL_PROTOCOL_ENDPOINT)
+		return INVALID_ID(pigen_protocol_endpoint_id);
+	endpoint = pigen_protocol_endpoint_get(model, symbol->object.protocol_endpoint);
+	return endpoint && endpoint->symbol.index == symbol_id.index ?
+		symbol->object.protocol_endpoint : INVALID_ID(pigen_protocol_endpoint_id);
+}
+
+pigen_protocol_endpoint_id pigen_protocol_endpoint_for_signal(
+	const pigen_semantic_model *model, pigen_signal_id signal, pigen_protocol_channel *channel)
+{
+	if (!model || signal.index >= model->signal_count)
+		return INVALID_ID(pigen_protocol_endpoint_id);
+	for (size_t e = 0; e < model->protocol_endpoint_count; e++)
+		for (pigen_protocol_channel c = 0; c < PIGEN_CHANNEL_COUNT; c++)
+			if (model->protocol_endpoints[e].channels[c].index == signal.index)
+			{
+				if (channel) *channel = c;
+				return (pigen_protocol_endpoint_id){(uint32_t)e};
+			}
+	return INVALID_ID(pigen_protocol_endpoint_id);
+}
+
+static int protocol_array_bounds(pigen_semantic_model *model,
+	const pigen_shape_dimension *dimension, int64_t *left, int64_t *right, size_t *count)
+{
+	if (dimension->form == PIGEN_SHAPE_DIMENSION_COUNT)
+	{
+		uint64_t value;
+		if (!pigen_const_expr_evaluate_u64(model, dimension->as.count, &value) ||
+			!value || value-1 > INT64_MAX || value > SIZE_MAX) return 0;
+		*left=(int64_t)(value-1); *right=0; *count=(size_t)value;
+		return 1;
+	}
+	if (dimension->form != PIGEN_SHAPE_DIMENSION_RANGE ||
+		!pigen_const_expr_evaluate_i64(model,dimension->as.range.left,left) ||
+		!pigen_const_expr_evaluate_i64(model,dimension->as.range.right,right)) return 0;
+	uint64_t distance = *left >= *right ? (uint64_t)*left-(uint64_t)*right : (uint64_t)*right-(uint64_t)*left;
+	if (distance == UINT64_MAX || distance+1 > SIZE_MAX) return 0;
+	*count=(size_t)(distance+1);
+	return 1;
+}
+
+int pigen_protocol_array_shape_size(pigen_semantic_model *model,
+	pigen_shape_id id, size_t *count)
+{
+	const pigen_semantic_shape *shape=pigen_shape_get(model,id);
+	const pigen_shape_dimension *dimensions=pigen_shape_dimensions(model,id);
+	if(!shape || !shape->dimension_count || !dimensions || !count) return 0;
+	size_t total=1;
+	for(size_t d=0;d<shape->dimension_count;d++)
+	{
+		int64_t left,right;size_t n;
+		if(!protocol_array_bounds(model,&dimensions[d],&left,&right,&n) || n>SIZE_MAX/total) return 0;
+		total*=n;
+	}
+	*count=total;
+	return 1;
+}
+
+const pigen_semantic_protocol_array *pigen_protocol_array_get(
+	const pigen_semantic_model *model, pigen_protocol_array_id array)
+{
+	return model && array.index < model->protocol_array_count ? &model->protocol_arrays[array.index] : NULL;
+}
+
+pigen_protocol_array_id pigen_symbol_protocol_array(
+	const pigen_semantic_model *model, pigen_symbol_id symbol_id)
+{
+	const pigen_symbol *symbol=pigen_symbol_get(model,symbol_id);
+	if (!symbol || symbol->kind!=PIGEN_SYMBOL_PROTOCOL_ARRAY) return INVALID_ID(pigen_protocol_array_id);
+	const pigen_semantic_protocol_array *array=pigen_protocol_array_get(model,symbol->object.protocol_array);
+	return array && array->symbol.index==symbol_id.index ? symbol->object.protocol_array : INVALID_ID(pigen_protocol_array_id);
+}
+
+pigen_protocol_array_id pigen_protocol_array_for_endpoint(
+	const pigen_semantic_model *model, pigen_protocol_endpoint_id endpoint, size_t *ordinal)
+{
+	if (!pigen_protocol_endpoint_get(model,endpoint)) return INVALID_ID(pigen_protocol_array_id);
+	for(size_t a=0;a<model->protocol_array_count;a++)
+	{
+		const pigen_semantic_protocol_array *array=&model->protocol_arrays[a];
+		for(size_t e=0;e<array->element_count;e++)
+			if(model->protocol_array_elements[array->first_element+e].index==endpoint.index)
+			{ if(ordinal)*ordinal=e; return (pigen_protocol_array_id){(uint32_t)a}; }
+	}
+	return INVALID_ID(pigen_protocol_array_id);
+}
+
+pigen_protocol_array_id pigen_protocol_array_add(pigen_semantic_model *model,
+	const pigen_semantic_protocol_array *array,
+	const pigen_protocol_endpoint_id *elements, size_t element_count)
+{
+	if(!model || !array || !elements || !element_count || !id_capacity_available(model->protocol_array_count) ||
+		element_count>SIZE_MAX-model->protocol_array_element_count ||
+		model->protocol_array_element_count+element_count>SIZE_MAX/sizeof(*model->protocol_array_elements))
+		return INVALID_ID(pigen_protocol_array_id);
+	const pigen_semantic_module *module=pigen_module_get(model,array->module);
+	pigen_symbol *symbol=array->symbol.index<model->symbol_count ? &model->symbols[array->symbol.index] : NULL;
+	const pigen_semantic_shape *shape=pigen_shape_get(model,array->shape);
+	const pigen_shape_dimension *dimensions=pigen_shape_dimensions(model,array->shape);
+	if(!module || !symbol || symbol->kind!=PIGEN_SYMBOL_PROTOCOL_ARRAY ||
+		(!scope_is_within(model,symbol->scope,module->scope) || (array->is_port && symbol->scope.index!=module->scope.index)) || symbol->object.protocol_array.index!=PIGEN_INVALID_ID ||
+		!spans_equal(symbol->declaration,array->span) ||
+		array->syntax.index==PIGEN_INVALID_ID || !pigen_source_span_valid(model->sources,array->span) ||
+		!pigen_protocol_type_get(model,array->type) || (array->role!=PIGEN_PROTOCOL_INITIATOR && array->role!=PIGEN_PROTOCOL_TARGET) ||
+		(array->is_port!=0 && array->is_port!=1) || !shape || !shape->dimension_count || !dimensions)
+		return INVALID_ID(pigen_protocol_array_id);
+	if(shape->dimension_count>SIZE_MAX-model->protocol_array_dimension_count ||
+		model->protocol_array_dimension_count+shape->dimension_count>SIZE_MAX/sizeof(*model->protocol_array_dimensions))
+		return INVALID_ID(pigen_protocol_array_id);
+	pigen_protocol_array_dimension *bounds=pigen_resize(NULL,shape->dimension_count*sizeof(*bounds));
+	size_t total=1;
+	for(size_t d=0;d<shape->dimension_count;d++)
+	{
+		int64_t left,right;size_t count;
+		if(!protocol_array_bounds(model,&dimensions[d],&left,&right,&count) || count>SIZE_MAX/total)
+			goto invalid;
+		bounds[d]=(pigen_protocol_array_dimension){left,right,count};
+		total*=count;
+	}
+	if(total!=element_count) goto invalid;
+	for(size_t e=0;e<element_count;e++)
+	{
+		const pigen_semantic_protocol_endpoint *endpoint=pigen_protocol_endpoint_get(model,elements[e]);
+		if(!endpoint || endpoint->module.index!=array->module.index || endpoint->type.index!=array->type.index ||
+			endpoint->role!=array->role || endpoint->is_port!=array->is_port ||
+			model->symbols[endpoint->symbol.index].scope.index!=symbol->scope.index ||
+			pigen_protocol_array_for_endpoint(model,elements[e],NULL).index!=PIGEN_INVALID_ID)
+			goto invalid;
+		for(size_t p=0;p<e;p++)if(elements[p].index==elements[e].index)goto invalid;
+	}
+	if(model->protocol_array_count==model->protocol_array_capacity)
+	{
+		model->protocol_array_capacity=model->protocol_array_capacity ? model->protocol_array_capacity*2 : 8;
+		model->protocol_arrays=pigen_resize(model->protocol_arrays,model->protocol_array_capacity*sizeof(*model->protocol_arrays));
+	}
+	size_t required=model->protocol_array_element_count+element_count;
+	if(required>model->protocol_array_element_capacity)
+	{
+		model->protocol_array_element_capacity=required;
+		model->protocol_array_elements=pigen_resize(model->protocol_array_elements,required*sizeof(*model->protocol_array_elements));
+	}
+	size_t dimensions_required=model->protocol_array_dimension_count+shape->dimension_count;
+	if(dimensions_required>model->protocol_array_dimension_capacity)
+	{
+		model->protocol_array_dimension_capacity=dimensions_required;
+		model->protocol_array_dimensions=pigen_resize(model->protocol_array_dimensions,dimensions_required*sizeof(*model->protocol_array_dimensions));
+	}
+	pigen_protocol_array_id result={(uint32_t)model->protocol_array_count};
+	pigen_semantic_protocol_array saved=*array;
+	saved.first_element=model->protocol_array_element_count;saved.element_count=element_count;
+	saved.first_dimension=model->protocol_array_dimension_count;saved.dimension_count=shape->dimension_count;
+	memcpy(model->protocol_array_dimensions+saved.first_dimension,bounds,saved.dimension_count*sizeof(*bounds));
+	model->protocol_array_dimension_count+=saved.dimension_count;free(bounds);
+	memcpy(model->protocol_array_elements+saved.first_element,elements,element_count*sizeof(*elements));
+	model->protocol_array_element_count+=element_count;
+	model->protocol_arrays[model->protocol_array_count++]=saved;
+	symbol->object.protocol_array=result;
+	return result;
+invalid:
+	free(bounds);
+	return INVALID_ID(pigen_protocol_array_id);
+}
+
+pigen_protocol_endpoint_id pigen_protocol_array_element(
+	const pigen_semantic_model *model, pigen_protocol_array_id id,
+	const int64_t *coordinates, size_t coordinate_count)
+{
+	const pigen_semantic_protocol_array *array=pigen_protocol_array_get(model,id);
+	if(!array || !coordinates || coordinate_count!=array->dimension_count)
+		return INVALID_ID(pigen_protocol_endpoint_id);
+	const pigen_protocol_array_dimension *dimensions=model->protocol_array_dimensions+array->first_dimension;
+	size_t ordinal=0;
+	for(size_t d=0;d<coordinate_count;d++)
+	{
+		int64_t left=dimensions[d].left,right=dimensions[d].right,index=coordinates[d];
+		size_t count=dimensions[d].count;
+		if(index<(left<right ? left : right) || index>(left>right ? left : right))
+			return INVALID_ID(pigen_protocol_endpoint_id);
+		uint64_t offset=left>=right ? (uint64_t)left-(uint64_t)index : (uint64_t)index-(uint64_t)left;
+		if(ordinal>SIZE_MAX/count || offset>SIZE_MAX-ordinal*count) return INVALID_ID(pigen_protocol_endpoint_id);
+		ordinal=ordinal*count+(size_t)offset;
+	}
+	return ordinal<array->element_count ? model->protocol_array_elements[array->first_element+ordinal] : INVALID_ID(pigen_protocol_endpoint_id);
+}
+
+int pigen_protocol_arrays_can_connect(const pigen_semantic_model *model,
+	pigen_protocol_array_id source, pigen_protocol_array_id destination)
+{
+	const pigen_semantic_protocol_array *s=pigen_protocol_array_get(model,source),*d=pigen_protocol_array_get(model,destination);
+	if(!s || !d || !pigen_protocol_can_connect(pigen_protocol_type_get(model,s->type),s->role,
+		pigen_protocol_type_get(model,d->type),d->role)) return 0;
+	if(s->dimension_count!=d->dimension_count) return 0;
+	for(size_t n=0;n<s->dimension_count;n++)
+	{
+		const pigen_protocol_array_dimension *sd=&model->protocol_array_dimensions[s->first_dimension+n];
+		const pigen_protocol_array_dimension *dd=&model->protocol_array_dimensions[d->first_dimension+n];
+		if(sd->count!=dd->count) return 0;
+	}
+	return 1;
+}
+
+static int protocol_static_input(pigen_semantic_model *model,
+	pigen_module_id module, pigen_symbol_id symbol)
+{
+	const pigen_semantic_signal *signal = pigen_signal_get(model, pigen_symbol_signal(model, symbol));
+	const pigen_semantic_shape *shape = signal ? pigen_shape_get(model, signal->shape) : NULL;
+	const pigen_transfer_type_descriptor *storage = signal ?
+		pigen_transfer_type_descriptor_get(signal->transfer_type) : NULL;
+	uint64_t bits;
+	return signal && signal->module.index == module.index &&
+		signal->direction == PIGEN_SEMANTIC_INPUT && storage && storage->is_static &&
+		shape && !shape->dimension_count && pigen_const_expr_evaluate_u64(model,
+			pigen_data_type_packed_width(model, signal->data_type), &bits) && bits == 1;
+}
+
+int pigen_protocol_endpoint_bind(pigen_semantic_model *model,
+	pigen_protocol_endpoint_id id, pigen_clock_domain_id domain_id,
+	pigen_symbol_id reset_symbol, int reset_active_low)
+{
+	if (!model || id.index >= model->protocol_endpoint_count) return 0;
+	pigen_semantic_protocol_endpoint *endpoint = &model->protocol_endpoints[id.index];
+	const pigen_semantic_clock_domain *domain = pigen_clock_domain_get(model, domain_id);
+	if (!domain || domain->edge != PIGEN_SEMANTIC_POSEDGE ||
+		(reset_active_low != 0 && reset_active_low != 1) ||
+		!protocol_static_input(model, endpoint->module, domain->clock_symbol) ||
+		!protocol_static_input(model, endpoint->module, reset_symbol)) return 0;
+	if (endpoint->binding.is_bound)
+		return endpoint->binding.domain.index == domain_id.index &&
+			endpoint->binding.reset_symbol.index == reset_symbol.index &&
+			endpoint->binding.reset_active_low == reset_active_low;
+	for (size_t c = 0; c < PIGEN_CHANNEL_COUNT; c++)
+	{
+		const pigen_semantic_signal *signal = pigen_signal_get(model, endpoint->channels[c]);
+		if (signal && signal->domain.index != PIGEN_INVALID_ID && signal->domain.index != domain_id.index)
+			return 0;
+	}
+	for (size_t c = 0; c < PIGEN_CHANNEL_COUNT; c++)
+	{
+		pigen_signal_id signal = endpoint->channels[c];
+		if (signal.index != PIGEN_INVALID_ID && !pigen_signal_bind_domain(model, signal, domain_id)) return 0;
+	}
+	endpoint->binding.is_bound = 1;
+	endpoint->binding.domain = domain_id;
+	endpoint->binding.reset_symbol = reset_symbol;
+	endpoint->binding.reset_active_low = reset_active_low;
+	return 1;
 }
 
 int pigen_signal_bind_domain(pigen_semantic_model *model,
@@ -2908,7 +4173,7 @@ pigen_process_id pigen_process_add(pigen_semantic_model *model,
 	}
 	result = (pigen_process_id){(uint32_t)model->process_count};
 	model->processes[model->process_count++] = (pigen_semantic_process){
-		syntax, module_id, domain_id, clock, span};
+		syntax, module_id, domain_id, clock, span, 0, 0, INVALID_ID(pigen_procedural_id)};
 	return result;
 }
 
@@ -2926,7 +4191,92 @@ pigen_process_id pigen_structural_process_add(pigen_semantic_model *model,
 	}
 	pigen_process_id result = {(uint32_t)model->process_count};
 	model->processes[model->process_count++] = (pigen_semantic_process){
-		syntax, module, INVALID_ID(pigen_clock_domain_id), INVALID_ID(pigen_expr_id), span};
+		syntax, module, INVALID_ID(pigen_clock_domain_id), INVALID_ID(pigen_expr_id), span, 0, 0, INVALID_ID(pigen_procedural_id)};
+	return result;
+}
+
+pigen_procedural_id pigen_procedural_add(pigen_semantic_model *model,
+	pigen_process_id process, pigen_procedural_kind kind,
+	pigen_expr_id condition, pigen_transfer_id assignment,
+	const pigen_procedural_id *children, size_t count, pigen_source_span span)
+{
+	if (!pigen_process_get(model, process) || (unsigned)kind > PIGEN_PROCEDURAL_CONTINUE ||
+		(count && !children) || !id_capacity_available(model->procedural_count) ||
+		count > SIZE_MAX-model->procedural_child_count ||
+		model->procedural_child_count+count > SIZE_MAX/sizeof(*children))
+		return INVALID_ID(pigen_procedural_id);
+	if (kind == PIGEN_PROCEDURAL_IF &&
+		(!pigen_expr_get(model, condition) || count < 1 || count > 2)) return INVALID_ID(pigen_procedural_id);
+	if ((kind==PIGEN_PROCEDURAL_WHILE || kind==PIGEN_PROCEDURAL_REPEAT || kind==PIGEN_PROCEDURAL_DO_WHILE) &&
+		(!pigen_expr_get(model,condition) || count!=1)) return INVALID_ID(pigen_procedural_id);
+	if (kind==PIGEN_PROCEDURAL_FOREVER && (count!=1 || condition.index!=PIGEN_INVALID_ID)) return INVALID_ID(pigen_procedural_id);
+	if ((kind==PIGEN_PROCEDURAL_BREAK || kind==PIGEN_PROCEDURAL_CONTINUE) &&
+		(count || condition.index!=PIGEN_INVALID_ID || assignment.index!=PIGEN_INVALID_ID)) return INVALID_ID(pigen_procedural_id);
+	int selection=kind>=PIGEN_PROCEDURAL_CASE && kind<=PIGEN_PROCEDURAL_CASEX;
+	if (selection && !pigen_expr_get(model,condition)) return INVALID_ID(pigen_procedural_id);
+	if (kind==PIGEN_PROCEDURAL_CASE_ITEM && (count!=1 ||
+		(condition.index!=PIGEN_INVALID_ID && !pigen_expr_get(model,condition)))) return INVALID_ID(pigen_procedural_id);
+	if (kind == PIGEN_PROCEDURAL_ASSIGN)
+	{
+		const pigen_semantic_transfer *transfer = pigen_transfer_get(model, assignment);
+		if (!transfer || transfer->process.index != process.index || count) return INVALID_ID(pigen_procedural_id);
+	}
+	int defaults=0;
+	for (size_t i=0;i<count;i++)
+	{
+		if (children[i].index>=model->procedural_count ||
+			model->procedural[children[i].index].process.index!=process.index) return INVALID_ID(pigen_procedural_id);
+		const pigen_semantic_procedural *child=&model->procedural[children[i].index];
+		if ((child->kind==PIGEN_PROCEDURAL_CASE_ITEM)!=selection) return INVALID_ID(pigen_procedural_id);
+		if ((unsigned)child->case_qualifier>PIGEN_CASE_PRIORITY ||
+			(child->case_qualifier!=PIGEN_CASE_UNQUALIFIED && child->kind!=PIGEN_PROCEDURAL_IF && (child->kind<PIGEN_PROCEDURAL_CASE || child->kind>PIGEN_PROCEDURAL_CASEX))) return INVALID_ID(pigen_procedural_id);
+		if (child->else_if && (child->else_if!=1 || child->kind!=PIGEN_PROCEDURAL_IF || child->child_count!=2 ||
+			child->first_child>model->procedural_child_count || 2>model->procedural_child_count-child->first_child ||
+			model->procedural_children[child->first_child+1].index>=model->procedural_count ||
+			model->procedural[model->procedural_children[child->first_child+1].index].kind!=PIGEN_PROCEDURAL_IF)) return INVALID_ID(pigen_procedural_id);
+		if (child->case_continuation)
+		{
+			if (!selection || !i || child->case_continuation!=1 || child->condition.index==PIGEN_INVALID_ID ||
+				child->child_count!=1 || child->first_child>=model->procedural_child_count) return INVALID_ID(pigen_procedural_id);
+			const pigen_semantic_procedural *previous=&model->procedural[children[i-1].index];
+			if (previous->condition.index==PIGEN_INVALID_ID || previous->child_count!=1 ||
+				previous->first_child>=model->procedural_child_count ||
+				model->procedural_children[previous->first_child].index!=model->procedural_children[child->first_child].index) return INVALID_ID(pigen_procedural_id);
+		}
+		if (selection && child->condition.index==PIGEN_INVALID_ID && ++defaults>1) return INVALID_ID(pigen_procedural_id);
+	}
+	if (kind==PIGEN_PROCEDURAL_FOR)
+	{
+		if (count!=3 || !pigen_expr_get(model,condition) ||
+			model->procedural[children[0].index].kind!=PIGEN_PROCEDURAL_BLOCK ||
+			model->procedural[children[1].index].kind!=PIGEN_PROCEDURAL_BLOCK) return INVALID_ID(pigen_procedural_id);
+		for(size_t phase=0;phase<2;phase++)
+		{
+			const pigen_semantic_procedural *step=&model->procedural[children[phase].index];
+			for(size_t i=0;i<step->child_count;i++)
+				if (model->procedural[model->procedural_children[step->first_child+i].index].kind!=PIGEN_PROCEDURAL_ASSIGN)
+					return INVALID_ID(pigen_procedural_id);
+		}
+	}
+	pigen_procedural_id *copy=count ? pigen_resize(NULL,count*sizeof(*children)) : NULL;
+	if (count) memcpy(copy,children,count*sizeof(*children));
+	if (model->procedural_count == model->procedural_capacity)
+	{
+		model->procedural_capacity = model->procedural_capacity ? model->procedural_capacity*2 : 16;
+		model->procedural = pigen_resize(model->procedural,model->procedural_capacity*sizeof(*model->procedural));
+	}
+	size_t needed=model->procedural_child_count+count;
+	if (needed > model->procedural_child_capacity)
+	{
+		model->procedural_child_capacity=needed;
+		model->procedural_children=pigen_resize(model->procedural_children,needed*sizeof(*children));
+	}
+	size_t first=model->procedural_child_count;
+	if (count) memcpy(model->procedural_children+first,copy,count*sizeof(*children));
+	free(copy);
+	model->procedural_child_count=needed;
+	pigen_procedural_id result={(uint32_t)model->procedural_count++};
+	model->procedural[result.index]=(pigen_semantic_procedural){kind,process,condition,assignment,first,count,span,0,PIGEN_CASE_UNQUALIFIED,0};
 	return result;
 }
 
@@ -3340,6 +4690,9 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->shape_dimensions);
 	free(model->scopes);
 	free(model->symbols);
+	free(model->imports);
+	free(model->retained_calls);
+	free(model->retained_observations);
 	free(model->expressions);
 	free(model->expression_children);
 	free(model->constant_expressions);
@@ -3348,13 +4701,28 @@ void pigen_free_semantic_model(pigen_semantic_model *model)
 	free(model->predicates);
 	free(model->predicate_atoms);
 	free(model->struct_members);
+	free(model->record_types);
 	free(model->lvalues);
 	free(model->lvalue_children);
 	free(model->modules);
 	free(model->parameters);
+	for(size_t i=0;i<model->generate_scope_count;i++) free(model->generate_scopes[i].external_name);
+	free(model->generate_scopes);
+	free(model->generate_items);
+	free(model->instances);
+	free(model->instance_connections);
 	free(model->signals);
+	free(model->protocol_types);
+	free(model->protocol_endpoints);
+	free(model->protocol_arrays);
+	free(model->protocol_array_dimensions);
+	free(model->protocol_array_elements);
+	free(model->protocol_fabric_edges);
 	free(model->clock_domains);
+	free(model->procedural);
+	free(model->procedural_children);
 	free(model->processes);
+	free(model->actions);
 	free(model->transfers);
 	free(model->transfer_signal_uses);
 	free(model->width_constraints);

@@ -937,6 +937,29 @@ char *pigen_lower_blocks(const char *source, size_t length, pigen_string *genera
 		}
 		if (token_is(&parser, parser.at, "fabric"))
 		{
+			/* Typed port-list fabrics belong to the structured frontend. The
+			 * legacy PAYLOAD_W form has parameters but no port list. */
+			size_t header = parser.at + 2;
+			if (token_is(&parser, header, "#") && token_is(&parser, header + 1, "("))
+			{
+				int depth = 1;
+				header += 2;
+				while (depth && header < parser.tokens.count)
+				{
+					if (token_is(&parser, header, "(")) depth++;
+					if (token_is(&parser, header, ")")) depth--;
+					header++;
+				}
+			}
+			if (token_is(&parser, header, "("))
+			{
+				while (current(&parser)->kind != PIGEN_TOKEN_EOF &&
+					!token_is(&parser, parser.at, "endfabric")) parser.at++;
+				if (current(&parser)->kind == PIGEN_TOKEN_EOF) pigen_fail("typed fabric requires `endfabric`");
+				parser.at++;
+				continue;
+			}
+
 			size_t start = current(&parser)->span.start;
 			size_t end;
 			fabric_block fabric = parse_fabric(&parser, &end);

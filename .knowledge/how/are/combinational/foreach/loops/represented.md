@@ -1,0 +1,18 @@
+---
+status: green
+revised_at: "2026-11-16T16:24:36+11:00"
+---
+
+Selected typed always_comb supports foreach over fixed unpacked data arrays, packed variables/fields and native AXI endpoint collections. Iteration follows unpacked dimensions before packed dimensions, with the rightmost iterated dimension changing fastest. Declaration direction, omitted dimensions and omitted trailing indices are preserved. Loop variables are private signed four-state 32-bit values; writes, updates, selected writes and concatenated writes reject.
+
+src/syntax.c:parse_procedural_foreach retains the target expression in PROCEDURAL_FOREACH.procedural_loop.control, FOREACH_INDEX children and one body. Invalid token IDs represent omitted names. The final bracket list is parsed separately from the target without reconstructing authored source text. Root always_comb recognizes native foreach header references as well as existing intrinsic/numerical triggers.
+
+src/resolve.c:resolve_combinational_foreach inspects a temporary analyzed data target or an owned native collection view without publishing a payload observation. Bounds must fit int32; iterated cardinality obeys maximum_generated_bits and named iterator nesting is bounded at 128. A private 64-bit ordinal supplies the existing semantic FOR's condition, initialization and step. One FOR gives multidimensional foreach one break target and a continue target reaching the next ordinal. Nested authored loops retain their own exits.
+
+Data/packed-field foreach resolves its body once. Quotient/remainder coordinates assign read-only iterator signal identities at body entry, preserving static local identity and ordered reads. Automatic locals initialize on each entry (how/are/automatic/procedural/initializers/represented.md). Native endpoint collections specialize coordinate branches while sharing canonical static body declarations; that mechanism and its cumulative process limit are owned by how/are/native/axi/collection/foreach/loops/resolved.md. Structural endpoint indexing still requires constants outside that specialization context.
+
+Each foreach has a private procedural scope. Named typed body blocks support qualified static locals (how/are/named/procedural/blocks/resolved.md). Nested names may shadow outer names, and iterators cannot escape or reuse the designated array's simple/final member name. Synthetic assignments use typed conversions and normal dependency analysis. Existing RTL/emitter FOR owners need no new statement kind.
+
+Clocked fixed-bound transfer iteration uses a separate specialized body path under integration validation (how/are/clocked/foreach/loops/represented.md). Dynamic/associative arrays, strings, bounds beyond int32 and all-omitted index lists remain unsupported in this typed route. Ordinary retained SV keeps its preservation path. Inspecting native bounds does not consume tokens or change ownership.
+
+make foreach-test runs tests/foreach_test.py and tests/native_foreach_test.py. foreach.pigen/foreach_tb.sv compare 1024 patterns with native foreach and independent explicit traversal: direction, shared static locals, mixed dimensions, skips, shadowing and exits. native_axis_foreach_data reverses 1024 buffered words without draining peeked tokens; projection/simulator details are owned by how/are/native/axi/field/projections/lowered.md. Native collection tests add all-family child/generated/fabric evidence. generate_semantic_test.c checks syntax, phases, types, isolation, canonical aliases and limits. The language basis is IEEE 1800-2017 §12.7.3 ([standard](https://fpga.mit.edu/6205/_static/F25/documentation/1800-2017.pdf)). Related: how/are/combinational/for/loops/represented.md; how/are/combinational/loop/exits/represented.md.

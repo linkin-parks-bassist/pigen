@@ -1,0 +1,20 @@
+`define CORE_TEST_WIDTH 8
+module retained_parameters #(
+    parameter integer W = `CORE_TEST_WIDTH,
+    parameter int[9] NEG = -2,
+    parameter uint[8] POS = 255,
+    parameter bit[4] MASK = 4'ha
+) (
+    input wire clk, input wire reset,
+    input bit[W] buf source,
+    output bit[W] buf destination
+);
+    localparam int[10] DOUBLE = NEG * 2;
+    initial begin
+        if (W != 8 || NEG != -2 || POS != 255 || MASK != 4'ha || DOUBLE != -4)
+            $fatal(1,"retained parameter value");
+        if ($bits(NEG) != 9 || $bits(POS) != 8 || $bits(MASK) != 4 || $bits(DOUBLE) != 10)
+            $fatal(1,"retained parameter width");
+    end
+    always @(posedge clk) destination <= source;
+endmodule

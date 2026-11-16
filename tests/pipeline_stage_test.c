@@ -2,7 +2,7 @@
  *
  * Test-contract stage of step (b) of the pipeline frontier: the discriminating
  * manifest that pins the SOURCE-LEVEL DISCRIMINABLE stage execution laws on
- * the structured path. It tests the skeleton's owner seam
+ * the structured path. It tests the stage owner seam
  * (include/pigen/pipeline_stage.h, pigen_pipeline_stage_laws) against the
  * behavior contract the spec and the stage-law leaves require (spec:
  * what/is/the/spec.md; the stage-execution law how/do/pipeline/stage/reads/work.md;
@@ -50,9 +50,9 @@
  * APIs (pigen_semantic_init, pigen_module_add, pigen_scope_add,
  * pigen_symbol_declare, pigen_signal_add, pigen_clock_domain_intern,
  * pigen_process_add) - the same module-scope skeleton the resolver builds for
- * a clocked process, since the structured lowerer does not yet carry a pipeline
- * statement through pigen_resolve_semantics (that is a later pipeline step) -
- * then drives the seam entry point and reads back exclusively through the
+ * a clocked process. This fixture isolates the stage-law owner rather than
+ * exercising the production resolver's pipeline dispatch. It then drives the
+ * seam entry point and reads back exclusively through the
  * owner accessors (pigen_pipeline_stage_laws + pigen_pipeline_stage_is_invalid,
  * pigen_symbol_lookup, pigen_signal_get, pigen_data_type_packed_width and
  * pigen_const_expr_evaluate_u64). Every witness is located through the parse

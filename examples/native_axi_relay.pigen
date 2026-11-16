@@ -1,0 +1,147 @@
+// Native protocol endpoints preserve all selected fields through independent
+// channel transfers. input/output select the target/initiator role of a bus.
+module native_axis_relay #(
+    parameter DATA_BITS = 32,
+    parameter ID_BITS = 4,
+    parameter DEST_BITS = 4,
+    parameter USER_BITS = 4
+) (
+    input wire clk,
+    input wire reset,
+    input uint[DATA_BITS] axi4_stream[keep=1,strb=1,last=1,id=ID_BITS,dest=DEST_BITS,user=USER_BITS] s,
+    output uint[DATA_BITS] axi4_stream[keep=1,strb=1,last=1,id=ID_BITS,dest=DEST_BITS,user=USER_BITS] m
+);
+    always @(posedge clk) if (!reset) m <= s;
+endmodule
+
+// Two four-bit initiator ID spaces need a five-bit target ID space.
+// The fabric prefixes each request ID and restores the original response ID.
+fabric native_axi4_merge2 (
+    input wire clk,
+    input wire reset,
+    input uint[32] axi4[addr=32,id=4,awuser=4,wuser=4,buser=4,aruser=4,ruser=4] s0,
+    input uint[32] axi4[addr=32,id=4,awuser=4,wuser=4,buser=4,aruser=4,ruser=4] s1,
+    output uint[32] axi4[addr=32,id=5,awuser=4,wuser=4,buser=4,aruser=4,ruser=4] m
+) begin
+    s0 -> m;
+    s1 -> m;
+endfabric
+
+// Explicit standard clock/reset names; resetn is normalized to the channel
+// storage's synchronous active-high reset, independently of payload typing.
+module native_axil_aresetn_relay (
+    input wire ACLK,
+    input wire ARESETn,
+    input uint[32] axi4_lite[addr=32,clock=ACLK,resetn=ARESETn] s,
+    output uint[32] axi4_lite[addr=32,clock=ACLK,resetn=ARESETn] m
+);
+    always @(posedge ACLK) if (ARESETn) begin
+        m.aw <= s.aw;
+        m.w <= s.w;
+        s.b <= m.b;
+        m.ar <= s.ar;
+        s.r <= m.r;
+    end
+endmodule
+
+module native_axil_relay #(
+    parameter DATA_BITS = 32,
+    parameter ADDR_BITS = 32
+) (
+    input wire clk,
+    input wire reset,
+    input uint[DATA_BITS] axi4_lite[addr=ADDR_BITS] s,
+    output uint[DATA_BITS] axi4_lite[addr=ADDR_BITS] m
+);
+    always @(posedge clk) if (!reset) begin
+        m.aw <= s.aw;
+        m.w <= s.w;
+        s.b <= m.b;
+        m.ar <= s.ar;
+        s.r <= m.r;
+    end
+endmodule
+
+module native_axi4_relay #(
+    parameter DATA_BITS = 32,
+    parameter ADDR_BITS = 32,
+    parameter ID_BITS = 4,
+    parameter USER_BITS = 4
+) (
+    input wire clk,
+    input wire reset,
+    input uint[DATA_BITS] axi4[addr=ADDR_BITS,id=ID_BITS,awuser=USER_BITS,wuser=USER_BITS,buser=USER_BITS,aruser=USER_BITS,ruser=USER_BITS] s,
+    output uint[DATA_BITS] axi4[addr=ADDR_BITS,id=ID_BITS,awuser=USER_BITS,wuser=USER_BITS,buser=USER_BITS,aruser=USER_BITS,ruser=USER_BITS] m
+);
+    always @(posedge clk) if (!reset) begin
+        m.aw <= s.aw;
+        m.w <= s.w;
+        s.b <= m.b;
+        m.ar <= s.ar;
+        s.r <= m.r;
+    end
+endmodule
+
+// Whole-bus child connections carry all five channels, including responses.
+// The forward sibling reference resolves without payload wires or adapters.
+module native_axi4_chain (
+    input wire clk,
+    input wire reset,
+    input uint[32] axi4[addr=32,id=4,awuser=4,wuser=4,buser=4,aruser=4,ruser=4] s,
+    output uint[32] axi4[addr=32,id=4,awuser=4,wuser=4,buser=4,aruser=4,ruser=4] m
+);
+    native_axi4_relay second(.clk(clk), .reset(reset), .s(first.m), .m(m));
+    native_axi4_relay first(.clk(clk), .reset(reset), .s(s));
+endmodule
+
+// Per-source route order maps TDEST 0/1/2 to the three output lanes.
+// The extra output TID bit preserves the two source identities.
+module native_axis_switch2x3 (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1,id=4,dest=2,user=3] s[2],
+  output uint[32] axi4_stream[keep=1,last=1,id=5,dest=2,user=3] m[3]
+);
+  fabric first begin s[0] -> m[0]; s[1] -> m[0]; endfabric
+  for (genvar source = 0; source < 2; source++) begin : inputs
+    for (genvar target = 1; target < 3; target++) begin : outputs
+      fabric begin s[source] -> m[target]; endfabric
+    end
+  end
+endmodule
+
+// Inclusive global address windows select targets independently for AW and AR.
+// The extra target ID bit distinguishes the two initiators.
+module native_axi4_switch2x2 #(
+  parameter BASE0 = 40'h0000000000,
+  parameter BASE1 = 40'h0000010000,
+  parameter WINDOW_BYTES = 40'h0000010000
+) (
+  input wire clk,
+  input wire reset,
+  input uint[64] axi4[addr=40,id=4] s[2],
+  output uint[64] axi4[addr=40,id=5] m[2]
+);
+  for (genvar source = 0; source < 2; source++) begin : inputs
+    fabric begin
+      s[source] -> m[0] at [BASE0:BASE0+WINDOW_BYTES-1];
+      s[source] -> m[1] at [BASE1:BASE1+WINDOW_BYTES-1];
+    endfabric
+  end
+endmodule
+
+module native_axil_switch2 #(
+  parameter BASE0 = 32'h00000000,
+  parameter BASE1 = 32'h00010000,
+  parameter WINDOW_BYTES = 32'h00001000
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_lite[addr=32] s,
+  output uint[32] axi4_lite[addr=32] m[2]
+);
+  fabric begin
+    s -> m[0] at [BASE0:BASE0+WINDOW_BYTES-1];
+    s -> m[1] at [BASE1:BASE1+WINDOW_BYTES-1];
+  endfabric
+endmodule

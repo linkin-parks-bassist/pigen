@@ -190,23 +190,34 @@ static size_t pipeline_field_width(pigen_semantic_model *model,
 	return (size_t)(hi_w - lo_w + 1);
 }
 
-/* Establishes the pipeline identifier as a module-scope buf output signal in
- * the model. The identifier becomes one pigen_semantic_signal: transfer_type
- * buf, direction a module output, bound to a module-scope symbol named at the
+/* Establishes the pipeline identifier in the requested lexical scope. A root
+ * identity retains OUTPUT compatibility; a nested identity is INTERNAL.
+ * The identifier becomes one BUF signal bound to a local symbol named at the
  * identifier's original span, carrying the outgoing packet aggregate (the
  * concatenation of the outgoing field data types in source order). A failed
  * call reports the error and the compile stops; it may leave partial state
  * behind, and nothing uses the model after a failed compile, so no caller or
  * test asserts that a failure left the model unchanged
  * (how/should/compiler/builders/fail.md). */
-int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
-	pigen_syntax_id syntax, pigen_module_id module,
+static int pipeline_scope_within_module(const pigen_semantic_model *model,
+	pigen_scope_id scope,pigen_scope_id module_scope)
+{
+	while(pigen_scope_get(model,scope))
+	{
+		if(scope.index==module_scope.index) return 1;
+		scope=model->scopes[scope.index].parent;
+	}
+	return 0;
+}
+
+int pigen_pipeline_identifier_establish_in_scope(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module,pigen_scope_id scope,
 	const pigen_syntax_node *pipeline,
 	const pigen_expanded_source *expanded,
 	pigen_pipeline_identifier *identity)
 {
 	const pigen_semantic_module *mod;
-	const pigen_scope *module_scope;
+
 	pigen_source_span name;
 	pigen_source_span value;
 	pigen_data_type_id aggregate;
@@ -216,6 +227,7 @@ int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 	size_t total = 0;
 	pigen_syntax_id child;
 
+	if(!identity) return -1;
 	*identity = (pigen_pipeline_identifier){
 		INVALID_ID(pigen_signal_id), INVALID_ID(pigen_symbol_id),
 		INVALID_ID(pigen_data_type_id), INVALID_SPAN,
@@ -226,8 +238,7 @@ int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 		return -1;
 	mod = pigen_module_get(model, module);
 	if (!mod) return -1;
-	module_scope = pigen_scope_get(model, mod->scope);
-	if (!module_scope) return -1;
+	if (!pipeline_scope_within_module(model,scope,mod->scope)) return -1;
 	name = pipeline_name_span(expanded, pipeline);
 	if (name.source.index == PIGEN_INVALID_ID || name.start == name.end)
 		return -1;
@@ -252,16 +263,14 @@ int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 	aggregate = pigen_data_type_sized_logic(model, total, PIGEN_SIGN_UNSIGNED);
 	if (aggregate.index == PIGEN_INVALID_ID) return -1;
 
-	/* The identifier is a module-scope signal: declare the module-scope symbol
-	 * (name anchored at the identifier's original span; the declaration span is
-	 * the same span, so it contains the name span) and add the buf output
-	 * signal bound to it. */
-	declared = pigen_symbol_declare(model, mod->scope, PIGEN_SYMBOL_SIGNAL,
+	/* Declare in the caller's lexical scope. Source spans anchor diagnostics;
+	 * scope and symbol identities distinguish repeated generate iterations. */
+	declared = pigen_symbol_declare(model, scope, PIGEN_SYMBOL_SIGNAL,
 		aggregate, name, name, &symbol, NULL);
 	if (declared != PIGEN_DECLARE_OK) return -1;
 	signal = pigen_signal_add(model, syntax, module, symbol, aggregate,
 		pigen_semantic_scalar_shape(model), INVALID_ID(pigen_expr_id),
-		PIGEN_TRANSFER_TYPE_BUF, PIGEN_SEMANTIC_OUTPUT, name);
+		PIGEN_TRANSFER_TYPE_BUF, scope.index==mod->scope.index ? PIGEN_SEMANTIC_OUTPUT : PIGEN_SEMANTIC_INTERNAL, name);
 	if (signal.index == PIGEN_INVALID_ID) return -1;
 
 	*identity = (pigen_pipeline_identifier){
@@ -273,13 +282,13 @@ int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 /* Recovers the established identity of a pipeline's outgoing buf output
  * packet from its parsed pipeline node, the resolved module and the parsed
  * expanded source (used to anchor the identifier span at its original spelling
- * span). The identifier is looked up in the module scope by its original name
+ * span). The identifier is looked up in the requested scope by its original name
  * span and the bound signal is recovered through the symbol's typed binding.
  * Returns 0 on success and -1 when the identity has not been established or
  * the arguments are invalid; a failed call reports the error and the compile
  * stops (how/should/compiler/builders/fail.md). */
-int pigen_pipeline_identifier_of(pigen_semantic_model *model,
-	pigen_syntax_id syntax, pigen_module_id module,
+int pigen_pipeline_identifier_of_in_scope(pigen_semantic_model *model,
+	pigen_syntax_id syntax, pigen_module_id module,pigen_scope_id scope,
 	const pigen_syntax_node *pipeline,
 	const pigen_expanded_source *expanded,
 	pigen_pipeline_identifier *identity)
@@ -291,6 +300,7 @@ int pigen_pipeline_identifier_of(pigen_semantic_model *model,
 	pigen_source_span name;
 	const pigen_semantic_signal *sig;
 
+	if(!identity) return -1;
 	*identity = (pigen_pipeline_identifier){
 		INVALID_ID(pigen_signal_id), INVALID_ID(pigen_symbol_id),
 		INVALID_ID(pigen_data_type_id), INVALID_SPAN,
@@ -300,19 +310,39 @@ int pigen_pipeline_identifier_of(pigen_semantic_model *model,
 		pipeline->kind != PIGEN_SYNTAX_PIPELINE)
 		return -1;
 	mod = pigen_module_get(model, module);
-	if (!mod) return -1;
+	if (!mod || !pipeline_scope_within_module(model,scope,mod->scope)) return -1;
 	name = pipeline_name_span(expanded, pipeline);
 	if (name.source.index == PIGEN_INVALID_ID || name.start == name.end)
 		return -1;
-	symbol = pigen_symbol_lookup(model, mod->scope, name);
+	symbol = pigen_symbol_lookup(model, scope, name);
 	known_symbol = pigen_symbol_get(model, symbol);
-	if (!known_symbol || known_symbol->kind != PIGEN_SYMBOL_SIGNAL) return -1;
+	if (!known_symbol || known_symbol->kind != PIGEN_SYMBOL_SIGNAL || known_symbol->scope.index!=scope.index) return -1;
 	signal = pigen_symbol_signal(model, symbol);
 	if (signal.index == PIGEN_INVALID_ID) return -1;
 	sig = pigen_signal_get(model, signal);
-	if (!sig || sig->module.index != module.index) return -1;
+	if (!sig || sig->module.index != module.index || sig->syntax.index!=syntax.index ||
+		sig->transfer_type!=PIGEN_TRANSFER_TYPE_BUF) return -1;
 	*identity = (pigen_pipeline_identifier){
 		signal, symbol, sig->data_type, name, syntax
 	};
 	return 0;
+}
+
+/* Module-scope compatibility entries retain the original identity contract. */
+int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
+	pigen_syntax_id syntax,pigen_module_id module,const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,pigen_pipeline_identifier *identity)
+{
+	const pigen_semantic_module *owner=pigen_module_get(model,module);
+	return pigen_pipeline_identifier_establish_in_scope(model,syntax,module,
+		owner ? owner->scope : INVALID_ID(pigen_scope_id),pipeline,expanded,identity);
+}
+
+int pigen_pipeline_identifier_of(pigen_semantic_model *model,
+	pigen_syntax_id syntax,pigen_module_id module,const pigen_syntax_node *pipeline,
+	const pigen_expanded_source *expanded,pigen_pipeline_identifier *identity)
+{
+	const pigen_semantic_module *owner=pigen_module_get(model,module);
+	return pigen_pipeline_identifier_of_in_scope(model,syntax,module,
+		owner ? owner->scope : INVALID_ID(pigen_scope_id),pipeline,expanded,identity);
 }

@@ -1,9 +1,9 @@
 ---
 status: green
-revised_at: "2026-11-11T17:36:12+11:00"
+revised_at: "2026-11-16T04:50:03+11:00"
 ---
 
-Child ports are parent endpoints: siblings connect with `.i(a.o)`, parent transfers read `a.o` or write `b.i`, and fabrics route `a.o -> b.i`. Explicit wires remain supported. Output transfers stay explicit, e.g. `output uint[8] buf o`. Broadcast reset uses `input wire reset`; unqualified input bit remains abstract.
+Child ports are parent endpoints: siblings connect with `.i(a.o)`, parent transfers read `a.o` or write `b.i`, and fabrics route `a.o -> b.i`. Explicit wires remain supported. Child outputs accept concatenations of writable parent projections; read-only and overlapping destinations diagnose (does/a/child/output/support/concatenated/parent/connections.md). Output transfers stay explicit, e.g. `output uint[8] buf o`. Broadcast reset uses `input wire reset`; unqualified input bit remains abstract.
 
 Resolution establishes sibling identities/omitted endpoints, static input aliases, outputs, then general inputs. Forward references and later module definitions resolve. Dot lookup distinguishes payloads from controls.
 
@@ -13,7 +13,7 @@ Exact aliases reuse views when type/shape match. Computed expressions also conve
 
 Constant slices/indices inside one output's raw-wire region map to that endpoint. Mapping requires scalar single-dimension bit coordinates and matching producer width. Whole-wire aliases also support runtime bit/indexed selections. Signed arithmetic of width max(64,index_width)+3 translates declared coordinates without truncation; reversed directions swap +: and -:. Index expressions resolve their own aliases, joining payload and index tokens atomically. Disjoint consumers still conflict because selection consumes whole tokens.
 
-Computed inputs resolve aliases through groups, conversions, unary/binary expressions, conditionals, concatenations and peek before atomic analysis. Changed paths are rebuilt without mutating shared expressions; selections map as units. Repeated reads deduplicate, and ternaries consume all referenced sources (how/does/an/atomic/transfer/fire.md). Structural processes have no clock; cross-instance clock compatibility remains unaudited.
+Computed inputs resolve aliases through groups, conversions, unary/binary expressions, conditionals, concatenations and peek before atomic analysis. Changed paths are rebuilt without mutating shared expressions; selections map as units. Repeated reads deduplicate, and ternaries consume all referenced sources (how/does/an/atomic/transfer/fire.md). Structural processes have no clock; ordinary cross-instance clock compatibility remains unaudited.
 
 Symbolic controls map to parent objects; selected controls use proxy observation/drive equations. Omitted controls reuse payload_valid/payload_ready or internal nets. Explicit i_ready targets observe boundary readiness. Read-only output-ready/input-valid support manual handshakes; conflicting automatic owners diagnose. Parent-input controls are observed without drivers using pigen_lvalue_is_writable. Raw-wire writes remain legal; explicit-valid gate versus replacement remains unresolved.
 
@@ -23,4 +23,6 @@ Ownership checks views and physical destinations: duplicate consumers, child/loc
 
 Evidence: child-port-endpoint-test covers coordinate directions, negative endpoints, signed/unsigned 128-bit indices, out-of-range indices, composite expressions, unequal-rate payload/index joins, forward references and duplicate owners. child-input-alias-ownership-test, child-slice-ownership-test, child-ready-manual-test and child-valid-manual-test cover physical/control ownership.
 
-Remaining: nested mappings, partial-region dynamic selections, spanning producers, unresolved bounds, multidimensional mappings, local/ordinary-SV writer auditing and arrays/generate scopes. Specialization/count owners: how/does/specialization/reach/a/fixed/point.md and how/to/normalize/declaration/counts.md.
+Native AXI supports named/positional scalar/array bindings, selections, concatenations, projections and forward siblings with checked timing. Internal storage/fabric bindings: how/are/internal/native/axi/child/bindings/resolved.md. Construction: how/are/native/axi/collection/concatenations/resolved.md; how/are/native/axi/collection/assignment/patterns/resolved.md. Generated children/named paths: how/are/generated/child/instances/lowered.md and how/are/named/generate/scope/paths/resolved.md. Collections: how/are/native/axi/endpoint/arrays/represented.md; how/are/native/axi/collection/selections/resolved.md. Syntax: how/to/write/native/axi/declarations.md.
+
+Remaining: nested mappings, partial-region dynamic selections, spanning producers, unresolved bounds, multidimensional mappings, local/ordinary-SV writer auditing and broader ordinary array/generate contexts. Specialization/count owners: how/does/specialization/reach/a/fixed/point.md and how/to/normalize/declaration/counts.md.

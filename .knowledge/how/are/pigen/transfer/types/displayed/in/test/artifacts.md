@@ -1,0 +1,16 @@
+---
+status: green
+revised_at: "2026-11-14T19:12:19+11:00"
+---
+
+Artifacts are internal debugging instruments. Draw native source data dependencies and show captured values accurately. The shared renderer must not fabricate register muxes, state/predicate decoder blocks, enable indicators, clock rails or control-wire bundles. Reset-only assignments are excluded from every internal diagram, while RTL and tests retain reset behaviour. A data arrow follows an actual payload donor, verified against the emitted value expression; control conditions must not appear as payload inputs.
+
+Use compact subsystem views with one instance of each native register or port per view. Every declared element must be reachable across a player's views. Ordinary continuous `assign` expressions belong in the data graph too. Only short bit selects or simple transforms belong on paths. Do not print full source expressions, selector predicates or code fragments in the drawing. Show what data goes where; full expressions belong only in inspection. Conditional selectors are control, not payload donors. Constant assignments remain annotations on their destination. Do not merge conditional assignments into slash-separated alternatives or invent a new language element. FSM states appear as separate named state strips.
+
+In-flight transforms preserve ready/valid. Combining operands ANDs their valids. Ordinary registers/statics are always valid/ready. Buffer payload availability and capacity are distinct from Boolean signals carrying ready/valid bits. Use the same endpoint colour rule everywhere: sky blue #429de8 ready, warm yellow #e8bd45 valid, green #23a766 both, dark neither. Input green represents the transfer; do not add write-enable readouts. Show V/R once per buffer, without duplicate wire annotations. Wires stay visible at constant width. FIFO intrinsics stay opaque. There are no LEDs.
+
+Q values hold until the edge, including stored payload with V=0. Packets illustrate only captured transfers; they do not commit registers early. Use small nonzero corners and eased travel within a uniformly timed clock. Never accelerate counters, compress idle clocks or automatically cross uncaptured intervals. Explicit trace-window selection is separate navigation. Changing activity text cannot move controls. Embedded height follows content, including source open/close. No inner schematic scrolling, clipping or overlapping labels is acceptable.
+
+The native viewers use tools/cores/native_layout.py to derive and route data paths with Graphviz, and internal.js to replay the observed values. Twelve HTML players contain 33 internal subsystem views plus the fork/join example. Source, executed operations and emitted-SV inspection remain available in collapsed panels rather than default code dumps. Larger cores use named subsystem views to retain legibility.
+
+The observer evaluates exact emitted predicates and write results in Icarus without altering core RTL, checking next-snapshot commits. Browser acceptance verifies all views, colours, uniform clocks and layout stability. check_native_layouts.py renders every internal view and checks card/label bounds and intersections; visually inspect the entire screenshot set, not one representative page. Reports have no call to action. Reproduction belongs in how/to/create/standard/core/test/artifacts.md.

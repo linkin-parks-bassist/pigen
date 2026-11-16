@@ -1,0 +1,68 @@
+// One byte per transaction, MSB first, all four SPI modes.
+// HALF_PERIOD >= 2 system clocks. MISO must meet system-clock setup/hold.
+module pigen_spi_controller #(
+    parameter integer HALF_PERIOD = 4,
+    parameter integer CPOL = 0,
+    parameter integer CPHA = 0
+) (
+    input wire clk,
+    input wire reset,
+    input bit[8] buf command,
+    output bit[8] buf response,
+    input wire miso,
+    output bit reg mosi,
+    output bit reg sck,
+    output bit reg cs_n
+);
+    initial if (HALF_PERIOD < 2 || CPOL < 0 || CPOL > 1 || CPHA < 0 || CPHA > 1) $fatal(1, "SPI requires HALF_PERIOD >= 2 and binary CPOL/CPHA");
+
+    bit[8] reg tx_shift;
+    bit[8] reg rx_shift;
+    int[32] reg timer;
+    int[5] reg remaining;
+
+    fsm @(posedge clk) begin
+        if (reset) begin
+            cs_n <= 1;
+            sck <= CPOL;
+            mosi <= 0;
+            goto idle;
+        end
+        state idle:
+            when (tx_shift <= command) goto setup;
+        state setup: begin
+                cs_n <= 0;
+                sck <= CPOL;
+                if (CPHA == 0) mosi <= tx_shift[7];
+                rx_shift <= 0;
+                timer <= HALF_PERIOD - 1;
+                remaining <= 8;
+                goto leading;
+            end
+        state leading:
+            if (timer == 0) begin
+                sck <= CPOL == 0;
+                if (CPHA == 0) rx_shift <= {rx_shift[6:0], miso};
+                else mosi <= tx_shift[7];
+                timer <= HALF_PERIOD - 1;
+                goto trailing;
+            end else timer <= timer - 1;
+        state trailing:
+            if (timer == 0) begin
+                sck <= CPOL;
+                if (CPHA == 1) rx_shift <= {rx_shift[6:0], miso};
+                timer <= HALF_PERIOD - 1;
+                if (remaining == 1) goto finish;
+                tx_shift <= tx_shift << 1;
+                if (CPHA == 0) mosi <= tx_shift[6];
+                remaining <= remaining - 1;
+                goto leading;
+            end else timer <= timer - 1;
+        state finish: begin
+            cs_n <= 1;
+            goto publish;
+        end
+        state publish:
+            when (response <= rx_shift) goto idle;
+    end
+endmodule

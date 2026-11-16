@@ -1,0 +1,14 @@
+---
+status: green
+revised_at: "2026-11-15T18:44:05+11:00"
+---
+
+Typed always_comb if, while, do/while, repeat and for controls use pigen_resolve_control_expression in expression_resolve.c, then resolve.c applies the control-specific interpretation. Native SV expressions receive their self-determined SV context, including signed unsized decimal literals and contextual intermediate widths. This preserves negative int comparisons and narrow signed arithmetic overflow. Concrete Pigen numerical subtrees retain their family arithmetic.
+
+The API reuses the CASE literal/operator domain and internal self-context traversal already used by case operands. Explicit cast boundaries remain intact, including identity casts. It resolves intrinsic-containing trees through the same domain as pure analyzed expressions. Failed resolution/context construction restores expression, child and width-constraint counts. Type interning remains idempotent. The CASE comparison API separately applies one shared context across selector and labels (how/are/procedural/case/operands/resolved.md).
+
+resolve.c:resolve_combinational_control requires scalar integral or exact-integer values and rejects consuming buffered reads without peek. If, while, do/while and for use explicit vector-truth or exact-integer logical normalization. Repeat retains its count and resizes integral counts narrower than 32 bits while preserving sign/state. Source operations keep intrinsic widths before that resize. An omitted for condition becomes constant true; forever has no condition.
+
+The control API does not impose an assignment destination type. Assignment resolution uses pigen_resolve_assignment_value: ordinary RHS trees retain intrinsic expression typing, while records and direct/grouped fills receive destination context, including conditional arms (how/are/assignment/fill/literals/resolved.md). Native SV compound fill assignments and casts use the shared context traversal while controls remain self-determined. Fill-containing ternary controls use self-context and vector truth before value-arm sizing. Packed selection operands normalize locally before constructing selection types; supported intrinsic call arguments use local self-context (how/are/expression/call/arguments/sized.md), while arbitrary function/task integration remains work.
+
+Evidence: tests/cores/continuous_intrinsics* checks for indices from -2 through 1, zero iterations, signed eight-bit addition overflow in a boolean control, four-state loop controls and signed repeat counts against independent native SV. tests/generate_semantic_test.c checks finished control widths and construction. tests/native_array_test.py exercises generated loop scopes for all AXI families and rejects buffered controls while preserving existing output files. These witnesses establish the covered controls, not full procedural language completion.

@@ -87,11 +87,25 @@ void pigen_lex_source(const char *source, size_t length, pigen_tokens *tokens)
 			continue;
 		}
 
-		if (isdigit((unsigned char)source[cursor]))
+		if (source[cursor]=='\'' && cursor+1<length && strchr("01xXzZ",source[cursor+1]))
 		{
-			kind = PIGEN_TOKEN_NUMBER;
-			while (cursor < length && (pigen_is_identifier_char((unsigned char)source[cursor]) || source[cursor] == '\''))
+			kind=PIGEN_TOKEN_NUMBER;
+			advance(source,&cursor,&line,&column);advance(source,&cursor,&line,&column);
+		}
+		else if (isdigit((unsigned char)source[cursor]))
+		{
+			kind = PIGEN_TOKEN_NUMBER;int based=0;
+			while (cursor < length && (pigen_is_identifier_char((unsigned char)source[cursor]) || source[cursor] == '\'' || (based && source[cursor]=='?')))
+			{
+				if (source[cursor] == '\'')
+				{
+					/* A number's apostrophe belongs to the token only for a
+					 * based literal. A size cast has a separate apostrophe. */
+					if (cursor + 1 == length || !strchr("sSbBoOdDhH", source[cursor + 1])) break;
+					based=1;
+				}
 				advance(source, &cursor, &line, &column);
+			}
 		}
 		else if (pigen_is_identifier_char((unsigned char)source[cursor]))
 		{

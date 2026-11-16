@@ -6,8 +6,8 @@ module coslice_typedef
 		input logic clk,
 		input logic reset,
 		input bit[16] buf source,
-		output buf low_t low,
-		output buf high_t high
+		output low_t buf low,
+		output high_t buf high
 	);
 
 	reg [15:0] state;

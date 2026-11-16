@@ -1,0 +1,10 @@
+// AXI4-Stream: four receive FIFO entries and one elastic output slot.
+// TDATA, TKEEP and TLAST travel as one native beat; no ID/DEST/USER/STRB.
+module pigen_axis_fifo (
+    input wire clk,
+    input wire reset,
+    input uint[32] axi4_stream[keep=1,last=1] fifo[4] s_axis,
+    output uint[32] axi4_stream[keep=1,last=1] m_axis
+);
+    always @(posedge clk) if (!reset) m_axis <= s_axis;
+endmodule

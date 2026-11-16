@@ -27,10 +27,9 @@
  * resolved module through the owner APIs (pigen_semantic_init,
  * pigen_module_add, pigen_scope_add, pigen_symbol_declare, pigen_signal_add,
  * pigen_clock_domain_intern, pigen_process_add) - the same module-scope
- * skeleton the resolver builds for a clocked process, since the structured
- * lowerer does not yet carry a pipeline statement through
- * pigen_resolve_semantics (that is a later pipeline step). The section then
- * drives the skeleton's establish entry on that model and asserts the
+ * structure the resolver builds for a clocked process. This fixture isolates
+ * the pipeline identifier owner rather than production pipeline resolution.
+ * The section drives the owner's establish entry on that model and asserts the
  * established identity and the signal it creates, read back exclusively through
  * the owner accessors (pigen_pipeline_identifier_of, pigen_signal_get,
  * pigen_symbol_get, pigen_symbol_signal, pigen_module_get, pigen_scope_get and

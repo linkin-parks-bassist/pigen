@@ -300,6 +300,65 @@ static pigen_syntax_expr_id parse_concatenation(expression_parser *parser)
 	return add_node(parser, node);
 }
 
+static pigen_syntax_expr_id parse_record(expression_parser *parser)
+{
+	size_t start=parser->at;
+	parser->at+=2;
+	pigen_syntax_expr_id *fields=NULL;
+	size_t count=0;int keyed=-1;
+	while(parser->at<parser->after && !token_is(parser,parser->at,"}"))
+	{
+		size_t field_start=parser->at;
+		pigen_syntax_expr_id key=parse_precedence(parser,1);
+		if(key.index==PIGEN_INVALID_ID) {free(fields);return key;}
+		if(!count && token_is(parser,parser->at,"{"))
+		{
+			parser->at++;
+			if(!collect_sequence(parser,"}",&fields,&count)) return INVALID_ID(pigen_syntax_expr_id);
+			if(!count || !token_is(parser,parser->at,"}"))
+			{free(fields);return fail(parser,parser->at,"unterminated assignment pattern replication body");}
+			parser->at++;
+			if(!token_is(parser,parser->at,"}"))
+			{free(fields);return fail(parser,parser->at,"assignment pattern replication must cover a whole dimension");}
+			parser->at++;
+			pigen_syntax_expr repeat={.kind=PIGEN_SYNTAX_EXPR_ARRAY_PATTERN_REPLICATION};
+			repeat.location=pigen_syntax_location_from_extent(parser->source,start,parser->at);
+			repeat.as.replication.count=key;
+			repeat.as.replication.first_child=append_children(parser,fields,count);
+			repeat.as.replication.child_count=count;
+			free(fields);return add_node(parser,repeat);
+		}
+		int has_key=token_is(parser,parser->at,":");
+		if(keyed<0) keyed=has_key;
+		if(keyed!=has_key)
+		{free(fields);return fail(parser,parser->at,"assignment pattern cannot mix keyed and positional entries");}
+		pigen_syntax_expr_id value=key;
+		if(keyed)
+		{
+			parser->at++;
+			value=parse_precedence(parser,1);
+			if(value.index==PIGEN_INVALID_ID) {free(fields);return value;}
+			const pigen_syntax_expr *name=pigen_syntax_expr_get(parser->arena,key);
+			pigen_syntax_expr field={.kind=PIGEN_SYNTAX_EXPR_RECORD_FIELD};
+			field.location=pigen_syntax_location_from_extent(parser->source,field_start,parser->at);
+			field.as.member.member=name && name->kind==PIGEN_SYNTAX_EXPR_NAME ? name->as.atom.token : INVALID_ID(pigen_token_id);
+			field.as.member.base=value;field.as.member.pattern_key=key;
+			value=add_node(parser,field);
+		}
+		fields=pigen_resize(fields,(count+1)*sizeof(*fields));fields[count++]=value;
+		if(!token_is(parser,parser->at,",")) break;
+		parser->at++;
+		if(token_is(parser,parser->at,"}")) {free(fields);return fail(parser,parser->at,"record construction has a trailing comma");}
+	}
+	if(!count || !token_is(parser,parser->at,"}"))
+	{free(fields);return fail(parser,parser->at,"empty or unterminated record construction");}
+	parser->at++;
+	pigen_syntax_expr record={.kind=keyed ? PIGEN_SYNTAX_EXPR_RECORD : PIGEN_SYNTAX_EXPR_ARRAY_PATTERN};
+	record.location=pigen_syntax_location_from_extent(parser->source,start,parser->at);
+	record.as.sequence.first_child=append_children(parser,fields,count);record.as.sequence.child_count=count;
+	free(fields);return add_node(parser,record);
+}
+
 static pigen_syntax_expr_id parse_primary(expression_parser *parser)
 {
 	size_t start = parser->at;
@@ -315,6 +374,8 @@ static pigen_syntax_expr_id parse_primary(expression_parser *parser)
 
 	if (parser->at >= parser->after)
 		return fail(parser, parser->at, "expected expression");
+	if (token_is(parser, parser->at, "'") && token_is(parser, parser->at+1, "{"))
+		return parse_record(parser);
 	original_node_count = parser->arena->node_count;
 	original_child_count = parser->arena->child_count;
 	original_type_count = parser->types->node_count;
@@ -381,6 +442,46 @@ static pigen_syntax_expr_id parse_primary(expression_parser *parser)
 	return add_node(parser, node);
 }
 
+static int inquiry_type_argument(expression_parser *parser,pigen_syntax_expr_id callee,
+ pigen_syntax_type_id *type)
+{
+ const pigen_syntax_expr *name=pigen_syntax_expr_get(parser->arena,callee);
+ if(!name || name->kind!=PIGEN_SYNTAX_EXPR_NAME) return 0;
+ const char *queries[]={"$bits","$left","$right","$low","$high","$increment","$size","$dimensions","$unpacked_dimensions"};
+ int inquiry=0;
+ for(size_t i=0;i<sizeof queries/sizeof *queries;i++)
+  if(token_is(parser,name->as.atom.token.index,queries[i])) inquiry=1;
+ if(!inquiry) return 0;
+ size_t nodes=parser->arena->node_count,children=parser->arena->child_count;
+ size_t types=parser->types->node_count,arguments=parser->types->argument_count,members=parser->types->member_count,after;
+ pigen_syntax_type_id candidate;
+ if(pigen_parse_type_prefix(parser->source,parser->at,parser->after,parser->arena,parser->types,&candidate,&after,NULL) && (token_is(parser,after,")") || token_is(parser,after,",")))
+ {
+  pigen_syntax_type *known=&parser->types->nodes[candidate.index];
+  int ownership=pigen_syntax_type_declaration_ownership(parser->source,parser->types,candidate,NULL,NULL);
+  if(known->base.index!=PIGEN_INVALID_ID && token_is(parser,known->base.index,"int") && !known->argument_count)
+  {known->is_systemverilog_int=1;ownership=PIGEN_SYNTAX_TYPE_SYSTEMVERILOG;}
+  /* A count-shaped suffix alone cannot distinguish T[2] from value[2]. */
+  if(ownership==PIGEN_SYNTAX_TYPE_PIGEN && known->base.index!=PIGEN_INVALID_ID)
+  {
+   const char *primitives[]={"int","uint","bit","logic","byte","integer","shortint","longint","time"};
+   int primitive=0;
+   for(size_t i=0;i<sizeof primitives/sizeof *primitives;i++)
+    if(token_is(parser,known->base.index,primitives[i])) primitive=1;
+   if(!primitive) ownership=PIGEN_SYNTAX_TYPE_UNOWNED;
+  }
+  if(ownership!=PIGEN_SYNTAX_TYPE_UNOWNED)
+  {*type=candidate;parser->at=after;return 1;}
+  if(known->signedness!=PIGEN_SYNTAX_SIGN_IMPLICIT)
+  {*type=candidate;parser->at=after;return 1;}
+  if(known->argument_count)
+  {*type=candidate;return 2;}
+ }
+ parser->arena->node_count=nodes;parser->arena->child_count=children;
+ parser->types->node_count=types;parser->types->argument_count=arguments;parser->types->member_count=members;
+ return 0;
+}
+
 static pigen_syntax_expr_id parse_postfix(expression_parser *parser)
 {
 	pigen_syntax_expr_id base = parse_primary(parser);
@@ -389,12 +490,33 @@ static pigen_syntax_expr_id parse_postfix(expression_parser *parser)
 	{
 		size_t start = parser->arena->nodes[base.index].location.extent.first.index;
 		pigen_syntax_expr node = {0};
-		if (token_is(parser, parser->at, "("))
+		if (token_is(parser, parser->at, "'") && token_is(parser, parser->at + 1, "("))
+		{
+			parser->at += 2;
+			pigen_syntax_expr_id value = parse_precedence(parser, 1);
+			if (value.index == PIGEN_INVALID_ID) return value;
+			if (!token_is(parser, parser->at, ")"))
+				return fail(parser, parser->at, "unterminated size cast");
+			parser->at++;
+			node.kind = PIGEN_SYNTAX_EXPR_CAST;
+			node.as.cast.type = INVALID_ID(pigen_syntax_type_id);
+			node.as.cast.value = value;
+			node.as.cast.is_size = 1;
+			node.as.cast.size = base;
+		}
+		else if (token_is(parser, parser->at, "("))
 		{
 			pigen_syntax_expr_id *arguments = NULL;
 			size_t count = 0;
 			parser->at++;
-			if (!collect_sequence(parser, ")", &arguments, &count)) return INVALID_ID(pigen_syntax_expr_id);
+			node.as.call.type_argument_kind=inquiry_type_argument(parser,base,&node.as.call.type_argument);
+			if(node.as.call.type_argument_kind==1 && token_is(parser,parser->at,","))
+   {
+    parser->at++;
+    if(token_is(parser,parser->at,")")) return fail(parser,parser->at,"missing inquiry dimension after comma");
+    if(!collect_sequence(parser,")",&arguments,&count)) return INVALID_ID(pigen_syntax_expr_id);
+   }
+   else if (node.as.call.type_argument_kind!=1 && !collect_sequence(parser, ")", &arguments, &count)) return INVALID_ID(pigen_syntax_expr_id);
 			if (!token_is(parser, parser->at, ")"))
 			{
 				free(arguments);
@@ -556,6 +678,7 @@ int pigen_parse_expression(const pigen_expanded_source *source,
 	size_t original_child_count;
 	size_t original_type_count;
 	size_t original_type_argument_count;
+	size_t original_type_member_count;
 	if (expression) *expression = INVALID_ID(pigen_syntax_expr_id);
 	if (!source || !arena || !types || first >= after ||
 		after > source->token_count)
@@ -564,6 +687,7 @@ int pigen_parse_expression(const pigen_expanded_source *source,
 	original_child_count = arena->child_count;
 	original_type_count = types->node_count;
 	original_type_argument_count = types->argument_count;
+	original_type_member_count = types->member_count;
 	result = parse_precedence(&parser, 1);
 	if (result.index == PIGEN_INVALID_ID) goto fail_parse;
 	if (parser.at != after)
@@ -578,6 +702,7 @@ fail_parse:
 	arena->child_count = original_child_count;
 	types->node_count = original_type_count;
 	types->argument_count = original_type_argument_count;
+	types->member_count = original_type_member_count;
 	return 0;
 }
 
@@ -602,4 +727,29 @@ void pigen_free_syntax_expr_arena(pigen_syntax_expr_arena *arena)
 	free(arena->nodes);
 	free(arena->children);
 	*arena = (pigen_syntax_expr_arena){0};
+}
+
+static int decimal_constant(const pigen_expanded_source *source,
+	const pigen_syntax_expr_arena *arena,pigen_syntax_expr_id id,size_t depth)
+{
+	const pigen_syntax_expr *node=pigen_syntax_expr_get(arena,id);
+	if (!node || depth>128) return 0;
+	if (node->kind==PIGEN_SYNTAX_EXPR_LITERAL)
+	{
+		const pigen_expanded_token *token=pigen_expanded_token_get(source,node->as.atom.token);
+		size_t length=0;const char *text=token ? pigen_expanded_token_text(source,token,&length) : NULL;
+		return token && token->kind==PIGEN_TOKEN_NUMBER && length && text[0]>='0' && text[0]<='9' && !memchr(text,'\'',length);
+	}
+	if (node->kind==PIGEN_SYNTAX_EXPR_GROUP) return decimal_constant(source,arena,node->as.group.operand,depth+1);
+	if (node->kind==PIGEN_SYNTAX_EXPR_UNARY) return decimal_constant(source,arena,node->as.unary.operand,depth+1);
+	if (node->kind==PIGEN_SYNTAX_EXPR_BINARY) return decimal_constant(source,arena,node->as.binary.left,depth+1) && decimal_constant(source,arena,node->as.binary.right,depth+1);
+	if (node->kind==PIGEN_SYNTAX_EXPR_CONDITIONAL) return decimal_constant(source,arena,node->as.conditional.condition,depth+1) &&
+		decimal_constant(source,arena,node->as.conditional.when_true,depth+1) && decimal_constant(source,arena,node->as.conditional.when_false,depth+1);
+	return 0;
+}
+
+int pigen_syntax_expr_is_decimal_constant(const pigen_expanded_source *source,
+	const pigen_syntax_expr_arena *arena,pigen_syntax_expr_id expression)
+{
+	return source && decimal_constant(source,arena,expression,0);
 }

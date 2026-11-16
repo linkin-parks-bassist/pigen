@@ -311,6 +311,69 @@ int main(int argc, char **argv)
 		REQUIRE(rt->dimension_count == 1 && rt->dimensions);
 	}
 
+
+	SECTION("packed-alias-atom-widths") {
+		const char *names[] = {"byte", "shortint", "integer", "longint", "time"};
+		const uint64_t widths[] = {8, 16, 32, 64, 64};
+		for (size_t n = 0; n < 5; n++) {
+			pigen_source_id source = pigen_source_add(&sources, "atom.pigen", names[n], strlen(names[n]));
+			pigen_source_span span = {source, 0, strlen(names[n])};
+			pigen_scope_id scope = pigen_scope_add(&sem, (pigen_scope_id){PIGEN_INVALID_ID}, span);
+			pigen_symbol_id symbol;
+			pigen_data_type_id atom = pigen_data_type_from_spelling(&sem, span, PIGEN_SIGN_IMPLICIT, NULL, 0);
+			REQUIRE(!IS_INVALID_ID(atom));
+			REQUIRE(pigen_symbol_declare(&sem, scope, PIGEN_SYMBOL_TYPEDEF, atom,
+				span, span, &symbol, NULL) == PIGEN_DECLARE_OK);
+			pigen_data_type_id scalar = pigen_data_type_alias(&sem, symbol, atom, PIGEN_SIGN_IMPLICIT, NULL, 0);
+			pigen_rtl_type_id scalar_id = pigen_lower_rtl_type(&lowering, scalar);
+			const pigen_rtl_type *record = pigen_rtl_type_get(&rtl, scalar_id);
+			REQUIRE(record && record->width == widths[n] && record->dimension_count == 0);
+			REQUIRE(record->sv_keyword == (int)pigen_data_type_sv_keyword(&sem, atom));
+			pigen_data_type_argument two = {.kind = PIGEN_DATA_TYPE_ARGUMENT_COUNT,
+				.as.count = pigen_const_expr_intern_integer(&sem, 2, pigen_data_type_unsized_integer(&sem))};
+			pigen_data_type_id packed = pigen_data_type_alias_with_arguments(&sem, symbol, atom, PIGEN_SIGN_IMPLICIT, &two, 1);
+			pigen_rtl_type_id packed_id = pigen_lower_rtl_type(&lowering, packed);
+			record = pigen_rtl_type_get(&rtl, packed_id);
+			REQUIRE(record && record->width == 2 * widths[n] && record->dimension_count == 2);
+			REQUIRE(record->sv_keyword == PIGEN_SV_INTEGER_NONE);
+			REQUIRE(record->dimensions[0].left.value == 1 && record->dimensions[0].right.value == 0);
+			REQUIRE(record->dimensions[1].left.value == (int64_t)widths[n] - 1 && record->dimensions[1].right.value == 0);
+			size_t count = rtl.type_count;
+			REQUIRE(pigen_lower_rtl_type(&lowering, packed).index == packed_id.index);
+			REQUIRE(rtl.type_count == count);
+			pigen_data_type_id direct = pigen_data_type_from_spelling(&sem, span, PIGEN_SIGN_IMPLICIT, &two, 1);
+			REQUIRE(pigen_lower_rtl_type(&lowering, direct).index == packed_id.index);
+			REQUIRE(rtl.type_count == count);
+		}
+	}
+
+
+	SECTION("void-data-marker") {
+		pigen_source_id source = pigen_source_add(&sources, "void.pigen", "void", 4);
+		pigen_source_span span = {source, 0, 4};
+		pigen_data_type_id type = pigen_data_type_from_spelling(&sem, span, PIGEN_SIGN_IMPLICIT, NULL, 0);
+		REQUIRE(!IS_INVALID_ID(type) && pigen_data_type_is_void(&sem, type));
+		REQUIRE(!pigen_data_type_is_integral(&sem, type));
+		REQUIRE(IS_INVALID_ID(pigen_data_type_concatenation(&sem, &type, 1)));
+		REQUIRE(pigen_data_type_numerical_interpretation(&sem, type) == PIGEN_NUMERICAL_NONE);
+		uint64_t width = 1;
+		REQUIRE(pigen_const_expr_evaluate_u64(&sem, pigen_data_type_packed_width(&sem, type), &width) && width == 0);
+		pigen_scope_id scope = pigen_scope_add(&sem, (pigen_scope_id){PIGEN_INVALID_ID}, span);
+		pigen_symbol_id symbol;
+		REQUIRE(pigen_symbol_declare(&sem, scope, PIGEN_SYMBOL_TYPEDEF, type, span, span, &symbol, NULL) == PIGEN_DECLARE_OK);
+		pigen_data_type_id alias = pigen_data_type_alias(&sem, symbol, type, PIGEN_SIGN_IMPLICIT, NULL, 0);
+		REQUIRE(pigen_data_type_is_void(&sem, alias) && pigen_data_type_matches(&sem, alias, type) == 1);
+		REQUIRE(pigen_data_type_matches(&sem, alias, pigen_data_type_unsized_integer(&sem)) == 0);
+		pigen_data_type_argument two = {.kind=PIGEN_DATA_TYPE_ARGUMENT_COUNT,
+			.as.count=pigen_const_expr_intern_integer(&sem, 2, pigen_data_type_unsized_integer(&sem))};
+		REQUIRE(IS_INVALID_ID(pigen_data_type_from_spelling(&sem, span, PIGEN_SIGN_IMPLICIT, &two, 1)));
+		REQUIRE(IS_INVALID_ID(pigen_data_type_alias_with_arguments(&sem, symbol, type, PIGEN_SIGN_IMPLICIT, &two, 1)));
+		size_t count = rtl.type_count;
+		REQUIRE(IS_INVALID_ID(pigen_lower_rtl_type(&lowering, type)));
+		REQUIRE(IS_INVALID_ID(pigen_lower_rtl_type(&lowering, alias)));
+		REQUIRE(rtl.type_count == count);
+	}
+
 	/* (4) Expression lowering preserves the surviving width, signedness, every
 	 * explicit conversion/projection and child order. Second expression-family
 	 * section of the Task 5 plus Task 6 lowering contract, fully implemented
@@ -3459,25 +3522,10 @@ int main(int argc, char **argv)
 		port_instance = &rtl_j.instances[instance_before + 1];
 		skid_instance = &rtl_j.instances[instance_before + 3];
 
-		/* (b) The FIFO instance's ordered parameters range holds a parameter
-		 * expression that resolves to the interned const-expr value of the
-		 * transfer argument (expected_depth, 4) - the depth round-trips
-		 * EXACTLY, witnessed on the record value, not a source spelling.
-		 * The witness record is jointly width- and type-checked against the
-		 * landed owners: the depth argument was built over the 8-bit type
-		 * (pigen_expr_add_integer(4, t8, ...)), and the ONLY expression
-		 * lowering owner path, pigen_lower_rtl_expression, lowers exact
-		 * integers through pigen_rtl_expr_add_integer - the uint64_t
-		 * convenience constructor that hardcodes literal_bit_count 64. So
-		 * the record a correct implementation publishes is 8-bit TYPED with
-		 * a 64-bit literal: (i) literal_bit_count == 64 - the only literal
-		 * width the owner path can publish (a 1-bit, 8-bit or other-width
-		 * literal carrying value 4 cannot round-trip) - and (ii) its type
-		 * field resolves through pigen_rtl_type_get to a record with
-		 * width == 8, signedness == PIGEN_SIGN_UNSIGNED and
-		 * state_domain == the 8-bit witness type's domain, compared field
-		 * by field, never by pointer (a distinct but equal type record
-		 * still passes). */
+		/* DEPTH preserves the argument value while adapting its type to the
+		 * primitive's signed 32-bit int parameter. The source witness is an
+		 * 8-bit value; it must not dictate the primitive interface width.
+		 * The integer literal constructor retains its 64-bit storage form. */
 		fifo_parameter_count = fifo_instance->parameters.count;
 		fifo_has_depth = 0;
 		for (size_t p = 0; p < fifo_parameter_count; p++) {
@@ -3493,10 +3541,9 @@ int main(int argc, char **argv)
 			pe_type = pigen_rtl_type_get(&rtl_j, pe->type);
 			if (!pe_type)
 				continue;
-			if (pe_type->width != 8 ||
-				pe_type->signedness != PIGEN_SIGN_UNSIGNED ||
-				pe_type->state_domain !=
-					pigen_data_type_state_domain(&sem_j, t8)) /* (ii) 8-bit type witness */
+			if (pe_type->width != 32 ||
+				pe_type->signedness != PIGEN_SIGN_SIGNED ||
+				pe_type->state_domain != PIGEN_DATA_TYPE_STATE_FOUR)
 				continue;
 			fifo_has_depth = 1;
 		}
@@ -3806,14 +3853,6 @@ int main(int argc, char **argv)
 		object_delta = rtl_k.object_count - object_before;
 		expression_delta = rtl_k.expression_count - expression_before;
 		instance_delta = rtl_k.instance_count - instance_before;
-		/* (a)+(b)+(c): exactly one VARIABLE payload object per signal (four),
-		 * exactly one pigen_rtl_instance per signal (four), and the
-		 * expression delta bounded by the shared depth argument (at most one,
-		 * per the [0,1] derivation above). A control-object publish, a shared
-		 * or missing payload, a missing or duplicated instance, or a
-		 * per-signal/duplicated depth record is each caught here. */
-		/* The [0,1] range: the lower bound 0 is implicit for the unsigned
-		 * delta; the upper bound 1 pins the single shared depth record. */
 		/* Six endpoint objects plus four action controls per storage signal,
 		 * one primitive instance per signal, and the shared FIFO depth plus
 		 * one object-reference expression per valid/ready control. */
@@ -3824,9 +3863,7 @@ int main(int argc, char **argv)
 		/* Case 2: IDEMPOTENCE. A second call on the SAME lowering and module
 		 * publishes NOTHING new: all three arena counts and the endpoints-map
 		 * count are unchanged and each of the four signals' endpoints record
-		 * is field-identical to after the first call (all six fields per
-		 * signal). Green against the landed lowering, which republishes
-		 * nothing on the second pass. */
+		 * is field-identical to after the first call. */
 		buf_record = lowering_k.lowered_endpoints[buf.index];
 		port_record = lowering_k.lowered_endpoints[port.index];
 		fifo_record = lowering_k.lowered_endpoints[fifo.index];

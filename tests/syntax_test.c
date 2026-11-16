@@ -18,6 +18,7 @@ typedef struct {
 	size_t type_nodes;
 	size_t type_arguments;
 	size_t shape_dimensions;
+	size_t retained_scopes,retained_names;
 } syntax_arena_counts;
 
 typedef struct {
@@ -114,7 +115,9 @@ static syntax_arena_counts snapshot_syntax_arenas(
 		.expression_children = tree->expressions.child_count,
 		.type_nodes = tree->types.node_count,
 		.type_arguments = tree->types.argument_count,
-		.shape_dimensions = tree->shape_dimension_count
+		.shape_dimensions = tree->shape_dimension_count,
+		.retained_scopes = tree->retained_scope_count,
+		.retained_names = tree->retained_name_count
 	};
 }
 
@@ -122,6 +125,8 @@ static void assert_syntax_arena_counts(syntax_arena_counts actual,
 	syntax_arena_counts expected)
 {
 	assert(actual.syntax_nodes == expected.syntax_nodes);
+	assert(actual.retained_scopes == expected.retained_scopes);
+	assert(actual.retained_names == expected.retained_names);
 	assert(actual.expression_nodes == expected.expression_nodes);
 	assert(actual.expression_children == expected.expression_children);
 	assert(actual.type_nodes == expected.type_nodes);
@@ -250,6 +255,17 @@ static void assert_packed_struct_typedef(pigen_source_manager *sources,
 	type = pigen_syntax_type_get(&fixture.tree.types,
 		node->as.type_definition.type);
 	assert(type && type->is_packed_struct && type->member_count == 2);
+	for (size_t i = 0; i < type->member_count; i++)
+	{
+		const pigen_syntax_struct_member *member = &fixture.tree.types.members[type->first_member+i];
+		const pigen_syntax_type *inner = pigen_syntax_type_get(&fixture.tree.types, member->type);
+		assert(inner);
+		if (inner->is_packed_struct)
+		{
+			assert(inner->member_count == 2);
+			assert(inner->first_member + inner->member_count <= type->first_member);
+		}
+	}
 	free_fixture(&fixture);
 }
 
@@ -410,8 +426,13 @@ static void test_cast_syntax(pigen_source_manager *sources)
 		&expressions, &types, &expression, &error));
 	assert(!pigen_parse_expression(&preprocessed.expanded, 39, 45,
 		&expressions, &types, &expression, &error));
-	assert(!pigen_parse_expression(&preprocessed.expanded, 45, 52,
+	assert(pigen_parse_expression(&preprocessed.expanded, 45, 52,
 		&expressions, &types, &expression, &error));
+	node = pigen_syntax_expr_get(&expressions, expression);
+	assert(node && node->kind == PIGEN_SYNTAX_EXPR_CAST && node->as.cast.is_size);
+	assert(node->as.cast.type.index == PIGEN_INVALID_ID);
+	assert(span_is(sources, node->location.source_span, "(value)'(value)"));
+	assert(pigen_syntax_expr_get(&expressions, node->as.cast.size)->kind == PIGEN_SYNTAX_EXPR_GROUP);
 	pigen_free_syntax_expr_arena(&expressions);
 	pigen_free_syntax_type_arena(&types);
 	pigen_free_preprocess_result(&preprocessed);
@@ -783,6 +804,12 @@ static void test_transactional_typedef_ownership(
 		"module module_byte_typedef; typedef byte byte_t; endmodule", 1);
 	assert_packed_struct_typedef(sources, "ordinary_aggregate_typedef.sv",
 		"typedef struct packed { logic [3:0] tag; logic flag; } packet_t;");
+	assert_packed_struct_typedef(sources, "inline_aggregate_last.sv",
+		"typedef struct packed { logic [15:0] hi; "
+		"struct packed { logic [7:0] tag; logic signed [7:0] value; } low; } packet_t;");
+	assert_packed_struct_typedef(sources, "inline_aggregate_first.sv",
+		"typedef struct packed { "
+		"struct packed { logic [7:0] tag; logic signed [7:0] value; } low; logic [15:0] hi; } packet_t;");
 	assert_compilation_unit_opaque_without_arena_leakage(sources,
 		"ordinary_array_typedef.sv",
 		"typedef logic [3:0] word_t [0:1];");
@@ -880,7 +907,9 @@ static void test_process_rollback(pigen_source_manager *sources)
 	pigen_syntax_id child;
 	size_t clocked_process_count = 0;
 
-	assert(parse_fixture(sources, "rollback.pigen", text, &fixture));
+	/* Speculative typed parsing must roll back its arenas, but a failed
+	 * buffered process must diagnose rather than vanish into raw SV. */
+	assert(!parse_fixture(sources, "rollback.pigen", text, &fixture));
 	module = fixture_module(&fixture);
 	assert(module);
 	for (child = module->first_child; child.index != PIGEN_INVALID_ID; )
@@ -892,15 +921,17 @@ static void test_process_rollback(pigen_source_manager *sources)
 		child = node->next_sibling;
 	}
 	assert(!clocked_process_count);
-	assert(fixture.tree.node_count == 10);
+	/* Failure stops before trailing opaque/module items are published. */
+	assert(fixture.tree.node_count < 10);
 	assert(fixture.tree.expressions.node_count == 0);
 	assert(fixture.tree.expressions.child_count == 0);
 	assert(fixture.tree.types.node_count == 2);
 	assert(fixture.tree.types.argument_count == 0);
 	assert(fixture.tree.shape_dimension_count == 0);
-	assert(fixture.error.origin.index == PIGEN_INVALID_ID);
-	assert(fixture.error.span.source.index == PIGEN_INVALID_ID);
-	assert(!fixture.error.message);
+	assert(fixture.error.origin.index != PIGEN_INVALID_ID);
+	assert(fixture.error.span.source.index != PIGEN_INVALID_ID);
+	assert(fixture.error.message && strstr(fixture.error.message,
+		"unsupported statement in a clocked process"));
 	free_fixture(&fixture);
 }
 

@@ -1,0 +1,17 @@
+// Stream beats can carry metadata without a TDATA field.
+typedef void axi4_stream[last=1,id=4,dest=3,user=7] metadata_t;
+
+module native_axis_metadata(
+    input wire clk, input wire reset,
+    input metadata_t fifo[3] s,
+    output metadata_t skid m);
+    fabric begin s -> m; endfabric
+endmodule
+
+// Omitting all fields gives handshake-only beats.
+typedef void axi4_stream token_t;
+module native_axis_tokens(
+    input wire clk, input wire reset,
+    input token_t s, output token_t m);
+    always @(posedge clk) if (!reset) m <= s;
+endmodule

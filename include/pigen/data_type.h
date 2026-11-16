@@ -113,6 +113,15 @@ pigen_data_type_id pigen_data_type_alias_target(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
 const pigen_packed_dimension *pigen_data_type_dimensions(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
+/* Expanded packed query dimensions, including integer atom/vector bounds.
+ * Scalar bit/logic has rank zero. Caller frees the returned dimension array. */
+int pigen_data_type_query_dimensions(pigen_semantic_model *model,
+ pigen_data_type_id type,pigen_packed_dimension **dimensions,size_t *count);
+/* Packed integral matching: aliases are transparent, record identity and packed
+ * bounds/state/sign remain significant. Void markers match only other void
+ * markers. 1 match, 0 different, -1 unresolved. */
+int pigen_data_type_matches(pigen_semantic_model *model,
+ pigen_data_type_id left,pigen_data_type_id right);
 pigen_data_type_id pigen_data_type_packed_element(pigen_semantic_model *model,
 	pigen_data_type_id type);
 pigen_data_type_id pigen_data_type_packed_select(pigen_semantic_model *model,
@@ -122,6 +131,8 @@ pigen_const_expr_id pigen_data_type_packed_width(pigen_semantic_model *model,
 	pigen_data_type_id type);
 pigen_data_type_id pigen_data_type_concatenation(pigen_semantic_model *model,
 	const pigen_data_type_id *data_types, size_t count);
+/* The fixed 32-bit signed four-state SystemVerilog integer type. */
+pigen_data_type_id pigen_data_type_sv_integer(pigen_semantic_model *model);
 pigen_data_type_id pigen_data_type_unsized_integer(pigen_semantic_model *model);
 pigen_data_type_id pigen_data_type_boolean(pigen_semantic_model *model);
 pigen_data_type_id pigen_data_type_signed_integer(
@@ -150,12 +161,16 @@ typedef enum {
 
 pigen_sv_integer_keyword pigen_data_type_sv_keyword(
 	const pigen_semantic_model *model, pigen_data_type_id data_type);
+/* A zero-bit, non-numerical DATA marker; never an RTL object type. */
+int pigen_data_type_is_void(const pigen_semantic_model *model, pigen_data_type_id type);
 int pigen_data_type_is_integral(const pigen_semantic_model *model,
 	pigen_data_type_id type);
 pigen_state_domain pigen_data_type_state_domain(
 	const pigen_semantic_model *model, pigen_data_type_id type);
 pigen_data_type_id pigen_data_type_sized_logic(pigen_semantic_model *model,
 	size_t width, pigen_signedness signedness);
+pigen_data_type_id pigen_data_type_sized_integral(pigen_semantic_model *model,
+	size_t width, pigen_signedness signedness, pigen_state_domain state);
 int pigen_data_type_resolve_assignment_conversion(
 	const pigen_semantic_model *model, pigen_data_type_id source,
 	pigen_data_type_id target, pigen_conversion *conversion);
@@ -168,6 +183,13 @@ int pigen_data_type_resolve_unary_operation(pigen_semantic_model *model,
 int pigen_data_type_resolve_binary_operation(pigen_semantic_model *model,
 	pigen_binary_operator operator, pigen_data_type_id left,
 	pigen_data_type_id right, pigen_binary_resolution *resolution);
+/* Native SV operator rules used by case-operand analysis; Pigen operands
+ * retain their ordinary intrinsic numerical family rules. */
+int pigen_data_type_resolve_case_unary_operation(pigen_semantic_model *model,
+	pigen_unary_operator operator,pigen_data_type_id operand,pigen_unary_resolution *resolution);
+int pigen_data_type_resolve_case_binary_operation(pigen_semantic_model *model,
+	pigen_binary_operator operator,pigen_data_type_id left,pigen_data_type_id right,
+	pigen_binary_resolution *resolution);
 int pigen_data_type_resolve_conditional_operation(
 	pigen_semantic_model *model, pigen_data_type_id condition,
 	pigen_data_type_id when_true, pigen_data_type_id when_false,

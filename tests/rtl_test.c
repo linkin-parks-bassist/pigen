@@ -412,6 +412,19 @@ int main(void)
 		children = pigen_rtl_expr_children(&model, copied, &n);
 		assert(n == 8);
 		for (size_t i = 0; i < n; ++i) assert(SAME_ID(children[i], parts[i]));
+		pigen_rtl_expr_id pattern=pigen_rtl_expr_add_array_pattern(&model,scalar,parts,8,first);
+		assert(!IS_INVALID(pattern));
+		children=pigen_rtl_expr_children(&model,pattern,&n);
+		pigen_rtl_expr_id repeated=pigen_rtl_expr_add_array_pattern(&model,scalar,children,n,second);
+		assert(!IS_INVALID(repeated) && model.expressions[repeated.index].child_count==8);
+		assert(model.expressions[repeated.index].kind==PIGEN_RTL_EXPR_ARRAY_PATTERN);
+		before_expr=model.expression_count;before_children=model.expression_child_count;
+		assert(IS_INVALID(pigen_rtl_expr_add_array_pattern(&model,scalar,NULL,0,first)));
+		pigen_rtl_expr_id bad_parts[]={zero,pigen_rtl_expr_add_integer(&model,two_state,0,first)};
+		before_expr=model.expression_count;
+		assert(IS_INVALID(pigen_rtl_expr_add_array_pattern(&model,scalar,bad_parts,2,first)));
+		assert(model.expression_count==before_expr && model.expression_child_count==before_children);
+
 	}
 
 	{
@@ -707,6 +720,131 @@ int main(void)
 		assert(!IS_INVALID(projected));
 		assert(SAME_ID(model.equations[projected.index].destination, target));
 		assert(SAME_ID(model.equations[projected.index].destination_expression, bit));
+		assert(pigen_rtl_equation_drives_object(&model, projected, target));
+		pigen_rtl_object_id second = pigen_rtl_object_add_with_owner(&model, owner,
+			PIGEN_RTL_OBJECT_VARIABLE, type, PIGEN_SEMANTIC_INTERNAL,
+			INVALID_ID(pigen_signal_id), first);
+		pigen_rtl_object_id index = pigen_rtl_object_add_with_owner(&model, owner,
+			PIGEN_RTL_OBJECT_VARIABLE, type, PIGEN_SEMANTIC_INTERNAL,
+			INVALID_ID(pigen_signal_id), first);
+		pigen_rtl_expr_id second_expr = pigen_rtl_expr_add_object(&model, type, second, first);
+		pigen_rtl_expr_id index_expr = pigen_rtl_expr_add_object(&model, type, index, first);
+		pigen_rtl_expr_id indexed = pigen_rtl_expr_add_index(&model, type, base, index_expr, first);
+		pigen_rtl_expr_id children[] = {indexed, second_expr};
+		pigen_rtl_expr_id concat = pigen_rtl_expr_add_concatenation(&model, type, children, 2, first);
+		pigen_rtl_expr_id nested = pigen_rtl_expr_add_concatenation(&model, type, &concat, 1, first);
+		pigen_rtl_equation_id combined = pigen_rtl_equation_add_projection_with_owner(
+			&model, owner, nested, one, first);
+		assert(!IS_INVALID(combined));
+		assert(SAME_ID(model.equations[combined.index].destination, target));
+		assert(SAME_ID(model.equations[combined.index].destination_expression, nested));
+		assert(pigen_rtl_equation_drives_object(&model, combined, target));
+		assert(pigen_rtl_equation_drives_object(&model, combined, second));
+		assert(!pigen_rtl_equation_drives_object(&model, combined, index));
+		assert(model.objects[0].module.index != owner.index);
+		pigen_rtl_expr_id foreign = pigen_rtl_expr_add_object(&model, type, (pigen_rtl_object_id){0}, first);
+		children[1] = foreign;
+		pigen_rtl_expr_id mixed = pigen_rtl_expr_add_concatenation(&model, type, children, 2, first);
+		children[1] = one;
+		pigen_rtl_expr_id invalid = pigen_rtl_expr_add_concatenation(&model, type, children, 2, first);
+		before = model.equation_count;
+		assert(IS_INVALID(pigen_rtl_equation_add_projection_with_owner(&model, owner, mixed, one, first)));
+		assert(IS_INVALID(pigen_rtl_equation_add_projection_with_owner(&model, owner, invalid, one, first)));
+		assert(model.equation_count == before);
+		pigen_rtl_expr_id no_expr={PIGEN_INVALID_ID};
+		pigen_rtl_procedural_id assignment=pigen_rtl_procedural_add(&model,owner,
+			PIGEN_PROCEDURAL_ASSIGN,nested,one,no_expr,NULL,0,first);
+		assert(!IS_INVALID(assignment));
+		pigen_rtl_procedural_id block=pigen_rtl_procedural_add(&model,owner,
+			PIGEN_PROCEDURAL_BLOCK,no_expr,no_expr,no_expr,&assignment,1,first);
+		assert(!IS_INVALID(block));
+		/* A child list borrowed from this arena must survive its growth. */
+		pigen_rtl_procedural_id copied=pigen_rtl_procedural_add(&model,owner,
+			PIGEN_PROCEDURAL_BLOCK,no_expr,no_expr,no_expr,model.procedural_children,1,first);
+		assert(!IS_INVALID(copied));
+		pigen_rtl_process_id comb=pigen_rtl_combinational_process_add(&model,owner,block,first);
+		assert(!IS_INVALID(comb) && model.processes[comb.index].is_combinational);
+		assert(pigen_rtl_process_drives_object(&model,comb,target));
+		assert(pigen_rtl_process_drives_object(&model,comb,second));
+		assert(!pigen_rtl_process_drives_object(&model,comb,index));
+		size_t statements=model.procedural_count,child_count=model.procedural_child_count;
+		assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_ASSIGN,
+			mixed,one,no_expr,NULL,0,first)));
+		assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_IF,
+			no_expr,no_expr,no_expr,&assignment,1,first)));
+		assert(model.procedural_count==statements && model.procedural_child_count==child_count);
+		pigen_rtl_type case_type={0};case_type.width=32;case_type.signedness=PIGEN_SIGN_UNSIGNED;
+		case_type.state_domain=PIGEN_DATA_TYPE_STATE_TWO;case_type.width_expression=(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		pigen_rtl_type_id case_type_id=pigen_rtl_type_intern(&model,&case_type);
+		pigen_rtl_expr_id case_value=pigen_rtl_expr_add_integer(&model,case_type_id,1,first);
+		pigen_rtl_procedural_id choice=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_CASE_ITEM,
+			no_expr,no_expr,case_value,&assignment,1,first);
+		pigen_rtl_procedural_id fallback=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_CASE_ITEM,
+			no_expr,no_expr,no_expr,&assignment,1,first);
+		assert(!IS_INVALID(choice) && !IS_INVALID(fallback));
+		pigen_rtl_procedural_id items[]={choice,fallback};
+		pigen_rtl_procedural_id selection=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_CASEZ,
+			no_expr,no_expr,case_value,items,2,first);
+		assert(!IS_INVALID(selection));
+		pigen_rtl_process_id case_process=pigen_rtl_combinational_process_add(&model,owner,selection,first);
+		assert(!IS_INVALID(case_process) && pigen_rtl_process_drives_object(&model,case_process,target));
+		assert(pigen_rtl_process_drives_object(&model,case_process,second));
+		assert(!pigen_rtl_process_drives_object(&model,case_process,index));
+        pigen_rtl_procedural_id loop=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_WHILE,
+            no_expr,no_expr,case_value,&assignment,1,first);
+        assert(!IS_INVALID(loop));
+        pigen_rtl_process_id loop_process=pigen_rtl_combinational_process_add(&model,owner,loop,first);
+        assert(!IS_INVALID(loop_process) && pigen_rtl_process_drives_object(&model,loop_process,target));
+        assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_REPEAT,
+            no_expr,no_expr,case_value,NULL,0,first)));
+        assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_WHILE,
+            no_expr,no_expr,no_expr,&assignment,1,first)));
+        pigen_rtl_procedural_id phases[]={block,block,assignment};
+        pigen_rtl_procedural_id for_loop=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_FOR,
+            no_expr,no_expr,case_value,phases,3,first);
+        assert(!IS_INVALID(for_loop));
+        pigen_rtl_process_id for_process=pigen_rtl_combinational_process_add(&model,owner,for_loop,first);
+        assert(!IS_INVALID(for_process) && pigen_rtl_process_drives_object(&model,for_process,target));
+        assert(!pigen_rtl_process_drives_object(&model,for_process,index));
+        size_t for_before=model.procedural_count;
+        assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_FOR,
+            no_expr,no_expr,no_expr,phases,3,first)));
+        phases[1]=assignment;
+        assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_FOR,
+            no_expr,no_expr,case_value,phases,3,first)));
+        assert(model.procedural_count==for_before);
+        pigen_rtl_procedural_id exit=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_BREAK,
+            no_expr,no_expr,no_expr,NULL,0,first);
+        assert(!IS_INVALID(exit));
+        size_t before_processes=model.process_count;
+        assert(IS_INVALID(pigen_rtl_combinational_process_add(&model,owner,exit,first)));
+        pigen_rtl_procedural_id orphan=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_BLOCK,
+            no_expr,no_expr,no_expr,&exit,1,first);
+        assert(IS_INVALID(pigen_rtl_combinational_process_add(&model,owner,orphan,first)));
+        assert(model.process_count==before_processes);
+        pigen_rtl_procedural_id bounded=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_DO_WHILE,
+            no_expr,no_expr,case_value,&exit,1,first);
+        assert(!IS_INVALID(bounded));
+        assert(!IS_INVALID(pigen_rtl_combinational_process_add(&model,owner,bounded,first)));
+        pigen_rtl_procedural_id forever=pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_FOREVER,
+            no_expr,no_expr,no_expr,&exit,1,first);
+        assert(!IS_INVALID(forever));
+        assert(!IS_INVALID(pigen_rtl_combinational_process_add(&model,owner,forever,first)));
+        phases[0]=orphan;phases[1]=block;
+        assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_FOR,
+            no_expr,no_expr,case_value,phases,3,first)));
+        assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_CONTINUE,
+            no_expr,no_expr,case_value,NULL,0,first)));
+		statements=model.procedural_count;child_count=model.procedural_child_count;
+		pigen_rtl_procedural_id repeated[]={fallback,fallback};
+		assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_CASE,
+			no_expr,no_expr,case_value,repeated,2,first)));
+		assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_CASE,
+			no_expr,no_expr,case_value,&assignment,1,first)));
+		assert(IS_INVALID(pigen_rtl_procedural_add(&model,owner,PIGEN_PROCEDURAL_BLOCK,
+			no_expr,no_expr,no_expr,&choice,1,first)));
+		assert(IS_INVALID(pigen_rtl_combinational_process_add(&model,owner,choice,first)));
+		assert(model.procedural_count==statements && model.procedural_child_count==child_count);
 	}
 
 	pigen_free_rtl_model(&model);

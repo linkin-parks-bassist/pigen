@@ -83,6 +83,21 @@ static int predicate_requires_symbol(const pigen_semantic_model *model,
 	{
 		const pigen_semantic_expr *condition = pigen_expr_get(model,
 			atoms[i].condition);
+		/* Truth normalization preserves this input's identity for known
+		 * Boolean values; runtime native-SV oracles cover X/Z branch choice. */
+		if (condition && condition->kind==PIGEN_EXPR_BINARY &&
+			condition->as.binary.operation.operator==PIGEN_BINARY_CASE_EQUAL)
+		{
+			const pigen_semantic_expr *one=pigen_expr_get(model,condition->as.binary.right);
+			if (one && one->kind==PIGEN_EXPR_INTEGER && one->as.integer==1)
+				condition=pigen_expr_get(model,condition->as.binary.left);
+		}
+		if (condition && condition->kind==PIGEN_EXPR_UNARY &&
+			condition->as.unary.operation.operator==PIGEN_UNARY_REDUCTION_OR)
+			condition=pigen_expr_get(model,condition->as.unary.operand);
+		while (condition && (condition->kind==PIGEN_EXPR_GROUP || condition->kind==PIGEN_EXPR_CONVERSION))
+			condition=pigen_expr_get(model,condition->kind==PIGEN_EXPR_GROUP ?
+				condition->as.group.operand : condition->as.conversion.operand);
 		if (condition && condition->kind == PIGEN_EXPR_SYMBOL &&
 			condition->as.symbol.index == symbol.index &&
 			atoms[i].expected == expected) return 1;

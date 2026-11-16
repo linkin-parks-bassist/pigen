@@ -1,0 +1,18 @@
+---
+status: green
+revised_at: "2026-11-16T08:48:03+11:00"
+---
+
+Native AXI typedefs can live in structured packages and be used as `bus_defs::bus_t`. Package aliases retain complete protocol contracts and DATA types. Package-qualified type keys use the same matcher as simple aliases (how/are/native/axi/collection/assignment/patterns/resolved.md). Timing/storage/role remain endpoint-use properties (how/are/native/axi/type/aliases/represented.md).
+
+syntax.h adds PACKAGE containers. syntax.c selects packages containing native protocol declarations or recognized qualified native aliases, parses typedefs/parameters in source order and preserves package wrappers. Required ordinary DATA/configuration companions also resolve; dependency selection and remaining mixed-package limits belong to how/are/ordinary/package/dependencies/resolved.md. Unrelated packages retain ordinary-SV preservation. type_syntax.h records has_package/package alongside the base token. Known native-package qualified declarations select structured resolution even for missing members, so lookup failure cannot silently drop a port.
+
+semantic.h/semantic.c provide PIGEN_SYMBOL_PACKAGE, pigen_symbol_bind_package_scope and pigen_symbol_lookup_package_member. Each package owns a scope under the compilation unit; member lookup is local and never borrows an enclosing name. Package parameters own constant semantic objects without a hardware module. resolve.c:add_package resolves package constants and typedefs before dependent modules. type_resolve.c:pigen_resolve_type_symbol is the shared qualified/unqualified type-name owner. expression_analysis.c resolves package constants and type keys through package symbols.
+
+specialize.c:qualified_native_hint classifies package alias uses for semantic child specialization without supplying contracts. Ordinary native package aliases do not become compilation-unit names. Namespace shadows are checked by semantic lookup. Forward qualified package aliases are checked before output (how/are/native/axi/forward/typedef/references/diagnosed.md).
+
+output.c renders ordinary package typedef syntax, including numerical packed counts and packed records, from parsed type structure. Native typedefs produce no SV declaration; wrappers, ordinary typedefs and constants remain available to retained SV. Packages create no RTL modules or endpoint storage.
+
+Current surface: typedefs and parameters in native packages, one package qualifier, qualified aliases/constants/type keys, endpoint declarations, parameterized children and fabrics. Imports use lexical canonical bindings (how/are/native/axi/package/imports/resolved.md); explicit and wildcard exports preserve original declaration identity (how/are/native/axi/package/exports/represented.md). Ordinary inline functions/tasks retain their bodies and package names alongside DATA/native contracts (how/are/retained/package/subroutines/represented.md). Typed subroutine evaluation, classes, enum/union typing and broader retained grammar remain work. This is not complete SystemVerilog package support.
+
+Evidence: tests/native_protocol_test.py package profiles independently score all three families through direct/aggregate/parameterized child and direct/routed fabric connections under stalls/reset. tests/native_array_test.py package profiles check flat/nested/generated type-key bindings with original endpoint identities. The 33 standard-pin profiles include package record identity/state matching. package_type_tests checks constants, ordinary package preservation, namespace errors and all-family examples/native_axi_packages.pigen; sanitizer runs exercise these paths.

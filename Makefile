@@ -1,15 +1,45 @@
 CC		= cc
 CFLAGS		= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude
 LDLIBS		= -lm
-SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c
+SEMANTIC_SOURCES = src/operation.c src/transfer_type.c src/protocol.c src/integer.c src/data_type.c src/semantic.c
 SYNTAX_SOURCES = src/syntax.c src/type_syntax.c src/expression.c src/preprocess.c src/lexer.c src/source.c src/util.c
 
 .PHONY: all clean test fsm-goto-first-test when-event-test child-port-endpoint-test fabric-anonymous-test case-wildcard-test case-width-test case-signed-test case-nested-test ordinary-case-test case-guarded-complex-test ordinary-sv-preserve-test case-guarded-mixed-test mixed-write-conflict-error-test dependent-ordered-writes-test multiple-ordered-writes-test final-else-guard-dependency-test else-if-guard-dependency-test else-guard-dependency-test nested-guard-chain-dependency-test differing-guardless-dependency-test bare-uint-error-test int-ports-sv-test mixed-plain-always-test guardless-blocking-dependency-test same-guardless-dependency-test guardless-blocking-dependency-error-test dependent-parameter-override-test explicit-elastic-controls-test deep-guarded-blocking-dependency-test blocking-dependency-guard-error-test guarded-blocking-dependency-test blocking-dependency-inline-test directive-sv-test positional-elastic-child-test unpacked-struct-sv-test nba-dependency-split-test union-sv-test localparam-override-test generate-if-sv-test independent-blocking-function-test buffered-instance-local-conflict-error-test buffered-instance-producer-error-test mixed-clocked-task-error-test async-reset-always-sv-test async-reset-sv-test mixed-clocked-order-error-test nested-mixed-clocked-function-test mixed-clocked-function-test parent-parameter-override-test implicit-elastic-destinations-test implicit-elastic-child-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test concat-dest-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test output-model-test fabric-test core-language-test pipeline-test pipeline-scope-test pipeline-syntax-test biquad-bank-test rtl-name-test rtl-lower-test route-test route-law-test route-vdo-test route-stall-test fabric-direct-duplicate-error-test clocked-case-error-test pipeline-reset-after-test pipeline-reset-conditional-test sv-integer-keywords-test integer-signal-test byte-type-test two-state-test validate-input-error-test peek-test validate-order-test macro-paste-decl-test macro-stringify-test macro-paste-ref-test macro-paste-test clog2-test pipeline-reset-test function-retain-test concat-placeholder-test struct-write-test pipeline-alias-test fabric-merge-test fabric-merge3-test concat-misaligned-test ternary-literal-test signed-cast-test typed-param-test integer-param-test pipeline-identity-test pipeline-output-test pipeline-stage-test pipeline-lower-test fsm-lower-test fsm-identity-test verify coslice-test coslice-typedef-test slicing-test signal-syntax-test validate-test signed-widen-test ready-break-test waveform compiler-waveform mac-waveform biquad-waveform text-waveform join-waveform fifo-waveform skid-waveform skid-compare-waveform port-waveform bram-waveform guarded-waveform output-waveform output-test clear-test fsm-test vertical-slice-test sv-emit-test compile-test coslice-xprop-test
 
+.PHONY: protocol-test protocol-semantic-test native-protocol-test
+
 all: pigen
 
-pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c
-	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c $(LDLIBS)
+protocol-test:
+	@dir=$$(mktemp -d); \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-protocol-test tests/protocol_test.c src/protocol.c || { rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-protocol-test || status=$$?; \
+	rm -rf $$dir; exit $$status
+
+protocol-semantic-test:
+	@dir=$$(mktemp -d); \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-protocol-semantic-test tests/protocol_semantic_test.c $(SEMANTIC_SOURCES) src/predicate.c src/source.c src/util.c || { rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-protocol-semantic-test || status=$$?; \
+	rm -rf $$dir; exit $$status
+
+native-protocol-test: pigen
+	python3 tests/native_protocol_test.py
+	python3 tests/native_array_test.py
+	python3 tests/native_axis_fabric_test.py
+	python3 tests/native_axis_demux_test.py
+	python3 tests/native_axis_routing_test.py
+	python3 tests/native_axi_fabric_test.py
+	python3 tests/native_axi_demux_test.py
+	python3 tests/native_axi_core_fabric_test.py
+	python3 tests/native_projection_test.py
+	python3 tests/native_core_contention_test.py
+
+test: protocol-test protocol-semantic-test native-protocol-test
+
+pigen: src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/protocol.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c
+	$(CC) $(CFLAGS) -o $@ src/pigen.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/protocol.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c $(LDLIBS)
 
 
 test: pigen exact-wide-test wide-literal-test child-input-alias-ownership-test child-slice-ownership-test child-valid-manual-test child-ready-manual-test fabric-static-fanout-test fabric-endpoint-ownership-test fabric-direct-order-error-test fabric-cross-block-test fabric-implicit-merge-test fabric-mixed-ownership-test specialization-test packed-count-error-test child-port-endpoint-test fabric-anonymous-test case-wildcard-test case-width-test case-signed-test case-nested-test ordinary-case-test case-guarded-complex-test ordinary-sv-preserve-test case-guarded-mixed-test mixed-write-conflict-error-test dependent-ordered-writes-test multiple-ordered-writes-test final-else-guard-dependency-test else-if-guard-dependency-test else-guard-dependency-test nested-guard-chain-dependency-test differing-guardless-dependency-test bare-uint-error-test int-ports-sv-test mixed-plain-always-test guardless-blocking-dependency-test same-guardless-dependency-test guardless-blocking-dependency-error-test dependent-parameter-override-test explicit-elastic-controls-test deep-guarded-blocking-dependency-test blocking-dependency-guard-error-test guarded-blocking-dependency-test blocking-dependency-inline-test directive-sv-test positional-elastic-child-test unpacked-struct-sv-test nba-dependency-split-test union-sv-test localparam-override-test generate-if-sv-test independent-blocking-function-test buffered-instance-local-conflict-error-test buffered-instance-producer-error-test mixed-clocked-task-error-test async-reset-always-sv-test async-reset-sv-test mixed-clocked-order-error-test nested-mixed-clocked-function-test mixed-clocked-function-test parent-parameter-override-test implicit-elastic-destinations-test implicit-elastic-child-test elastic-child-ports-test elastic-pigen-children-test parameterized-pigen-children-test enum-preserve-test interface-port-preserve-test typed-param-test integer-param-test source-test preprocess-test transfer-type-test syntax-model-test fsm-syntax-test integer-test semantic-test predicate-test expression-resolve-test expression-use-test resolve-test rtl-test fabric-test core-language-test pipeline-test
@@ -35,7 +65,7 @@ transfer-type-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-transfer-type-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-transfer-type-test tests/transfer_type_test.c src/transfer_type.c || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-transfer-type-test tests/transfer_type_test.c src/transfer_type.c src/protocol.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-transfer-type-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -43,15 +73,24 @@ syntax-model-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-syntax-model-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-syntax-model-test tests/syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-syntax-model-test tests/syntax_test.c src/transfer_type.c src/protocol.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-syntax-model-test || status=$$?; \
+	rm -rf $$dir; exit $$status
+
+.PHONY: generate-syntax-test
+test: generate-syntax-test
+generate-syntax-test:
+	@dir=$$(mktemp -d); \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-generate-syntax-test tests/generate_syntax_test.c src/transfer_type.c src/protocol.c $(SYNTAX_SOURCES) || { rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-generate-syntax-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
 fsm-syntax-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-fsm-syntax-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-syntax-test tests/fsm_syntax_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-fsm-syntax-test tests/fsm_syntax_test.c src/transfer_type.c src/protocol.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-fsm-syntax-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -77,6 +116,40 @@ predicate-test:
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-predicate-test tests/predicate_test.c src/predicate.c $(SEMANTIC_SOURCES) src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-predicate-test || status=$$?; \
+	rm -rf $$dir; exit $$status
+
+.PHONY: qualified-case-test
+test: qualified-case-test
+qualified-case-test: pigen
+	python3 tests/qualified_case_test.py
+
+.PHONY: runtime-zero-replication-test
+test: runtime-zero-replication-test
+runtime-zero-replication-test: pigen
+	python3 tests/runtime_zero_replication_test.py
+
+.PHONY: grouped-port-test
+test: grouped-port-test
+grouped-port-test: pigen
+	python3 tests/grouped_port_test.py
+
+.PHONY: case-group-test
+test: case-group-test
+case-group-test: pigen
+	python3 tests/case_group_test.py
+
+.PHONY: clocked-case-test
+test: clocked-case-test
+clocked-case-test: pigen
+	python3 tests/clocked_case_test.py
+
+.PHONY: generate-semantic-test
+test: generate-semantic-test
+generate-semantic-test:
+	@dir=$$(mktemp -d); \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-generate-semantic-test tests/generate_semantic_test.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-generate-semantic-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
 expression-resolve-test:
@@ -117,6 +190,15 @@ rtl-name-test:
 	status=0; \
 	$(CC) $(CFLAGS) -o $$dir/pigen-rtl-name-test tests/rtl_name_test.c src/rtl_name.c src/source.c src/util.c || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-rtl-name-test || status=$$?; \
+	rm -rf $$dir; exit $$status
+
+.PHONY: generated-instance-test
+test: generated-instance-test
+generated-instance-test:
+	@dir=$$(mktemp -d); \
+	status=0; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-generated-instance-test tests/generated_instance_test.c src/rtl_lower.c src/rtl.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/predicate.c src/pipeline_identity.c $(SEMANTIC_SOURCES) $(SYNTAX_SOURCES) || { rm -rf $$dir; exit 1; }; \
+	$$dir/pigen-generated-instance-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
 output-model-test:
@@ -171,7 +253,7 @@ pipeline-identity-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-pipeline-identity-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-identity-test tests/pipeline_identity_test.c src/transfer_type.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-pipeline-identity-test tests/pipeline_identity_test.c src/transfer_type.c src/protocol.c $(SYNTAX_SOURCES) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-pipeline-identity-test $(T) || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -285,7 +367,6 @@ core-language-test: pigen
 
 pipeline-test: pigen
 	./pigen tests/pipeline.pigen -o /tmp/pigen-pipeline.sv
-	grep -q 'value__pigen_packet_in = ((enable == 1 && source_valid)' /tmp/pigen-pipeline.sv
 	iverilog -g2012 -o /tmp/pigen-pipeline-vvp rtl/pigen_primitives.sv /tmp/pigen-pipeline.sv tests/pipeline_tb.sv
 	vvp /tmp/pigen-pipeline-vvp
 
@@ -307,17 +388,17 @@ case-guarded-mixed-test: pigen
 	vvp $$dir/sim | grep -Fq 'PASS mixed case guards'; \
 	status=$$?; rm -rf $$dir; exit $$status
 
-clocked-case-error-test: pigen
-	if ./pigen tests/clocked_case_error.pigen -o /tmp/case-error.sv 2>/tmp/case-error.err; then \
-		echo 'structured case process unexpectedly compiled' >&2; exit 1; fi
-	grep -q 'structured construct in an unsupported clocked process is not supported' /tmp/case-error.err
+.PHONY: clocked-case-actions-test
+clocked-case-error-test: clocked-case-actions-test
+clocked-case-actions-test: pigen
+	python3 tests/clocked_case_test.py --actions-only
 
 interface-port-preserve-test: pigen
 	dir=$$(mktemp -d); \
 	./pigen tests/interface_port_preserve.pigen -o $$dir/iface.sv && \
 	test $$(grep -c '^interface bus_if;' $$dir/iface.sv) -eq 1 && \
 	grep -Fq 'module m(input logic clk, bus_if bus' $$dir/iface.sv && \
-	verilator --lint-only -Wall -Wno-fatal -Wno-DECLFILENAME \
+	verilator --lint-only -Wall -Wno-DECLFILENAME \
 		--top-module wrap $$dir/iface.sv; \
 	status=$$?; rm -rf $$dir; exit $$status
 
@@ -369,7 +450,7 @@ unpacked-struct-sv-test: pigen
 	dir=$$(mktemp -d); \
 	./pigen tests/unpacked_struct_sv.pigen -o $$dir/struct.sv && \
 	grep -Fq 'typedef struct {' $$dir/struct.sv && \
-	verilator --lint-only -Wall -Wno-fatal -Wno-DECLFILENAME \
+	verilator --lint-only -Wall -Wno-DECLFILENAME \
 		--top-module structplain $$dir/struct.sv; \
 	status=$$?; rm -rf $$dir; exit $$status
 
@@ -1051,7 +1132,7 @@ compile-test:
 	@dir=$$(mktemp -d); \
 	rm -f /tmp/pigen-compile-test; \
 	status=0; \
-	$(CC) $(CFLAGS) -o $$dir/pigen-compile-test tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c $(LDLIBS) || { status=1; rm -rf $$dir; exit 1; }; \
+	$(CC) $(CFLAGS) -o $$dir/pigen-compile-test tests/compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/protocol.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c $(LDLIBS) || { status=1; rm -rf $$dir; exit 1; }; \
 	$$dir/pigen-compile-test || status=$$?; \
 	rm -rf $$dir; exit $$status
 
@@ -1167,7 +1248,7 @@ specialization-test: pigen
 		grep -Fxq 'preserve output' $$dir/output.sv || { status=1; break; }; \
 	done; rm -rf $$dir; exit $$status
 	dir=$$(mktemp -d); \
-	$(CC) $(CFLAGS) -o $$dir/check tests/specialization_test.c src/specialize.c src/lexer.c src/util.c $(LDLIBS) && \
+	$(CC) $(CFLAGS) -o $$dir/check tests/specialization_test.c src/specialize.c src/protocol.c src/lexer.c src/util.c $(LDLIBS) && \
 	$$dir/check && \
 	./pigen tests/deep_specialization.pigen -o $$dir/deep.sv && \
 	iverilog -g2012 -s deep_specialization_tb -o $$dir/sim tests/deep_specialization_tb.sv rtl/pigen_primitives.sv $$dir/deep.sv && \
@@ -1325,3 +1406,106 @@ exact-wide-test: pigen
 	iverilog -g2012 -s exact_wide_tb -o $$dir/sim tests/exact_wide_tb.sv rtl/pigen_primitives.sv $$dir/design.sv && \
 	vvp $$dir/sim | grep -Fq 'PASS exact wide'; \
 	status=$$?; rm -rf $$dir; exit $$status
+
+.PHONY: cores-test cores-report cores-video
+cores-test: pigen
+	python3 tests/cores/run.py
+
+cores-report: cores-test
+	python3 tools/cores/report.py --out build/cores
+
+CORE_VIDEO_PYTHON ?= python3
+cores-video: cores-report
+	$(CORE_VIDEO_PYTHON) tools/cores/uart_video.py --out build/cores/media --trace build/cores/uart-div16/trace.csv
+	$(CORE_VIDEO_PYTHON) tools/cores/bus_video.py --profile sdram --trace build/cores/sdram-cas2/trace.csv --out build/cores/media
+	$(CORE_VIDEO_PYTHON) tools/cores/bus_video.py --profile spi_target --trace build/cores/spi-target-mode0-half73/trace.csv --out build/cores/media
+	$(CORE_VIDEO_PYTHON) tools/cores/bus_video.py --profile spi --trace build/cores/spi-mode0-half4/trace.csv --out build/cores/media
+	$(CORE_VIDEO_PYTHON) tools/cores/bus_video.py --profile i2c --trace build/cores/i2c-half4/trace.csv --out build/cores/media
+	$(CORE_VIDEO_PYTHON) tools/cores/bus_video.py --profile i2s --trace build/cores/i2s-half4/trace.csv --out build/cores/media
+	$(CORE_VIDEO_PYTHON) tools/cores/bus_video.py --profile axi4 --trace build/cores/axi4-seed1/trace.csv --out build/cores/media
+	$(CORE_VIDEO_PYTHON) tools/cores/bus_video.py --profile axil --trace build/cores/axil-seed1/trace.csv --out build/cores/media
+	$(CORE_VIDEO_PYTHON) tools/cores/bus_video.py --profile axis --trace build/cores/axis-fifo/trace.csv --out build/cores/media
+	$(CORE_VIDEO_PYTHON) tools/cores/transfer_slots.py --trace build/cores/transfer-flow/slots.csv --out build/cores/media
+	python3 tools/cores/report.py --out build/cores
+
+verify: cores-test
+
+.PHONY: cli-diagnostics-test lint-fatal-test
+cli-diagnostics-test: pigen
+	sh tests/cli_diagnostics_test.sh
+lint-fatal-test: pigen
+	sh tests/lint_fatal_pin.sh
+verify: output-model-test coslice-typedef-test coslice-xprop-test cli-diagnostics-test lint-fatal-test
+
+.PHONY: native-routing-compile-test
+test: native-routing-compile-test
+native-routing-compile-test:
+	@dir=$$(mktemp -d); \
+	$(CC) $(CFLAGS) -o $$dir/test tests/native_routing_compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/protocol.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c $(LDLIBS) && $$dir/test; status=$$?; rm -rf $$dir; exit $$status
+
+.PHONY: foreach-test
+foreach-test: pigen
+	python3 tests/foreach_test.py
+	python3 tests/native_foreach_test.py
+
+test: foreach-test
+
+.PHONY: clocked-foreach-test
+test: clocked-foreach-test
+clocked-foreach-test: pigen
+	python3 tests/clocked_foreach_test.py
+
+.PHONY: pipeline-liveness-test
+test: pipeline-liveness-test
+pipeline-liveness-test: pigen
+	python3 tests/pipeline_liveness_test.py
+
+.PHONY: native-function-context-test
+test: native-function-context-test
+native-function-context-test: pigen
+	python3 tests/native_function_context_test.py
+
+.PHONY: native-function-effects-test
+test: native-function-effects-test
+native-function-effects-test: pigen
+	python3 tests/native_function_effect_test.py
+
+.PHONY: array-query-test
+test: array-query-test
+array-query-test: pigen
+	python3 tests/array_query_test.py
+
+.PHONY: runtime-array-query-test
+test: runtime-array-query-test
+runtime-array-query-test: pigen
+	python3 tests/runtime_array_query_test.py
+
+.PHONY: static-local-initializer-test
+test: static-local-initializer-test
+static-local-initializer-test: pigen
+	python3 tests/static_local_initializer_test.py
+
+.PHONY: four-to-two-chunk-test
+test: four-to-two-chunk-test
+four-to-two-chunk-test: pigen
+	python3 tests/four_to_two_chunk_test.py
+
+.PHONY: unpacked-initializer-test
+test: unpacked-initializer-test
+unpacked-initializer-test: pigen
+	python3 tests/unpacked_initializer_test.py
+
+.PHONY: automatic-local-initializer-test
+test: automatic-local-initializer-test
+automatic-local-initializer-test: pigen
+	python3 tests/automatic_local_initializer_test.py
+
+.PHONY: numerical-generate-test
+test: numerical-generate-test
+numerical-generate-test: pigen
+	python3 tests/numerical_generate_test.py
+
+.PHONY: named-procedural-block-test
+test: named-procedural-block-test
+named-procedural-block-test: pigen
+	python3 tests/named_procedural_block_test.py

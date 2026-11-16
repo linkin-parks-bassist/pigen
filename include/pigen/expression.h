@@ -18,7 +18,11 @@ typedef enum {
 	PIGEN_SYNTAX_EXPR_MEMBER,
 	PIGEN_SYNTAX_EXPR_INDEX,
 	PIGEN_SYNTAX_EXPR_SELECT,
-	PIGEN_SYNTAX_EXPR_CAST
+	PIGEN_SYNTAX_EXPR_CAST,
+	PIGEN_SYNTAX_EXPR_RECORD,
+	PIGEN_SYNTAX_EXPR_ARRAY_PATTERN,
+	PIGEN_SYNTAX_EXPR_ARRAY_PATTERN_REPLICATION,
+	PIGEN_SYNTAX_EXPR_RECORD_FIELD
 } pigen_syntax_expr_kind;
 
 typedef enum {
@@ -98,11 +102,17 @@ typedef struct {
 			pigen_syntax_expr_id callee;
 			size_t first_argument;
 			size_t argument_count;
+			/* Type inquiries: 1 is type-only; 2 retains an ambiguous type candidate. */
+			int type_argument_kind;
+			pigen_syntax_type_id type_argument;
 		} call;
 		struct {
 			pigen_syntax_expr_id base;
 			pigen_token_id member;
 			int scoped;
+			/* RECORD_FIELD retains its constant array key as well as a
+			 * simple record member token when one was written. */
+			pigen_syntax_expr_id pattern_key;
 		} member;
 		struct {
 			pigen_syntax_expr_id base;
@@ -117,6 +127,10 @@ typedef struct {
 		struct {
 			pigen_syntax_type_id type;
 			pigen_syntax_expr_id value;
+			/* Explicit expression-sized casts; simple names remain ambiguous
+			 * with typedef casts until lexical symbol resolution. */
+			int is_size;
+			pigen_syntax_expr_id size;
 		} cast;
 	} as;
 } pigen_syntax_expr;
@@ -140,6 +154,10 @@ const pigen_syntax_expr *pigen_syntax_expr_get(
 	const pigen_syntax_expr_arena *arena, pigen_syntax_expr_id expression);
 const pigen_syntax_expr_id *pigen_syntax_expr_children(
 	const pigen_syntax_expr_arena *arena, size_t first, size_t count);
+/* True for trees made only from unsized decimal integer literals and operators,
+ * with no named values, typed casts, concatenations or calls. */
+int pigen_syntax_expr_is_decimal_constant(const pigen_expanded_source *source,
+	const pigen_syntax_expr_arena *arena,pigen_syntax_expr_id expression);
 void pigen_free_syntax_expr_arena(pigen_syntax_expr_arena *arena);
 
 #endif

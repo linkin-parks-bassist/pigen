@@ -1,0 +1,21 @@
+module intrinsic_unary (
+    input wire clk, input wire reset,
+    input bit[8] buf source,
+    output bit[8] buf destination,
+    output bit reg missing,
+    output bit reg blocked,
+    output bit[8] reg inverted,
+    output bit reg parity,
+    output bit reg all_bits,
+    output bit reg no_bits
+);
+    always @(posedge clk) begin
+        destination <= source;
+        missing <= !valid(source);
+        blocked <= !ready(destination);
+        inverted <= ~peek(source);
+        parity <= ^peek(source);
+        all_bits <= &peek(source);
+        no_bits <= ~|peek(source);
+    end
+endmodule

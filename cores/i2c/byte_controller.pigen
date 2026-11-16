@@ -1,0 +1,143 @@
+// Single-controller open-drain byte engine; HALF_PERIOD >= 2.
+// command = {START, STOP, READ, NACK_after_read, byte[7:0]}.
+// response = {NACK_seen_on_write, received_byte[7:0]}.
+// Chain bytes without STOP; START also generates a repeated START.
+// Waits for actual SCL high (clock stretching); no arbitration or timeout.
+module pigen_i2c_byte_controller #(parameter integer HALF_PERIOD = 4) (
+    input wire clk,
+    input wire reset,
+    input bit[12] buf command,
+    output bit[9] buf response,
+    input wire scl_i,
+    input wire sda_i,
+    output bit reg scl_low,
+    output bit reg sda_low
+);
+    initial if (HALF_PERIOD < 2) $fatal(1, "I2C requires HALF_PERIOD >= 2");
+    bit[12] reg request;
+    bit[8] reg tx_shift;
+    bit[8] reg rx_shift;
+    bit reg nack;
+    int[32] reg timer;
+    int[5] reg remaining;
+    bit reg scl_meta;
+    bit reg scl_sync;
+    bit reg sda_meta;
+    bit reg sda_sync;
+    always @(posedge clk) begin
+        if (reset) begin
+            scl_meta <= 1;
+            scl_sync <= 1;
+            sda_meta <= 1;
+            sda_sync <= 1;
+        end else begin
+            scl_meta <= scl_i;
+            scl_sync <= scl_meta;
+            sda_meta <= sda_i;
+            sda_sync <= sda_meta;
+        end
+    end
+    fsm @(posedge clk) begin
+        if (reset) begin
+            scl_low <= 0;
+            sda_low <= 0;
+            goto idle;
+        end
+        state idle:
+            when (request <= command) goto setup;
+        state setup: begin
+            tx_shift <= request[7:0];
+            rx_shift <= 0;
+            nack <= 0;
+            remaining <= 8;
+            sda_low <= 0;
+            timer <= HALF_PERIOD - 1;
+            if (request[11]) goto start_release;
+            goto bit_setup;
+        end
+        state start_release:
+            if (timer == 0) begin
+                scl_low <= 0;
+                goto start_wait;
+            end else timer <= timer - 1;
+        state start_wait:
+            if (scl_sync) begin
+                timer <= HALF_PERIOD - 1;
+                goto start_high;
+            end
+        state start_high:
+            if (timer == 0) begin
+                sda_low <= 1;
+                timer <= HALF_PERIOD - 1;
+                goto start_hold;
+            end else timer <= timer - 1;
+        state start_hold:
+            if (timer == 0) begin
+                scl_low <= 1;
+                goto bit_setup;
+            end else timer <= timer - 1;
+        state bit_setup: begin
+            scl_low <= 1;
+            if (request[9]) sda_low <= 0;
+            else sda_low <= !tx_shift[7];
+            timer <= HALF_PERIOD - 1;
+            goto bit_low;
+        end
+        state bit_low:
+            if (timer == 0) begin scl_low <= 0; goto bit_wait; end
+            else timer <= timer - 1;
+        state bit_wait:
+            if (scl_sync) begin timer <= HALF_PERIOD - 1; goto bit_high; end
+        state bit_high:
+            if (timer == 0) begin
+                rx_shift <= {rx_shift[6:0],sda_sync};
+                tx_shift <= tx_shift << 1;
+                scl_low <= 1;
+                if (remaining == 1) goto ack_setup;
+                remaining <= remaining - 1;
+                goto bit_setup;
+            end else timer <= timer - 1;
+        state ack_setup: begin
+            if (request[9]) sda_low <= !request[8];
+            else sda_low <= 0;
+            timer <= HALF_PERIOD - 1;
+            goto ack_low;
+        end
+        state ack_low:
+            if (timer == 0) begin scl_low <= 0; goto ack_wait; end
+            else timer <= timer - 1;
+        state ack_wait:
+            if (scl_sync) begin timer <= HALF_PERIOD - 1; goto ack_high; end
+        state ack_high:
+            if (timer == 0) begin
+                if (!request[9]) nack <= sda_sync;
+                scl_low <= 1;
+                goto finish;
+            end else timer <= timer - 1;
+        state finish: begin
+            if (request[10]) begin
+                sda_low <= 1;
+                timer <= HALF_PERIOD - 1;
+                goto stop_low;
+            end
+            sda_low <= 0;
+            goto publish;
+        end
+        state stop_low:
+            if (timer == 0) begin scl_low <= 0; goto stop_wait; end
+            else timer <= timer - 1;
+        state stop_wait:
+            if (scl_sync) begin timer <= HALF_PERIOD - 1; goto stop_high; end
+        state stop_high:
+            if (timer == 0) begin
+                sda_low <= 0;
+                timer <= HALF_PERIOD - 1;
+                goto bus_free;
+            end else timer <= timer - 1;
+        state bus_free:
+            if (timer == 0) goto publish;
+            else timer <= timer - 1;
+        state publish:
+            when (response <= {nack,rx_shift}) goto idle;
+    end
+endmodule

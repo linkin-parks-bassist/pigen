@@ -31,10 +31,13 @@ typedef struct {
 
 typedef struct {
 	pigen_token_id base;
+	int has_package;
+	pigen_token_id package;
 	pigen_syntax_signedness signedness;
 	pigen_syntax_location location;
 	size_t first_argument;
 	size_t argument_count;
+	int is_systemverilog_int; /* Bare int in a procedural SV context. */
 	int is_packed_struct;
 	size_t first_member;
 	size_t member_count;

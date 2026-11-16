@@ -1,0 +1,12 @@
+module integer_resize (
+    input wire clk, input wire reset,
+    input uint[16] buf value,
+    output bit[128] buf result
+);
+    always @(posedge clk) if (!reset)
+        result <= {uint[8]'(value),uint[24]'(value),
+                   int[8]'(int[16]'(value)),int[24]'(int[16]'(value)),
+                   uint[16]'(uint[8]'(value)),uint[16]'(uint[8]'(value) << 4),
+                   uint[16]'(uint[8]'(value) + 1),
+                   uint[16]'(uint[8]'(value) * uint[8]'(value))};
+endmodule

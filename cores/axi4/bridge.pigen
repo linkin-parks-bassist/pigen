@@ -1,0 +1,153 @@
+// AXI4, 32-bit data/address, 4-bit IDs. Independent read/write burst engines.
+// Captured address state = {lock,burst[1:0],size[2:0],len[7:0],id[3:0],byte_address[31:0]}.
+// Channel fields are native; W is queued as {last,strobes,data} inside the engine.
+// Backend writes = {strobes,address,data}, reads = aligned byte address.
+// Backend replies use OKAY/SLVERR/DECERR, one per request, in order per direction.
+// Both sides share reset; flush backend work/replies when reset is asserted.
+// FIXED/INCR/WRAP, 1/2/4-byte sizes and unaligned FIXED/INCR are supported.
+// No exclusive monitor: AxLOCK is ignored and accesses receive ordinary responses.
+module pigen_axi4_bridge (
+    input wire clk, input wire reset,
+    input uint[32] axi4[addr=32,id=4] s_axi,
+    output bit[68] buf write_request,
+    input bit[2] buf write_reply,
+    output bit[32] buf read_request,
+    input bit[34] buf read_reply
+);
+    bit[37] buf w_queue;
+    always @(posedge clk) if (!reset) w_queue <= {s_axi.w.last,s_axi.w.strb,s_axi.w.data};
+    bit[50] reg wa;
+    bit[37] reg beat;
+    bit[2] reg write_status;
+    bit[2] reg ack;
+    bit[34] reg read_value;
+    bit[32] reg write_address;
+    bit[4] reg write_id;
+    bit[9] reg write_left;
+    bit[3] reg write_size;
+    bit[2] reg write_burst;
+    bit[32] reg write_step;
+    bit[32] reg write_wrap_mask;
+    bit[33] reg write_end;
+    bit[1] reg write_bad;
+    bit[32] reg read_address;
+    bit[4] reg read_id;
+    bit[9] reg read_left;
+    bit[3] reg read_size;
+    bit[2] reg read_burst;
+    bit[32] reg read_step;
+    bit[32] reg read_wrap_mask;
+    bit[33] reg read_end;
+    bit[1] reg read_bad;
+    bit[50] reg ra;
+    bit[4] wire write_lanes;
+    assign write_lanes = write_size == 0 ? (4'b0001 << write_address[1:0]) :
+        write_size == 1 ? ((write_address[1] ? 4'b1100 : 4'b0011) & (4'b1111 << write_address[1:0])) :
+        (4'b1111 << write_address[1:0]);
+    fsm @(posedge clk) begin
+        if (reset) goto idle;
+        state idle:
+            when (wa <= {s_axi.aw.lock,s_axi.aw.burst,s_axi.aw.size,s_axi.aw.len,s_axi.aw.id,s_axi.aw.addr}) goto setup;
+        state setup: begin
+            write_address <= wa[31:0];
+            write_id <= wa[35:32];
+            write_left <= {1'b0,wa[43:36]} + 9'd1;
+            write_size <= wa[46:44];
+            write_burst <= wa[48:47];
+            write_step <= 32'd1 << wa[46:44];
+            write_wrap_mask <= (({24'b0,wa[43:36]} + 32'd1) << wa[46:44]) - 32'd1;
+            write_end <= ({1'b0,wa[31:0]} & ~((33'd1 << wa[46:44])-33'd1)) +
+                (({25'b0,wa[43:36]} + 33'd1) << wa[46:44]) - 33'd1;
+            goto validate;
+        end
+        state validate: begin
+            write_bad <= 0;
+            write_status <= 0;
+            if (write_size > 2 || write_burst == 3 ||
+                (write_burst == 0 && write_left > 16) ||
+                (write_burst == 1 && {1'b0,write_address[31:12]} != write_end[32:12]) ||
+                (write_burst == 2 && ((write_left != 2 && write_left != 4 && write_left != 8 && write_left != 16) ||
+                    (write_address & (write_step - 32'd1)) != 0))) begin
+                write_bad <= 1;
+                write_status <= 3;
+            end
+            goto take_data;
+        end
+        state take_data:
+            when (beat <= w_queue) goto dispatch;
+        state dispatch: begin
+            // AWLEN owns the drain length, including malformed WLAST inputs.
+            if ((beat[36] != (write_left == 1) || (beat[35:32] & ~write_lanes) != 0) && write_status < 2)
+                write_status <= 2;
+            if (write_bad || (beat[35:32] & ~write_lanes) != 0 || beat[35:32] == 0) goto advance;
+            when (write_request <= {beat[35:32], (write_address & 32'hfffffffc), beat[31:0]}) goto wait_reply;
+        end
+        state wait_reply:
+            when (ack <= write_reply) goto accumulate;
+        state accumulate: begin
+            if (ack > write_status) write_status <= ack;
+            goto advance;
+        end
+        state advance: begin
+            if (write_left == 1) goto publish;
+            write_left <= write_left - 9'd1;
+            if (write_burst == 1)
+                write_address <= (write_address & ~(write_step - 32'd1)) + write_step;
+            if (write_burst == 2)
+                write_address <= (write_address & ~write_wrap_mask) |
+                    (((write_address & ~(write_step - 32'd1)) + write_step) & write_wrap_mask);
+            goto take_data;
+        end
+        state publish:
+            when (s_axi.b <= '{id:uint[4]'(write_id),resp:uint[2]'(write_status)}) goto idle;
+    end
+    fsm @(posedge clk) begin
+        if (reset) goto idle;
+        state idle:
+            when (ra <= {s_axi.ar.lock,s_axi.ar.burst,s_axi.ar.size,s_axi.ar.len,s_axi.ar.id,s_axi.ar.addr}) goto setup;
+        state setup: begin
+            read_address <= ra[31:0];
+            read_id <= ra[35:32];
+            read_left <= {1'b0,ra[43:36]} + 9'd1;
+            read_size <= ra[46:44];
+            read_burst <= ra[48:47];
+            read_step <= 32'd1 << ra[46:44];
+            read_wrap_mask <= (({24'b0,ra[43:36]} + 32'd1) << ra[46:44]) - 32'd1;
+            read_end <= ({1'b0,ra[31:0]} & ~((33'd1 << ra[46:44])-33'd1)) +
+                (({25'b0,ra[43:36]} + 33'd1) << ra[46:44]) - 33'd1;
+            goto validate;
+        end
+        state validate: begin
+            read_bad <= 0;
+            if (read_size > 2 || read_burst == 3 ||
+                (read_burst == 0 && read_left > 16) ||
+                (read_burst == 1 && {1'b0,read_address[31:12]} != read_end[32:12]) ||
+                (read_burst == 2 && ((read_left != 2 && read_left != 4 && read_left != 8 && read_left != 16) ||
+                    (read_address & (read_step - 32'd1)) != 0))) begin
+                read_bad <= 1;
+            end
+            goto dispatch;
+        end
+        state dispatch: begin
+            if (read_bad) begin
+                read_value <= {2'b11,32'b0};
+                goto publish;
+            end
+            when (read_request <= (read_address & 32'hfffffffc)) goto wait_reply;
+        end
+        state wait_reply:
+            when (read_value <= read_reply) goto publish;
+        state publish:
+            when (s_axi.r <= '{last:uint[1]'(read_left == 1),id:uint[4]'(read_id),resp:uint[2]'(read_value[33:32]),data:uint[32]'(read_value[31:0])}) goto advance;
+        state advance: begin
+            if (read_left == 1) goto idle;
+            read_left <= read_left - 9'd1;
+            if (read_burst == 1)
+                read_address <= (read_address & ~(read_step - 32'd1)) + read_step;
+            if (read_burst == 2)
+                read_address <= (read_address & ~read_wrap_mask) |
+                    (((read_address & ~(read_step - 32'd1)) + read_step) & read_wrap_mask);
+            goto dispatch;
+        end
+    end
+endmodule

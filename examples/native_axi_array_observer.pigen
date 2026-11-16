@@ -1,0 +1,47 @@
+// Pattern entries snapshot both observations on every foreach body entry.
+module native_axis_array_observer #(parameter LANES=2)(
+    input wire clk, input wire reset,
+    input bit[32] axi4_stream buf s[LANES],
+    output bit[32] axi4_stream buf m[LANES],
+    output logic[1:0] wire status[LANES]
+);
+    fabric begin s -> m; endfabric
+    always_comb begin
+        foreach(s[i]) begin
+            automatic logic observations[1:0]='{valid(s[i]),ready(m[i])};
+            status[i]={observations[1],observations[0]};
+        end
+    end
+endmodule
+
+// Pattern entries snapshot both observations on every foreach body entry.
+module native_axil_array_observer #(parameter LANES=2,parameter ADDRESS_BITS=40)(
+    input wire clk, input wire reset,
+    input bit[32] axi4_lite[addr=ADDRESS_BITS] buf s[LANES],
+    output bit[32] axi4_lite[addr=ADDRESS_BITS] buf m[LANES],
+    output logic[1:0] wire status[LANES]
+);
+    fabric begin s -> m; endfabric
+    always_comb begin
+        foreach(s[i]) begin
+            automatic logic observations[1:0]='{valid(s[i].w),ready(m[i].w)};
+            status[i]={observations[1],observations[0]};
+        end
+    end
+endmodule
+
+// Pattern entries snapshot both observations on every foreach body entry.
+module native_axi_array_observer #(parameter LANES=2,parameter ADDRESS_BITS=40)(
+    input wire clk, input wire reset,
+    input bit[32] axi4[addr=ADDRESS_BITS] buf s[LANES],
+    output bit[32] axi4[addr=ADDRESS_BITS] buf m[LANES],
+    output logic[1:0] wire status[LANES]
+);
+    fabric begin s -> m; endfabric
+    always_comb begin
+        foreach(s[i]) begin
+            automatic logic observations[1:0]='{valid(s[i].w),ready(m[i].w)};
+            status[i]={observations[1],observations[0]};
+        end
+    end
+endmodule

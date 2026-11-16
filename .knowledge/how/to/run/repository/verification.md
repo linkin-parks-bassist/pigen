@@ -1,12 +1,12 @@
 ---
 status: green
-revised_at: "2026-11-11T17:14:45+11:00"
+revised_at: "2026-11-16T21:02:11+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-Use focused affected gates during edits and one full verification at meaningful checkpoints. verify depends on test and sv-emit-test; do not run make test followed by make verify redundantly. The explicit emitter gate covers expression rendering, literal limits, publication failure and the whole-design golden. Its two-state golden expects bit, matching the RTL records. Run make sv-emit-test T=t10-no-search when changing the emitter's structural boundary.
+Use focused edit gates and full checkpoints. verify includes test, sv-emit-test, cores-test, output-model-test, coslice-typedef-test, coslice-xprop-test, cli-diagnostics-test and lint-fatal-test; avoid make test before make verify. Emitter checks cover rendering, literal limits, publication failure and whole-design output. Its golden uses bit for two-state RTL; structural changes use make sv-emit-test T=t10-no-search. Smoke guard probes: how/are/clocked/controls/resolved.md.
 
-For this 32-logical-CPU host, build first and use bounded parallel verification with synchronized target output:
+On this 32-logical-CPU host, build first and bound parallelism with synchronized output:
 
 ```bash
 make -j8 pigen
@@ -14,11 +14,15 @@ make -j8 pigen
   make -j8 --output-sync=target verify
 ```
 
-The suite covers structured C owners, pipeline corpus, fixed-point MAC, text/biquad examples, FSMs, child endpoints, inline/standalone fabric routing/fairness, SVG topology, ordinary-SV preservation and specialization. Passing gates establish their covered behavior, not completion of the full language spec. Mixed selector scheduling, qualified cases and other acceptance gaps remain in what/is/the/plan.md and what/is/broken.md.
+make protocol-test verifies AXI4-Stream/AXI4-Lite/AXI4 field layouts, width constraints, roles and complete contract compatibility. make protocol-semantic-test verifies canonical protocol types, channel signal bindings, directions and ownership independently of storage. make native-protocol-test checks source declarations, standard pins, stalled channel/field transport, signed data, 1024-bit AXI4, incompatible copies and parameterized examples. Capacity, isolation and reset recovery are covered; Switching/routing gates: how/does/the/native/axi/stream/destination/switch/work.md; how/does/native/memory/mapped/address/routing/work.md. All three run in test/verify. Retained native observations and directions: make native-function-context-test and native-function-effects-test run in test/verify (how/are/retained/native/axi/observations/represented.md; how/are/retained/subroutine/argument/effects/checked.md). Renamed clock/reset bindings and domain rejection are checked. Real-core contention and hierarchy/exclusive-ID checks pass (how/to/verify/native/axi/core/fabric/composition.md).
 
-Recorded baseline on 2026-11-10: wall 21.85 s, user 121.08 s, sys 8.35 s, exit 0. This timing predates later gate additions. Targets use unique temporary artifacts; output-test and output-waveform use separate generated SV/Verilator directories. Keep outer jobs bounded and avoid multiplying nested Verilator jobs.
+The suite covers structured C owners, pipeline corpus, MAC/text/biquad examples, FSMs, child endpoints, fabric routing/fairness/SVG, ordinary-SV preservation, specialization and native standard cores. cores-test runs 122 cases, twenty-six invalid parameter checks and seven SDRAM checker-rejection witnesses. Synthesizable profiles use warnings-fatal lint; legal casex/X-label tests require fatal style diagnostics (how/are/combinational/case/statements/represented.md); Icarus runs independent protocol models/scoreboards. AXI4-Lite and AXI4 each use three stall-pattern seeds; SDRAM uses three CAS/timing profiles. I2C target uses nine address/timing profiles with exhaustive address and byte checks, stretching, partial aborts, queued-byte preservation and reset. SPI target uses 12 mode/asynchronous-timing configurations with exhaustive bytes, continuous CS, late TX, receive backpressure, abort/reset recovery and first-bit hold checks. UART covers 60 framing/divisor combinations (all 30 formats at divisors 4 and 7), plus five default-8N1 divisor cases. The when-value regression checks 1536 stalled results and malformed-header failures. The concatenation regression checks 8192 bytes, whole-RHS conversion, placeholders, empty when bodies and stalls. The explicit transfer-flow example supplies independently validated movie snapshots. The integer-resize regression checks all 65536 inputs with signed/unsigned narrowing/widening, arithmetic and concatenations. make cores-report builds the evidence gallery and independently checked internal-register observer traces. Run python3 tools/cores/check_internal_players.py for browser acceptance of all native storage/views, colours, uniform clocks, capture boundaries, stable layout and inspection. Also run tools/cores/check_native_layouts.py and visually inspect all 33 internal views for clipping and overlap; make cores-video adds trace-driven clips. These gates establish covered behavior, not full language-spec completion or every separately selectable legacy witness. Remaining acceptance work is in what/is/the/plan.md and what/is/broken.md.
 
-Icarus Verilog 13 is at ~/.local/bin; Verilator 5.020 lint is warnings-fatal. make clean removes pigen. Investigate failures instead of weakening diagnostics. Obsolete test initializers and expectations must be reconciled with the actual record/language contract; do not change a golden merely to match unverified output.
+Recorded baseline on 2026-11-10: wall 21.85 s, user 121.08 s, sys 8.35 s, exit 0; it predates later gates. Synchronized targets buffer output. Inspect live process state before diagnosing silence. On Linux, /proc/PID/fd/1 can expose the target's spool; require test -f before reading, and never consume a live pipe. Most targets use unique temporary artifacts. output-test/output-waveform use separate generated directories. Core evidence lives in build/cores; concurrent runner invocations require distinct --out directories. Avoid multiplying nested Verilator jobs.
+
+Icarus 13 is at ~/.local/bin and Verilator 5.020 lint is warnings-fatal. Wider-divisor oracle exception: why/does/icarus/compound/division/disagree/with/systemverilog.md. make clean removes pigen. Investigate failures without weakening diagnostics. Reconcile obsolete expectations with the language contract; never update a golden solely to match unverified output.
+
+Verilator and Icarus are on PATH.
 
 Proof:
 

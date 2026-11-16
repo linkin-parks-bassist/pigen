@@ -54,6 +54,8 @@ void pigen_rtl_lowering_free(pigen_rtl_lowering *lowering)
 	free(lowering->lowered_types);
 	free(lowering->lowered_expressions);
 	free(lowering->lowered_endpoints);
+	free(lowering->protocol_ports);
+	free(lowering->retained_observation_objects);
 	free(lowering->storage_drives);
 	*lowering = (pigen_rtl_lowering){0};
 }
@@ -92,7 +94,8 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 	pigen_rtl_type descriptor;
 	pigen_rtl_type_id result;
 	const pigen_packed_dimension *owner_dimensions;
-	pigen_rtl_packed_dimension *dimensions;
+	pigen_packed_dimension *expanded_dimensions = NULL;
+	pigen_rtl_packed_dimension *dimensions = NULL;
 	pigen_const_expr_id width_expr;
 	uint64_t width;
 	pigen_signedness signedness;
@@ -146,16 +149,36 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 			return (pigen_rtl_type_id){PIGEN_INVALID_ID};
 	}
 
+	if (!width) return (pigen_rtl_type_id){PIGEN_INVALID_ID};
+
 	dimension_count = pigen_data_type_dimension_count(sem, type);
 	owner_dimensions = pigen_data_type_dimensions(sem, type);
+	pigen_sv_integer_keyword keyword = pigen_data_type_sv_keyword(sem,type);
+	if ((pigen_data_type_alias_symbol(sem,type).index != PIGEN_INVALID_ID ||
+		(keyword != PIGEN_SV_INTEGER_NONE && dimension_count)) &&
+		pigen_data_type_is_integral(sem,type))
+	{
+		if (!pigen_data_type_query_dimensions(sem,type,&expanded_dimensions,&dimension_count))
+			return (pigen_rtl_type_id){PIGEN_INVALID_ID};
+		/* Scalar integer keywords supply their own atom width. Packed
+		 * extensions require a vector type in SV, including that atom range. */
+		if (keyword != PIGEN_SV_INTEGER_NONE)
+		{
+			if (dimension_count == 1)
+				dimension_count = 0;
+			else if (dimension_count > 1)
+				keyword = PIGEN_SV_INTEGER_NONE;
+		}
+		owner_dimensions = expanded_dimensions;
+	}
 	if (dimension_count && !owner_dimensions)
-		return (pigen_rtl_type_id){PIGEN_INVALID_ID};
+	{ free(expanded_dimensions); return (pigen_rtl_type_id){PIGEN_INVALID_ID}; }
 
 	descriptor = (pigen_rtl_type){0};
 	descriptor.signedness = signedness;
 	descriptor.state_domain = state_domain;
 	descriptor.width = width;
-	descriptor.sv_keyword = (int)pigen_data_type_sv_keyword(sem, type);
+	descriptor.sv_keyword = (int)keyword;
 	descriptor.width_expression = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	descriptor.dimension_count = dimension_count;
 
@@ -165,11 +188,11 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 	if (dimension_count)
 	{
 		if (dimension_count > SIZE_MAX / sizeof(*dimensions))
-			return (pigen_rtl_type_id){PIGEN_INVALID_ID};
+		{ free(expanded_dimensions); return (pigen_rtl_type_id){PIGEN_INVALID_ID}; }
 		dimensions = pigen_resize(NULL,
 			dimension_count * sizeof(*dimensions));
 		if (!dimensions)
-			return (pigen_rtl_type_id){PIGEN_INVALID_ID};
+		{ free(expanded_dimensions); return (pigen_rtl_type_id){PIGEN_INVALID_ID}; }
 		for (i = 0; i < dimension_count; i++)
 		{
 			int64_t bound_value;
@@ -187,6 +210,7 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 				if (child.index == PIGEN_INVALID_ID)
 				{
 					free(dimensions);
+					free(expanded_dimensions);
 					return (pigen_rtl_type_id){PIGEN_INVALID_ID};
 				}
 				dimensions[i].left = (pigen_rtl_bound){0, child};
@@ -204,6 +228,7 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 				if (child.index == PIGEN_INVALID_ID)
 				{
 					free(dimensions);
+					free(expanded_dimensions);
 					return (pigen_rtl_type_id){PIGEN_INVALID_ID};
 				}
 				dimensions[i].right = (pigen_rtl_bound){0, child};
@@ -211,6 +236,7 @@ pigen_rtl_type_id pigen_lower_rtl_type(pigen_rtl_lowering *lowering,
 		}
 		descriptor.dimensions = dimensions;
 	}
+	free(expanded_dimensions);
 
 	/* Publish one RTL type record and memoize it by the source arena index. */
 	result = pigen_rtl_type_intern(rtl, &descriptor);
@@ -455,6 +481,50 @@ pigen_rtl_expr_id pigen_lower_rtl_expression(pigen_rtl_lowering *lowering,
 	case PIGEN_CONST_EXPR_CONVERSION:
 	{
 		pigen_rtl_expr_id operand;
+		if (owner->as.conversion.conversion.kind==PIGEN_CONVERSION_FOUR_TO_TWO)
+		{
+			pigen_const_expr_id source_id=owner->as.conversion.operand;
+			const pigen_const_expr *source=pigen_const_expr_get(sem,source_id);
+			uint64_t source_bits=0;
+			int unknown=0;
+			if (source && pigen_const_expr_evaluate_u64(sem,
+				pigen_data_type_packed_width(sem,source->data_type),&source_bits))
+				for (uint64_t bit=0;bit<source_bits;bit++)
+				{
+					pigen_bit_state state;
+					if (!pigen_const_expr_evaluate_bit(sem,source_id,bit,&state)) break;
+					if (state>PIGEN_BIT_ONE) {unknown=1;break;}
+				}
+			/* Clear constant X/Z before RTL publication. Preserve ordinary
+			 * known-value conversion records and their source identities. */
+			if (unknown)
+			{
+				const pigen_rtl_type *target=pigen_rtl_type_get(rtl,result_type);
+				if (!target || !target->width) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				uint64_t bits=target->width;
+				size_t count=bits/64+(bits%64!=0);
+				if (!count || count>SIZE_MAX/sizeof(pigen_rtl_literal_word))
+					return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				pigen_rtl_literal_word *words=calloc(count,sizeof(*words));
+				if (!words) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				int complete=1;
+				for (uint64_t bit=0;bit<bits;bit++)
+				{
+					pigen_bit_state state;
+					if (!pigen_const_expr_evaluate_bit(sem,expression,bit,&state) || state>PIGEN_BIT_ONE)
+					{complete=0;break;}
+					if (state==PIGEN_BIT_ONE) words[bit/64].value|=UINT64_C(1)<<(bit%64);
+				}
+				if (complete)
+				{
+					result=pigen_rtl_expr_add_literal(rtl,PIGEN_RTL_EXPR_BITS,result_type,words,bits,0,origin);
+					free(words);break;
+				}
+				free(words);
+			}
+			owner=pigen_const_expr_get(sem,expression);
+			if (!owner) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+		}
 		const pigen_const_expr *source = pigen_const_expr_get(sem, owner->as.conversion.operand);
 		if (source && pigen_data_type_numerical_interpretation(sem, source->data_type) == PIGEN_NUMERICAL_EXACT_INTEGER &&
 			pigen_integer_is_negative(sem, pigen_data_type_exact_value(sem, source->data_type)))
@@ -628,6 +698,10 @@ static pigen_rtl_module_id rtl_module_for_semantic(pigen_rtl_model *rtl,
 		if (pigen_module_memo[i].rtl == rtl &&
 			pigen_module_memo[i].semantic.index == semantic.index)
 			return pigen_module_memo[i].module;
+	/* The arena is authoritative after a module memo reset, including revisits
+	 * after another module was lowered. Never manufacture a second owner. */
+	for(size_t i=0;i<rtl->module_count;i++)
+		if(rtl->modules[i].semantic_module.index==semantic.index) return (pigen_rtl_module_id){(uint32_t)i};
 	{
 		pigen_rtl_module_id created = pigen_rtl_module_add_with_owner(rtl,
 			semantic,
@@ -687,19 +761,42 @@ static char *name_join(const char *base, const char *suffix)
 	return name;
 }
 
+static char *scoped_symbol_spelling(const pigen_semantic_model *sem,const pigen_symbol *symbol)
+{
+	size_t length=0;
+	const char *text=symbol ? pigen_source_span_text(sem->sources,symbol->name,&length) : NULL;
+	if(!text) return NULL;
+	int generated=0;
+	for(pigen_scope_id scope=symbol->scope;pigen_scope_get(sem,scope);scope=sem->scopes[scope.index].parent)
+	{
+		if (sem->scopes[scope.index].is_procedural) generated=1;
+		for(size_t i=0;i<sem->generate_scope_count;i++)
+			if(sem->generate_scopes[i].scope.index==scope.index) generated=1;
+	}
+	pigen_string name={0};
+	if(generated) pigen_append_format(&name,"__pigen_scope_%u_",symbol->scope.index);
+	pigen_append_range(&name,text,length);
+	return name.data;
+}
+
 static char *signal_spelling(pigen_rtl_lowering *lowering,
 	const pigen_semantic_signal *signal)
 {
-	const pigen_symbol *symbol = pigen_symbol_get(lowering->semantics,
-		signal->symbol);
-	const char *text;
-	size_t length = 0;
-
-	if (!symbol)
-		return NULL;
-	text = pigen_source_span_text(lowering->semantics->sources,
-		symbol->name, &length);
-	return text ? pigen_copy_range(text, length) : NULL;
+	pigen_protocol_channel channel;
+	pigen_protocol_endpoint_id native_id = pigen_protocol_endpoint_for_signal(lowering->semantics,
+		pigen_symbol_signal(lowering->semantics, signal->symbol), &channel);
+	const pigen_semantic_protocol_endpoint *native = pigen_protocol_endpoint_get(lowering->semantics, native_id);
+	if (native && !native->is_instance_view)
+	{
+		const pigen_symbol *owner = pigen_symbol_get(lowering->semantics, native->symbol);
+		char *base=scoped_symbol_spelling(lowering->semantics,owner);
+		if(!base) return NULL;
+		pigen_string name = {0}; pigen_append(&name,base); free(base);
+		pigen_append(&name, "__pigen_channel_"); pigen_append(&name, pigen_protocol_channel_name(channel));
+		return name.data;
+	}
+	const pigen_symbol *symbol = pigen_symbol_get(lowering->semantics,signal->symbol);
+	return scoped_symbol_spelling(lowering->semantics,symbol);
 }
 
 static int name_object(pigen_rtl_lowering *lowering,
@@ -741,6 +838,13 @@ static char *signal_shape_suffix(pigen_rtl_lowering *lowering,
 
 		if (dimensions[i].form == PIGEN_SHAPE_DIMENSION_RANGE)
 		{
+			int64_t signed_left,signed_right;
+			if (pigen_const_expr_evaluate_i64(sem,dimensions[i].as.range.left,&signed_left) &&
+				pigen_const_expr_evaluate_i64(sem,dimensions[i].as.range.right,&signed_right))
+			{
+				pigen_append_format(&text," [%lld:%lld]",(long long)signed_left,(long long)signed_right);
+				continue;
+			}
 			if (!pigen_const_expr_evaluate_u64(sem,
 					dimensions[i].as.range.left, &left) ||
 				!pigen_const_expr_evaluate_u64(sem,
@@ -772,6 +876,85 @@ static int signal_is_child_endpoint(const pigen_semantic_model *model, size_t in
 	return pigen_signal_is_instance_endpoint(model, (pigen_signal_id){(uint32_t)index});
 }
 
+static pigen_symbol_id static_record_owner(const pigen_semantic_model *sem,
+	pigen_data_type_id type)
+{
+	for (size_t depth = 0; depth <= sem->data_type_count; depth++)
+	{
+		pigen_symbol_id owner = pigen_data_type_alias_symbol(sem, type);
+		if (owner.index == PIGEN_INVALID_ID) break;
+		for (size_t i = 0; i < sem->struct_member_count; i++)
+			if (sem->struct_members[i].owner.index == owner.index) return owner;
+		type = pigen_data_type_alias_target(sem, type);
+	}
+	return (pigen_symbol_id){PIGEN_INVALID_ID};
+}
+
+static int append_static_dimensions(pigen_string *text, pigen_semantic_model *sem,
+	const pigen_packed_dimension *dimensions, size_t count)
+{
+	for (size_t i = 0; i < count; i++)
+	{
+		int64_t left, right;
+		if (!pigen_const_expr_evaluate_i64(sem, dimensions[i].left, &left) ||
+			!pigen_const_expr_evaluate_i64(sem, dimensions[i].right, &right)) return 0;
+		pigen_append_format(text, " [%lld:%lld]", (long long)left, (long long)right);
+	}
+	return 1;
+}
+
+/* Prepare declarations above the semantic-free terminal boundary. Inline
+ * schemas avoid depending on authored typedef visibility or generated names. */
+static int append_static_data_type(pigen_string *text, pigen_semantic_model *sem,
+	pigen_data_type_id type, size_t depth)
+{
+	if (depth > sem->data_type_count) return 0;
+	pigen_symbol_id owner = static_record_owner(sem, type);
+	if (owner.index == PIGEN_INVALID_ID)
+	{
+		pigen_append(text, pigen_data_type_state_domain(sem,type) == PIGEN_DATA_TYPE_STATE_TWO ? "bit" : "logic");
+		if (pigen_data_type_signedness(sem,type) == PIGEN_SIGN_SIGNED) pigen_append(text," signed");
+		pigen_packed_dimension *dimensions = NULL; size_t count = 0;
+		if (!pigen_data_type_query_dimensions(sem,type,&dimensions,&count)) return 0;
+		int ok = append_static_dimensions(text,sem,dimensions,count);
+		free(dimensions); return ok;
+	}
+	pigen_append(text, pigen_data_type_signedness(sem,type) == PIGEN_SIGN_SIGNED ?
+		"struct packed signed { " : "struct packed { ");
+	size_t count = 0;
+	for (size_t i = 0; i < sem->struct_member_count; i++)
+		if (sem->struct_members[i].owner.index == owner.index) count++;
+	pigen_semantic_struct_member *members = pigen_resize(NULL,count*sizeof(*members));
+	size_t at = 0;
+	for (size_t i = 0; i < sem->struct_member_count; i++)
+		if (sem->struct_members[i].owner.index == owner.index) members[at++] = sem->struct_members[i];
+	for (size_t i = 1; i < count; i++)
+	{
+		pigen_semantic_struct_member member = members[i]; size_t j = i;
+		while (j && members[j-1].offset < member.offset) { members[j] = members[j-1]; j--; }
+		members[j] = member;
+	}
+	for (size_t i = 0; i < count; i++)
+	{
+		size_t length = 0;
+		const char *name = pigen_source_span_text(sem->sources,members[i].name,&length);
+		if (!name || !length || !append_static_data_type(text,sem,members[i].data_type,depth+1))
+		{ free(members); return 0; }
+		pigen_append(text," "); pigen_append_range(text,name,length); pigen_append(text," ; ");
+	}
+	free(members); pigen_append(text,"}");
+	/* Preserve packed dimensions outside the schema, not the flat vector
+ * used internally to calculate the record's width. */
+	for (size_t n = 0; n <= sem->data_type_count; n++)
+	{
+		if (!append_static_dimensions(text,sem,pigen_data_type_dimensions(sem,type),
+			pigen_data_type_dimension_count(sem,type))) return 0;
+		if (pigen_data_type_alias_symbol(sem,type).index == owner.index) return 1;
+		type = pigen_data_type_alias_target(sem,type);
+	}
+	return 0;
+}
+
 static pigen_rtl_object_id add_named_object(pigen_rtl_lowering *lowering,
 	pigen_rtl_module_id rtl_module, pigen_rtl_type_id type,
 	pigen_semantic_direction direction, size_t signal_index,
@@ -799,7 +982,16 @@ static pigen_rtl_object_id add_named_object(pigen_rtl_lowering *lowering,
 
 		if (descriptor && descriptor->is_static)
 		{
+			if (static_record_owner(lowering->semantics,signal->data_type).index != PIGEN_INVALID_ID)
+			{
+				pigen_string text = {0};
+				if (!append_static_data_type(&text,lowering->semantics,signal->data_type,0))
+				{ free(text.data); return (pigen_rtl_object_id){PIGEN_INVALID_ID}; }
+				rtl->objects[object.index].declaration_type = text.data;
+			}
 			char *shape = signal_shape_suffix(lowering, signal_index);
+			const pigen_semantic_shape *declared=pigen_shape_get(lowering->semantics,signal->shape);
+			if(!shape && declared && declared->dimension_count) return (pigen_rtl_object_id){PIGEN_INVALID_ID};
 			if (shape)
 			{
 				if (!pigen_rtl_object_set_shape(rtl, object, shape))
@@ -898,6 +1090,10 @@ static int expr_references_symbol(const pigen_semantic_model *model,
 		return expr_references_symbol(model, expr->as.select.base, symbol) ||
 			expr_references_symbol(model, expr->as.select.left, symbol) ||
 			expr_references_symbol(model, expr->as.select.right, symbol);
+	case PIGEN_EXPR_EVALUATED_VALUE:
+		return expr_references_symbol(model,expr->as.evaluation.value,symbol) ||
+			expr_references_symbol(model,expr->as.evaluation.evaluated,symbol);
+	case PIGEN_EXPR_ARRAY_PATTERN:
 	case PIGEN_EXPR_CONCATENATION:
 	{
 		const pigen_expr_id *children = pigen_expr_children(model,
@@ -1159,6 +1355,7 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 	size_t reset_index;
 	pigen_rtl_object_id clock_object;
 	pigen_rtl_object_id reset_object = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+	pigen_rtl_expr_id native_reset = {PIGEN_INVALID_ID};
 	pigen_rtl_expr_id zero;
 	char *instance_name;
 	int ok = 0;
@@ -1176,16 +1373,39 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 	if (control_type.index == PIGEN_INVALID_ID)
 		goto done;
 
-	/* Clock and reset by the module's declared port convention. */
-	clock_index = module_input_named(lowering, semantic_module, "clk");
+	/* Native protocol bindings own clock/reset identities. Ordinary storage
+	 * retains the module's existing clk/reset convention. */
+	const pigen_semantic_protocol_endpoint *protocol = pigen_protocol_endpoint_get(sem,
+		pigen_protocol_endpoint_for_signal(sem, (pigen_signal_id){(uint32_t)signal_index}, NULL));
+	if (protocol && !protocol->binding.is_bound) goto done;
+	const pigen_semantic_clock_domain *protocol_domain = protocol ?
+		pigen_clock_domain_get(sem, protocol->binding.domain) : NULL;
+	clock_index = protocol_domain ? pigen_symbol_signal(sem, protocol_domain->clock_symbol).index :
+		module_input_named(lowering, semantic_module, "clk");
 	clock_object = (pigen_rtl_object_id){PIGEN_INVALID_ID};
 	if (clock_index != SIZE_MAX &&
 		lowering->lowered_endpoint_count > clock_index)
 		clock_object = lowering->lowered_endpoints[clock_index].payload;
-	reset_index = module_input_named(lowering, semantic_module, "reset");
+	reset_index = protocol ? pigen_symbol_signal(sem, protocol->binding.reset_symbol).index :
+		module_input_named(lowering, semantic_module, "reset");
 	if (reset_index != SIZE_MAX &&
 		lowering->lowered_endpoint_count > reset_index)
 		reset_object = lowering->lowered_endpoints[reset_index].payload;
+	if (protocol)
+	{
+		const pigen_rtl_object *reset_pin = pigen_rtl_object_get(rtl, reset_object);
+		if (!reset_pin || clock_object.index == PIGEN_INVALID_ID) goto done;
+		native_reset = object_expression(lowering, reset_pin->type, reset_object, origin);
+		if (protocol->binding.reset_active_low)
+		{
+			pigen_unary_resolution inverse;
+			if (!pigen_data_type_resolve_unary_operation(sem, PIGEN_UNARY_LOGICAL_NOT,
+				sem->signals[reset_index].data_type, &inverse)) goto done;
+			pigen_rtl_type_id reset_type = pigen_lower_rtl_type(lowering, inverse.operation.result_data_type);
+			native_reset = pigen_rtl_expr_add_unary(rtl, reset_type, &inverse, native_reset, origin);
+		}
+		if (native_reset.index == PIGEN_INVALID_ID) goto done;
+	}
 
 	payload = add_named_object(lowering, rtl_module, data_type,
 		payload_direction, signal_index, origin, base, NULL);
@@ -1256,7 +1476,20 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 			owner_signal->transfer_argument);
 		if (argument_const.index == PIGEN_INVALID_ID)
 			goto done;
-		depth = pigen_lower_rtl_expression(lowering, argument_const);
+		/* The storage definition declares DEPTH as a signed 32-bit int.
+		 * Finish that interface conversion here, independent of the width
+		 * of a genvar-derived constant expression. */
+		uint64_t count=0;int64_t signed_count=0;
+		if(pigen_const_expr_evaluate_i64(sem,argument_const,&signed_count))
+		{
+			if(signed_count<=0) goto done;
+			count=(uint64_t)signed_count;
+		}
+		else if(!pigen_const_expr_evaluate_u64(sem,argument_const,&count)) goto done;
+		if(!count || count>INT32_MAX) goto done;
+		pigen_rtl_type_id depth_type=pigen_lower_rtl_type(lowering,
+			pigen_data_type_sized_logic(sem,32,PIGEN_SIGN_SIGNED));
+		depth=pigen_rtl_expr_add_integer(rtl,depth_type,count,owner_signal->span);
 		if (depth.index == PIGEN_INVALID_ID)
 			goto done;
 		parameter = &depth;
@@ -1265,15 +1498,17 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 
 #define CONNECT(port, object) \
 	connections[connection_count++] = (pigen_rtl_connection){ \
-		(port), (object), (pigen_rtl_expr_id){PIGEN_INVALID_ID}}
+		(port), (object), (pigen_rtl_expr_id){PIGEN_INVALID_ID}, PIGEN_SEMANTIC_INTERNAL}
 #define CONNECT_VALUE(port, value) \
 	connections[connection_count++] = (pigen_rtl_connection){ \
-		(port), (pigen_rtl_object_id){PIGEN_INVALID_ID}, (value)}
+		(port), (pigen_rtl_object_id){PIGEN_INVALID_ID}, (value), PIGEN_SEMANTIC_INTERNAL}
 	if (clock_object.index != PIGEN_INVALID_ID)
 		CONNECT("clk", clock_object);
 	else
 		CONNECT_VALUE("clk", zero);
-	if (reset_object.index != PIGEN_INVALID_ID)
+	if (native_reset.index != PIGEN_INVALID_ID)
+		CONNECT_VALUE("reset", native_reset);
+	else if (reset_object.index != PIGEN_INVALID_ID)
 		CONNECT("reset", reset_object);
 	else
 		CONNECT_VALUE("reset", zero);
@@ -1324,6 +1559,37 @@ static int storage_endpoints(pigen_rtl_lowering *lowering,
 done:
 	free(base);
 	return ok;
+}
+
+/* Only authored member/index paths into real static record objects may use
+ * SV field names. Computed records and buffered channels keep packed lowering. */
+static int static_record_path(pigen_rtl_lowering *lowering, pigen_expr_id value)
+{
+	const pigen_semantic_model *sem = lowering->semantics;
+	for (size_t n = 0; n <= sem->expression_count; n++)
+	{
+		const pigen_semantic_expr *node = pigen_expr_get(sem,value);
+		if (!node) return 0;
+		switch (node->kind)
+		{
+		case PIGEN_EXPR_GROUP: value=node->as.group.operand; break;
+		case PIGEN_EXPR_PEEK: value=node->as.peek.source; break;
+		case PIGEN_EXPR_INDEX: value=node->as.index.base; break;
+		case PIGEN_EXPR_SELECT:
+			if (!node->as.select.is_member) return 0;
+			value=node->as.select.base; break;
+		case PIGEN_EXPR_SYMBOL:
+		{
+			pigen_signal_id signal=pigen_symbol_signal(sem,node->as.symbol);
+			if (signal.index >= lowering->lowered_endpoint_count) return 0;
+			pigen_rtl_object_id object=lowering->lowered_endpoints[signal.index].payload;
+			const pigen_rtl_object *known=pigen_rtl_object_get(lowering->rtl,object);
+			return known && known->declaration_type;
+		}
+		default: return 0;
+		}
+	}
+	return 0;
 }
 
 static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
@@ -1511,6 +1777,180 @@ static int lower_endpoint_view(pigen_rtl_lowering *lowering, size_t signal_index
 	return 0;
 }
 
+const pigen_rtl_protocol_channel_ports *pigen_lowered_protocol_ports(
+	const pigen_rtl_lowering *lowering, pigen_protocol_endpoint_id endpoint,
+	pigen_protocol_channel channel)
+{
+	if (!lowering) return NULL;
+	for (size_t i = 0; i < lowering->protocol_port_count; i++)
+		if (lowering->protocol_ports[i].endpoint.index == endpoint.index &&
+			lowering->protocol_ports[i].channel == channel) return &lowering->protocol_ports[i];
+	return NULL;
+}
+
+static pigen_data_type_id protocol_field_type(pigen_semantic_model *sem,
+	const pigen_semantic_signal *signal, const pigen_protocol_field_layout *field)
+{
+	pigen_symbol_id alias = pigen_data_type_alias_symbol(sem, signal->data_type);
+	for (size_t i = 0; i < sem->struct_member_count; i++)
+	{
+		const pigen_semantic_struct_member *member = &sem->struct_members[i];
+		if (member->owner.index == alias.index && member->offset == field->offset)
+			return member->data_type;
+	}
+	return (pigen_data_type_id){PIGEN_INVALID_ID};
+}
+
+/* Resolve standard pins once, above the terminal renderer. Packed channel
+ * objects remain internal handshake/storage identities. */
+static char *protocol_port_base(const pigen_semantic_model *sem, pigen_protocol_endpoint_id endpoint)
+{
+	const pigen_semantic_protocol_endpoint *scalar = pigen_protocol_endpoint_get(sem, endpoint);
+	size_t ordinal;
+	pigen_protocol_array_id owner = pigen_protocol_array_for_endpoint(sem, endpoint, &ordinal);
+	const pigen_semantic_protocol_array *array = pigen_protocol_array_get(sem, owner);
+	const pigen_symbol *symbol = pigen_symbol_get(sem, array ? array->symbol : scalar->symbol);
+	size_t length = 0;
+	const char *name = symbol ? pigen_source_span_text(sem->sources, symbol->name, &length) : NULL;
+	if (!name) return NULL;
+	pigen_string result = {0};
+	pigen_append_range(&result, name, length);
+	if (array)
+	{
+		size_t stride = array->element_count;
+		for (size_t d = 0; d < array->dimension_count; d++)
+		{
+			const pigen_protocol_array_dimension *dimension = &sem->protocol_array_dimensions[array->first_dimension+d];
+			stride /= dimension->count;
+			uint64_t offset = ordinal / stride;
+			ordinal %= stride;
+			uint64_t coordinate = dimension->left >= dimension->right ?
+				(uint64_t)dimension->left - offset : (uint64_t)dimension->left + offset;
+			if (coordinate > INT64_MAX)
+				pigen_append_format(&result, "_m%llu", (unsigned long long)(UINT64_C(0)-coordinate));
+			else pigen_append_format(&result, "_%llu", (unsigned long long)coordinate);
+		}
+	}
+	return result.data;
+}
+
+static int lower_protocol_ports(pigen_rtl_lowering *lowering,
+	pigen_module_id module, pigen_rtl_module_id rtl_module)
+{
+	pigen_semantic_model *sem = lowering->semantics;
+	pigen_rtl_model *rtl = lowering->rtl;
+	for (size_t e = 0; e < sem->protocol_endpoint_count; e++)
+	{
+		const pigen_semantic_protocol_endpoint *endpoint = &sem->protocol_endpoints[e];
+		if (endpoint->module.index != module.index || !endpoint->is_port) continue;
+		const pigen_protocol *protocol = pigen_protocol_type_get(sem, endpoint->type);
+		char *base = protocol_port_base(sem, (pigen_protocol_endpoint_id){(uint32_t)e});
+		if (!protocol || !base) { free(base); return 0; }
+		for (pigen_protocol_channel channel = 0; channel < PIGEN_CHANNEL_COUNT; channel++)
+		{
+			pigen_protocol_channel_layout layout;
+			if (!pigen_protocol_layout(protocol, channel, &layout)) continue;
+			if (pigen_lowered_protocol_ports(lowering, (pigen_protocol_endpoint_id){(uint32_t)e}, channel)) continue;
+			pigen_signal_id id = endpoint->channels[channel];
+			const pigen_semantic_signal *signal = pigen_signal_get(sem, id);
+			if (!signal || id.index >= lowering->lowered_endpoint_count) { free(base); return 0; }
+			pigen_rtl_signal_endpoints endpoints = lowering->lowered_endpoints[id.index];
+			const pigen_rtl_expr *valid = pigen_rtl_expr_get(rtl, endpoints.valid);
+			if (!valid || valid->kind != PIGEN_RTL_EXPR_OBJECT ||
+				endpoints.source_ready.index == PIGEN_INVALID_ID) { free(base); return 0; }
+			pigen_rtl_protocol_channel_ports ports = {
+				.endpoint = {(uint32_t)e}, .channel = channel,
+				.valid = valid->object, .ready = endpoints.source_ready
+			};
+			pigen_rtl_type_id control_type = valid->type;
+			for (size_t f = 0; f < PIGEN_FIELD_COUNT; f++)
+				ports.fields[f] = (pigen_rtl_object_id){PIGEN_INVALID_ID};
+			const char *prefix = channel == PIGEN_CHANNEL_BEAT ? "t" : pigen_protocol_channel_name(channel);
+			pigen_string stem = {0};
+			pigen_append(&stem, base); pigen_append(&stem, "_"); pigen_append(&stem, prefix);
+			if (signal->direction == PIGEN_SEMANTIC_INPUT)
+			{
+				ports.valid = add_named_object(lowering, rtl_module, control_type,
+					PIGEN_SEMANTIC_INPUT, id.index, endpoint->span, stem.data, "valid");
+				ports.ready = add_named_object(lowering, rtl_module, control_type,
+					PIGEN_SEMANTIC_OUTPUT, id.index, endpoint->span, stem.data, "ready");
+				pigen_rtl_expr_id acceptance;
+				if (signal->transfer_type == PIGEN_TRANSFER_TYPE_BUF)
+				{
+					pigen_data_type_id bit = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+					pigen_unary_resolution inverse;
+					if (!pigen_data_type_resolve_unary_operation(sem, PIGEN_UNARY_LOGICAL_NOT, bit, &inverse))
+					{ free(stem.data); free(base); return 0; }
+					acceptance = pigen_rtl_expr_add_unary(rtl, control_type, &inverse, endpoints.valid, endpoint->span);
+				}
+				else acceptance = object_expression(lowering, control_type, endpoints.input_ready, endpoint->span);
+				pigen_rtl_expr_id offer = object_expression(lowering, control_type, ports.valid, endpoint->span);
+				/* A one-slot elastic buffer may replace on a pop. Its AXI
+				 * boundary accepts only while empty, cutting that combinational
+				 * path while preserving the selected one-slot capacity. */
+				if (signal->transfer_type == PIGEN_TRANSFER_TYPE_BUF)
+				{
+					pigen_data_type_id bit = pigen_data_type_sized_logic(sem, 1, PIGEN_SIGN_UNSIGNED);
+					pigen_binary_resolution conjunction;
+					if (!pigen_data_type_resolve_binary_operation(sem, PIGEN_BINARY_LOGICAL_AND,
+						bit, bit, &conjunction)) { free(stem.data); free(base); return 0; }
+					offer = pigen_rtl_expr_add_binary(rtl, control_type, &conjunction, offer, acceptance, endpoint->span);
+				}
+				if (pigen_rtl_equation_add_with_owner(rtl, rtl_module, ports.ready, acceptance, endpoint->span).index == PIGEN_INVALID_ID ||
+					pigen_rtl_equation_add_with_owner(rtl, rtl_module, endpoints.input_valid, offer, endpoint->span).index == PIGEN_INVALID_ID)
+				{ free(stem.data); free(base); return 0; }
+			}
+			if (!name_object(lowering, ports.valid, name_join(stem.data, "valid")) ||
+				!name_object(lowering, ports.ready, name_join(stem.data, "ready")))
+			{ free(stem.data); free(base); return 0; }
+			rtl->objects[endpoints.payload.index].direction = PIGEN_SEMANTIC_INTERNAL;
+			pigen_rtl_type_id payload_type = rtl->objects[endpoints.payload.index].type;
+			pigen_rtl_expr_id payload = object_expression(lowering, payload_type, endpoints.payload, endpoint->span);
+			pigen_rtl_expr_id pins[PIGEN_FIELD_COUNT];
+			pigen_rtl_type_id coordinate_type = pigen_lower_rtl_type(lowering,
+				pigen_data_type_sized_logic(sem, 64, PIGEN_SIGN_UNSIGNED));
+			for (size_t f = 0; f < layout.field_count; f++)
+			{
+				const pigen_protocol_field_layout *field = &layout.fields[f];
+				pigen_rtl_type_id type = pigen_lower_rtl_type(lowering, protocol_field_type(sem, signal, field));
+				pigen_rtl_object_id pin = add_named_object(lowering, rtl_module, type,
+					signal->direction, id.index, endpoint->span, stem.data, pigen_protocol_field_name(field->field));
+				if (pin.index == PIGEN_INVALID_ID) { free(stem.data); free(base); return 0; }
+				ports.fields[field->field] = pin;
+				pins[layout.field_count - 1 - f] = object_expression(lowering, type, pin, endpoint->span);
+				if (signal->direction == PIGEN_SEMANTIC_OUTPUT)
+				{
+					pigen_rtl_expr_id high = pigen_rtl_expr_add_integer(rtl, coordinate_type,
+						field->offset + field->bits - 1, endpoint->span);
+					pigen_rtl_expr_id low = pigen_rtl_expr_add_integer(rtl, coordinate_type, field->offset, endpoint->span);
+					pigen_rtl_expr_id value = pigen_rtl_expr_add_select(rtl, type, payload, high, low,
+						PIGEN_SEMANTIC_SELECT_RANGE, endpoint->span);
+					if (pigen_rtl_equation_add_with_owner(rtl, rtl_module, pin, value, endpoint->span).index == PIGEN_INVALID_ID)
+					{ free(stem.data); free(base); return 0; }
+				}
+			}
+			if (signal->direction == PIGEN_SEMANTIC_INPUT)
+			{
+				pigen_rtl_expr_id value = layout.field_count ? pigen_rtl_expr_add_concatenation(rtl,
+					payload_type, pins, layout.field_count, endpoint->span) :
+					pigen_rtl_expr_add_integer(rtl, payload_type, 0, endpoint->span);
+				if (pigen_rtl_equation_add_with_owner(rtl, rtl_module, endpoints.input_payload, value, endpoint->span).index == PIGEN_INVALID_ID)
+				{ free(stem.data); free(base); return 0; }
+			}
+			free(stem.data);
+			if (lowering->protocol_port_count == lowering->protocol_port_capacity)
+			{
+				lowering->protocol_port_capacity = lowering->protocol_port_capacity ? lowering->protocol_port_capacity * 2 : 8;
+				lowering->protocol_ports = pigen_resize(lowering->protocol_ports,
+					lowering->protocol_port_capacity * sizeof(*lowering->protocol_ports));
+			}
+			lowering->protocol_ports[lowering->protocol_port_count++] = ports;
+		}
+		free(base);
+	}
+	return 1;
+}
+
 int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -1580,11 +2020,15 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 			realization == PIGEN_TRANSFER_REALIZATION_SKID_QUEUE;
 		instance_destination = signal_is_instance_destination(sem,
 			owner_signal->symbol);
+		const pigen_semantic_protocol_endpoint *protocol_owner = pigen_protocol_endpoint_get(sem,
+			pigen_protocol_endpoint_for_signal(sem, (pigen_signal_id){(uint32_t)i}, NULL));
+		int native_receiver = protocol_owner && protocol_owner->is_port &&
+			owner_signal->direction == PIGEN_SEMANTIC_INPUT;
 		/* A concrete buffered input is an upstream-owned boundary view, not
 		 * local storage, so it is lowered in the first pass with the
 		 * boundary shape. A buffered output driven by a child instance is
 		 * likewise the child's boundary view, not a second storage owner. */
-		if (is_storage && (owner_signal->direction == PIGEN_SEMANTIC_INPUT ||
+		if (is_storage && ((owner_signal->direction == PIGEN_SEMANTIC_INPUT && !native_receiver) ||
 			instance_destination || signal_is_child_endpoint(sem, i)))
 			is_storage = 0;
 		if ((pass == 0) == is_storage)
@@ -1609,7 +2053,9 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 		}
 		else
 		{
-			if (!storage_endpoints(lowering, owner_signal, i,
+			pigen_semantic_signal storage_owner = *owner_signal;
+			if (native_receiver) storage_owner.direction = PIGEN_SEMANTIC_INTERNAL;
+			if (!storage_endpoints(lowering, &storage_owner, i,
 				rtl_module, module, realization, &endpoints))
 				return -1;
 		}
@@ -1620,7 +2066,17 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
 			return -1;
 		lowering->lowered_endpoints[i] = endpoints;
 	}
-	return 0;
+ if(!lower_protocol_ports(lowering,module,rtl_module)) return -1;
+ for(size_t i=0;i<signal_count;i++)
+ {
+  const pigen_semantic_signal *signal=&sem->signals[i];
+  if(signal->module.index!=module.index || signal->initial_value.index==PIGEN_INVALID_ID) continue;
+  pigen_rtl_expr_id value=lower_expr(lowering,signal->initial_value);
+  pigen_rtl_object_id object=lowering->lowered_endpoints[i].payload;
+  if(value.index==PIGEN_INVALID_ID || object.index==PIGEN_INVALID_ID || rtl->objects[object.index].kind!=PIGEN_RTL_OBJECT_VARIABLE) return -1;
+  rtl->objects[object.index].initial_value=value;
+ }
+ return 0;
 }
 
 
@@ -1654,6 +2110,152 @@ static pigen_rtl_expr_id lower_coordinate(pigen_rtl_lowering *lowering,
 	return lower_expr(lowering, expression);
 }
 
+static int projection_is_computed(const pigen_semantic_model *model, pigen_expr_id expression)
+{
+	const pigen_semantic_expr *node=pigen_expr_get(model,expression);
+	while (node)
+	{
+		pigen_expr_id next;
+		switch (node->kind)
+		{
+		case PIGEN_EXPR_SELECT: next=node->as.select.base; break;
+		case PIGEN_EXPR_INDEX: next=node->as.index.base; break;
+		case PIGEN_EXPR_GROUP: next=node->as.group.operand; break;
+		case PIGEN_EXPR_PEEK: next=node->as.peek.source; break;
+		case PIGEN_EXPR_EVALUATED_VALUE:
+		case PIGEN_EXPR_CONVERSION: case PIGEN_EXPR_ARRAY_PATTERN:
+	case PIGEN_EXPR_CONCATENATION:
+		case PIGEN_EXPR_BINARY: case PIGEN_EXPR_UNARY: case PIGEN_EXPR_CONDITIONAL: return 1;
+		default: return 0;
+		}
+		node=pigen_expr_get(model,next);
+	}
+	return 0;
+}
+
+static pigen_rtl_module_id projection_module(const pigen_rtl_model *rtl, pigen_rtl_expr_id value)
+{
+	const pigen_rtl_expr *node = pigen_rtl_expr_get(rtl, value);
+	if (!node) return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	if (node->kind == PIGEN_RTL_EXPR_OBJECT)
+	{
+		const pigen_rtl_object *object = pigen_rtl_object_get(rtl, node->object);
+		return object ? object->module : (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	}
+	size_t count = 0;
+	const pigen_rtl_expr_id *children = pigen_rtl_expr_children(rtl, value, &count);
+	for (size_t i=0; children && i<count; i++)
+	{
+		pigen_rtl_module_id module = projection_module(rtl, children[i]);
+		if (module.index != PIGEN_INVALID_ID) return module;
+	}
+	return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+}
+
+/* A packed index rooted in an object is a legal primary. Keep procedural
+ * coordinate reads in the expression so ordered writes are visible immediately. */
+static int projection_is_indexed_primary(const pigen_rtl_model *rtl,pigen_rtl_expr_id value)
+{
+	for(size_t depth=0;depth<128;depth++)
+	{
+		const pigen_rtl_expr *node=pigen_rtl_expr_get(rtl,value);
+		if(!node) return 0;
+		if(node->kind==PIGEN_RTL_EXPR_OBJECT) return 1;
+		if(node->kind!=PIGEN_RTL_EXPR_INDEX || node->child_count!=2) return 0;
+		value=rtl->expression_children[node->first_child];
+	}
+	return 0;
+}
+
+static int projection_reads_procedural_local(const pigen_semantic_model *model,pigen_expr_id value,size_t depth)
+{
+	const pigen_semantic_expr *node=pigen_expr_get(model,value);
+	if(!node || depth>128) return 0;
+	pigen_expr_id children[3];size_t count=0;
+	switch(node->kind)
+	{
+	case PIGEN_EXPR_SYMBOL:
+	{
+		const pigen_symbol *symbol=pigen_symbol_get(model,node->as.symbol);
+		const pigen_scope *scope=symbol ? pigen_scope_get(model,symbol->scope) : NULL;
+		return symbol && symbol->kind==PIGEN_SYMBOL_SIGNAL && scope && scope->is_procedural;
+	}
+	case PIGEN_EXPR_INDEX: children[count++]=node->as.index.base;children[count++]=node->as.index.index;break;
+	case PIGEN_EXPR_SELECT: children[count++]=node->as.select.base;children[count++]=node->as.select.left;children[count++]=node->as.select.right;break;
+	case PIGEN_EXPR_GROUP: children[count++]=node->as.group.operand;break;
+	case PIGEN_EXPR_PEEK: children[count++]=node->as.peek.source;break;
+	case PIGEN_EXPR_CONVERSION: children[count++]=node->as.conversion.operand;break;
+	case PIGEN_EXPR_UNARY: children[count++]=node->as.unary.operand;break;
+	case PIGEN_EXPR_BINARY: children[count++]=node->as.binary.left;children[count++]=node->as.binary.right;break;
+	case PIGEN_EXPR_CONDITIONAL: children[count++]=node->as.conditional.condition;children[count++]=node->as.conditional.when_true;children[count++]=node->as.conditional.when_false;break;
+	case PIGEN_EXPR_EVALUATED_VALUE: children[count++]=node->as.evaluation.value;children[count++]=node->as.evaluation.evaluated;break;
+	case PIGEN_EXPR_ARRAY_PATTERN:
+	case PIGEN_EXPR_CONCATENATION:
+		for(size_t i=0;i<node->as.sequence.child_count;i++)
+			if(projection_reads_procedural_local(model,model->expression_children[node->as.sequence.first_child+i],depth+1)) return 1;
+		return 0;
+	default: return 0;
+	}
+	for(size_t i=0;i<count;i++) if(projection_reads_procedural_local(model,children[i],depth+1)) return 1;
+	return 0;
+}
+
+/* Preserve local coordinates in a typed combinational alias before selecting
+ * a native field or an immutable computed record. Mutable ordinary lvalue
+ * paths retain their existing lowering. */
+static pigen_rtl_expr_id projection_operand(pigen_rtl_lowering *lowering,
+	pigen_expr_id semantic_base, pigen_rtl_expr_id value, pigen_source_span span)
+{
+	const pigen_rtl_expr *rtl_value = pigen_rtl_expr_get(lowering->rtl, value);
+	if (!rtl_value || rtl_value->kind == PIGEN_RTL_EXPR_OBJECT) return value;
+	if(rtl_value->kind==PIGEN_RTL_EXPR_INDEX && projection_is_indexed_primary(lowering->rtl,value) &&
+		projection_reads_procedural_local(lowering->semantics,semantic_base,0)) return value;
+
+	pigen_rtl_type_id type = rtl_value->type;
+	const pigen_semantic_expr *base = pigen_expr_get(lowering->semantics, semantic_base);
+	int computed = 0;
+	while (base && base->kind != PIGEN_EXPR_SYMBOL)
+	{
+		pigen_expr_id next;
+		switch (base->kind)
+		{
+		case PIGEN_EXPR_SELECT: next = base->as.select.base; break;
+		case PIGEN_EXPR_INDEX: next = base->as.index.base; break;
+		case PIGEN_EXPR_GROUP: next = base->as.group.operand; break;
+		case PIGEN_EXPR_PEEK: next = base->as.peek.source; break;
+		case PIGEN_EXPR_CONVERSION: computed=1; next = base->as.conversion.operand; break;
+		default: computed=1; next=(pigen_expr_id){PIGEN_INVALID_ID}; break;
+		}
+		base = pigen_expr_get(lowering->semantics, next);
+	}
+	pigen_signal_id signal = base ? pigen_symbol_signal(lowering->semantics, base->as.symbol) :
+		(pigen_signal_id){PIGEN_INVALID_ID};
+	if (!computed && pigen_protocol_endpoint_for_signal(lowering->semantics, signal, NULL).index == PIGEN_INVALID_ID)
+	{
+		const pigen_semantic_signal *source = pigen_signal_get(lowering->semantics, signal);
+		const pigen_transfer_type_descriptor *descriptor = source ? pigen_transfer_type_descriptor_get(source->transfer_type) : NULL;
+		if (!descriptor || descriptor->is_static) return value;
+	}
+	pigen_rtl_module_id module = projection_module(lowering->rtl, value);
+	if (module.index == PIGEN_INVALID_ID)
+		for (size_t i=0;i<lowering->semantics->module_count;i++)
+		{
+			const pigen_semantic_module *owner=&lowering->semantics->modules[i];
+			if (owner->span.source.index==span.source.index && owner->span.start<=span.start && owner->span.end>=span.end)
+			{ module=rtl_module_for_semantic(lowering->rtl,lowering->semantics,(pigen_module_id){(uint32_t)i}); break; }
+		}
+	if (module.index == PIGEN_INVALID_ID) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	pigen_rtl_object_id object = pigen_rtl_object_add_with_owner(lowering->rtl, module,
+		PIGEN_RTL_OBJECT_VARIABLE, type, PIGEN_SEMANTIC_INTERNAL,
+		(pigen_signal_id){PIGEN_INVALID_ID}, span);
+	if (object.index == PIGEN_INVALID_ID) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	char name[64]; snprintf(name, sizeof name, "__pigen_projection_%u", object.index);
+	if (!name_object(lowering, object, pigen_copy_range(name, strlen(name))) ||
+		pigen_rtl_equation_add_with_owner(lowering->rtl, module, object, value, span).index == PIGEN_INVALID_ID)
+		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	return object_expression(lowering, type, object, span);
+}
+
 static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 	pigen_expr_id expression)
 {
@@ -1677,7 +2279,9 @@ static pigen_rtl_expr_id lower_expr(pigen_rtl_lowering *lowering,
 	{
 		pigen_const_expr_id constant = pigen_expr_constant(sem, expression);
 
-		if (constant.index != PIGEN_INVALID_ID)
+		if (constant.index != PIGEN_INVALID_ID &&
+			!((owner->kind == PIGEN_EXPR_SELECT && projection_is_computed(sem,owner->as.select.base)) ||
+			  (owner->kind == PIGEN_EXPR_INDEX && projection_is_computed(sem,owner->as.index.base))))
 		{
 			pigen_rtl_expr_id lowered =
 				pigen_lower_rtl_expression(lowering, constant);
@@ -1915,7 +2519,26 @@ ordinary:
 		pigen_rtl_expr_id base;
 		pigen_rtl_expr_id index;
 
+		const pigen_semantic_expr *projection = pigen_expr_get(sem, owner->as.index.base);
+		int64_t offset, high, selected;
+		if (projection && projection->kind == PIGEN_EXPR_SELECT &&
+			!pigen_data_type_dimension_count(sem, projection->data_type) &&
+			projection->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE &&
+			pigen_const_expr_evaluate_i64(sem, pigen_expr_constant(sem, projection->as.select.left), &high) &&
+			pigen_const_expr_evaluate_i64(sem, pigen_expr_constant(sem, projection->as.select.right), &offset) &&
+			pigen_const_expr_evaluate_i64(sem, pigen_expr_constant(sem, owner->as.index.index), &selected) &&
+			offset >= 0 && high >= offset && selected >= 0 && selected <= high - offset)
+		{
+			base = lower_expr(lowering, projection->as.select.base);
+			base = projection_operand(lowering, projection->as.select.base, base, owner->span);
+			pigen_rtl_type_id coordinate = pigen_lower_rtl_type(lowering,
+				pigen_data_type_sized_logic(sem, 64, PIGEN_SIGN_UNSIGNED));
+			index = pigen_rtl_expr_add_integer(rtl, coordinate, (uint64_t)(offset + selected), origin);
+			return pigen_rtl_expr_add_index(rtl, result_type, base, index, origin);
+		}
+
 		base = lower_expr(lowering, owner->as.index.base);
+		base = projection_operand(lowering, owner->as.index.base, base, owner->span);
 		index = lower_coordinate(lowering, owner->as.index.index);
 		if (base.index == PIGEN_INVALID_ID ||
 			index.index == PIGEN_INVALID_ID)
@@ -1928,8 +2551,45 @@ ordinary:
 		pigen_rtl_expr_id base;
 		pigen_rtl_expr_id left;
 		pigen_rtl_expr_id right;
+		if (owner->as.select.is_member && static_record_path(lowering,owner->as.select.base))
+		{
+			pigen_semantic_expr member=*owner;
+			base=lower_expr(lowering,member.as.select.base);
+			left=lower_coordinate(lowering,member.as.select.left);
+			right=lower_coordinate(lowering,member.as.select.right);
+			size_t length=0;
+			const char *source=pigen_source_span_text(sem->sources,member.as.select.member_name,&length);
+			if (!source || !length) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+			char *name=pigen_copy_range(source,length);
+			pigen_rtl_expr_id selected=pigen_rtl_expr_add_member_select(rtl,result_type,base,left,right,name,origin);
+			free(name); return selected;
+		}
+		const pigen_semantic_expr *projection = pigen_expr_get(sem, owner->as.select.base);
+		int64_t offset, high, low, projection_high;
+		/* Numerical members have local [width-1:0] coordinates. Compose a
+		 * constant subrange into their containing record before emitting SV,
+		 * whose part-select result cannot itself be part-selected. */
+		if (projection && projection->kind == PIGEN_EXPR_SELECT &&
+			!pigen_data_type_dimension_count(sem, projection->data_type) &&
+			projection->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE &&
+			owner->as.select.kind == PIGEN_SEMANTIC_SELECT_RANGE &&
+			pigen_const_expr_evaluate_i64(sem, pigen_expr_constant(sem, projection->as.select.left), &projection_high) &&
+			pigen_const_expr_evaluate_i64(sem, pigen_expr_constant(sem, projection->as.select.right), &offset) &&
+			pigen_const_expr_evaluate_i64(sem, pigen_expr_constant(sem, owner->as.select.left), &high) &&
+			pigen_const_expr_evaluate_i64(sem, pigen_expr_constant(sem, owner->as.select.right), &low) &&
+			offset >= 0 && projection_high >= offset && high >= low && low >= 0 && high <= projection_high - offset)
+		{
+			base = lower_expr(lowering, projection->as.select.base);
+			base = projection_operand(lowering, projection->as.select.base, base, owner->span);
+			pigen_rtl_type_id coordinate = pigen_lower_rtl_type(lowering,
+				pigen_data_type_sized_logic(sem, 64, PIGEN_SIGN_UNSIGNED));
+			left = pigen_rtl_expr_add_integer(rtl, coordinate, (uint64_t)(offset + high), origin);
+			right = pigen_rtl_expr_add_integer(rtl, coordinate, (uint64_t)(offset + low), origin);
+			return pigen_rtl_expr_add_select(rtl, result_type, base, left, right, PIGEN_SEMANTIC_SELECT_RANGE, origin);
+		}
 
 		base = lower_expr(lowering, owner->as.select.base);
+		base = projection_operand(lowering, owner->as.select.base, base, owner->span);
 		left = lower_coordinate(lowering, owner->as.select.left);
 		right = lower_coordinate(lowering, owner->as.select.right);
 		if (base.index == PIGEN_INVALID_ID ||
@@ -1939,6 +2599,14 @@ ordinary:
 		return pigen_rtl_expr_add_select(rtl, result_type, base, left,
 			right, owner->as.select.kind, origin);
 	}
+	case PIGEN_EXPR_EVALUATED_VALUE:
+	{
+		pigen_semantic_expr node=*owner;
+		pigen_rtl_expr_id value=lower_expr(lowering,node.as.evaluation.value);
+		pigen_rtl_expr_id evaluated=lower_expr(lowering,node.as.evaluation.evaluated);
+		return pigen_rtl_expr_add_evaluated_value(rtl,result_type,value,evaluated,node.as.evaluation.before,origin);
+	}
+	case PIGEN_EXPR_ARRAY_PATTERN:
 	case PIGEN_EXPR_CONCATENATION:
 	{
 		const pigen_expr_id *owner_children;
@@ -1966,7 +2634,7 @@ ordinary:
 				return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 			}
 		}
-		result = pigen_rtl_expr_add_concatenation(rtl, result_type,
+		result = (owner->kind==PIGEN_EXPR_ARRAY_PATTERN ? pigen_rtl_expr_add_array_pattern : pigen_rtl_expr_add_concatenation)(rtl, result_type,
 			children, child_count, origin);
 		free(children);
 		return result;
@@ -2870,6 +3538,62 @@ static int lower_child_input_ready_bindings(pigen_rtl_lowering *lowering,
 	return 0;
 }
 
+static pigen_rtl_procedural_id lower_combinational_statement(pigen_rtl_lowering *lowering,
+	pigen_rtl_module_id module,pigen_procedural_id id,size_t depth)
+{
+	pigen_semantic_model *sem=lowering->semantics;
+	pigen_rtl_procedural_id invalid={PIGEN_INVALID_ID};
+	if (id.index>=sem->procedural_count || depth>128) return invalid;
+	pigen_semantic_procedural node=sem->procedural[id.index];
+	pigen_rtl_expr_id destination={PIGEN_INVALID_ID},value={PIGEN_INVALID_ID},condition={PIGEN_INVALID_ID};
+	if (node.kind==PIGEN_PROCEDURAL_ASSIGN)
+	{
+		const pigen_semantic_transfer *assignment=pigen_transfer_get(sem,node.assignment);
+		const pigen_semantic_lvalue *target=assignment ? pigen_lvalue_get(sem,assignment->destination) : NULL;
+		if (!target) return invalid;
+		destination=lower_expr(lowering,target->expression);value=lower_expr(lowering,assignment->value);
+		if (destination.index==PIGEN_INVALID_ID || value.index==PIGEN_INVALID_ID) return invalid;
+	}
+	else if (node.kind!=PIGEN_PROCEDURAL_BLOCK && node.condition.index!=PIGEN_INVALID_ID)
+	{
+		condition=lower_expr(lowering,node.condition);
+		if (condition.index==PIGEN_INVALID_ID) return invalid;
+	}
+	if (node.first_child>sem->procedural_child_count || node.child_count>sem->procedural_child_count-node.first_child) return invalid;
+	pigen_rtl_procedural_id *children=node.child_count ? pigen_resize(NULL,node.child_count*sizeof(*children)) : NULL;
+	for (size_t i=0;i<node.child_count;i++)
+	{
+		pigen_procedural_id child_id=sem->procedural_children[node.first_child+i];
+		if (child_id.index>=sem->procedural_count) {free(children);return invalid;}
+		pigen_semantic_procedural child=sem->procedural[child_id.index];
+		if (child.case_continuation)
+		{
+			if (node.kind<PIGEN_PROCEDURAL_CASE || node.kind>PIGEN_PROCEDURAL_CASEX || !i ||
+				child.kind!=PIGEN_PROCEDURAL_CASE_ITEM || child.case_continuation!=1 || child.child_count!=1 ||
+				child.first_child>=sem->procedural_child_count) {free(children);return invalid;}
+			const pigen_semantic_procedural *previous=&sem->procedural[sem->procedural_children[node.first_child+i-1].index];
+			if (previous->child_count!=1 || previous->first_child>=sem->procedural_child_count ||
+				sem->procedural_children[previous->first_child].index!=sem->procedural_children[child.first_child].index)
+				{free(children);return invalid;}
+			pigen_rtl_procedural_id body=lowering->rtl->procedural_children[lowering->rtl->procedural[children[i-1].index].first_child];
+			pigen_rtl_expr_id label=lower_expr(lowering,child.condition);
+			children[i]=pigen_rtl_procedural_add(lowering->rtl,module,PIGEN_PROCEDURAL_CASE_ITEM,
+				(pigen_rtl_expr_id){PIGEN_INVALID_ID},(pigen_rtl_expr_id){PIGEN_INVALID_ID},label,&body,1,child.span);
+			if (children[i].index!=PIGEN_INVALID_ID) lowering->rtl->procedural[children[i].index].case_continuation=1;
+		}
+		else children[i]=lower_combinational_statement(lowering,module,child_id,depth+1);
+		if (children[i].index==PIGEN_INVALID_ID) { free(children);return invalid; }
+	}
+	pigen_rtl_procedural_id result=pigen_rtl_procedural_add(lowering->rtl,module,node.kind,
+		destination,value,condition,children,node.child_count,node.span);
+	if (result.index!=PIGEN_INVALID_ID)
+	{
+		lowering->rtl->procedural[result.index].case_qualifier=node.case_qualifier;
+		lowering->rtl->procedural[result.index].else_if=node.else_if;
+	}
+	free(children);return result;
+}
+
 int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -2915,6 +3639,12 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 		owner_process = pigen_process_get(sem, processes[pi]);
 		if (!owner_process)
 			return -1;
+		if (owner_process->is_combinational)
+		{
+			pigen_rtl_procedural_id body=lower_combinational_statement(lowering,rtl_module,owner_process->body,0);
+			if (body.index==PIGEN_INVALID_ID || pigen_rtl_combinational_process_add(rtl,rtl_module,body,owner_process->span).index==PIGEN_INVALID_ID) return -1;
+			continue;
+		}
 		owner_domain = pigen_clock_domain_get(sem, owner_process->domain);
 		clock_expr = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 		if (owner_process->clock.index != PIGEN_INVALID_ID)
@@ -2948,6 +3678,18 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 			{
 				free(update_ids);
 				return -1;
+			}
+			if (owner_process->is_continuous)
+			{
+				const pigen_semantic_lvalue *destination = pigen_lvalue_get(sem, owner->destination);
+				pigen_rtl_expr_id path = destination ? lower_expr(lowering, destination->expression) :
+					(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+				pigen_rtl_expr_id expression = lower_expr(lowering, owner->value);
+				if (path.index == PIGEN_INVALID_ID || expression.index == PIGEN_INVALID_ID ||
+					pigen_rtl_equation_add_projection_with_owner(rtl, rtl_module,
+						path, expression, owner->span).index == PIGEN_INVALID_ID)
+				{ free(update_ids); return -1; }
+				continue;
 			}
 			fire = fire_identity_for_transfer(lowering, owner);
 			offer = offer_identity_for_transfer(lowering, owner);
@@ -3251,6 +3993,14 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 		}
 		if (owner_domain)
 		{
+			/* Qualified clocked controls keep a check-only ordered tree. The
+			 * actual transfers still use their independent fire predicates. */
+			pigen_rtl_procedural_id checks={PIGEN_INVALID_ID};
+			if (owner_process->body.index!=PIGEN_INVALID_ID)
+			{
+				checks=lower_combinational_statement(lowering,rtl_module,owner_process->body,0);
+				if (checks.index==PIGEN_INVALID_ID) {free(update_ids);return -1;}
+			}
 			pigen_rtl_process_id proc_id = pigen_rtl_process_add_with_owner(rtl, rtl_module, clock_expr,
 				owner_domain->edge, update_ids, update_count,
 				owner_process->span);
@@ -3259,6 +4009,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 				free(update_ids);
 				return -1;
 			}
+			rtl->processes[proc_id.index].body=checks;
 		}
 		free(update_ids);
 	}
@@ -3310,6 +4061,15 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 				if (sem->instance_connections[c].endpoint_view.index == signal_index || expr_references_symbol(sem,
 					sem->instance_connections[c].value, signal->symbol))
 				{ driven = 1; break; }
+			for (size_t f = 0; f < sem->protocol_fabric_edge_count && !driven; f++)
+			{
+				const pigen_semantic_protocol_fabric_edge *edge = &sem->protocol_fabric_edges[f];
+				const pigen_semantic_protocol_endpoint *source = pigen_protocol_endpoint_get(sem, edge->source);
+				const pigen_semantic_protocol_endpoint *destination = pigen_protocol_endpoint_get(sem, edge->destination);
+				for (pigen_protocol_channel channel = 0; channel < PIGEN_CHANNEL_COUNT; channel++)
+					if (source->channels[channel].index == signal_index || destination->channels[channel].index == signal_index)
+					{ driven = 1; break; }
+			}
 			if (!driven &&
 				pigen_rtl_equation_add_with_owner(rtl, rtl_module,
 					endpoints->source_ready, zero,
@@ -3374,6 +4134,197 @@ static int child_connection_drives(pigen_rtl_lowering *lowering,
 	return 0;
 }
 
+typedef struct {
+	pigen_rtl_connection *items;
+	size_t count,capacity;
+} generated_connections;
+
+static int generated_connection(pigen_rtl_lowering *lowering,generated_connections *connections,
+	const char *port,pigen_rtl_expr_id value,pigen_semantic_direction direction)
+{
+	const pigen_rtl_expr *expression=pigen_rtl_expr_get(lowering->rtl,value);
+	if(!port || !expression) return 0;
+	if(connections->count==connections->capacity)
+	{
+		connections->capacity=connections->capacity ? connections->capacity*2 : 16;
+		connections->items=pigen_resize(connections->items,connections->capacity*sizeof(*connections->items));
+	}
+	connections->items[connections->count++]=(pigen_rtl_connection){
+		.port=pigen_copy_range(port,strlen(port)),
+		.object=expression->kind==PIGEN_RTL_EXPR_OBJECT ? expression->object : (pigen_rtl_object_id){PIGEN_INVALID_ID},
+		.value=value,.direction=direction};
+	return 1;
+}
+
+static int generated_native_channel(pigen_rtl_lowering *lowering,generated_connections *connections,
+	const pigen_semantic_instance_connection *connection,pigen_protocol_endpoint_id endpoint,pigen_protocol_channel channel)
+{
+	pigen_semantic_model *sem=lowering->semantics;
+	const pigen_semantic_protocol_endpoint *port=pigen_protocol_endpoint_get(sem,endpoint);
+	const pigen_protocol *protocol=port ? pigen_protocol_type_get(sem,port->type) : NULL;
+	pigen_protocol_channel_layout layout;
+	const pigen_semantic_expr *value=pigen_expr_get(sem,connection->value);
+	while(value && value->kind==PIGEN_EXPR_CONVERSION) value=pigen_expr_get(sem,value->as.conversion.operand);
+	pigen_signal_id signal=value && value->kind==PIGEN_EXPR_SYMBOL ? pigen_symbol_signal(sem,value->as.symbol) : (pigen_signal_id){PIGEN_INVALID_ID};
+	if(!pigen_protocol_layout(protocol,channel,&layout) || signal.index>=lowering->lowered_endpoint_count) return 0;
+	pigen_rtl_signal_endpoints bound=lowering->lowered_endpoints[signal.index];
+	const pigen_rtl_object *payload=pigen_rtl_object_get(lowering->rtl,bound.payload);
+	if(!payload) return 0;
+	pigen_rtl_expr_id packed=object_expression(lowering,payload->type,bound.payload,connection->span);
+	pigen_rtl_type_id coordinate=pigen_lower_rtl_type(lowering,pigen_data_type_sized_logic(sem,64,PIGEN_SIGN_UNSIGNED));
+	char *base=protocol_port_base(sem,endpoint);
+	if(!base) return 0;
+	pigen_string stem={0}; pigen_append(&stem,base); free(base); pigen_append(&stem,"_");
+	pigen_append(&stem,channel==PIGEN_CHANNEL_BEAT ? "t" : pigen_protocol_channel_name(channel));
+	int ok=1;
+	for(size_t f=0;f<layout.field_count+2 && ok;f++)
+	{
+		pigen_rtl_expr_id expression;
+		const char *suffix;
+		if(f<layout.field_count)
+		{
+			const pigen_protocol_field_layout *field=&layout.fields[f];
+			const pigen_semantic_signal *typed=pigen_signal_get(sem,connection->port_signal);
+			pigen_rtl_type_id type=pigen_lower_rtl_type(lowering,protocol_field_type(sem,typed,field));
+			pigen_rtl_expr_id high=pigen_rtl_expr_add_integer(lowering->rtl,coordinate,field->offset+field->bits-1,connection->span);
+			pigen_rtl_expr_id low=pigen_rtl_expr_add_integer(lowering->rtl,coordinate,field->offset,connection->span);
+			expression=pigen_rtl_expr_add_select(lowering->rtl,type,packed,high,low,PIGEN_SEMANTIC_SELECT_RANGE,connection->span);
+			suffix=pigen_protocol_field_name(field->field);
+		}
+		else {expression=f==layout.field_count ? bound.valid : bound.ready; suffix=f==layout.field_count ? "valid" : "ready";}
+		char *name=name_join(stem.data,suffix);
+		pigen_semantic_direction direction=connection->direction;
+		if(f==layout.field_count+1) direction=direction==PIGEN_SEMANTIC_INPUT ? PIGEN_SEMANTIC_OUTPUT : PIGEN_SEMANTIC_INPUT;
+		ok=generated_connection(lowering,connections,name,expression,direction); free(name);
+	}
+	free(stem.data);
+	return ok;
+}
+
+static int generated_regular_port(pigen_rtl_lowering *lowering,generated_connections *connections,
+	const pigen_semantic_instance *instance,const pigen_semantic_instance_connection *connection)
+{
+	pigen_semantic_model *sem=lowering->semantics;
+	const pigen_semantic_signal *port=pigen_signal_get(sem,connection->port_signal);
+	const pigen_symbol *symbol=port ? pigen_symbol_get(sem,port->symbol) : NULL;
+	size_t length=0,base_length=0;
+	const char *name=pigen_source_span_text(sem->sources,connection->port_name,&length);
+	const char *base=symbol ? pigen_source_span_text(sem->sources,symbol->name,&base_length) : NULL;
+	if(!name || !base) return 0;
+	char *spelling=pigen_copy_range(name,length);
+	pigen_signal_id view=connection->endpoint_view;
+	const pigen_semantic_expr *value=pigen_expr_get(sem,connection->value);
+	while(value && value->kind==PIGEN_EXPR_CONVERSION) value=pigen_expr_get(sem,value->as.conversion.operand);
+	if(view.index==PIGEN_INVALID_ID && value && value->kind==PIGEN_EXPR_SYMBOL) view=pigen_symbol_signal(sem,value->as.symbol);
+	pigen_rtl_signal_endpoints bound={0};
+	int have_endpoint=view.index<lowering->lowered_endpoint_count;
+	if(have_endpoint) bound=lowering->lowered_endpoints[view.index];
+	int payload=length==base_length && !memcmp(name,base,length);
+	pigen_rtl_expr_id expression;
+	if(connection->endpoint_view.index!=PIGEN_INVALID_ID && payload && have_endpoint)
+	{
+		const pigen_rtl_object *object=pigen_rtl_object_get(lowering->rtl,bound.payload);
+		expression=object ? object_expression(lowering,object->type,bound.payload,connection->span) : (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	}
+	else expression=lower_expr(lowering,connection->value);
+	int ok=generated_connection(lowering,connections,spelling,expression,connection->direction);
+	free(spelling);
+	if(!ok || !payload || pigen_transfer_type_descriptor_get(port->transfer_type)->is_static) return ok;
+	if(!have_endpoint) return 0;
+	for(size_t k=0;k<2;k++)
+	{
+		const char *suffix=k ? "_ready" : "_valid";
+		int explicit_control=0;
+		for(size_t c=0;c<instance->connection_count;c++)
+		{
+			size_t n=0;
+			const char *text=pigen_source_span_text(sem->sources,sem->instance_connections[instance->first_connection+c].port_name,&n);
+			if(text && n==base_length+6 && !memcmp(text,base,base_length) && !memcmp(text+base_length,suffix,6)) explicit_control=1;
+		}
+		if(explicit_control) continue;
+		char *port_name=pigen_resize(NULL,base_length+7);
+		memcpy(port_name,base,base_length);memcpy(port_name+base_length,suffix,7);
+		pigen_rtl_expr_id control=k ? bound.ready : bound.valid;
+		if(k && connection->direction==PIGEN_SEMANTIC_INPUT && bound.source_ready.index!=PIGEN_INVALID_ID)
+		{
+			const pigen_rtl_object *ready=pigen_rtl_object_get(lowering->rtl,bound.source_ready);
+			if(!ready) {free(port_name);return 0;}
+			control=object_expression(lowering,ready->type,bound.source_ready,connection->span);
+		}
+		ok=generated_connection(lowering,connections,port_name,control,k ?
+			(connection->direction==PIGEN_SEMANTIC_INPUT ? PIGEN_SEMANTIC_OUTPUT : PIGEN_SEMANTIC_INPUT) : connection->direction);
+		free(port_name); if(!ok) return 0;
+	}
+	return 1;
+}
+
+int pigen_lower_rtl_generated_instances(pigen_rtl_lowering *lowering,pigen_module_id module)
+{
+	if(!lowering || !lowering->semantics || !lowering->rtl) return -1;
+	pigen_semantic_model *sem=lowering->semantics;
+	const pigen_semantic_module *owner=pigen_module_get(sem,module);
+	if(!owner) return -1;
+	pigen_rtl_module_id rtl_module=rtl_module_for_semantic(lowering->rtl,sem,module);
+	for(size_t i=0;i<sem->instance_count;i++)
+	{
+		const pigen_semantic_instance *instance=&sem->instances[i];
+		const pigen_symbol *symbol=pigen_symbol_get(sem,instance->symbol);
+		if(instance->module.index!=module.index || (symbol->scope.index==owner->scope.index && owner->specialization_of.index==PIGEN_INVALID_ID &&
+			sem->modules[instance->child_module.index].specialization_of.index==PIGEN_INVALID_ID &&
+			!sem->modules[instance->child_module.index].is_external)) continue;
+		int exists=0;
+		for(size_t p=0;p<lowering->rtl->instance_count;p++)
+			if(lowering->rtl->instances[p].definition && lowering->rtl->instances[p].semantic_instance.index==i) exists=1;
+		if(exists) continue;
+		generated_connections connections={0}; int ok=1;
+		for(size_t c=0;c<instance->connection_count && ok;c++)
+		{
+			const pigen_semantic_instance_connection *connection=&sem->instance_connections[instance->first_connection+c];
+			pigen_protocol_channel channel;
+			pigen_protocol_endpoint_id endpoint=pigen_protocol_endpoint_for_signal(sem,connection->port_signal,&channel);
+			ok=endpoint.index!=PIGEN_INVALID_ID ? generated_native_channel(lowering,&connections,connection,endpoint,channel) :
+				generated_regular_port(lowering,&connections,instance,connection);
+		}
+		pigen_rtl_record_range range={0};
+		if(ok) {range=pigen_rtl_connection_range_add(lowering->rtl,connections.items,connections.count);ok=range.first!=PIGEN_INVALID_ID;}
+		for(size_t c=0;c<connections.count;c++) free((void*)connections.items[c].port);
+		free(connections.items);
+		if(!ok) return -1;
+		const pigen_semantic_module *child = pigen_module_get(sem, instance->child_module);
+		const pigen_semantic_module *definition_owner = child;
+		while (definition_owner->is_external && definition_owner->specialization_of.index != PIGEN_INVALID_ID)
+			definition_owner = pigen_module_get(sem, definition_owner->specialization_of);
+		const pigen_symbol *target=pigen_symbol_get(sem,definition_owner->symbol);
+		size_t length=0; const char *definition=pigen_source_span_text(sem->sources,target->name,&length);
+		char *name=scoped_symbol_spelling(sem,symbol);
+		if(!definition || !name) {free(name);return -1;}
+		pigen_rtl_expr_id *parameters = NULL;
+		size_t parameter_count = 0;
+		if (child->is_external)
+			for (size_t p = 0; p < sem->parameter_count; p++) {
+				const pigen_semantic_parameter *parameter = &sem->parameters[p];
+				const pigen_symbol *parameter_symbol = pigen_symbol_get(sem, parameter->symbol);
+				if (parameter->module.index != instance->child_module.index || parameter->is_local ||
+					parameter_symbol->scope.index != child->scope.index) continue;
+				pigen_rtl_expr_id value = pigen_lower_rtl_expression(lowering, pigen_expr_constant(sem, parameter->value));
+				if (value.index == PIGEN_INVALID_ID) { free(parameters); free(name); return -1; }
+				parameters = pigen_resize(parameters, (parameter_count + 1) * sizeof(*parameters));
+				parameters[parameter_count++] = value;
+			}
+		pigen_rtl_instance_id id=pigen_rtl_instance_add_with_owner(lowering->rtl,rtl_module,module,parameters,parameter_count,NULL,0,instance->span);
+		free(parameters);
+		if(id.index==PIGEN_INVALID_ID) {free(name);return -1;}
+		pigen_rtl_instance *record=&lowering->rtl->instances[id.index];
+		record->primitive=PIGEN_RTL_PRIMITIVE_INVALID;
+		record->payload_type=(pigen_rtl_type_id){PIGEN_INVALID_ID};
+		record->semantic_instance=(pigen_instance_id){(uint32_t)i};
+		record->connection_records=range;
+		pigen_rtl_set_name(lowering->rtl,&record->name,name); free(name);
+		record->definition=pigen_copy_range(definition,length);
+	}
+	return 0;
+}
+
 int pigen_lower_rtl_endpoint_defaults(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -3406,14 +4357,14 @@ int pigen_lower_rtl_endpoint_defaults(pigen_rtl_lowering *lowering,
 				{
 					const pigen_rtl_connection *connection = &rtl->connections[instance->connection_records.first+c];
 					if (connection->object.index != targets[t].index || !connection->port) continue;
-					if (!strcmp(connection->port, "packet_out") || !strcmp(connection->port, "out_valid") ||
-						!strcmp(connection->port, "in_ready") ||
-						(instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE2 &&
-						 (!strcmp(connection->port, "i0_ready") || !strcmp(connection->port, "i1_ready")))) driven = 1;
+					if (pigen_rtl_primitive_port_is_output(instance->primitive, connection->port)) driven = 1;
 				}
 			}
 			for (size_t e = 0; !driven && e < rtl->equation_count; e++)
-				if (rtl->equations[e].destination.index == targets[t].index) driven = 1;
+				if (pigen_rtl_equation_drives_object(rtl, (pigen_rtl_equation_id){(uint32_t)e}, targets[t])) driven = 1;
+			for (size_t p = 0; !driven && p < rtl->process_count; p++)
+				if (rtl->processes[p].module.index==owner.index &&
+					pigen_rtl_process_drives_object(rtl,(pigen_rtl_process_id){(uint32_t)p},targets[t])) driven=1;
 			for (size_t u = 0; !driven && u < rtl->update_count; u++)
 				if (rtl->updates[u].destination.index == targets[t].index) driven = 1;
 			if (driven) continue;
@@ -3445,6 +4396,295 @@ int pigen_lower_rtl_endpoint_defaults(pigen_rtl_lowering *lowering,
  * invalid return is the owner's rejection path only: a failure may leave
  * partial state behind and is not a rollback contract
  * (how/should/compiler/builders/fail.md). */
+static int lower_specialization_parameters(pigen_rtl_lowering *lowering,pigen_module_id module)
+{
+	pigen_semantic_model *sem=lowering->semantics;pigen_rtl_model *rtl=lowering->rtl;
+	const pigen_semantic_module *owner=pigen_module_get(sem,module);
+	if(owner->specialization_of.index==PIGEN_INVALID_ID) return 0;
+	pigen_rtl_module_id target=rtl_module_for_semantic(rtl,sem,module);
+	for(size_t i=0;i<sem->parameter_count;i++)
+	{
+		const pigen_semantic_parameter *parameter=&sem->parameters[i];
+		if(parameter->module.index!=module.index) continue;
+		const pigen_symbol *symbol=pigen_symbol_get(sem,parameter->symbol);
+		if(symbol->scope.index!=owner->scope.index) continue;
+		int exists=0;
+		for(size_t j=0;j<rtl->object_count;j++)
+			if(rtl->objects[j].module.index==target.index && rtl->objects[j].kind==PIGEN_RTL_OBJECT_PARAMETER &&
+				rtl->objects[j].origin.source.index==symbol->name.source.index &&
+				rtl->objects[j].origin.start==symbol->name.start && rtl->objects[j].origin.end==symbol->name.end) exists=1;
+		if(exists) continue;
+		pigen_rtl_type_id type=pigen_lower_rtl_type(lowering,symbol->data_type);
+		pigen_rtl_expr_id value=pigen_lower_rtl_expression(lowering,pigen_expr_constant(sem,parameter->value));
+		if(type.index==PIGEN_INVALID_ID || value.index==PIGEN_INVALID_ID) return -1;
+		pigen_rtl_object_id object=pigen_rtl_object_add_with_owner(rtl,target,PIGEN_RTL_OBJECT_PARAMETER,type,
+			PIGEN_SEMANTIC_INTERNAL,(pigen_signal_id){PIGEN_INVALID_ID},symbol->name);
+		if(object.index==PIGEN_INVALID_ID) return -1;
+		rtl->objects[object.index].initial_value=value;
+		size_t length=0;const char *name=pigen_source_span_text(sem->sources,symbol->name,&length);
+		if(!name) return -1;
+		char *copy=pigen_copy_range(name,length);pigen_rtl_set_name(rtl,&rtl->objects[object.index].name,copy);free(copy);
+	}
+	return 0;
+}
+
+/* External source paths use selected scope metadata; emitted spellings remain
+ * the resolved RTL names. Keep the relation explicit instead of parsing names. */
+static char *source_scope_path(const pigen_semantic_model *sem,pigen_module_id module,pigen_scope_id scope)
+{
+	const pigen_semantic_module *owner=pigen_module_get(sem,module);
+	if(!owner) return NULL;
+	const pigen_semantic_generate_scope **parents=pigen_resize(NULL,(sem->generate_scope_count+1)*sizeof(*parents));
+	size_t count=0,depth=0;
+	while(scope.index!=owner->scope.index)
+	{
+		const pigen_scope *current=pigen_scope_get(sem,scope);
+		if(!current || depth++>=sem->scope_count) {free(parents);return NULL;}
+		for(size_t i=0;i<sem->generate_scope_count;i++)
+			if(sem->generate_scopes[i].scope.index==scope.index) parents[count++]=&sem->generate_scopes[i];
+		scope=current->parent;
+	}
+	pigen_string path={0};
+	for(size_t i=count;i>0;i--)
+	{
+		const pigen_semantic_generate_scope *part=parents[i-1];
+		if(!part->external_name) {free(parents);free(path.data);return NULL;}
+		if(path.length) pigen_append(&path,".");
+		pigen_append(&path,part->external_name);
+		if(part->is_iteration) pigen_append_format(&path,"[%lld]",(long long)part->index);
+	}
+	free(parents);return path.data ? path.data : pigen_copy_range("",0);
+}
+
+static char *source_symbol_path(const pigen_semantic_model *sem,pigen_module_id module,pigen_symbol_id id)
+{
+	const pigen_symbol *symbol=pigen_symbol_get(sem,id);
+	size_t length=0;const char *name=symbol ? pigen_source_span_text(sem->sources,symbol->name,&length) : NULL;
+	char *scope=symbol ? source_scope_path(sem,module,symbol->scope) : NULL;
+	if(!name || !scope) {free(scope);return NULL;}
+	pigen_string path={0};pigen_append(&path,scope);free(scope);
+	if(path.length) pigen_append(&path,".");
+	pigen_append_range(&path,name,length);return path.data;
+}
+
+static char *source_endpoint_path(const pigen_semantic_model *sem,pigen_protocol_endpoint_id id,size_t depth)
+{
+	const pigen_semantic_protocol_endpoint *endpoint=pigen_protocol_endpoint_get(sem,id);
+	if(!endpoint || depth>sem->instance_count+1) return NULL;
+	if(endpoint->is_instance_view)
+	{
+		const pigen_semantic_instance *instance=pigen_instance_get(sem,endpoint->instance);
+		char *parent=instance ? source_symbol_path(sem,endpoint->module,instance->symbol) : NULL;
+		char *child=source_endpoint_path(sem,endpoint->child_endpoint,depth+1);
+		if(!parent || !child) {free(parent);free(child);return NULL;}
+		pigen_string path={0};pigen_append(&path,parent);pigen_append(&path,".");pigen_append(&path,child);
+		free(parent);free(child);return path.data;
+	}
+	size_t ordinal=0;
+	const pigen_semantic_protocol_array *array=pigen_protocol_array_get(sem,pigen_protocol_array_for_endpoint(sem,id,&ordinal));
+	char *base=source_symbol_path(sem,endpoint->module,array ? array->symbol : endpoint->symbol);
+	if(!base) return NULL;
+	pigen_string path={0};pigen_append(&path,base);free(base);
+	if(array)
+	{
+		size_t stride=array->element_count;
+		for(size_t d=0;d<array->dimension_count;d++)
+		{
+			const pigen_protocol_array_dimension *dimension=&sem->protocol_array_dimensions[array->first_dimension+d];
+			stride/=dimension->count;
+			uint64_t offset=ordinal/stride;ordinal%=stride;
+			uint64_t coordinate=dimension->left>=dimension->right ? (uint64_t)dimension->left-offset : (uint64_t)dimension->left+offset;
+			if(coordinate>INT64_MAX) pigen_append_format(&path,"[-%llu]",(unsigned long long)(UINT64_C(0)-coordinate));
+			else pigen_append_format(&path,"[%llu]",(unsigned long long)coordinate);
+		}
+	}
+	return path.data;
+}
+
+static char *source_signal_path(const pigen_semantic_model *sem,pigen_signal_id id)
+{
+	const pigen_semantic_signal *signal=pigen_signal_get(sem,id);
+	if(!signal) return NULL;
+	pigen_protocol_channel channel;
+	pigen_protocol_endpoint_id endpoint=pigen_protocol_endpoint_for_signal(sem,id,&channel);
+	if(endpoint.index==PIGEN_INVALID_ID)
+	{
+		for(size_t i=0;i<sem->instance_count;i++)
+			for(size_t c=0;c<sem->instances[i].connection_count;c++)
+			{
+				const pigen_semantic_instance_connection *connection=&sem->instance_connections[sem->instances[i].first_connection+c];
+				if(connection->endpoint_view.index!=id.index) continue;
+				const pigen_symbol *port=pigen_symbol_get(sem,connection->port_symbol);
+				char *parent=source_symbol_path(sem,signal->module,sem->instances[i].symbol);
+				size_t length=0;const char *name=port ? pigen_source_span_text(sem->sources,port->name,&length) : NULL;
+				if(!parent || !name) {free(parent);return NULL;}
+				pigen_string path={0};pigen_append(&path,parent);pigen_append(&path,".");pigen_append_range(&path,name,length);
+				free(parent);return path.data;
+			}
+		return source_symbol_path(sem,signal->module,signal->symbol);
+	}
+	char *base=source_endpoint_path(sem,endpoint,0);
+	if(!base) return NULL;
+	pigen_string path={0};pigen_append(&path,base);free(base);
+	pigen_append(&path,".");pigen_append(&path,pigen_protocol_channel_name(channel));return path.data;
+}
+
+static int source_object_reference(pigen_rtl_lowering *lowering,pigen_rtl_module_id module,
+	pigen_signal_id signal,pigen_rtl_source_role role,pigen_rtl_object_id object,const char *path)
+{
+	if(object.index==PIGEN_INVALID_ID) return 1;
+	const pigen_rtl_object *target=pigen_rtl_object_get(lowering->rtl,object);
+	const pigen_semantic_signal *source=pigen_signal_get(lowering->semantics,signal);
+	const pigen_symbol *symbol=source ? pigen_symbol_get(lowering->semantics,source->symbol) : NULL;
+	if(!target || !target->name || !symbol) return 0;
+	pigen_rtl_source_reference reference={.role=role,.module=module,.scope=symbol->scope,
+		.signal=signal,.object=object,.instance={PIGEN_INVALID_ID},.source_path=(char*)path,.emitted_name=target->name};
+	return pigen_rtl_source_reference_add(lowering->rtl,&reference)!=SIZE_MAX;
+}
+
+static pigen_rtl_object_id source_control_object(const pigen_rtl_model *rtl,pigen_rtl_expr_id id)
+{
+	const pigen_rtl_expr *expression=pigen_rtl_expr_get(rtl,id);
+	return expression && expression->kind==PIGEN_RTL_EXPR_OBJECT ? expression->object : (pigen_rtl_object_id){PIGEN_INVALID_ID};
+}
+
+static char *source_instance_port_path(pigen_rtl_lowering *lowering,
+	const pigen_semantic_instance *instance,const char *port)
+{
+	pigen_semantic_model *sem=lowering->semantics;
+	char *base=source_symbol_path(sem,instance->module,instance->symbol);
+	if(!base) return NULL;
+	char *suffix=NULL;
+	for(size_t e=0;e<sem->protocol_endpoint_count && !suffix;e++)
+	{
+		const pigen_semantic_protocol_endpoint *endpoint=&sem->protocol_endpoints[e];
+		if(endpoint->module.index!=instance->child_module.index || !endpoint->is_port) continue;
+		const pigen_protocol *protocol=pigen_protocol_type_get(sem,endpoint->type);
+		char *pin_base=protocol_port_base(sem,(pigen_protocol_endpoint_id){(uint32_t)e});
+		if(!pin_base) {free(base);return NULL;}
+		for(pigen_protocol_channel channel=0;channel<PIGEN_CHANNEL_COUNT && !suffix;channel++)
+		{
+			pigen_protocol_channel_layout layout;
+			if(!pigen_protocol_layout(protocol,channel,&layout)) continue;
+			for(size_t f=0;f<layout.field_count+2 && !suffix;f++)
+			{
+				const char *field=f<layout.field_count ? pigen_protocol_field_name(layout.fields[f].field) : f==layout.field_count ? "valid" : "ready";
+				pigen_string pin={0};pigen_append(&pin,pin_base);pigen_append(&pin,"_");
+				pigen_append(&pin,channel==PIGEN_CHANNEL_BEAT ? "t" : pigen_protocol_channel_name(channel));pigen_append(&pin,field);
+				int match=!strcmp(pin.data,port);free(pin.data);
+				if(match)
+				{
+					char *endpoint_path=source_endpoint_path(sem,(pigen_protocol_endpoint_id){(uint32_t)e},0);
+					if(!endpoint_path) {free(pin_base);free(base);return NULL;}
+					pigen_string path={0};pigen_append(&path,endpoint_path);free(endpoint_path);
+					pigen_append(&path,".");pigen_append(&path,pigen_protocol_channel_name(channel));pigen_append(&path,".");pigen_append(&path,field);
+					suffix=path.data;
+				}
+			}
+		}
+		free(pin_base);
+	}
+	pigen_string path={0};pigen_append(&path,base);pigen_append(&path,".");pigen_append(&path,suffix ? suffix : port);
+	free(base);free(suffix);return path.data;
+}
+
+static int lower_retained_observations(pigen_rtl_lowering *lowering,pigen_module_id module,pigen_rtl_module_id rtl_module)
+{
+ pigen_semantic_model *sem=lowering->semantics;
+ if(!lowering->retained_observation_objects && sem->retained_observation_count)
+ {
+  lowering->retained_observation_count=sem->retained_observation_count;
+  lowering->retained_observation_objects=pigen_resize(NULL,sem->retained_observation_count*sizeof(pigen_rtl_object_id));
+  for(size_t i=0;i<sem->retained_observation_count;i++) lowering->retained_observation_objects[i]=(pigen_rtl_object_id){PIGEN_INVALID_ID};
+ }
+ for(size_t i=0;i<sem->retained_observation_count;i++)
+ {
+  const pigen_semantic_retained_observation *use=&sem->retained_observations[i];
+  if(use->module.index!=module.index || lowering->retained_observation_objects[i].index!=PIGEN_INVALID_ID) continue;
+  const pigen_semantic_expr *value=pigen_expr_get(sem,use->value);
+  if(!value) return 0;
+  pigen_source_span span=value->span;
+  pigen_data_type_id data_type=value->data_type;
+  pigen_rtl_expr_id expression=lower_expr(lowering,use->value);
+  pigen_rtl_type_id type=pigen_lower_rtl_type(lowering,data_type);
+  if(expression.index==PIGEN_INVALID_ID || type.index==PIGEN_INVALID_ID) return 0;
+  pigen_rtl_object_id object=pigen_rtl_object_add_with_owner(lowering->rtl,rtl_module,
+   PIGEN_RTL_OBJECT_VARIABLE,type,PIGEN_SEMANTIC_INTERNAL,(pigen_signal_id){PIGEN_INVALID_ID},span);
+  char name[80];snprintf(name,sizeof name,"__pigen_retained_observation_%u",object.index);
+  if(object.index==PIGEN_INVALID_ID || !name_object(lowering,object,pigen_copy_range(name,strlen(name))) ||
+   pigen_rtl_equation_add_with_owner(lowering->rtl,rtl_module,object,expression,span).index==PIGEN_INVALID_ID) return 0;
+  lowering->retained_observation_objects[i]=object;
+ }
+ return 1;
+}
+
+static int lower_source_references(pigen_rtl_lowering *lowering,pigen_module_id module,pigen_rtl_module_id rtl_module)
+{
+	pigen_semantic_model *sem=lowering->semantics;pigen_rtl_model *rtl=lowering->rtl;
+	for(size_t i=0;i<sem->generate_scope_count;i++)
+	{
+		const pigen_semantic_generate_scope *scope=&sem->generate_scopes[i];
+		if(scope->module.index!=module.index) continue;
+		char *path=source_scope_path(sem,module,scope->scope);
+		char prefix[64];snprintf(prefix,sizeof prefix,"__pigen_scope_%u_",scope->scope.index);
+		pigen_rtl_source_reference reference={.role=PIGEN_RTL_SOURCE_SCOPE,.module=rtl_module,.scope=scope->scope,
+			.signal={PIGEN_INVALID_ID},.object={PIGEN_INVALID_ID},.instance={PIGEN_INVALID_ID},.source_path=path,.emitted_name=prefix};
+		int ok=pigen_rtl_source_reference_add(rtl,&reference)!=SIZE_MAX;free(path);if(!ok) return 0;
+	}
+	for(size_t i=0;i<sem->signal_count;i++)
+	{
+		if(sem->signals[i].module.index!=module.index || i>=lowering->lowered_endpoint_count) continue;
+		pigen_rtl_signal_endpoints endpoints=lowering->lowered_endpoints[i];
+		if(endpoints.payload.index==PIGEN_INVALID_ID) continue;
+		pigen_signal_id signal={(uint32_t)i};char *path=source_signal_path(sem,signal);
+		if(!path) return 0;
+		pigen_rtl_object_id objects[]={endpoints.payload,source_control_object(rtl,endpoints.valid),source_control_object(rtl,endpoints.ready),
+			endpoints.source_ready,endpoints.input_payload,endpoints.input_valid,endpoints.input_ready};
+		pigen_rtl_source_role roles[]={PIGEN_RTL_SOURCE_VALUE,PIGEN_RTL_SOURCE_VALID,PIGEN_RTL_SOURCE_READY,
+			PIGEN_RTL_SOURCE_READY,PIGEN_RTL_SOURCE_INPUT_VALUE,PIGEN_RTL_SOURCE_INPUT_VALID,PIGEN_RTL_SOURCE_INPUT_READY};
+		int ok=1;
+		for(size_t j=0;j<sizeof objects/sizeof *objects && ok;j++) ok=source_object_reference(lowering,rtl_module,signal,roles[j],objects[j],path);
+		free(path);if(!ok) return 0;
+	}
+	for(size_t i=0;i<lowering->protocol_port_count;i++)
+	{
+		const pigen_rtl_protocol_channel_ports *ports=&lowering->protocol_ports[i];
+		const pigen_semantic_protocol_endpoint *endpoint=pigen_protocol_endpoint_get(sem,ports->endpoint);
+		if(endpoint->module.index!=module.index) continue;
+		pigen_signal_id signal=endpoint->channels[ports->channel];char *path=source_signal_path(sem,signal);
+		if(!path) return 0;
+		int ok=source_object_reference(lowering,rtl_module,signal,PIGEN_RTL_SOURCE_VALID,ports->valid,path) &&
+			source_object_reference(lowering,rtl_module,signal,PIGEN_RTL_SOURCE_READY,ports->ready,path);
+		for(size_t f=0;f<PIGEN_FIELD_COUNT && ok;f++) if(ports->fields[f].index!=PIGEN_INVALID_ID)
+		{
+			pigen_string field={0};pigen_append(&field,path);pigen_append(&field,".");pigen_append(&field,pigen_protocol_field_name((pigen_protocol_field)f));
+			ok=source_object_reference(lowering,rtl_module,signal,PIGEN_RTL_SOURCE_FIELD,ports->fields[f],field.data);free(field.data);
+		}
+		free(path);if(!ok) return 0;
+	}
+	for(size_t i=0;i<rtl->instance_count;i++)
+	{
+		const pigen_rtl_instance *instance=&rtl->instances[i];
+		if(instance->module.index!=rtl_module.index || !instance->definition) continue;
+		const pigen_semantic_instance *source=pigen_instance_get(sem,instance->semantic_instance);
+		const pigen_symbol *symbol=source ? pigen_symbol_get(sem,source->symbol) : NULL;
+		char *path=source ? source_symbol_path(sem,module,source->symbol) : NULL;
+		if(!symbol || !path || !instance->name) {free(path);return 0;}
+		pigen_rtl_source_reference reference={.role=PIGEN_RTL_SOURCE_INSTANCE,.module=rtl_module,.scope=symbol->scope,
+			.signal={PIGEN_INVALID_ID},.object={PIGEN_INVALID_ID},.instance={(uint32_t)i},.source_path=path,.emitted_name=instance->name};
+		int ok=pigen_rtl_source_reference_add(rtl,&reference)!=SIZE_MAX;free(path);if(!ok) return 0;
+		for(size_t c=0;c<instance->connection_records.count;c++)
+		{
+			const pigen_rtl_connection *connection=&rtl->connections[instance->connection_records.first+c];
+			path=source_instance_port_path(lowering,source,connection->port);
+			pigen_string emitted={0};pigen_append(&emitted,instance->name);pigen_append(&emitted,".");pigen_append(&emitted,connection->port);
+			reference.role=PIGEN_RTL_SOURCE_INSTANCE_PORT;reference.source_path=path;reference.emitted_name=emitted.data;
+			ok=pigen_rtl_source_reference_add(rtl,&reference)!=SIZE_MAX;free(path);free(emitted.data);if(!ok) return 0;
+		}
+	}
+	return 1;
+}
+
 pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
 	pigen_module_id module)
 {
@@ -3457,10 +4697,13 @@ pigen_rtl_module_id pigen_lower_rtl_module(pigen_rtl_lowering *lowering,
 	if (module.index == PIGEN_INVALID_ID ||
 		!pigen_module_get(lowering->semantics, module))
 		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
+	if (pigen_lower_rtl_generated_instances(lowering,module)!=0 || lower_specialization_parameters(lowering,module)!=0)
+		return (pigen_rtl_module_id){PIGEN_INVALID_ID};
 	rtl = lowering->rtl;
 	rtl_module = rtl_module_for_semantic(rtl, lowering->semantics, module);
 	if (rtl_module.index == PIGEN_INVALID_ID)
 		return rtl_module;
+	if(!lower_retained_observations(lowering,module,rtl_module) || !lower_source_references(lowering,module,rtl_module)) return (pigen_rtl_module_id){PIGEN_INVALID_ID};
 	record = pigen_rtl_module_get(rtl, rtl_module);
 	if (!record)
 		return (pigen_rtl_module_id){PIGEN_INVALID_ID};

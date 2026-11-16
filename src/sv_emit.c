@@ -78,6 +78,7 @@ struct buf {
 	size_t length;
 	size_t capacity;
 	int failed;
+	int rendering_lvalue;
 };
 
 static void buf_append(struct buf *b, const char *text, size_t length)
@@ -221,6 +222,16 @@ static int render_expression_level(const pigen_rtl_model *rtl,
 static int render(struct buf *b, const pigen_rtl_model *rtl,
 	const pigen_rtl_expr *expr);
 
+static int render_as(struct buf *b, const pigen_rtl_model *rtl,
+	const pigen_rtl_expr *expr, int lvalue)
+{
+	int saved = b->rendering_lvalue;
+	b->rendering_lvalue = lvalue;
+	int result = render(b, rtl, expr);
+	b->rendering_lvalue = saved;
+	return result;
+}
+
 static void buf_append_ull(struct buf *b, unsigned long long value)
 {
 	char digits[24];
@@ -235,6 +246,37 @@ static void buf_append_ull(struct buf *b, unsigned long long value)
 	}
 	while (length)
 		buf_append(b, digits + --length, 1);
+}
+
+/* Preserve the child's intrinsic width before a surrounding size context. */
+static void render_at_width(struct buf *b, const pigen_rtl_model *rtl,
+    const pigen_rtl_expr *expr, uint64_t width)
+{
+    const pigen_rtl_type *type = pigen_rtl_type_get(rtl, expr->type);
+    if (!type) { b->failed = 1; return; }
+    buf_append_str(b, type->signedness == PIGEN_SIGN_SIGNED ? "signed'(" : "unsigned'(");
+    buf_append_ull(b, width); buf_append_str(b, "'(");
+    if (width != type->width && (expr->kind == PIGEN_RTL_EXPR_BINARY ||
+        expr->kind == PIGEN_RTL_EXPR_UNARY || expr->kind == PIGEN_RTL_EXPR_CONDITIONAL))
+    {
+        buf_append_ull(b, type->width); buf_append_str(b, "'(");
+        render(b, rtl, expr); buf_append_str(b, ")");
+    }
+    else render(b, rtl, expr);
+    buf_append_str(b, "))");
+}
+
+/* Concatenation operands are self-determined. In particular, semantic
+ * integer values must not become unsized decimal literals here. */
+static void render_evaluated_operand(struct buf *b, const pigen_rtl_model *rtl,
+    const pigen_rtl_expr *expr, size_t index)
+{
+    const pigen_rtl_expr *child=pigen_rtl_expr_get(rtl,
+        rtl->expression_children[expr->first_child+index]);
+    const pigen_rtl_type *type=child ? pigen_rtl_type_get(rtl,child->type) : NULL;
+    if(!type) {b->failed=1;return;}
+    if(type->width) render_at_width(b,rtl,child,type->width);
+    else render(b,rtl,child);
 }
 
 static int render_children(struct buf *b, const pigen_rtl_model *rtl,
@@ -427,6 +469,32 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 			b->failed = 1;
 			return -1;
 		}
+        {
+            const pigen_rtl_type *type = pigen_rtl_type_get(rtl, expr->type);
+            const pigen_rtl_type *lt = pigen_rtl_type_get(rtl, left->type);
+            const pigen_rtl_type *rt = pigen_rtl_type_get(rtl, right->type);
+            pigen_binary_operator kind = expr->as.binary.resolution.operation.operator;
+            int comparison = kind >= PIGEN_BINARY_LESS && kind <= PIGEN_BINARY_WILDCARD_NOT_EQUAL;
+            int logical = kind == PIGEN_BINARY_LOGICAL_AND || kind == PIGEN_BINARY_LOGICAL_OR;
+            int count_operand = kind == PIGEN_BINARY_POWER ||
+                (kind >= PIGEN_BINARY_SHIFT_LEFT && kind <= PIGEN_BINARY_ARITH_SHIFT_RIGHT);
+            uint64_t working = comparison ? (lt && rt && lt->width > rt->width ? lt->width : rt ? rt->width : 0) : type ? type->width : 0;
+            if (type && lt && rt && !logical &&
+                (lt->width != working || (!count_operand && rt->width != working)))
+            {
+                if (!comparison)
+                {
+                    buf_append_str(b, type->signedness == PIGEN_SIGN_SIGNED ? "signed'(" : "unsigned'(");
+                    buf_append_ull(b, working); buf_append_str(b, "'(");
+                }
+                render_at_width(b, rtl, left, working);
+                buf_append_str(b, op->text);
+                if (count_operand) render(b, rtl, right);
+                else render_at_width(b, rtl, right, working);
+                if (!comparison) buf_append_str(b, "))");
+                return b->failed ? -1 : 0;
+            }
+        }
 		left_level = render_expression_level(rtl, left);
 		right_level = render_expression_level(rtl, right);
 		level = op->level;
@@ -541,7 +609,6 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 			pigen_rtl_type_get(rtl, expr->type);
 		const pigen_rtl_expr *operand;
 		int is_signed;
-		pigen_conversion_kind conversion_kind;
 
 		if (!type)
 		{
@@ -556,30 +623,45 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 			return -1;
 		}
 		is_signed = type->signedness == PIGEN_SIGN_SIGNED;
-		conversion_kind = expr->as.conversion.conversion.kind;
-		if (conversion_kind == PIGEN_CONVERSION_INTEGER_RESIZE)
+		if (expr->as.conversion.conversion.kind==PIGEN_CONVERSION_FOUR_TO_TWO)
 		{
-			/* A signedness resize carries no width: the target cast
-			 * applies directly to the operand. */
-			if (is_signed)
-				buf_append_str(b, "signed'(");
-			else
-				buf_append_str(b, "unsigned'(");
-			render(b, rtl, operand);
-			if (b->failed)
-				return -1;
-			buf_append_str(b, ")");
-			return 0;
+			const pigen_rtl_type *source=pigen_rtl_type_get(rtl,operand->type);
+			if (!source || !source->width || !type->width) {b->failed=1;return -1;}
+			buf_append_str(b,is_signed ? "signed'({" : "unsigned'({");
+			/* Built-in two-state integer casts clear X/Z before a surrounding
+			 * expression uses the value. Chunking avoids duplicating a nested
+			 * conversion once per bit, without aliases that would move reads. */
+			for(uint64_t remaining=type->width;remaining>0;)
+			{
+				uint64_t chunk=remaining%64 ? remaining%64 : 64;
+				remaining-=chunk;
+				if (remaining+chunk!=type->width) buf_append_str(b,", ");
+				buf_append_ull(b,chunk);buf_append_str(b,chunk<=32 ? "'(int'(" : "'(longint'(");
+				uint64_t work=chunk<=32 ? 32 : 64;
+				if (work<type->width) work=type->width;
+				buf_append_ull(b,work);buf_append_str(b,"'(");
+				buf_append_ull(b,type->width);buf_append_str(b,"'(");
+				render_at_width(b,rtl,operand,source->width);
+				buf_append_str(b,")) >> ");buf_append_ull(b,remaining);buf_append_str(b,"))");
+			}
+			buf_append_str(b,"})");return b->failed ? -1 : 0;
 		}
-		/* Every other kind renders the target's full cast on the
-		 * operand. */
+		/* Resizing must carry the owner's width as well as signedness. A
+		 * sign-only cast leaves the operand width context-dependent. */
 		if (is_signed)
 			buf_append_str(b, "signed'(");
 		else
 			buf_append_str(b, "unsigned'(");
 		buf_append_ull(b, (unsigned long long)type->width);
 		buf_append_str(b, "'(");
-		render(b, rtl, operand);
+        {
+            const pigen_rtl_type *source = pigen_rtl_type_get(rtl, operand->type);
+            if (source && source->width != type->width &&
+                (operand->kind == PIGEN_RTL_EXPR_BINARY || operand->kind == PIGEN_RTL_EXPR_UNARY ||
+                 operand->kind == PIGEN_RTL_EXPR_CONDITIONAL))
+                render_at_width(b, rtl, operand, source->width);
+            else render(b, rtl, operand);
+        }
 		if (b->failed)
 			return -1;
 		buf_append_str(b, "))");
@@ -601,13 +683,13 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 		}
 		if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
 			buf_append_str(b, "(");
-		render(b, rtl, base);
+		render_as(b, rtl, base, b->rendering_lvalue || base->kind == PIGEN_RTL_EXPR_SELECT);
 		if (b->failed)
 			return -1;
 		if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
 			buf_append_str(b, ")");
 		buf_append_str(b, "[");
-		render(b, rtl, index);
+		render_as(b, rtl, index, 0);
 		if (b->failed)
 			return -1;
 		buf_append_str(b, "]");
@@ -619,6 +701,9 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 		const pigen_rtl_expr *left;
 		const pigen_rtl_expr *right;
 		pigen_select_kind kind;
+		const pigen_rtl_type *selected_type = pigen_rtl_type_get(rtl, expr->type);
+		int signed_value = !b->rendering_lvalue && selected_type &&
+			selected_type->signedness == PIGEN_SIGN_SIGNED;
 
 		base = pigen_rtl_expr_get(rtl,
 			rtl->expression_children[expr->first_child]);
@@ -632,15 +717,24 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 			return -1;
 		}
 		kind = expr->as.select.kind;
+		if (signed_value) buf_append_str(b, "signed'(");
 		if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
 			buf_append_str(b, "(");
-		render(b, rtl, base);
+		render_as(b, rtl, base, b->rendering_lvalue || base->kind == PIGEN_RTL_EXPR_SELECT);
 		if (b->failed)
 			return -1;
 		if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
 			buf_append_str(b, ")");
+		if (expr->as.select.member_name)
+		{
+			buf_append_str(b,".");
+			buf_append_str(b,expr->as.select.member_name);
+			if (expr->as.select.member_name[0] == '\\') buf_append_str(b," ");
+			if (signed_value) buf_append_str(b,")");
+			return b->failed ? -1 : 0;
+		}
 		buf_append_str(b, "[");
-		render(b, rtl, left);
+		render_as(b, rtl, left, 0);
 		if (b->failed)
 			return -1;
 		if (kind == PIGEN_SEMANTIC_SELECT_RANGE)
@@ -651,22 +745,38 @@ static int render(struct buf *b, const pigen_rtl_model *rtl,
 			buf_append_str(b, " -: ");
 		if (kind != PIGEN_SEMANTIC_SELECT_RANGE)
 		{
-			render(b, rtl, right);
+			render_as(b, rtl, right, 0);
 			if (b->failed)
 				return -1;
 		}
 		else
 		{
-			render(b, rtl, right);
+			render_as(b, rtl, right, 0);
 			if (b->failed)
 				return -1;
 		}
 		buf_append_str(b, "]");
+		if (signed_value) buf_append_str(b, ")");
 		return 0;
 	}
+	case PIGEN_RTL_EXPR_EVALUATED_VALUE:
+	{
+		if(expr->child_count!=2) return -1;
+		const pigen_rtl_type *type=pigen_rtl_type_get(rtl,expr->type);
+		if(!type || (!type->width && type->width_expression.index==PIGEN_INVALID_ID) || (expr->as.evaluation.before!=0 && expr->as.evaluation.before!=1)) return -1;
+		if(type->signedness==PIGEN_SIGN_SIGNED) buf_append_str(b,"$signed(");
+		buf_append_str(b,"{");
+		if(!expr->as.evaluation.before) {render_evaluated_operand(b,rtl,expr,0);buf_append_str(b,",");}
+		buf_append_str(b,"{0{");render_evaluated_operand(b,rtl,expr,1);buf_append_str(b,"}}");
+		if(expr->as.evaluation.before) {buf_append_str(b,",");render_evaluated_operand(b,rtl,expr,0);}
+		buf_append_str(b,"}");
+		if(type->signedness==PIGEN_SIGN_SIGNED) buf_append_str(b,")");
+		return b->failed ? -1 : 0;
+	}
+	case PIGEN_RTL_EXPR_ARRAY_PATTERN:
 	case PIGEN_RTL_EXPR_CONCATENATION:
 	{
-		buf_append_str(b, "{");
+		buf_append_str(b, expr->kind==PIGEN_RTL_EXPR_ARRAY_PATTERN ? "'{" : "{");
 		if (!render_children(b, rtl, expr, expr->child_count,
 			PRC_STRUCT, ","))
 			return -1;
@@ -685,6 +795,8 @@ static int render_expression_level(const pigen_rtl_model *rtl,
 	(void)rtl;
 	switch (expr->kind)
 	{
+	case PIGEN_RTL_EXPR_EVALUATED_VALUE:
+	case PIGEN_RTL_EXPR_ARRAY_PATTERN:
 	case PIGEN_RTL_EXPR_CONCATENATION:
 	case PIGEN_RTL_EXPR_INDEX:
 	case PIGEN_RTL_EXPR_SELECT:
@@ -747,8 +859,16 @@ static int emit_expr(struct buf *b, const pigen_rtl_model *rtl,
 	return render(b, rtl, expr);
 }
 
-/* Copy an opaque span's text verbatim from the source manager (byte-exact, no
- * trim, no re-parse). */
+static int emit_lvalue(struct buf *b, const pigen_rtl_model *rtl, pigen_rtl_expr_id id)
+{
+	b->rendering_lvalue = 1;
+	int result = emit_expr(b, rtl, id);
+	b->rendering_lvalue = 0;
+	return result;
+}
+
+/* Opaque spans remain byte-exact. Retained items may carry text prepared by
+ * the output owner, just as retained items inside a module do. */
 static int emit_opaque(struct buf *b, const pigen_source_manager *sources,
 	const pigen_output_item *item)
 {
@@ -757,9 +877,11 @@ static int emit_opaque(struct buf *b, const pigen_source_manager *sources,
 
 	if (!pigen_source_span_valid(sources, item->as.span))
 		return -1;
-	text = pigen_source_span_text(sources, item->as.span, &length);
+	text = item->kind==PIGEN_OUTPUT_RETAINED && item->text ? item->text :
+		pigen_source_span_text(sources, item->as.span, &length);
 	if (!text)
 		return -1;
+	if(item->kind==PIGEN_OUTPUT_RETAINED && item->text) length=strlen(text);
 	buf_append(b, text, length);
 	return b->failed ? -1 : 0;
 }
@@ -822,6 +944,11 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 		return -1;
 
 	buf_append_str(b, "  ");
+	if (object->kind == PIGEN_RTL_OBJECT_PARAMETER)
+	{
+		if (is_port) return -1;
+		buf_append_str(b, "localparam ");
+	}
 	if (is_port)
 	{
 		switch (object->direction)
@@ -843,34 +970,44 @@ static int emit_object(struct buf *b, const pigen_rtl_model *rtl,
 			buf_append_str(b, " ");
 		buf_append_str(b, " ");
 	}
-	switch ((pigen_sv_integer_keyword)type->sv_keyword)
+	if (object->declaration_type)
+		buf_append_str(b, object->declaration_type);
+	else
 	{
-		case PIGEN_SV_INTEGER_BYTE: buf_append_str(b, "byte"); break;
-		case PIGEN_SV_INTEGER_INTEGER: buf_append_str(b, "integer"); break;
-		case PIGEN_SV_INTEGER_SHORTINT: buf_append_str(b, "shortint"); break;
-		case PIGEN_SV_INTEGER_LONGINT: buf_append_str(b, "longint"); break;
-		case PIGEN_SV_INTEGER_TIME: buf_append_str(b, "time"); break;
-		default:
+		switch ((pigen_sv_integer_keyword)type->sv_keyword)
 		{
-			const char *base = type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
-				"bit" : "logic";
+			case PIGEN_SV_INTEGER_BYTE: buf_append_str(b, "byte"); break;
+			case PIGEN_SV_INTEGER_INTEGER: buf_append_str(b, "integer"); break;
+			case PIGEN_SV_INTEGER_SHORTINT: buf_append_str(b, "shortint"); break;
+			case PIGEN_SV_INTEGER_LONGINT: buf_append_str(b, "longint"); break;
+			case PIGEN_SV_INTEGER_TIME: buf_append_str(b, "time"); break;
+			default:
+			{
+				const char *base = type->state_domain == PIGEN_DATA_TYPE_STATE_TWO ?
+					"bit" : "logic";
 
-			buf_append_str(b, base);
-			if (type->signedness == PIGEN_SIGN_SIGNED)
-				buf_append_str(b, " signed");
-			break;
+				buf_append_str(b, base);
+				if (type->signedness == PIGEN_SIGN_SIGNED)
+					buf_append_str(b, " signed");
+				break;
+			}
 		}
-	}
-	if (type_has_range(type))
-	{
-		buf_append_str(b, " ");
-		if (emit_range(b, rtl, type) != 0)
-			return -1;
+		if (type_has_range(type))
+		{
+			buf_append_str(b, " ");
+			if (emit_range(b, rtl, type) != 0)
+				return -1;
+		}
 	}
 	buf_append_str(b, " ");
 	buf_append_str(b, name);
 	if (object->shape)
 		buf_append_str(b, object->shape);
+	if (object->initial_value.index != PIGEN_INVALID_ID)
+	{
+		buf_append_str(b, " = ");
+		if (emit_expr(b, rtl, object->initial_value) != 0) return -1;
+	}
 	if (is_port)
 		buf_append_str(b, comma ? "," : "");
 	else
@@ -915,6 +1052,10 @@ static const char *primitive_name(pigen_rtl_primitive primitive)
 	case PIGEN_RTL_PRIMITIVE_SKID: return "pigen_skid";
 	case PIGEN_RTL_PRIMITIVE_MERGE2: return "pigen_merge2";
 	case PIGEN_RTL_PRIMITIVE_MERGE: return "pigen_merge";
+	case PIGEN_RTL_PRIMITIVE_AXIS_MERGE: return "pigen_axis_merge";
+	case PIGEN_RTL_PRIMITIVE_AXIS_DEMUX: return "pigen_axis_demux";
+	case PIGEN_RTL_PRIMITIVE_AXI_MERGE: return "pigen_axi_merge";
+	case PIGEN_RTL_PRIMITIVE_AXI_DEMUX: return "pigen_axi_demux";
 	default: return NULL;
 	}
 }
@@ -934,6 +1075,8 @@ static int emit_connection(struct buf *b, const pigen_rtl_model *rtl,
 		buf_append_str(b, name);
 		return b->failed ? -1 : 0;
 	}
+	if (connection->direction==PIGEN_SEMANTIC_OUTPUT || connection->direction==PIGEN_SEMANTIC_INOUT)
+		return emit_lvalue(b,rtl,connection->value);
 	{
 		const pigen_rtl_expr *value = pigen_rtl_expr_get(rtl,
 			connection->value);
@@ -966,9 +1109,7 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 	size_t parameter_count = instance->parameters.count;
 	size_t i;
 	int first_parameter = 1;
-	const char *definition = instance->name ? NULL : NULL;
-
-	(void)definition;
+	const char *definition = instance->definition;
 	if (!name)
 		return -1;
 	parameters = parameter_count ? &rtl->instance_parameters[parameter_first]
@@ -984,7 +1125,7 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 		buf_append_str(b, definition);
 	}
 	else
-		buf_append_str(b, name);
+		buf_append_str(b, definition ? definition : name);
 	if (parameter_count || instance->payload_type.index != PIGEN_INVALID_ID)
 	{
 		buf_append_str(b, " #(");
@@ -1010,10 +1151,34 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 					buf_append_str(b, ".DEPTH(");
 				else if (instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE)
 					buf_append_str(b, ".N(");
+				else if (instance->primitive == PIGEN_RTL_PRIMITIVE_AXIS_MERGE)
+				{
+					static const char *names[]={"N","LAST_BIT","HAS_LAST","PACKET_LOCK","TRACK_STREAMS","ID_LSB","ID_W","DEST_LSB","DEST_W"};
+					if(i>=sizeof(names)/sizeof(*names)) return -1;
+					buf_append_str(b,".");buf_append_str(b,names[i]);buf_append_str(b,"(");
+				}
+				else if (instance->primitive == PIGEN_RTL_PRIMITIVE_AXIS_DEMUX)
+					buf_append_str(b, i == 0 ? ".N(" : i == 1 ? ".DEST_LSB(" : ".DEST_W(");
+				else if(instance->primitive==PIGEN_RTL_PRIMITIVE_AXI_DEMUX)
+				{
+					static const char *names[]={"N","AW_W","W_W","B_W","AR_W","R_W","ADDR_W","AW_ADDR_LSB","AR_ADDR_LSB","FULL","WLAST_BIT","RLAST_BIT","ARLEN_LSB","ID_W","AW_ID_LSB","AR_ID_LSB","B_ID_LSB","R_ID_LSB","B_RESP_LSB","R_RESP_LSB","BASES","LIMITS"};
+					if(i>=sizeof(names)/sizeof(*names)) return -1;
+					buf_append_str(b,".");buf_append_str(b,names[i]);buf_append_str(b,"(");
+				}
+				else if (instance->primitive == PIGEN_RTL_PRIMITIVE_AXI_MERGE)
+				{
+					static const char *names[] = {"N", "AW_W", "W_W", "B_W", "AR_W", "R_W", "FULL", "WLAST_BIT", "RLAST_BIT"};
+					if (i >= sizeof(names)/sizeof(*names)) return -1;
+					buf_append_str(b, "."); buf_append_str(b, names[i]); buf_append_str(b, "(");
+				}
 				if (emit_expr(b, rtl, parameters[i]) != 0)
 					return -1;
 				if (instance->primitive == PIGEN_RTL_PRIMITIVE_FIFO ||
-					instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE)
+					instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE ||
+					instance->primitive == PIGEN_RTL_PRIMITIVE_AXIS_MERGE ||
+					instance->primitive == PIGEN_RTL_PRIMITIVE_AXIS_DEMUX ||
+					instance->primitive == PIGEN_RTL_PRIMITIVE_AXI_MERGE ||
+					instance->primitive == PIGEN_RTL_PRIMITIVE_AXI_DEMUX)
 					buf_append_str(b, ")");
 				first_parameter = 0;
 			}
@@ -1030,7 +1195,7 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 		}
 		buf_append_str(b, ")");
 	}
-	if (instance->primitive != PIGEN_RTL_PRIMITIVE_INVALID)
+	if (instance->primitive != PIGEN_RTL_PRIMITIVE_INVALID || definition)
 	{
 		buf_append_str(b, " ");
 		buf_append_str(b, name);
@@ -1106,7 +1271,7 @@ static int emit_equation(struct buf *b, const pigen_rtl_model *rtl,
 	buf_append_str(b, "  assign ");
 	if (equation->destination_expression.index != PIGEN_INVALID_ID)
 	{
-		if (emit_expr(b, rtl, equation->destination_expression) != 0) return -1;
+		if (emit_lvalue(b, rtl, equation->destination_expression) != 0) return -1;
 	}
 	else buf_append_str(b, dest_name);
 	buf_append_str(b, " = ");
@@ -1118,6 +1283,164 @@ static int emit_equation(struct buf *b, const pigen_rtl_model *rtl,
 
 /* A clocked process: `  always @(<edge> <clock>)` then each update as
  * `    dest <= value;` (four-space indent). */
+static int emit_procedural(struct buf *b,const pigen_rtl_model *rtl,
+	pigen_rtl_procedural_id id,size_t indent,size_t depth,pigen_rtl_procedural_id loop)
+{
+	if (id.index>=rtl->procedural_count || depth>128) return -1;
+	const pigen_rtl_procedural *node=&rtl->procedural[id.index];
+	for (size_t i=0;i<indent;i++) buf_append_str(b," ");
+	if (node->kind==PIGEN_PROCEDURAL_ASSIGN)
+	{
+		if (emit_lvalue(b,rtl,node->destination)!=0) return -1;
+		buf_append_str(b," = ");if (emit_expr(b,rtl,node->value)!=0) return -1;
+		buf_append_str(b,";\n");return b->failed ? -1 : 0;
+	}
+	if (node->first_child>rtl->procedural_child_count || node->child_count>rtl->procedural_child_count-node->first_child) return -1;
+	if (node->kind==PIGEN_PROCEDURAL_BREAK || node->kind==PIGEN_PROCEDURAL_CONTINUE)
+	{
+		if (loop.index==PIGEN_INVALID_ID || node->child_count) return -1;
+		buf_append_str(b,"disable __pigen_loop_");buf_append_ull(b,loop.index);
+		buf_append_str(b,node->kind==PIGEN_PROCEDURAL_BREAK ? "_exit;\n" : "_body;\n");
+		return b->failed ? -1 : 0;
+	}
+	if (node->kind>=PIGEN_PROCEDURAL_WHILE && node->kind<=PIGEN_PROCEDURAL_FOREVER)
+	{
+		int phased=node->kind==PIGEN_PROCEDURAL_FOR;
+		if (node->child_count!=(phased ? 3u : 1u)) return -1;
+		/* The loop identity supplies both lexical control targets. Keeping
+		 * the iteration target before FOR's step preserves continue order. */
+		buf_append_str(b,"begin : __pigen_loop_");buf_append_ull(b,id.index);buf_append_str(b,"_exit\n");
+		if (phased && emit_procedural(b,rtl,rtl->procedural_children[node->first_child],indent+2,depth+1,loop)!=0) return -1;
+		for(size_t i=0;i<indent+2;i++) buf_append_str(b," ");
+		if (node->kind==PIGEN_PROCEDURAL_FOREVER) buf_append_str(b,"forever begin\n");
+		else if (node->kind==PIGEN_PROCEDURAL_DO_WHILE) buf_append_str(b,"do begin\n");
+		else
+		{
+			buf_append_str(b,node->kind==PIGEN_PROCEDURAL_REPEAT ? "repeat (" : "while (");
+			if (emit_expr(b,rtl,node->condition)!=0) return -1;
+			buf_append_str(b,") begin\n");
+		}
+		for(size_t i=0;i<indent+4;i++) buf_append_str(b," ");
+		buf_append_str(b,"begin : __pigen_loop_");buf_append_ull(b,id.index);buf_append_str(b,"_body\n");
+		if (emit_procedural(b,rtl,rtl->procedural_children[node->first_child+(phased ? 2u : 0u)],indent+6,depth+1,id)!=0) return -1;
+		for(size_t i=0;i<indent+4;i++) buf_append_str(b," ");
+		buf_append_str(b,"end\n");
+		if (phased && emit_procedural(b,rtl,rtl->procedural_children[node->first_child+1],indent+4,depth+1,loop)!=0) return -1;
+		for(size_t i=0;i<indent+2;i++) buf_append_str(b," ");
+		buf_append_str(b,"end");
+		if (node->kind==PIGEN_PROCEDURAL_DO_WHILE)
+		{
+			buf_append_str(b," while (");if (emit_expr(b,rtl,node->condition)!=0) return -1;
+			buf_append_str(b,");");
+		}
+		buf_append_str(b,"\n");
+		for(size_t i=0;i<indent;i++) buf_append_str(b," ");
+		buf_append_str(b,"end\n");return b->failed ? -1 : 0;
+	}
+	if (node->kind==PIGEN_PROCEDURAL_IF)
+	{
+		if (node->child_count<1 || node->child_count>2) return -1;
+		if (node->case_qualifier!=PIGEN_CASE_UNQUALIFIED)
+			buf_append_str(b,node->case_qualifier==PIGEN_CASE_UNIQUE ? "unique " : node->case_qualifier==PIGEN_CASE_UNIQUE0 ? "unique0 " : "priority ");
+		buf_append_str(b,"if (");if (emit_expr(b,rtl,node->condition)!=0) return -1;
+		buf_append_str(b,") begin\n");
+		if (emit_procedural(b,rtl,rtl->procedural_children[node->first_child],indent+2,depth+1,loop)!=0) return -1;
+		for (size_t i=0;i<indent;i++) buf_append_str(b," ");
+		buf_append_str(b,"end");
+		if (node->child_count==2)
+		{
+			if (node->else_if)
+			{
+				buf_append_str(b," else ");
+				return emit_procedural(b,rtl,rtl->procedural_children[node->first_child+1],indent,depth+1,loop);
+			}
+			buf_append_str(b," else begin\n");
+			if (emit_procedural(b,rtl,rtl->procedural_children[node->first_child+1],indent+2,depth+1,loop)!=0) return -1;
+			for (size_t i=0;i<indent;i++) buf_append_str(b," ");
+			buf_append_str(b,"end");
+		}
+		buf_append_str(b,"\n");return b->failed ? -1 : 0;
+	}
+	if (node->kind>=PIGEN_PROCEDURAL_CASE && node->kind<=PIGEN_PROCEDURAL_CASEX)
+	{
+		if (node->case_qualifier!=PIGEN_CASE_UNQUALIFIED)
+			buf_append_str(b,node->case_qualifier==PIGEN_CASE_UNIQUE ? "unique " : node->case_qualifier==PIGEN_CASE_UNIQUE0 ? "unique0 " : "priority ");
+		buf_append_str(b,node->kind==PIGEN_PROCEDURAL_CASE ? "case (" : node->kind==PIGEN_PROCEDURAL_CASEZ ? "casez (" : "casex (");
+		const pigen_rtl_expr *selector=pigen_rtl_expr_get(rtl,node->condition);
+		const pigen_rtl_type *type=selector ? pigen_rtl_type_get(rtl,selector->type) : NULL;
+		if (!type) return -1;
+		render_at_width(b,rtl,selector,type->width);buf_append_str(b,")\n");int fallback=0;
+		/* Icarus cannot elaborate a case containing only a default. An
+		 * explicit zero arm with the same body preserves one selector
+		 * evaluation, sensitivity and exactly one execution of that body. */
+		if (node->case_qualifier==PIGEN_CASE_UNQUALIFIED && (!node->child_count || (node->child_count==1 &&
+			rtl->procedural[rtl->procedural_children[node->first_child].index].condition.index==PIGEN_INVALID_ID)))
+		{
+			for(size_t i=0;i<indent+2;i++) buf_append_str(b," ");
+			buf_append_ull(b,type->width);buf_append_str(b,"'d0: begin\n");
+			if (node->child_count)
+			{
+				const pigen_rtl_procedural *item=&rtl->procedural[rtl->procedural_children[node->first_child].index];
+				if (emit_procedural(b,rtl,rtl->procedural_children[item->first_child],indent+4,depth+2,loop)!=0) return -1;
+			}
+			for(size_t i=0;i<indent+2;i++) buf_append_str(b," ");
+			buf_append_str(b,"end\n");
+		}
+		for(size_t i=0;i<node->child_count;i++)
+		{
+			pigen_rtl_procedural_id item=rtl->procedural_children[node->first_child+i];
+			if (item.index>=rtl->procedural_count) return -1;
+			fallback|=rtl->procedural[item.index].condition.index==PIGEN_INVALID_ID;
+			if (i+1<node->child_count && rtl->procedural[rtl->procedural_children[node->first_child+i+1].index].case_continuation)
+			{
+				const pigen_rtl_procedural *first=&rtl->procedural[item.index];
+				for(size_t spaces=0;spaces<indent+2;spaces++) buf_append_str(b," ");
+				for (;;)
+				{
+					const pigen_rtl_procedural *label=&rtl->procedural[rtl->procedural_children[node->first_child+i].index];
+					render_at_width(b,rtl,pigen_rtl_expr_get(rtl,label->condition),type->width);
+					if (i+1==node->child_count || !rtl->procedural[rtl->procedural_children[node->first_child+i+1].index].case_continuation) break;
+					buf_append_str(b,", ");i++;
+				}
+				buf_append_str(b,": begin\n");
+				if (emit_procedural(b,rtl,rtl->procedural_children[first->first_child],indent+4,depth+2,loop)!=0) return -1;
+				for(size_t spaces=0;spaces<indent+2;spaces++) buf_append_str(b," ");
+				buf_append_str(b,"end\n");
+			}
+			else if (emit_procedural(b,rtl,item,indent+2,depth+1,loop)!=0) return -1;
+		}
+		if (!fallback && node->case_qualifier==PIGEN_CASE_UNQUALIFIED)
+		{
+			for(size_t i=0;i<indent+2;i++) buf_append_str(b," ");
+			buf_append_str(b,"default: begin end\n");
+		}
+		for(size_t i=0;i<indent;i++) buf_append_str(b," ");
+		buf_append_str(b,"endcase\n");return b->failed ? -1 : 0;
+	}
+	if (node->kind==PIGEN_PROCEDURAL_CASE_ITEM)
+	{
+		if (node->child_count!=1) return -1;
+		if (node->condition.index==PIGEN_INVALID_ID) buf_append_str(b,"default");
+		else
+		{
+			const pigen_rtl_expr *label=pigen_rtl_expr_get(rtl,node->condition);
+			const pigen_rtl_type *type=label ? pigen_rtl_type_get(rtl,label->type) : NULL;
+			if (!type) return -1;
+			render_at_width(b,rtl,label,type->width);
+		}
+		buf_append_str(b,": begin\n");
+		if (emit_procedural(b,rtl,rtl->procedural_children[node->first_child],indent+2,depth+1,loop)!=0) return -1;
+		for(size_t i=0;i<indent;i++) buf_append_str(b," ");
+		buf_append_str(b,"end\n");return b->failed ? -1 : 0;
+	}
+	if (node->kind!=PIGEN_PROCEDURAL_BLOCK) return -1;
+	buf_append_str(b,"begin\n");
+	for (size_t i=0;i<node->child_count;i++)
+		if (emit_procedural(b,rtl,rtl->procedural_children[node->first_child+i],indent+2,depth+1,loop)!=0) return -1;
+	for (size_t i=0;i<indent;i++) buf_append_str(b," ");
+	buf_append_str(b,"end\n");return b->failed ? -1 : 0;
+}
+
 static int emit_process(struct buf *b, const pigen_rtl_model *rtl,
 	const pigen_rtl_process *process)
 {
@@ -1127,6 +1450,12 @@ static int emit_process(struct buf *b, const pigen_rtl_model *rtl,
 	size_t count = process->updates.count;
 	size_t i;
 
+	if (process->is_combinational)
+	{
+		buf_append_str(b,"  always_comb begin\n");
+		if (emit_procedural(b,rtl,process->body,4,0,(pigen_rtl_procedural_id){PIGEN_INVALID_ID})!=0) return -1;
+		buf_append_str(b,"  end\n");return b->failed ? -1 : 0;
+	}
 	updates = count ? &rtl->updates[first] : NULL;
 	switch (process->edge)
 	{
@@ -1145,6 +1474,8 @@ static int emit_process(struct buf *b, const pigen_rtl_model *rtl,
 	if (emit_expr(b, rtl, process->clock) != 0)
 		return -1;
 	buf_append_str(b, ") begin\n");
+	if (process->body.index!=PIGEN_INVALID_ID &&
+		emit_procedural(b,rtl,process->body,4,0,(pigen_rtl_procedural_id){PIGEN_INVALID_ID})!=0) return -1;
 	for (i = 0; i < count; i++)
 	{
 		const pigen_rtl_object *dest;
@@ -1166,7 +1497,7 @@ static int emit_process(struct buf *b, const pigen_rtl_model *rtl,
 		}
 		if (updates[i].path.index != PIGEN_INVALID_ID)
 		{
-			if (emit_expr(b, rtl, updates[i].path) != 0)
+			if (emit_lvalue(b, rtl, updates[i].path) != 0)
 				return -1;
 		}
 		else
@@ -1339,8 +1670,28 @@ static int validate_expr(const pigen_rtl_model *rtl, const pigen_rtl_expr *expr)
 {
 	size_t i;
 
-	if (expr->first_child + expr->child_count > rtl->expression_child_count)
+	if (!rtl || !expr || expr->first_child > rtl->expression_child_count ||
+		expr->child_count > rtl->expression_child_count-expr->first_child)
 		return -1;
+	if(expr->kind==PIGEN_RTL_EXPR_ARRAY_PATTERN)
+	{
+		if(!expr->child_count) return -1;
+		for(size_t c=0;c<expr->child_count;c++)
+		{
+			const pigen_rtl_expr *child=pigen_rtl_expr_get(rtl,rtl->expression_children[expr->first_child+c]);
+			if(!child || child->type.index!=expr->type.index) return -1;
+		}
+	}
+	if(expr->kind==PIGEN_RTL_EXPR_EVALUATED_VALUE)
+	{
+		if(expr->child_count!=2 || (expr->as.evaluation.before!=0 && expr->as.evaluation.before!=1)) return -1;
+		const pigen_rtl_expr *value=pigen_rtl_expr_get(rtl,rtl->expression_children[expr->first_child]);
+		const pigen_rtl_expr *evaluated=pigen_rtl_expr_get(rtl,rtl->expression_children[expr->first_child+1]);
+		const pigen_rtl_type *type=pigen_rtl_type_get(rtl,expr->type),*et=evaluated ? pigen_rtl_type_get(rtl,evaluated->type) : NULL;
+		if(!value || value->type.index!=expr->type.index || !type || !et ||
+			(!type->width && type->width_expression.index==PIGEN_INVALID_ID) ||
+			(!et->width && et->width_expression.index==PIGEN_INVALID_ID)) return -1;
+	}
 	for (i = 0; i < expr->child_count; i++)
 	{
 		const pigen_rtl_expr *child = pigen_rtl_expr_get(rtl,
@@ -1357,6 +1708,79 @@ static int validate_expr(const pigen_rtl_model *rtl, const pigen_rtl_expr *expr)
 /* Validate one structured record's final-name and child-index invariants
  * before rendering: every record must carry a resolvable final name and every
  * expression it references must index live children. */
+static int validate_procedural(const pigen_rtl_model *rtl,pigen_rtl_module_id module,
+	pigen_rtl_procedural_id id,size_t depth,size_t loops)
+{
+	if (id.index>=rtl->procedural_count || depth>128) return -1;
+	const pigen_rtl_procedural *node=&rtl->procedural[id.index];
+	if (node->module.index!=module.index || (unsigned)node->kind>PIGEN_PROCEDURAL_CONTINUE ||
+		node->first_child>rtl->procedural_child_count || node->child_count>rtl->procedural_child_count-node->first_child) return -1;
+	if (node->case_continuation && (node->kind!=PIGEN_PROCEDURAL_CASE_ITEM || node->case_continuation!=1)) return -1;
+	if ((unsigned)node->case_qualifier>PIGEN_CASE_PRIORITY ||
+		(node->case_qualifier!=PIGEN_CASE_UNQUALIFIED && node->kind!=PIGEN_PROCEDURAL_IF && (node->kind<PIGEN_PROCEDURAL_CASE || node->kind>PIGEN_PROCEDURAL_CASEX))) return -1;
+	if (node->else_if && (node->else_if!=1 || node->kind!=PIGEN_PROCEDURAL_IF || node->child_count!=2 ||
+		rtl->procedural_children[node->first_child+1].index>=rtl->procedural_count ||
+		rtl->procedural[rtl->procedural_children[node->first_child+1].index].kind!=PIGEN_PROCEDURAL_IF)) return -1;
+	if (node->kind==PIGEN_PROCEDURAL_BREAK || node->kind==PIGEN_PROCEDURAL_CONTINUE)
+		return !loops || node->child_count || node->condition.index!=PIGEN_INVALID_ID ||
+			node->destination.index!=PIGEN_INVALID_ID || node->value.index!=PIGEN_INVALID_ID ? -1 : 0;
+	if (node->kind==PIGEN_PROCEDURAL_FOREVER && (node->child_count!=1 || node->condition.index!=PIGEN_INVALID_ID)) return -1;
+	if (node->kind==PIGEN_PROCEDURAL_ASSIGN)
+		return node->child_count || validate_expr(rtl,pigen_rtl_expr_get(rtl,node->destination)) ||
+			validate_expr(rtl,pigen_rtl_expr_get(rtl,node->value)) ? -1 : 0;
+	if (node->kind==PIGEN_PROCEDURAL_IF && (node->child_count<1 || node->child_count>2 ||
+		validate_expr(rtl,pigen_rtl_expr_get(rtl,node->condition)))) return -1;
+	if ((node->kind==PIGEN_PROCEDURAL_WHILE || node->kind==PIGEN_PROCEDURAL_REPEAT || node->kind==PIGEN_PROCEDURAL_DO_WHILE) &&
+		(node->child_count!=1 || validate_expr(rtl,pigen_rtl_expr_get(rtl,node->condition)))) return -1;
+	if (node->kind==PIGEN_PROCEDURAL_FOR)
+	{
+		if (node->child_count!=3 || validate_expr(rtl,pigen_rtl_expr_get(rtl,node->condition))) return -1;
+		pigen_rtl_procedural_id init=rtl->procedural_children[node->first_child],step=rtl->procedural_children[node->first_child+1];
+		if (init.index>=rtl->procedural_count || step.index>=rtl->procedural_count ||
+			rtl->procedural[init.index].kind!=PIGEN_PROCEDURAL_BLOCK || rtl->procedural[step.index].kind!=PIGEN_PROCEDURAL_BLOCK) return -1;
+		for(size_t phase=0;phase<2;phase++)
+		{
+			const pigen_rtl_procedural *updates=&rtl->procedural[phase ? step.index : init.index];
+			if (updates->first_child>rtl->procedural_child_count || updates->child_count>rtl->procedural_child_count-updates->first_child) return -1;
+			for(size_t i=0;i<updates->child_count;i++)
+			{
+				pigen_rtl_procedural_id update=rtl->procedural_children[updates->first_child+i];
+				if (update.index>=rtl->procedural_count || rtl->procedural[update.index].kind!=PIGEN_PROCEDURAL_ASSIGN) return -1;
+			}
+		}
+	}
+	int selection=node->kind>=PIGEN_PROCEDURAL_CASE && node->kind<=PIGEN_PROCEDURAL_CASEX;
+	if (selection && validate_expr(rtl,pigen_rtl_expr_get(rtl,node->condition))) return -1;
+	if (node->kind==PIGEN_PROCEDURAL_CASE_ITEM && (!depth || node->child_count!=1 ||
+		(node->condition.index!=PIGEN_INVALID_ID && validate_expr(rtl,pigen_rtl_expr_get(rtl,node->condition))))) return -1;
+	int defaults=0;
+	for (size_t i=0;i<node->child_count;i++)
+	{
+		pigen_rtl_procedural_id child=rtl->procedural_children[node->first_child+i];
+		if (child.index>=rtl->procedural_count ||
+			(rtl->procedural[child.index].kind==PIGEN_PROCEDURAL_CASE_ITEM)!=selection) return -1;
+		if (selection && rtl->procedural[child.index].condition.index==PIGEN_INVALID_ID && ++defaults>1) return -1;
+		if (rtl->procedural[child.index].case_continuation)
+		{
+			const pigen_rtl_procedural *item=&rtl->procedural[child.index];
+			if (!selection || !i || item->condition.index==PIGEN_INVALID_ID || item->child_count!=1 ||
+				item->first_child>=rtl->procedural_child_count) return -1;
+			const pigen_rtl_procedural *previous=&rtl->procedural[rtl->procedural_children[node->first_child+i-1].index];
+			if (previous->condition.index==PIGEN_INVALID_ID || previous->child_count!=1 ||
+				previous->first_child>=rtl->procedural_child_count ||
+				rtl->procedural_children[previous->first_child].index!=rtl->procedural_children[item->first_child].index) return -1;
+		}
+		if (selection && rtl->procedural[child.index].condition.index!=PIGEN_INVALID_ID)
+		{
+			const pigen_rtl_expr *selector=pigen_rtl_expr_get(rtl,node->condition),*label=pigen_rtl_expr_get(rtl,rtl->procedural[child.index].condition);
+			const pigen_rtl_type *st=selector ? pigen_rtl_type_get(rtl,selector->type) : NULL,*lt=label ? pigen_rtl_type_get(rtl,label->type) : NULL;
+			if (!st || !lt || !st->width || st->width!=lt->width || st->signedness!=lt->signedness) return -1;
+		}
+		if (validate_procedural(rtl,module,child,depth+1,loops+(size_t)(node->kind>=PIGEN_PROCEDURAL_WHILE && node->kind<=PIGEN_PROCEDURAL_FOREVER && (node->kind!=PIGEN_PROCEDURAL_FOR || i==2)))!=0) return -1;
+	}
+	return 0;
+}
+
 static int validate_record(const pigen_source_manager *sources,
 	const pigen_output_model *layout, const pigen_rtl_model *rtl,
 	const pigen_output_item *item)
@@ -1390,6 +1814,11 @@ static int validate_record(const pigen_source_manager *sources,
 			return -1;
 		if (!object_name(rtl, object))
 			return -1;
+		if(object->kind==PIGEN_RTL_OBJECT_PARAMETER || object->initial_value.index!=PIGEN_INVALID_ID)
+		{
+			const pigen_rtl_expr *value=pigen_rtl_expr_get(rtl,object->initial_value);
+			if(object->direction!=PIGEN_SEMANTIC_INTERNAL || (object->kind!=PIGEN_RTL_OBJECT_PARAMETER && object->kind!=PIGEN_RTL_OBJECT_VARIABLE) || !value || validate_expr(rtl,value)!=0) return -1;
+		}
 		return 0;
 	}
 	case PIGEN_OUTPUT_RTL_INSTANCE:
@@ -1436,6 +1865,8 @@ static int validate_record(const pigen_source_manager *sources,
 		process = pigen_rtl_process_get(rtl, item->as.process);
 		if (!process)
 			return -1;
+		if (process->is_combinational) return validate_procedural(rtl,process->module,process->body,0,0);
+		if (process->body.index!=PIGEN_INVALID_ID && validate_procedural(rtl,process->module,process->body,0,0)) return -1;
 		if (process->updates.first + process->updates.count >
 			rtl->update_count)
 			return -1;
@@ -1655,6 +2086,8 @@ int pigen_emit_systemverilog(const pigen_source_manager *sources,
 		buf_append(&b, "", 0);
 	if (output_string)
 		*output_string = b.data;
+	else
+		free(b.data);
 	return 0;
 fail:
 	free(b.data);

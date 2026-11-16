@@ -1,0 +1,14 @@
+---
+status: green
+revised_at: "2026-11-16T12:15:51+11:00"
+---
+
+Typed member selections retain their field identity as well as packed coordinates. expression_analysis.h and semantic.h SELECT payloads carry is_member/member_name. Analysis and direct resolution publish that metadata through pigen_expr_add_member_select, preserving the existing resolved member type and high/low offsets for expression-use, lvalue and ownership analysis.
+
+src/rtl_lower.c:static_record_path recognizes member/index/group/peek paths rooted in objects with prepared static record declarations. It excludes computed conversions and explicit non-member slices, whose emitted values are packed expressions rather than actual record objects. lower_expr emits a named RTL member select for eligible fields before numerical range composition. Native channels, buffered records and computed records retain their separate packed/typed-alias paths (how/are/native/axi/field/projections/lowered.md).
+
+rtl.h/rtl.c keep the existing SELECT kind and three coordinate children, adding an optional model-owned member_name through pigen_rtl_expr_add_member_select. sv_emit.c renders that metadata as `.field`, including escaped-name termination, and otherwise renders the normal range. Value signedness uses the existing cast rules; writable paths remain uncast. No source search or semantic lookup occurs in the terminal renderer. rtl.c frees copied member names.
+
+Real static record declarations preserve nested fields and their local bounds/rank (how/are/static/packed/record/declarations/emitted.md). Named member emission therefore supports negative/ascending bounds and multidimensional members without chained flat part-selects. Mutable locals stay inside ordered procedural evaluation; no continuous alias samples them outside their process. Packed and unpacked record arrays require indexing before field access. pigen_struct_member_for_type stops at packed dimensions, while analysis/direct resolution reject residual unpacked shape.
+
+Focused evidence: static_record_preservation_tests compares typed and retained probes against physical input-bit mappings for scalar, packed and unpacked containers, including signed/X/Z and SV-bound/rank cases. Six native dynamic-write profiles compare ordered local mutation against standard-pin XOR masks across all AXI families and direct/child/fabric paths. ordered_record_projection_tests checks repeated writes/readback in loops across all three containers against independent masks. C tests cover copied/escaped RTL member names, invalid empty names and indexed packed schemas. The full `make -j4 --output-sync=target verify` gate passes (/tmp/pigen-static-member-verify-final.log). ASan/UBSan pass the expanded record/native profiles and expression/emitter C tests (/tmp/pigen-static-member-asan-l7qitd05 and /tmp/pigen-static-member-c-asan.log).

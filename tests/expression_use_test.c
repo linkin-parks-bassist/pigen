@@ -432,6 +432,23 @@ int main(void)
 	assert(analysis.signals[1].contexts == PIGEN_EXPRESSION_USE_LVALUE);
 
 	pigen_free_expression_use_analysis(&analysis);
+	pigen_expr_id evaluated_value=pigen_expr_add_evaluated_value(&model,lvalue_expression,index_expression,1,
+		pigen_expr_get(&model,lvalue_expression)->span);
+	assert(evaluated_value.index!=PIGEN_INVALID_ID && pigen_expr_constant(&model,evaluated_value).index==PIGEN_INVALID_ID);
+	assert(pigen_lvalue_resolve(&model,evaluated_value).index==PIGEN_INVALID_ID);
+	assert(pigen_analyze_expression_uses(&model,evaluated_value,always,PIGEN_EXPRESSION_USE_READ,&analysis));
+	assert(analysis.signal_count==2 && analysis.use_count==3);
+	pigen_free_expression_use_analysis(&analysis);
+	pigen_data_type_id evaluated_type=pigen_expr_get(&model,lvalue_expression)->data_type;
+	pigen_source_span evaluated_span=pigen_expr_get(&model,lvalue_expression)->span;
+	pigen_expr_id constant_value=pigen_expr_add_integer(&model,7,evaluated_type,evaluated_span);
+	pigen_expr_id constant_evaluated=pigen_expr_add_integer(&model,9,evaluated_type,evaluated_span);
+	pigen_expr_id retained_evaluation=pigen_expr_add_evaluated_value(&model,constant_value,constant_evaluated,0,evaluated_span);
+	assert(retained_evaluation.index!=PIGEN_INVALID_ID && pigen_expr_constant(&model,retained_evaluation).index==PIGEN_INVALID_ID);
+	size_t expressions_before=model.expression_count;
+	assert(pigen_expr_add_evaluated_value(&model,lvalue_expression,index_expression,2,
+		pigen_expr_get(&model,lvalue_expression)->span).index==PIGEN_INVALID_ID);
+	assert(model.expression_count==expressions_before);
 	pigen_free_semantic_model(&model);
 	pigen_free_syntax_tree(&syntax);
 	pigen_free_preprocess_result(&preprocessed);

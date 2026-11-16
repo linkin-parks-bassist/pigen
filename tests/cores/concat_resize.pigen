@@ -1,0 +1,18 @@
+module concat_narrow(input wire clk,input wire reset,input bit[8] buf source,
+                     output bit[8] buf upper,output bit[8] buf lower);
+    always @(posedge clk) if (!reset)
+        when ({upper,lower} <= {source + 8'd1,peek(source)}) begin end
+endmodule
+module concat_wide(input wire clk,input wire reset,input bit[8] buf source,
+                   output bit[8] buf upper,output bit[8] buf lower);
+    always @(posedge clk) if (!reset) {upper,lower} <= source;
+endmodule
+module concat_signed(input wire clk,input wire reset,input int[8] buf source,
+                     output bit[8] buf upper,output bit[8] buf lower);
+    always @(posedge clk) if (!reset) {upper,lower} <= source;
+endmodule
+module concat_placeholder_resize(input wire clk,input wire reset,input bit[8] buf source,
+                                 output bit[8] buf upper,output bit[8] buf lower);
+    always @(posedge clk) if (!reset)
+        {upper,_,lower} <= {source + 8'd1,8'hab,peek(source)};
+endmodule

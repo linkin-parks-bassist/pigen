@@ -1,0 +1,141 @@
+// Seven-bit addressed I2C target, MSB-first bytes, open-drain outputs.
+// Each SCL high/low and START/STOP setup/hold interval >= 8 clk periods.
+// SETUP_CYCLES sets stretched read-data setup; qualify physical timing separately.
+// RX backpressure stretches before ACK; empty TX stretches before read data.
+module pigen_i2c_target #(
+    parameter integer ADDRESS = 82,
+    parameter integer SETUP_CYCLES = 4
+) (
+    input wire clk,
+    input wire reset,
+    input wire scl_i,
+    input wire sda_i,
+    input bit[8] buf tx,
+    output bit[8] buf rx,
+    output bit reg scl_low,
+    output bit reg sda_low,
+    output bit reg active,
+    output bit reg reading,
+    output bit reg completed
+);
+    initial if (ADDRESS < 8 || ADDRESS > 119 || SETUP_CYCLES < 2) $fatal(1,"I2C target requires ADDRESS 8..119 and SETUP_CYCLES >= 2");
+    bit[8] buf pending;
+    always @(posedge clk) if (!reset) pending <= tx;
+    bit[2] reg meta;
+    bit[2] reg pins;
+    bit[2] reg previous;
+    bit[8] reg shift;
+    int[5] reg remaining;
+    bit reg nack;
+    int[32] reg setup_left;
+    always @(posedge clk) begin
+        if (reset) begin meta <= 3; pins <= 3; previous <= 3; end
+        else begin meta <= {scl_i,sda_i}; pins <= meta; previous <= pins; end
+    end
+    fsm @(posedge clk) begin
+        if (reset) begin
+            scl_low <= 0;
+            sda_low <= 0;
+            active <= 0;
+            reading <= 0;
+            completed <= 0;
+            goto idle;
+        end
+        completed <= 0;
+        if (pins[1] && previous[1] && pins[0] != previous[0]) begin
+            scl_low <= 0;
+            sda_low <= 0;
+            active <= 0;
+            if (pins[0]) begin
+                if (active) completed <= 1;
+                goto idle;
+            end
+            reading <= 0;
+            shift <= 0;
+            remaining <= 7;
+            goto address_bits;
+        end
+        state idle: begin end
+        state address_bits:
+            if (pins[1] && !previous[1]) begin
+                shift <= {shift[6:0],pins[0]};
+                if (remaining == 0) begin
+                    if (shift[6:0] != bit[7]'(ADDRESS)) goto ignore_bus;
+                    reading <= pins[0];
+                    active <= 1;
+                    goto address_fall;
+                end
+                remaining <= remaining - 1;
+            end
+        state address_fall:
+            if (!pins[1] && previous[1]) begin sda_low <= 1; goto address_ack; end
+        state address_ack:
+            if (pins[1] && !previous[1]) goto address_ack_fall;
+        state address_ack_fall:
+            if (!pins[1] && previous[1]) begin
+                sda_low <= 0;
+                if (reading) begin scl_low <= 1; goto read_wait; end
+                shift <= 0;
+                remaining <= 7;
+                goto write_bits;
+            end
+        state write_bits:
+            if (pins[1] && !previous[1]) begin
+                shift <= {shift[6:0],pins[0]};
+                if (remaining == 0) goto write_fall;
+                remaining <= remaining - 1;
+            end
+        state write_fall:
+            if (!pins[1] && previous[1]) begin scl_low <= 1; goto write_wait; end
+        state write_wait:
+            when (rx <= shift) begin
+                sda_low <= 1;
+                setup_left <= SETUP_CYCLES - 1;
+                goto write_setup;
+            end
+        state write_setup:
+            if (setup_left == 0) begin scl_low <= 0; goto write_ack; end
+            else setup_left <= setup_left - 1;
+        state write_ack:
+            if (pins[1] && !previous[1]) goto write_ack_fall;
+        state write_ack_fall:
+            if (!pins[1] && previous[1]) begin
+                sda_low <= 0;
+                shift <= 0;
+                remaining <= 7;
+                goto write_bits;
+            end
+        state read_wait:
+            when (shift <= pending) goto read_setup;
+        state read_setup: begin
+            sda_low <= !shift[7];
+            remaining <= 7;
+            setup_left <= SETUP_CYCLES - 1;
+            goto read_settle;
+        end
+        state read_settle:
+            if (setup_left == 0) begin scl_low <= 0; goto read_bits; end
+            else setup_left <= setup_left - 1;
+        state read_bits: begin
+            if (pins[1] && !previous[1]) begin
+                if (remaining == 0) goto read_last_fall;
+                remaining <= remaining - 1;
+            end
+            if (!pins[1] && previous[1]) begin
+                shift <= shift << 1;
+                sda_low <= !shift[6];
+            end
+        end
+        state read_last_fall:
+            if (!pins[1] && previous[1]) begin sda_low <= 0; goto read_ack; end
+        state read_ack:
+            if (pins[1] && !previous[1]) begin nack <= pins[0]; goto read_ack_fall; end
+        state read_ack_fall:
+            if (!pins[1] && previous[1]) begin
+                if (nack) begin active <= 0; completed <= 1; goto ignore_bus; end
+                scl_low <= 1;
+                goto read_wait;
+            end
+        state ignore_bus: begin end
+    end
+endmodule

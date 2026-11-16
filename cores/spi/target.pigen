@@ -1,0 +1,100 @@
+// Oversampled MSB-first SPI target. All pins are sampled by clk.
+// Hold every SCK half-period and CS setup/high interval >= 6 clk periods.
+// TX must be available before a byte's first leading edge (and CPHA=0 setup).
+// Missing TX sends zero; full RX drops newest. Partial bytes abort on CS/reset.
+module pigen_spi_target #(
+    parameter integer CPOL = 0,
+    parameter integer CPHA = 0
+) (
+    input wire clk,
+    input wire reset,
+    input wire cs_n,
+    input wire sck,
+    input wire mosi,
+    input bit[8] buf tx,
+    output bit[8] buf rx,
+    output wire miso,
+    output wire miso_enable,
+    output bit reg underrun,
+    output bit reg overrun
+);
+    initial if (CPOL < 0 || CPOL > 1 || CPHA < 0 || CPHA > 1) $fatal(1, "SPI target requires binary CPOL/CPHA");
+    bit[8] buf pending;
+    always @(posedge clk) if (!reset) pending <= tx;
+
+    bit[3] reg sync_first;
+    bit[3] reg sync_second;
+    bit reg previous_sck;
+    bit reg selected;
+    bit reg fresh;
+    bit reg tx_bit;
+    bit[8] reg tx_shift;
+    bit[8] reg rx_shift;
+    uint[3] reg index;
+
+    assign miso_enable = !cs_n && !reset;
+    // For CPHA=0 the first bit precedes the consuming leading edge.
+    assign miso = CPHA == 0 && fresh ? (valid(pending) ? (peek(pending) >> 7) != 0 : 0) : tx_bit;
+
+    always @(posedge clk) begin
+        if (reset) begin
+            sync_first <= {1'b1, bit'(CPOL), 1'b0};
+            sync_second <= {1'b1, bit'(CPOL), 1'b0};
+            previous_sck <= CPOL;
+            selected <= 0;
+            fresh <= 1;
+            index <= 0;
+            tx_bit <= 0;
+            tx_shift <= 0;
+            rx_shift <= 0;
+            underrun <= 0;
+            overrun <= 0;
+        end else begin
+            sync_first <= {cs_n,sck,mosi};
+            sync_second <= sync_first;
+            previous_sck <= sync_second[1];
+            underrun <= 0;
+            overrun <= 0;
+            if (sync_second[2]) begin
+                selected <= 0;
+                fresh <= 1;
+                index <= 0;
+                tx_bit <= 0;
+                rx_shift <= 0;
+            end else if (!selected) begin
+                selected <= 1;
+                fresh <= 1;
+                index <= 0;
+                rx_shift <= 0;
+            end else if (sync_second[1] != previous_sck) begin
+                if (sync_second[1] != bit'(CPOL)) begin
+                    // Leading edge: reserve this byte's TX token exactly once.
+                    if (fresh) begin
+                        tx_shift <= 0;
+                        tx_bit <= valid(pending) && (peek(pending) >> 7) != 0;
+                        when (tx_shift <= pending) begin end
+                        if (!valid(pending)) underrun <= 1;
+                        fresh <= 0;
+                    end
+                    if (CPHA == 1) begin
+                        if (!fresh) tx_bit <= tx_shift[7];
+                    end
+                end
+                if ((CPHA == 0 && sync_second[1] != bit'(CPOL)) ||
+                    (CPHA == 1 && sync_second[1] == bit'(CPOL))) begin
+                    rx_shift <= {rx_shift[6:0],sync_second[0]};
+                    index <= index + 1;
+                    if (index == 7) begin
+                        when (rx <= {rx_shift[6:0],sync_second[0]}) begin end
+                        if (!ready(rx)) overrun <= 1;
+                    end
+                end
+                if (sync_second[1] == bit'(CPOL)) begin
+                    tx_shift <= tx_shift << 1;
+                    if (CPHA == 0) tx_bit <= tx_shift[6];
+                    if ((CPHA == 0 && index == 0) || (CPHA == 1 && index == 7)) fresh <= 1;
+                end
+            end
+        end
+    end
+endmodule

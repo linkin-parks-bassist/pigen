@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-11T17:18:25+11:00"
+revised_at: "2026-11-15T21:21:56+11:00"
 ---
 
 pigen_const_expr_normalize_count(model,value) owns type counts and transfer depths. Known positive ordinary/exact integers and known packed-bit values normalize into canonical unsized positive constants; symbolic integral constants remain structural for later elaboration. Zero, signed negatives, X/Z, values beyond uint64 and invalid IDs fail closed. int[0] retains the type count must be a positive integer diagnostic.
@@ -11,4 +11,4 @@ Conditional counts evaluate a known condition (including signed comparisons), th
 
 FIFO resolution switches on descriptor.parameter NONE/DEPTH: NONE requires an absent argument; DEPTH resolves a constant in PIGEN_LITERAL_DOMAIN_PIGEN, validates it with the normalizer and retains its semantic expression ID. Width, depth and declarator shape remain independent. Symbols and ordinary ranges retain their SV literal domain.
 
-The directionless-port scanner ignores commas nested in parentheses/brackets/braces, allowing marker-free static bit[{...}] declarations to reach count validation. child-port-endpoint-test simulates parameterized packed counts/depths and signed coordinate aliases. packed-count-error-test covers static width, zero, negative, unknown and truncating-shift-zero diagnostics. semantic-test covers packed ordering, signed fields, signed coordinates and overflow. General constant-expression coverage remains subject to acceptance audit; these tests do not establish every cast/operator combination.
+The directionless-port scanner ignores nested commas, skips parameter lists and recognizes inherited ANSI declarators, allowing grouped and marker-free static bit[{...}] ports to reach count validation (how/does/declaration/syntax/store/omission.md). child-port-endpoint-test simulates parameterized packed counts/depths and signed coordinate aliases. packed-count-error-test covers static width, zero, negative, unknown and truncating-shift-zero diagnostics. semantic-test covers packed ordering, signed fields, signed coordinates and overflow. General constant-expression coverage remains subject to acceptance audit; these tests do not establish every cast/operator combination.

@@ -3,6 +3,14 @@
 
 #include "pigen/ids.h"
 
+/* Native SystemVerilog case checking and synthesis contract. */
+typedef enum {
+	PIGEN_CASE_UNQUALIFIED,
+	PIGEN_CASE_UNIQUE,
+	PIGEN_CASE_UNIQUE0,
+	PIGEN_CASE_PRIORITY
+} pigen_case_qualifier;
+
 typedef enum {
 	PIGEN_CONVERSION_INVALID,
 	PIGEN_CONVERSION_IDENTITY,
@@ -11,7 +19,8 @@ typedef enum {
 	PIGEN_CONVERSION_INTEGER_PROMOTION,
 	PIGEN_CONVERSION_INTEGER_REINTERPRET,
 	PIGEN_CONVERSION_VECTOR_TO_INTEGER,
-	PIGEN_CONVERSION_INTEGER_TO_VECTOR
+	PIGEN_CONVERSION_INTEGER_TO_VECTOR,
+	PIGEN_CONVERSION_FOUR_TO_TWO
 } pigen_conversion_kind;
 
 typedef struct {

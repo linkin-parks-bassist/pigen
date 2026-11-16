@@ -1,0 +1,354 @@
+// Each loop iteration owns independent AXI channel storage and handshakes.
+module native_axis_generated #(
+  parameter DATA_W = 32,
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[DATA_W] axi4_stream[keep=1,last=1] fifo[3] s[LANES],
+  output uint[DATA_W] axi4_stream[keep=1,last=1] skid m[LANES]
+);
+  generate
+    for (genvar lane = 0; lane < LANES; lane++) begin : lanes
+      uint[DATA_W] axi4_stream[keep=1,last=1] buf pending;
+      always @(posedge clk) if (!reset) begin
+        pending <= s[lane];
+        m[lane] <= pending;
+      end
+    end
+  endgenerate
+endmodule
+
+module native_axil_generated #(
+  parameter DATA_W = 32,
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[DATA_W] axi4_lite[addr=40] fifo[3] s[LANES],
+  output uint[DATA_W] axi4_lite[addr=40] skid m[LANES]
+);
+  generate
+    for (genvar lane = 0; lane < LANES; lane += 1) begin : lanes
+      always @(posedge clk) if (!reset) begin
+        m[lane].aw <= s[lane].aw;
+        m[lane].w <= s[lane].w;
+        s[lane].b <= m[lane].b;
+        m[lane].ar <= s[lane].ar;
+        s[lane].r <= m[lane].r;
+      end
+    end
+  endgenerate
+endmodule
+
+module native_axi4_generated #(
+  parameter DATA_W = 32,
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[DATA_W] axi4[addr=40,id=4] fifo[3] s[LANES],
+  output uint[DATA_W] axi4[addr=40,id=4] skid m[LANES]
+);
+  generate
+    for (genvar lane = 0; lane < LANES; lane++) begin : lanes
+      fabric begin
+        s[lane] -> m[lane];
+      endfabric
+    end
+  endgenerate
+endmodule
+
+// Repeated child names remain local to their generated iteration.
+module native_axis_generated_lane (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s,
+  output uint[32] axi4_stream[keep=1,last=1] m
+);
+  always @(posedge clk) if (!reset) m <= s;
+endmodule
+
+module native_axis_child_bank #(
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] fifo[3] s[LANES],
+  output uint[32] axi4_stream[keep=1,last=1] skid m[LANES]
+);
+  generate
+    for (genvar lane = 0; lane < LANES; lane++) begin : lanes
+      native_axis_generated_lane child (
+        .clk(clk), .reset(reset), .s(s[lane]), .m(m[lane])
+      );
+    end
+  endgenerate
+endmodule
+
+module native_axis_configured_lane #(
+  parameter DEPTH = 2
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s,
+  output uint[32] axi4_stream[keep=1,last=1] m
+);
+  uint[32] axi4_stream[keep=1,last=1] fifo[DEPTH] queue;
+  always @(posedge clk) if (!reset) begin
+    queue <= s;
+    m <= queue;
+  end
+endmodule
+
+// Each iteration specializes its child from the lane's constant environment.
+module native_axis_configured_bank #(
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s[LANES],
+  output uint[32] axi4_stream[keep=1,last=1] m[LANES]
+);
+  generate
+    for (genvar lane = 0; lane < LANES; lane++) begin : lanes
+      native_axis_configured_lane #(.DEPTH(lane + 2)) child (
+        .clk(clk), .reset(reset), .s(s[lane]), .m(m[lane])
+      );
+    end
+  endgenerate
+endmodule
+
+// Separate generate loops instantiate and connect the same native endpoints.
+module native_axis_named_bank #(
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s[LANES],
+  output uint[32] axi4_stream[keep=1,last=1] m[LANES]
+);
+  genvar lane, route;
+  for (lane = 0; lane < LANES; lane++) begin : lanes
+    native_axis_configured_lane #(.DEPTH(lane + 2)) child (
+      .clk(clk), .reset(reset)
+    );
+  end
+  for (route = 0; route < LANES; route++) begin : links
+    fabric begin
+      s[route] -> lanes[route].child.s;
+      lanes[route].child.m -> m[route];
+    endfabric
+  end
+endmodule
+
+// Select a whole native implementation while keeping one typed port contract.
+module native_axis_selected_bank #(
+  parameter IMPLEMENTATION = 0,
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s[LANES],
+  output uint[32] axi4_stream[keep=1,last=1] m[LANES]
+);
+  for (genvar lane = 0; lane < LANES; lane++) begin : lanes
+    case (IMPLEMENTATION)
+      0: begin : queued
+        native_axis_configured_lane #(.DEPTH(lane + 2)) child (
+          .clk(clk), .reset(reset), .s(s[lane]), .m(m[lane])
+        );
+      end
+      default: begin : direct
+        fabric begin s[lane] -> m[lane]; endfabric
+      end
+    endcase
+  end
+endmodule
+
+// Each lane owns its startup counter and synchronous FSM state.
+module native_axis_fsm_bank #(
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] fifo[3] s[LANES],
+  output uint[32] axi4_stream[keep=1,last=1] skid m[LANES]
+);
+  for (genvar lane = 0; lane < LANES; lane++) begin : lanes
+    localparam STARTUP = lane % 3 + 1;
+    uint[8] reg delay;
+    fsm @(posedge clk) begin
+      if (reset) begin
+        delay <= 0;
+        goto waiting;
+      end
+      state waiting:
+        if (delay < STARTUP) delay <= delay + 1;
+        else goto running;
+      state running: m[lane] <= s[lane];
+    end
+  end
+endmodule
+
+// Each stream lane owns its record pipeline and reset binding.
+module native_axis_pipeline_bank #(
+  parameter DATA_W = 32,
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[DATA_W] axi4_stream[keep=1,last=1] fifo[3] s[LANES],
+  output uint[DATA_W] axi4_stream[keep=1,last=1] skid m[LANES]
+);
+  for (genvar lane = 0; lane < LANES; lane++) begin : lanes
+    typedef struct packed {
+      bit last;
+      bit [DATA_W/8-1:0] keep;
+      bit [DATA_W-1:0] data;
+    } beat_record;
+    always @(posedge clk) begin
+      if (reset) pipeline_reset(pipe);
+      else begin
+        pipeline pipe begin
+          beat_record first;
+          beat_record final;
+          stage begin first <= beat_record'(s[lane].beat); end
+          stage begin final <= first; end
+          yield final;
+        endpipeline
+        m[lane].beat <= uint[DATA_W+DATA_W/8+1]'(pipe);
+      end
+    end
+  end
+endmodule
+
+// Matching collections connect lane by lane through one typed fabric link.
+module native_axis_array_link #(
+  parameter LANES = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] fifo[3] s[LANES],
+  output uint[32] axi4_stream[keep=1,last=1] skid m[LANES]
+);
+  fabric begin s -> m; endfabric
+endmodule
+
+module native_axis_row (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s[2],
+  output uint[32] axi4_stream[keep=1,last=1] m[2]
+);
+  for (genvar lane = 0; lane < 2; lane++) begin : lanes
+    always @(posedge clk) if (!reset) m[lane] <= s[lane];
+  end
+endmodule
+
+// Each child binds one selected row of the parent endpoint collection.
+module native_axis_row_bank #(
+  parameter ROWS = 4
+) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] fifo[3] s[ROWS][2],
+  output uint[32] axi4_stream[keep=1,last=1] skid m[ROWS][2]
+);
+  for (genvar row = 0; row < ROWS; row++) begin : rows
+    native_axis_row child(.clk(clk), .reset(reset), .s(s[row]), .m(m[row]));
+  end
+endmodule
+
+// Independent endpoint ports form a child collection in declaration order.
+module native_axis_joined_ports (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s0,
+  input uint[32] axi4_stream[keep=1,last=1] s1,
+  output uint[32] axi4_stream[keep=1,last=1] m0,
+  output uint[32] axi4_stream[keep=1,last=1] m1
+);
+  native_axis_row child(.clk(clk), .reset(reset), .s({s0,s1}), .m({m0,m1}));
+endmodule
+
+// Replication covers one dimension and retains the original endpoint identities.
+module native_axis_pattern_bank (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s[2][2],
+  output uint[32] axi4_stream[keep=1,last=1] m[2][2]
+);
+  for (genvar row = 0; row < 2; row++) begin : rows
+    native_axis_row child(.clk(clk), .reset(reset),
+      .s('{1{s[row][1],s[row][0]}}), .m('{1{m[row][1],m[row][0]}}));
+  end
+endmodule
+
+// Keys refer to child coordinates; default supplies the one unmatched lane.
+module native_axis_keyed_ports (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream[keep=1,last=1] s[2],
+  output uint[32] axi4_stream[keep=1,last=1] m[2]
+);
+  native_axis_row child(.clk(clk), .reset(reset),
+    .s('{default:s[0],1:s[1]}), .m('{0:m[0],1:m[1]}));
+endmodule
+
+// Observe native handshake state with ordinary ordered combinational code.
+module native_axis_observed_bank #(parameter LANES=2)(
+    input wire clk, input wire reset,
+    input uint[32] axi4_stream fifo[2] s[LANES],
+    output uint[32] axi4_stream skid m[LANES],
+    output uint[8] wire status[LANES]
+);
+    for(genvar lane=0;lane<LANES;lane++) begin : lanes
+        always_comb begin : observe
+            logic [7:0] flags;
+            automatic logic downstream_ready=ready(m[lane]);
+            flags=0;
+            flags[0]=valid(s[lane]);
+            flags[1]=downstream_ready;
+            unique case(flags[0])
+                1'b1: flags[2]|=flags[1];
+                default: ;
+            endcase
+            status[lane]=uint[8]'(observe.flags);
+        end : observe
+        always @(posedge clk) if(!reset) m[lane] <= s[lane];
+    end
+endmodule
+
+// Iteration observes the packed DATA shape without consuming a channel token.
+module native_axis_foreach_data (
+  input wire clk,
+  input wire reset,
+  input bit[4][8] axi4_stream buf s,
+  output bit[4][8] wire reversed
+);
+  always_comb begin
+    reversed=0;
+    foreach(s.beat.data[row,column]) begin
+      reversed[3-row][7-column]=peek(s.beat).data[row][column];
+    end
+  end
+endmodule
+
+// Observe the currently offered lane heads through the native collection type.
+module native_axis_foreach_bank #(parameter LANES=4) (
+  input wire clk,
+  input wire reset,
+  input uint[32] axi4_stream fifo[3] s[LANES],
+  output uint[32] wire checksum,
+  output bit[LANES] wire offered
+);
+  always_comb begin
+    checksum=0;
+    offered=0;
+    foreach(s[lane]) begin
+      offered=(offered << 1) | bit[LANES]'(valid(s[lane]));
+      if(valid(s[lane])) checksum+=peek(s[lane]).data;
+    end
+  end
+endmodule

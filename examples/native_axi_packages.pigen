@@ -1,0 +1,56 @@
+package data_configuration;
+    localparam int DATA_BITS=32, ADDRESS_BITS=40, ID_BITS=4;
+    typedef struct packed {bit[15:0] hi; bit[15:0] lo;} word_t;
+    function automatic bit [DATA_BITS-1:0] join_halves(input bit [15:0] hi, input bit [15:0] lo);
+        return {hi, lo};
+    endfunction
+endpackage
+
+package native_buses;
+    import data_configuration::*;
+    export data_configuration::word_t;
+    typedef word_t axi4_stream[keep=1,last=1] stream_t;
+    typedef bit[DATA_BITS] axi4_lite[addr=ADDRESS_BITS] registers_t;
+    typedef bit[64] axi4[addr=ADDRESS_BITS,id=ID_BITS] memory_t;
+    typedef memory_t copied_memory_t;
+endpackage
+
+package public_buses;
+    export *::*;
+    import native_buses::stream_t, native_buses::registers_t,
+           native_buses::memory_t, native_buses::copied_memory_t,
+           native_buses::word_t;
+endpackage
+
+module native_axis_package import public_buses::stream_t; (
+    input wire clk,
+    input wire reset,
+    input stream_t fifo[2] s,
+    output stream_t skid m
+);
+    always @(posedge clk) if (!reset) begin
+        import public_buses::word_t;
+        m <= '{data:word_t'('{hi:s.data.hi,lo:s.data.lo}),keep:s.keep,last:s.last};
+    end
+endmodule
+
+module native_axil_package import public_buses::*; (
+    input wire clk,
+    input wire reset,
+    input registers_t s,
+    output registers_t m
+);
+    fabric begin s -> m; endfabric
+endmodule
+
+fabric native_axi4_package(
+    input wire clk,
+    input wire reset,
+    input public_buses::copied_memory_t s,
+    output public_buses::memory_t m
+) begin
+    import public_buses::copied_memory_t;
+    copied_memory_t fifo[3] middle;
+    s -> middle;
+    middle -> m;
+endfabric

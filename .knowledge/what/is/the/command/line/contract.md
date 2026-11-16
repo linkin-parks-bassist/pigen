@@ -1,8 +1,12 @@
 ---
 status: green
-revised_at: "2026-11-09T21:26:10+11:00"
+revised_at: "2026-11-14T16:46:50+11:00"
 ---
 
-The `pigen` CLI compiles one `.pigen` source through the structured pipeline (preprocess, lex, parse, semantic resolution, RTL lowering, naming, output model, SV emission) via `pigen_compile_source`. Contract: silent success — the output file is written, stdout is empty, exit 0, no notice; loud failure — a diagnostic goes to stderr, the exit code is nonzero, and no output file is written. Spanned diagnostics print `<path>:<line>:<column>: <message>`, the offending source line prefixed with four spaces, then a caret; spanless failures print `pigen: <message>`. Arguments: `pigen INPUT.pigen [-o OUTPUT.sv]`; without `-o`, a trailing `.pigen` becomes `.sv`, otherwise `.sv` is appended. Argument errors print usage and exit 2.
+The pigen CLI compiles one .pigen input through specialization and the structured parse/semantic/RTL/output/emission path, with fabric diagram generation where present. Silent success writes the output, leaves stdout/stderr empty and exits 0. Compile failure writes a diagnostic to stderr, exits nonzero and preserves any existing output artifact.
 
-The structured frontend accepts the data-first dialect (`logic [7:0] buf stage`, `bit[32] buf incoming`, `int[16] fifo[8] pending`) and diagnoses transfer-first prototype spellings (`buf [7:0] stage`) as "data type must precede the transfer type". Fabric diagram options (`--diagram`, `--no-diagram`) belong to the quarantined prototype and are not accepted by the structured CLI.
+Arguments: `pigen INPUT.pigen [-o OUTPUT.sv] [--diagram PATH | --no-diagram]`. --output is an alias for -o. Without an output option, a trailing .pigen becomes .sv; otherwise .sv is appended. Argument errors print usage and exit 2. Diagram options are accepted by this checkout's production CLI; they are not restricted to a separate prototype executable.
+
+A nonempty valid diagnostic span prints path:line:column:message, the offending source line prefixed with four spaces, then a caret aligned to the reported column. Missing or zero-width spans take the one-line `pigen: message` fallback. EOF for an unfinished design unit exercises that fallback. Data-first declarations are accepted; transfer-first spellings such as `buf bit[8] stage` diagnose that the data type must precede the transfer type.
+
+tests/cli_diagnostics_test.sh invokes the real driver in temporary directories, checking the exact spanned diagnostic, zero-width EOF fallback, silent success, no default output on failure and preservation of an explicit existing output. Its malformed inputs are created by the test rather than relying on formerly invalid repository fixtures that now compile. make cli-diagnostics-test runs it and verify includes that gate.

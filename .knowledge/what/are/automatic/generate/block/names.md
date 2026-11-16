@@ -1,0 +1,18 @@
+---
+status: green
+revised_at: "2026-11-15T13:07:59+11:00"
+---
+
+IEEE 1800-2017 §27.6 assigns external identifiers to unnamed generate blocks. Each generate construct in a lexical scope receives its textual ordinal, starting at one, including named and unselected constructs. Unnamed blocks use genblk followed by that ordinal; leading zeros avoid explicit-name collisions. Nested scopes restart numbering. Directly nested conditionals share the enclosing construct's scope/ordinal under §27.5; a loop still owns an iteration scope. Generate-region delimiters create no scope.
+
+src/syntax.c:assign_external_generate_names performs a lexical pass after module parsing, before semantic branch selection or iteration expansion. It accounts for structured and retained explicit/implicit generate controls, alternative bodies and later declarations. Procedural expressions/bodies do not contribute generate ordinals. The collision pass considers header parameters/ports, declarations, instances, functions/tasks and named procedural blocks. Retained escaped identifiers are joined from adjacent expanded-source token spans and stored without the escape marker. Initializers and assign RHS references do not declare names.
+
+include/pigen/syntax.h:pigen_syntax_generate_name records module identity, parent template index (SIZE_MAX for module scope), control/body tokens, optional explicit-name token, ordinal and owned external_name. The syntax tree's generate_names arena includes retained/unselected templates; it does not select branches or create native hardware. Repeated loop iterations share one template name.
+
+Selected pigen_semantic_generate_scope records copy external_name and external_ordinal from their template. Each semantic record owns its string independently; pigen_generate_scope_add validates optional metadata pairs, copies on successful publication, and model cleanup frees the copies. pigen_free_syntax_tree frees template strings separately. Existing lexical parent scopes and iteration indices distinguish instances of the same template.
+
+These are external-interface identifiers, not authored hierarchical names. Existing name spans still retain explicit labels only, and authored lookup does not register genblk metadata. Source paths require explicit labels (how/are/named/generate/scope/paths/resolved.md). RTL qualifies generated objects by lexical IDs and publishes an owned source-to-emitted reference map (how/are/source/paths/mapped/to/rtl/names.md). Broader retained-SV/native namespace/driver auditing remains work. Metadata does not claim full retained-SV integration inside structured scopes.
+
+tests/generate_semantic_test.c checks mixed retained/native controls, disabled/named constructs, explicit regions, forward collisions requiring several leading zeros, named procedural blocks, escaped retained names, nested scopes, negative-index iterations, unbraced conditional/loop scopes, direct conditional/case chains, metadata ownership and rejection of automatic authored paths. generate-syntax-test preserves grammar/provenance coverage. tests/native_array_test.py verifies generated all-family transport and specialization through standard pins. Sanitizers check semantic/template string lifetimes.
+
+Authority: [IEEE 1800-2017 §§27.5–27.6](https://fpga.mit.edu/6205/_static/F25/documentation/1800-2017.pdf), checked against the cached standard text. An independent Icarus %m probe confirms that an explicitly named procedural block reserves its identifier against automatic generate names. Structured source namespace validation remains separate (how/are/generate/block/name/conflicts/validated.md).

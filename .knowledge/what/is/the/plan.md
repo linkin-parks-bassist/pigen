@@ -1,17 +1,16 @@
 ---
 status: green
-revised_at: "2026-11-11T19:56:39+11:00"
+revised_at: "2026-11-16T21:18:46+11:00"
 ---
 
-Prioritize implementation of settled language semantics over hardening and edge-case expansion. Keep focused behavioral tests with each implementation change; do not defer correctness of the feature being built.
+Remaining repository work, separate from native AXI module-interface/fabric delivery.
 
-The settled `when` transfer-event surface and the FSM surface (optional/anonymous names, level-zero code, ordinary reset, first-executed-goto termination) are implemented with behavioral witnesses; how/to/write/fsm/states.md owns the contract and limits.
+1. Remove legacy optional FSM block names; enforce anonymous fsm @(posedge clk) begin and update affected syntax/tests.
+2. Resume general SV/compiler compatibility separately from AXI delivery. Integrate generated retained helper scopes, opaque/extern signatures and impure function/task scheduling (how/are/retained/native/axi/observations/represented.md; how/are/retained/subroutine/argument/effects/checked.md). Extend analyzed constants, expression sizing/entry points, fill literals, unpacked type-key patterns/concatenations/slices/typedef casts, collection binding contexts and continuous-assignment lvalues. Finish named-block forward/retained hierarchy, function/task contexts, retained/native namespace and driver audits, generated enum names, opaque-import exports and retained type/value-shadow grammar. Extend ordinary packages to classes, DPI/extern/prototypes, variables and enums/unions, then typed subroutine evaluation. Continue effectful mixed-case qualification/scheduling, remaining qualified-if contexts, sequential case/loop lowering and nonblocking reconstruction. Governing owners: what/is/the/spec.md, what/is/broken.md, how/are/ordinary/package/dependencies/resolved.md and how/are/scoped/combinational/processes/represented.md.
+3. Expand native core profiles and transaction composition beyond existing UART/SPI/I2C/I2S/Stream/Lite/SDRAM/AXI4 coverage; extend framing, widths and memory throughput. Preserve independent RTL evidence and browser acceptance. Views must expose RHS/control semantics, preserve transform ready/valid, AND combining valids, omit reset cases and separate write-enable indicators, retain assign dependencies, collapse raw SV, preserve compact layouts/uniform clocks/stable controls and pass visual checks. Board qualification needs SDRAM part/temperature/geometry/clock selection, forwarded-clock phase and FPGA I/O constraints.
 
-1. Exercise the new surface in the queued-worker showcase and representative real designs: idiomatic numerical types, always, implicit transfer guards, explicit when events and ordinary reset code. Keep compatibility witnesses separate from authored Pigen showcases (where/are/behavioral/examples.md).
-2. Continue substantive specification coverage: arrays/generate endpoint scopes, remaining expression/connection forms, mixed-case selector scheduling and qualified cases, sequential case/loop lowering, impure function/task side effects and nonblocking write reconstruction. Work requirement-by-requirement against what/is/the/spec.md and the compatibility contract; do not shrink requirements to supported syntax.
+After substantive work, harden nested/partial/spanning and multidimensional aliases, multiword constants/powers, standalone negative typing, unresolved bounds, writer/cross-clock audits, specialization provenance, broader compatibility and independent fire/ready probes against actual update enables (what/is/elastic/rtl/task/eight.md). Preserve interrupted work.
 
-After the language work above, return to the hardening backlog: nested/partial-region/spanning-producer and multidimensional alias mappings; multiword constant/power evaluation; standalone negative exact types and untyped negative bitwise typing; unresolved bounds; alias writer and cross-clock audits; specialization diagnostic provenance; and broader compatibility/edge-case matrices. Existing owners retain exact capability boundaries: how/to/connect/child/ports.md, what/is/elastic/rtl/task/five.md, what/is/broken.md and how/to/run/repository/verification.md. Preserve interrupted work rather than discarding or quietly expanding it ahead of the priorities above.
+Open decisions: FSM startup without asserted reset; computed automatic-input validity; pipeline yield surface; fabric manifest/SVG retention; struct-like child instantiation; distinct memory-mapped fabric surface.
 
-Open decisions: startup without an asserted FSM reset; explicit-valid gate versus replacement for computed automatic inputs; pipeline yield surface; fabric manifest/SVG retention; struct-like child instantiation. Reset intrinsic proposals and last-goto-wins semantics are superseded.
-
-Deferred to Pigen 1.0: ready-cycle validation (elastic RTL Task 7) and route negative witnesses. Stages diagnose and stop without rollback.
+Deferred to Pigen 1.0: ready-cycle validation and route negative witnesses. Stages diagnose and stop without rollback.

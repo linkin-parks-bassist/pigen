@@ -1,0 +1,39 @@
+module job_engine (
+    input wire clk,
+    input wire reset,
+    input int[9] buf request,
+    output int[17] buf result
+);
+    int[9] fifo[4] pending;
+    int[9] reg remaining;
+    int[17] reg total;
+
+    always @(posedge clk)
+        pending <= request;
+
+    fsm @(posedge clk) begin
+        if (reset) goto initialise;
+
+        state idle: begin
+            total <= 0;
+            when (remaining <= pending) goto calculate;
+        end
+
+        state calculate:
+            if (remaining == 0)
+                goto publish;
+            else begin
+                total <= total + remaining;
+                remaining <= remaining - 1;
+            end
+
+        state publish:
+            when (result <= total) goto idle;
+
+        state initialise: begin
+            remaining <= 0;
+            total <= 0;
+            goto idle;
+        end
+    end
+endmodule

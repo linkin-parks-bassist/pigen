@@ -1,0 +1,21 @@
+module when_value (
+    input wire clk,
+    input wire reset,
+    input bit[8] buf choice,
+    input bit[8] buf logical_data,
+    input bit[8] buf relation,
+    output bit[8] buf selected,
+    output bit buf logical_result,
+    output bit buf relation_result,
+    output uint[16] reg accepted
+);
+    always @(posedge clk) begin
+        if (reset) accepted <= 0;
+        else begin
+            when (selected <= choice[0] ? choice + 8'd1 : choice ^ 8'ha5)
+                accepted <= accepted + 1;
+            when (logical_result <= logical_data <= 8'd127 || logical_data == 8'd255) begin end
+            when (relation_result <= relation <= 8'd127) begin end
+        end
+    end
+endmodule

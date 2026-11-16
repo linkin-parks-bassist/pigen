@@ -1,0 +1,14 @@
+---
+status: green
+revised_at: "2026-11-16T07:12:20+11:00"
+---
+
+Native typedefs follow source order. A later declaration cannot retroactively classify an earlier endpoint, inquiry or cast. IEEE 1800-2017 §6.18 requires typedef declarations before use and forbids hierarchical typedef references ([standard](https://fpga.mit.edu/6205/_static/F25/documentation/1800-2017.pdf)). Native alias representation belongs to how/are/native/axi/type/aliases/represented.md.
+
+src/syntax.c:check_retained_native_forward_uses runs after the complete syntax tree and typedef-name facts exist, before successful parsing returns. It checks module header type positions, simple retained declarations, unowned typedef bases and direct type inquiries/casts in retained assign statements. A later visible native fact produces a source-spanned `native AXI typedef must be declared before use` error. Structured declarations already reaching type resolution can instead produce the normal `unknown type name` diagnostic. Compilation failure preserves existing output files.
+
+future_protocol_alias walks the occurrence's syntax scope and parents. A preceding typedef or value binding prevents an outer future native fact from being borrowed. protocol_scope_value_shadows shares the parser's parameter, parsed signal and retained-declaration name barriers. A later ordinary local typedef also blocks searching an outer native type. No future contract is inserted into the semantic model.
+
+The check distinguishes typed ANSI entries from bare port-name continuations and non-ANSI names. Retained module-instance connection lists are not declarations. Retained procedural bodies have unmodeled inner scopes, so their expressions are not scanned as module-scope queries. Ordinary interface ports retain their preservation path. Forward qualified package type positions are checked against parsed package facts (how/are/native/axi/package/types/represented.md). Imports of later native packages reject; common earlier-package imports are supported (how/are/native/axi/package/imports/resolved.md). Structured block imports are supported (how/are/procedural/package/imports/resolved.md). Package functions, opaque procedural/class contexts, general retained grammar and more complex type spellings still require integration; this is not a general SystemVerilog forward-reference validator.
+
+Evidence: tests/native_protocol_test.py:forward_alias_tests covers 30 rejection cases across Stream/Lite/full AXI: compilation-unit/local ports, alias chains, scalar/array/typed-net declarations, generated declarations, queries and casts. Four independent Icarus simulations with fatal Verilator lint check wire/parameter/function shadows and non-ANSI ports against later outer aliases. tests/syntax_test.c retains ordinary interface ports; generate-syntax-test and specialization-test cover existing parser/classifier contracts.

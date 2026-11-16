@@ -1,0 +1,21 @@
+// Every visible connection is a source-level atomic transfer between buf slots.
+module pigen_transfer_flow (
+    input wire clk,
+    input wire reset,
+    input wire step_right,
+    input uint[8] buf ingress,
+    output uint[10] buf egress
+);
+    uint[8] buf left;
+    uint[8] buf right;
+    uint[9] buf doubled;
+    uint[9] buf incremented;
+    always @(posedge clk) begin
+        if (!reset) begin
+            {left,right} <= {ingress,ingress};
+            doubled <= left * 2;
+            if (step_right) incremented <= right + 1;
+            egress <= doubled + incremented;
+        end
+    end
+endmodule

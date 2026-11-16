@@ -159,6 +159,10 @@ static int visit(use_analyzer *analyzer, pigen_expr_id expression,
 				visit(analyzer, known->as.select.right,
 					INVALID_ID(pigen_expr_id), predicate,
 					PIGEN_EXPRESSION_USE_TYPE);
+		case PIGEN_EXPR_EVALUATED_VALUE:
+			return visit(analyzer,known->as.evaluation.evaluated,INVALID_ID(pigen_expr_id),predicate,context) &&
+				visit(analyzer,known->as.evaluation.value,INVALID_ID(pigen_expr_id),predicate,context);
+		case PIGEN_EXPR_ARRAY_PATTERN:
 		case PIGEN_EXPR_CONCATENATION:
 		{
 			const pigen_expr_id *children = pigen_expr_children(
@@ -218,6 +222,8 @@ static int visit_lvalue(use_analyzer *analyzer, pigen_expr_id expression,
 		case PIGEN_EXPR_CONVERSION:
 		case PIGEN_EXPR_BINARY:
 		case PIGEN_EXPR_CONDITIONAL:
+		case PIGEN_EXPR_EVALUATED_VALUE:
+		case PIGEN_EXPR_ARRAY_PATTERN:
 		case PIGEN_EXPR_CONCATENATION:
 		case PIGEN_EXPR_ACCEPTS:
 		case PIGEN_EXPR_VALID:

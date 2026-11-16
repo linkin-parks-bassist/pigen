@@ -1,0 +1,10 @@
+---
+status: green
+revised_at: "2026-11-15T04:52:46+11:00"
+---
+
+cores/axil/registers.pigen implements a native 32-bit AXI4-Lite register endpoint with four read/write words at byte addresses 0, 4, 8 and 12. Separate AW and W buffers accept either order; a joint native transfer pairs queued address/data tokens. WSTRB selects individual bytes, including a successful no-op for zero strobes. Misaligned or unmapped addresses return DECERR; failed reads return zero data. Reset clears registers, ingress buffers and outstanding response validity. Read data snapshots at lookup; a word update on that same clock edge returns the pre-update value. AXI does not define transaction-level ordering between independently scheduled read/write channels here.
+
+The pigen_axil_registers module declares a native axi4_lite s_axi endpoint and emits standard pins directly. B/R responses use named typed records. cores/axil/pins.sv is a comment-only compatibility placeholder, not an implementation adapter. Protection attributes are ignored, so the endpoint provides no security/privilege filter. Response buffering is native Pigen and preserves VALID and payload under backpressure. This is AXI4-Lite, with no bursts or IDs, rather than a full AXI4 memory controller.
+
+tests/cores/axil_tb.sv independently scores accepted AW/W pairs, byte updates, B responses and read data. Read/write overlap uses disjoint addresses to avoid inventing ordering between independent channels. Three deterministic seeds vary BREADY/RREADY; each checks all 16 byte masks at every word, AW-first/W-first/simultaneous arrival, queued traffic, response stalls, misaligned/unmapped/high addresses, and reset with orphan AW, orphan W and stalled B/R responses. The runner performs warnings-fatal Verilator lint and Icarus simulation, retaining CSV/VCD/log/source hashes. The report exposes native source, architecture, waveforms, comparisons and an actual trace timing clip. Physical timing and formal protocol certification remain outside this simulation evidence.

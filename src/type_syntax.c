@@ -146,6 +146,7 @@ int pigen_parse_type_prefix(const pigen_expanded_source *source,
 	size_t *after, pigen_syntax_error *error)
 {
 	pigen_syntax_type parsed = {0};
+	pigen_syntax_type_arena direct_members = {0};
 	pigen_syntax_type_argument *arguments = NULL;
 	size_t argument_count = 0;
 	size_t argument_capacity = 0;
@@ -168,7 +169,6 @@ int pigen_parse_type_prefix(const pigen_expanded_source *source,
 			size_t open = at + 2;
 			size_t close = matching_brace(source, open, limit);
 			size_t member_at = open + 1;
-			size_t first_member = types->member_count;
 
 			if (close == limit)
 			{
@@ -191,19 +191,25 @@ int pigen_parse_type_prefix(const pigen_expanded_source *source,
 						"packed struct member requires a name and semicolon");
 					goto done;
 				}
-				if (!append_struct_member(types,
+				if (!append_struct_member(&direct_members,
 					(pigen_token_id){(uint32_t)name_at}, member_type))
 					goto done;
 				member_at = name_at + 2;
 			}
 			parsed.base = (pigen_token_id){(uint32_t)at};
 			parsed.is_packed_struct = 1;
-			parsed.first_member = first_member;
-			parsed.member_count = types->member_count - first_member;
+			/* Recursive member types publish their own ranges first. Keep this
+			 * record's direct members contiguous and exclude descendants. */
+			parsed.first_member = types->member_count;
+			parsed.member_count = direct_members.member_count;
+			for (size_t i = 0; i < direct_members.member_count; i++)
+				if (!append_struct_member(types, direct_members.members[i].name,
+					direct_members.members[i].type)) goto done;
 			parsed.location = pigen_syntax_location_from_extent(source,
 				first, close + 1);
 			if (!append_type(types, parsed, NULL, 0, type)) goto done;
 			*after = close + 1;
+			free(direct_members.members);
 			free(arguments);
 			return 1;
 		}
@@ -223,6 +229,8 @@ int pigen_parse_type_prefix(const pigen_expanded_source *source,
 	if (at < limit && token_at(source, at)->kind == PIGEN_TOKEN_IDENTIFIER &&
 		!token_is(source, at, "signed") && !token_is(source, at, "unsigned"))
 		parsed.base = (pigen_token_id){(uint32_t)at++};
+	if (at+1<limit && token_is(source,at,"::") && token_at(source,at+1)->kind==PIGEN_TOKEN_IDENTIFIER)
+	{parsed.has_package=1;parsed.package=parsed.base;parsed.base=(pigen_token_id){(uint32_t)(at+1)};at+=2;}
 	if (token_is(source, at, "signed") || token_is(source, at, "unsigned"))
 	{
 		if (parsed.signedness != PIGEN_SYNTAX_SIGN_IMPLICIT)
@@ -291,6 +299,7 @@ done:
 		expressions->child_count = original_child_count;
 		types->member_count = original_member_count;
 	}
+	free(direct_members.members);
 	free(arguments);
 	return ok;
 }
@@ -317,7 +326,8 @@ pigen_syntax_type_ownership pigen_syntax_type_declaration_ownership(
 		structured_name(structured_name_context, known->base))
 		return PIGEN_SYNTAX_TYPE_STRUCTURED;
 	if (known->base.index != PIGEN_INVALID_ID &&
-		(token_is(source, known->base.index, "logic") ||
+		(token_is(source, known->base.index, "void") ||
+			token_is(source, known->base.index, "logic") ||
 			token_is(source, known->base.index, "bit") ||
 			token_is(source, known->base.index, "byte") ||
 			token_is(source, known->base.index, "integer") ||

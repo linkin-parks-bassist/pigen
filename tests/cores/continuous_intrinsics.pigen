@@ -1,0 +1,425 @@
+module continuous_intrinsics (
+    input wire clk, input wire reset,
+    input bit[8] buf source,
+    input logic signed [7:0] signed_value,
+    input logic [7:0] unsigned_value,
+    input bit signed [7:0] wire two_value,
+    output bit[8] buf destination,
+    output wire source_offered, output wire destination_accepting,
+    output wire missing, output wire fire, output wire below,
+    output bit[2] wire split_flags,
+    output bit[8] wire raw, output bit[8] wire selected,
+    output bit[8] wire plus_one, output bit[2] wire flags,
+    output bit[8] wire repeated, output bit[8] wire shifted,
+    output bit[4] wire cast_nibble, output bit wire case_match,
+    output bit[4] wire low_nibble,
+    output bit[12] wire size_literal, output bit[12] wire size_named,
+    output bit[12] wire size_grouped, output bit[4] wire size_nibble,
+    output logic signed [15:0] wide_signed, output logic [15:0] wide_unsigned,
+    output logic signed [15:0] narrow_signed, output logic [15:0] narrow_unsigned,
+    output logic signed [15:0] shifted_signed, output bit signed [15:0] wide_two,
+    output bit[8] wire concat_joined, output bit[8] wire concat_truncated,
+    output logic [7:0] concat_sign_high, output logic [7:0] concat_sign_low,
+    output logic [7:0] comb_value, output logic [7:0] comb_chosen,
+    output logic [7:0] comb_after, output logic [7:0] comb_truth
+);
+    localparam WIDTH=12;
+    always @(posedge clk) destination <= source;
+    assign source_offered = valid(source);
+    assign destination_accepting = ready(destination);
+    assign below = valid(source) && (peek(source) <= 8'h7f);
+    assign {split_flags[1],split_flags[0]} = {ready(destination),valid(source)};
+    assign missing = !valid(source);
+    assign fire = accepts(destination, source);
+    assign raw = peek(source);
+    assign selected = valid(source) ? peek(source) : 8'hcc;
+    assign plus_one = peek(source) + 8'd1;
+    assign flags = {ready(destination), valid(source)};
+    assign repeated = {8{valid(source)}};
+    assign shifted = peek(source) >> 2;
+    assign cast_nibble = bit[4]'(peek(source));
+    assign case_match = peek(source) === 8'ha5;
+    assign low_nibble = peek(source)[3:0];
+    assign size_literal = 12'(peek(source));
+    assign size_named = WIDTH'(peek(source));
+    assign size_grouped = (WIDTH+0)'(peek(source));
+    always_comb begin
+        comb_value=peek(source);
+        if(comb_value[0]) begin
+            comb_value[0]=0;
+            comb_chosen=8'ha5;
+        end else comb_chosen=8'h5a;
+        comb_after=comb_value;
+        if(comb_value[0]) comb_after=8'hff;
+        if(signed_value) comb_truth=8'hcc; else comb_truth=8'h33;
+    end
+    if(1) begin : cast_scope
+        assign {{concat_joined[7:5],concat_joined[4]},concat_joined[3:0]} = peek(source);
+        assign {concat_truncated[7:4],concat_truncated[3:0]} = {peek(source),8'ha5};
+        assign {concat_sign_high,concat_sign_low} = signed_value;
+        assign size_nibble = 4'(peek(source));
+        assign wide_signed = 12'(signed_value);
+        assign wide_unsigned = WIDTH'(unsigned_value);
+        assign narrow_signed = (WIDTH-8)'(signed_value);
+        assign narrow_unsigned = 4'(unsigned_value);
+        assign shifted_signed = 12'(signed_value) >>> 3;
+        assign wide_two = 12'(two_value);
+    end
+endmodule
+
+module static_intrinsics #(parameter integer W = 8)(input bit[W] wire value, output wire observed);
+    assign observed = ready(value) && valid(value);
+endmodule
+
+module numeric_comb(input wire [7:0] value, output uint[8] wire observed);
+    always_comb begin
+        uint[8] temporary;
+        temporary=uint[8]'(value);
+        observed=temporary;
+    end
+endmodule
+
+// Each result has an independent native-SV reference in the testbench.
+module compound_comb(
+    input logic [7:0] value, input logic signed [7:0] signed_value,
+    input uint[1] wire pick,
+    output logic [7:0] results[22], output uint[8] wire numeric,
+    output logic [7:0] selected
+);
+    always_comb begin
+        uint[8] number;
+        uint[1] slot;
+        logic [7:0] entries[2];
+        logic signed [7:0] signed_work;
+        logic [3:0] high,low;
+        results[0]=value; results[0]+=8'd19;
+        results[1]=value; results[1]-=8'd29;
+        results[2]=value; results[2]*=8'd13;
+        results[3]=value; results[3]/=8'd3;
+        results[4]=value; results[4]%=8'd7;
+        results[5]=value; results[5]&=8'hb6;
+        results[6]=value; results[6]|=8'h49;
+        results[7]=value; results[7]^=8'hc3;
+        results[8]=value; results[8]<<=value[2:0];
+        results[9]=value; results[9]>>=value[2:0];
+        results[10]=value; results[10]<<<=value[2:0];
+        results[11]=value; results[11]>>>=value[2:0];
+        signed_work=signed_value; signed_work>>>=3; results[12]=signed_work;
+        signed_work=signed_value; signed_work/=-8'sd3; results[13]=signed_work;
+        results[14]=value; ++results[14]; results[14]++; --results[14]; results[14]--;
+        high=value[7:4]; low=value[3:0]; {high,low}+=8'd23; results[15]={high,low};
+        results[16]=value; results[16]+=16'hff01;
+        results[17]=value; results[17]/=16'h0101;
+        signed_work=signed_value; signed_work*=16'sd131; results[18]=signed_work;
+        signed_work=signed_value; signed_work/=16'd3; results[19]=signed_work;
+        signed_work=signed_value; signed_work/=value; results[20]=signed_work;
+        signed_work=signed_value; signed_work%=16'd7; results[21]=signed_work;
+        number=uint[8]'(value); number--; ++number; number++; ++number; number-=2; numeric=number;
+        slot=pick; entries[0]=value; entries[1]=~value;
+        entries[slot]+=value; ++slot; entries[slot]^=value;
+        selected=entries[0]^entries[1];
+    end
+endmodule
+
+module case_comb(input logic [7:0] value,input logic signed [7:0] signed_value,
+    input logic [7:0] runtime_label,output logic [7:0] results[28]);
+    always_comb begin
+        uint[8] helper;
+        logic [7:0] selector;
+        helper=uint[8]'(value); selector=value;
+        case(selector[0])
+            default: results[0]=8'hcc;
+            1'b1: begin selector[0]=0; results[0]=8'ha5; end
+            1'b0: results[0]=8'h5a;
+        endcase
+        results[1]=selector;
+        case(value[1:0])
+            2'b00,2'b01: begin
+                logic [7:0] selector;
+                selector=8'h13;
+                case(value[2])
+                    1'b1: selector+=8'd7;
+                    default selector-=8'd3;
+                endcase
+                results[2]=selector;
+            end
+            default: results[2]=8'h72;
+        endcase
+        case(value)
+            runtime_label: results[3]=8'h11;
+            8'hff: results[3]=8'h22;
+            default: results[3]=8'h33;
+        endcase
+        case(signed_value)
+            16'h0080: results[4]=8'h44;
+            default: results[4]=8'h45;
+        endcase
+        case(signed_value)
+            16'shff80: results[5]=8'h55;
+            default: results[5]=8'h56;
+        endcase
+        case(signed_value)
+            128: results[6]=8'h66;
+            default: results[6]=8'h67;
+        endcase
+        results[7]=8'h70;
+        case(value)
+            (value[0] ? 8'h01 : 8'h02),8'h03: results[7]=8'h77;
+        endcase
+        results[8]=8'(helper);
+        case(signed_value+8'sd1) 8'sh80: results[9]=8'h91; default: results[9]=8'h92; endcase
+        case(signed_value+8'sd1) 16'sd128: results[10]=8'ha1; default: results[10]=8'ha2; endcase
+        case(signed_value>>>1) 16'h0040: results[11]=8'hb1; default: results[11]=8'hb2; endcase
+        case(value) '1: results[12]=8'hc1; default: results[12]=8'hc2; endcase
+        case(value) '0: results[13]=8'hd1; default: results[13]=8'hd2; endcase
+        case(8'('1)) 8'hff: results[14]=8'he1; default: results[14]=8'he2; endcase
+        case((signed_value+8'sd1)==16'sd128) 1'b1: results[15]=8'hf1; default: results[15]=8'hf2; endcase
+        case({4'('1),4'(value)}) 8'hfa: results[16]=8'h81; default: results[16]=8'h82; endcase
+        case(value[0] ? '1 : 8'h12) 8'hff: results[17]=8'h83; default: results[17]=8'h84; endcase
+        case((value+8'd123)/8'd3) 8'd0: results[18]=8'h85; default: results[18]=8'h86; endcase
+        casez(value) 8'b0???????: results[19]=8'h87; 8'b1???????: results[19]=8'h88; default: results[19]=8'h89; endcase
+        case(value) endcase
+        results[20]=value; case(value) default: results[20]+=8'd17; endcase
+        case(uint[8]'(value)+1) 9'd256: results[21]=8'h8a; default: results[21]=8'h8b; endcase
+        case(uint[64]'(2147483647+1)) 64'd2147483648: results[22]=8'h8c; default: results[22]=8'h8d; endcase
+        case(uint[8]'(value)<<1) 9'd256: results[23]=8'h8e; default: results[23]=8'h8f; endcase
+        case(peek(helper)+1) 9'd256: results[24]=8'h90; default: results[24]=8'h91; endcase
+        case(uint[8]'(8'bxxxx0001)) 8'd1: results[25]=8'h92; default: results[25]=8'h93; endcase
+        case(bit'(1'bx)) 1'b0: results[26]=8'h94; default: results[26]=8'h95; endcase
+        case(bit'(!1'bx)) 1'b0: results[27]=8'h96; default: results[27]=8'h97; endcase
+    end
+endmodule
+
+module state_casts(input logic signed [7:0] signed_value,input logic [7:0] unsigned_value,
+    output uint[16] wire cast_u,output int[16] wire cast_s,
+    output uint[8] wire cast_composite,output bit wire cast_direct,
+    output logic cast_equal,output uint[128] wire cast_wide);
+    assign cast_u=uint[16]'(unsigned_value);
+    assign cast_s=int[16]'(signed_value);
+    assign cast_composite=uint[8]'(signed_value)^uint[8]'(1);
+    assign cast_direct=bit'(uint[1]'(signed_value[0]));
+    assign cast_equal=(uint[8]'(signed_value)==uint[8]'(1));
+    assign cast_wide=uint[128]'(signed_value);
+endmodule
+
+module loop_comb(input logic [7:0] value, input logic signed [7:0] signed_value,
+    output logic [7:0] results[14]);
+    always_comb begin
+        uint[8] helper;
+        logic [7:0] counter, accumulator, selector;
+        bit [7:0] repeat_count;
+        helper=uint[8]'(value);
+        counter=0; accumulator=0;
+        while(counter<value[2:0]) begin
+            accumulator+=counter;
+            counter++;
+        end
+        results[0]=accumulator;
+        repeat_count=value & 8'd7; accumulator=0;
+        repeat(repeat_count) begin accumulator++; repeat_count=0; end
+        results[1]=accumulator;
+        counter=0; accumulator=0;
+        repeat(3) begin
+            logic [7:0] inner;
+            inner=0;
+            while(inner<2) begin accumulator+=counter; inner++; end
+            counter++;
+        end
+        results[2]=accumulator;
+        accumulator=8'h5a;
+        repeat(signed_value) accumulator++;
+        results[3]=accumulator;
+        selector=value; accumulator=0;
+        while(selector) begin accumulator++; selector=0; end
+        results[4]=accumulator;
+        counter=0;
+        while(counter<2) begin
+            case(counter) 0: counter++; default: counter+=1; endcase
+        end
+        repeat(0) ;
+        while(0) ;
+        results[5]=counter ^ 8'(peek(helper));
+        accumulator=0;
+        for(int i=0;i<3;i++) begin
+            accumulator+=8'(i);
+            for(int i=0;i<2;i++) accumulator++;
+        end
+        results[6]=accumulator;
+        accumulator=0;
+        for(counter=0,selector=3;counter<3;counter++,selector=3-counter) accumulator+=selector;
+        results[7]=accumulator;
+        accumulator=0;
+        for(int i=0,j=1;i<3;i++,j+=2) accumulator+=8'(j);
+        results[8]=accumulator;
+        counter=0;accumulator=0;
+        for(;counter<value[2:0];) begin accumulator++;counter++;end
+        results[9]=accumulator;
+        accumulator=8'ha5;
+        for(int i=3;i<0;i--) accumulator=0;
+        for(counter=0;counter<2;counter++) ;
+        results[10]=accumulator ^ counter;
+        accumulator=0;
+        for(int i=-2;i<2;i++) accumulator+=8'(i+2);
+        results[11]=accumulator;
+        accumulator=0;
+        for(counter=0;counter<1 && (signed_value+8'sd1)<8'sd0;counter++) accumulator++;
+        results[12]=accumulator;
+        accumulator=0;
+        for(uint[8] i=254;i+1<256;i++) accumulator++;
+        results[13]=accumulator;
+
+
+    end
+endmodule
+
+module loop_control(input logic [7:0] value,output logic [7:0] results[10]);
+    always_comb begin
+        logic [7:0] counter, accumulator, selector;
+        selector=peek(value); accumulator=0;
+        for(int i=0;i<8;i++) begin
+            if(i==value[2:0]) break;
+            if(i==3) continue;
+            accumulator+=8'(i);
+        end
+        results[0]=accumulator;
+        accumulator=0;
+        for(counter=0,selector=0;counter<8;counter++,selector=counter) begin
+            if(counter[0]) continue;
+            accumulator+=selector;
+        end
+        results[1]=accumulator ^ counter;
+        accumulator=0;
+        for(int i=0;i<3;i++) begin
+            for(int j=0;j<5;j++) begin
+                if(j==1) continue;
+                if(j==3) break;
+                accumulator+=8'(i+j);
+            end
+            accumulator++;
+        end
+        results[2]=accumulator;
+        accumulator=0;counter=0;
+        while(counter<8) begin
+            counter++;
+            if(counter==2) continue;
+            if(counter==5) break;
+            accumulator+=counter;
+        end
+        results[3]=accumulator ^ counter;
+        accumulator=0;counter=0;
+        repeat(7) begin
+            counter++;
+            if(counter==2) continue;
+            if(counter==5) break;
+            accumulator+=counter;
+        end
+        results[4]=accumulator ^ counter;
+        accumulator=0;counter=0;
+        do begin
+            counter++;
+            if(counter<2) continue;
+            accumulator++;
+        end while(counter<value[2:0]);
+        results[5]=accumulator;
+        accumulator=0;counter=0;
+        forever begin
+            counter++;
+            if(counter<2) continue;
+            accumulator+=counter;
+            if(counter==4) break;
+        end
+        results[6]=accumulator ^ counter;
+        selector=value;accumulator=0;
+        do begin accumulator++;selector=0;continue;accumulator=8'hff;end while(selector);
+        results[7]=accumulator;
+        for(counter=0;counter<8;counter++) begin if(counter==2) break;end
+        results[8]=counter;
+        accumulator=0;
+        for(counter=0;counter<5;counter++) begin
+            case(counter) 2: break; default: accumulator++; endcase
+            accumulator+=10;
+        end
+        results[9]=accumulator;
+    end
+endmodule
+
+module fill_casts(input logic [7:0] value,output logic [15:0] results[12]);
+    localparam W=8;
+    always_comb begin
+        results[0]=logic[16]'(uint[16]'('1));
+        results[1]=bit[16]'('x);
+        results[2]=logic[16]'('x);
+        results[3]=8'('1);
+        results[4]=8'(4'('1));
+        results[5]=4'(8'('1));
+        results[6]=W'(value[0] ? '1 : '0);
+        results[7]=logic[16]'(int[16]'('1));
+        results[8]=logic[16]'(bit[8]'('z));
+        results[9]=bit[16]'(value[0] ? '1 : '0);
+        results[10]=logic[16]'(value[0] ? '1 : '0);
+        results[11]=logic[16]'(int[16]'(value[0] ? '1 : 8'sh80));
+    end
+endmodule
+
+module compound_fills(input logic [7:0] value,output logic [15:0] results[20]);
+    always_comb begin
+        results[0]='1 ^ value;
+        results[1]=('1 + value) >> 1;
+        results[2]='1 << value[2:0];
+        results[3]=value >> '1;
+        results[4]=~'0;
+        results[5]={'1,value};
+        results[6]={2{'1,value}};
+        results[7]=16'('1 ^ value);
+        results[8]=logic[16]'(uint[16]'('x | value));
+        results[9]=('1 == value);
+        results[10]=(|'1);
+        results[11]=logic[16]'(8'('1) ^ value);
+        results[12]=8'('1 + value);
+        results[13]=('1 & value) + 16'h100;
+        results[14]=value[0] ? ('1 ^ value) : ('0 | value);
+        results[15]='1 && value;
+        results[16]=~(&('1 ^ value));
+        results[17]=('1 >> 1) ^ 16'h1234;
+        results[18]=!'0;
+        results[19]=!('1 ^ value);
+    end
+endmodule
+
+module selected_fills(input logic [7:0] value,output logic [15:0] results[16]);
+    always_comb begin
+        results[0]=logic[16]'(uint[16]'((value ^ '1)[7:4]));
+        results[1]=value['1];
+        results[2]=value[('1 & 32'd3):0];
+        results[3]=value[0 +: ('1 & 32'd3)];
+        results[4]=(~'0 ^ 2'b00)[0];
+        results[5]=('1 ^ value)[value[2:0]];
+        results[6]=value[('1 & 32'd7)];
+        results[7]=('1 & value) ? 16'ha5a5 : 16'h5a5a;
+        results[8]=('1 ^ value) ? value : (value ^ 8'hff);
+        results[9]=('x & value) ? 16'ha5a5 : 16'h5a5a;
+        results[10]=(bit[2][4]'('1))[value[0]];
+        results[11]=(bit[2][4]'(value ^ '1))[('1 & 32'd1)];
+        results[12]=('1 ^ value)[7:('1 & 32'd4)];
+        results[13]='1 ? value : 8'h0;
+        results[14]='0 ? value : 8'h0;
+        results[15]=('1 & value)[3:0] ^ '1;
+    end
+endmodule
+
+module called_fills(input logic [7:0] value,output logic [15:0] results[20]);
+    always_comb begin
+        results[0]=$signed('1);results[1]=$unsigned('1);
+        results[2]=$signed('1 ^ value);results[3]=$unsigned('1 ^ value);
+        results[4]=16'($signed('1 ^ value));results[5]=16'($unsigned('1 ^ value));
+        results[6]=logic[16]'(uint[16]'($clog2('1 ^ 8'h00)));
+        results[7]=logic[16]'(uint[16]'($clog2('1)));
+        results[8]=$signed({'1,value});results[9]=$unsigned({'1,value});
+        results[10]=peek('1 ^ value);results[11]=peek('1);
+        results[12]=$signed(peek('1));results[13]=$unsigned($signed('1));
+        results[14]=$signed($unsigned('1));results[15]=$signed(bit[8]'('1));
+        results[16]=$unsigned(bit[8]'('x));results[17]=$signed('1 ^ value) >>> 3;
+        results[18]=$unsigned(peek(('1 ^ value)[7:4]));
+        results[19]=$clog2(('1 ^ 8'h00)[7:4]);
+    end
+endmodule

@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "pigen/lexer.h"
+#include "pigen/protocol.h"
 #include "pigen/specialize.h"
 #include "pigen/util.h"
 
@@ -25,6 +26,7 @@ typedef struct {
 	size_t parameter_close_token;
 	size_t endmodule_token;
 	int pigen;
+	const unsigned char *native_types;
 	spec_parameter *parameters;
 	size_t parameter_count;
 	spec_buffered_port *buffered_ports;
@@ -68,7 +70,10 @@ static size_t find_matching(const char *source, const pigen_tokens *tokens,
 	for (at = open; at < limit; at++)
 	{
 		if (token_is_text(source, &tokens->items[at], open_text)) depth++;
-		else if (token_is_text(source, &tokens->items[at], close_text) && !--depth)
+		else if ((token_is_text(source, &tokens->items[at], close_text) ||
+			(text_equals(open_text,"begin") && text_equals(close_text,"end") &&
+			 (token_is_text(source,&tokens->items[at],"endfabric") ||
+			  token_is_text(source,&tokens->items[at],"endpipeline")))) && !--depth)
 			return at;
 	}
 	return limit;
@@ -94,8 +99,255 @@ static size_t list_entry_end(const char *source, const pigen_tokens *tokens,
 	return limit;
 }
 
+static int token_is_protocol(const char *source, const pigen_token *token)
+{
+	pigen_protocol_family family;
+	return pigen_protocol_family_from_spelling(source + token->span.start,
+		token->span.end - token->span.start, &family);
+}
+
+typedef struct {size_t parent;const char *close;size_t package_name;} hint_scope;
+typedef struct {size_t name,scope;unsigned char native;} hint_name;
+typedef struct {size_t scope,package_scope,member;} hint_import;
+
+static int hint_token_equal(const char *source,const pigen_tokens *tokens,size_t a,size_t b)
+{
+ if(a>=tokens->count || b>=tokens->count) return 0;
+ const pigen_token *x=&tokens->items[a],*y=&tokens->items[b];
+ size_t n=x->span.end-x->span.start;
+ return n==y->span.end-y->span.start && !memcmp(source+x->span.start,source+y->span.start,n);
+}
+
+static unsigned char qualified_native_hint(const char *source,const pigen_tokens *tokens,size_t at,
+ const hint_scope *scopes,size_t scope_count,const hint_name *names,size_t name_count)
+{
+ if(at+2>=tokens->count || !token_is_text(source,&tokens->items[at+1],"::")) return 0;
+ for(size_t owner=1;owner<scope_count;owner++)
+ {
+  if(!hint_token_equal(source,tokens,at,scopes[owner].package_name)) continue;
+  for(size_t n=name_count;n>0;n--)
+   if(names[n-1].scope==owner && hint_token_equal(source,tokens,at+2,names[n-1].name)) return names[n-1].native;
+  return 0;
+ }
+ return 0;
+}
+
+static unsigned char imported_native_hint(const char *source,const pigen_tokens *tokens,size_t at,size_t scope,
+ const hint_import *imports,size_t import_count,const hint_name *names,size_t name_count,int *found)
+{
+ unsigned char native=0;*found=0;
+ for(size_t i=0;i<import_count;i++)
+ {
+  const hint_import *item=&imports[i];
+  if(item->scope!=scope || (item->member!=SIZE_MAX && !hint_token_equal(source,tokens,at,item->member))) continue;
+  for(size_t n=name_count;n>0;n--)
+   if(names[n-1].scope==item->package_scope && hint_token_equal(source,tokens,at,names[n-1].name))
+   {
+    *found=1;
+    if(item->member!=SIZE_MAX) return names[n-1].native;
+    native|=names[n-1].native;break;
+   }
+ }
+ return native;
+}
+
+/* Lexical hints for source rewriting only. Semantic resolution owns contracts.
+ * Keep ordinary typedef shadows and source order, including aliases of aliases. */
+static unsigned char *native_type_hints(const char *source,const pigen_tokens *tokens)
+{
+ hint_scope *scopes=pigen_resize(NULL,(tokens->count+1)*sizeof(*scopes));
+ size_t name_capacity=tokens->count+1;
+ hint_name *names=pigen_resize(NULL,name_capacity*sizeof(*names));
+ hint_import *imports=pigen_resize(NULL,(tokens->count+1)*sizeof(*imports));size_t import_count=0;
+ hint_import *exports=pigen_resize(NULL,(tokens->count+1)*sizeof(*exports));size_t export_count=0;
+ unsigned char *hints=pigen_resize(NULL,tokens->count ? tokens->count : 1);
+ memset(hints,0,tokens->count);
+ size_t scope=0,scope_count=1,name_count=0;
+ scopes[0]=(hint_scope){0,NULL,SIZE_MAX};
+ for(size_t at=0;at<tokens->count;at++)
+ {
+  const pigen_token *token=&tokens->items[at];
+  for(size_t owner=scope;;owner=scopes[owner].parent)
+  {
+   int found=0;
+   for(size_t n=name_count;n>0;n--)
+   {
+    const hint_name *name=&names[n-1];
+    if(name->scope!=owner) continue;
+    const pigen_token *defined=&tokens->items[name->name];
+    size_t length=defined->span.end-defined->span.start;
+    if(length==token->span.end-token->span.start &&
+       !memcmp(source+defined->span.start,source+token->span.start,length))
+    {hints[at]=name->native;found=1;break;}
+   }
+   if(!found) hints[at]=imported_native_hint(source,tokens,at,owner,imports,import_count,names,name_count,&found);
+   if(found || !owner) break;
+  }
+  if(qualified_native_hint(source,tokens,at,scopes,scope_count,names,name_count)) hints[at]=1;
+  if(token_is_text(source,token,"import"))
+  {
+   for(size_t entry=at+1;entry+2<tokens->count;)
+   {
+    if(!token_is_text(source,&tokens->items[entry+1],"::")) break;
+    for(size_t owner=1;owner<scope_count;owner++)
+     if(hint_token_equal(source,tokens,entry,scopes[owner].package_name))
+     {
+      imports[import_count++]=(hint_import){scope,owner,token_is_text(source,&tokens->items[entry+2],"*") ? SIZE_MAX : entry+2};
+      for(size_t n=0;n<name_count;n++) if(names[n].scope==owner && names[n].native) hints[at]=1;
+      break;
+     }
+    entry+=3;if(entry>=tokens->count || !token_is_text(source,&tokens->items[entry],",")) break;entry++;
+   }
+  }
+  if(token_is_text(source,token,"export"))
+  {
+   for(size_t entry=at+1;entry+2<tokens->count;)
+   {
+    if(!token_is_text(source,&tokens->items[entry+1],"::")) break;
+    size_t package=SIZE_MAX;
+    if(!token_is_text(source,&tokens->items[entry],"*"))
+    {
+     for(size_t owner=1;owner<scope_count;owner++)
+      if(hint_token_equal(source,tokens,entry,scopes[owner].package_name)) {package=owner;break;}
+     if(package==SIZE_MAX) break;
+    }
+    size_t member=token_is_text(source,&tokens->items[entry+2],"*") ? SIZE_MAX : entry+2;
+    exports[export_count++]=(hint_import){scope,package,member};
+    if(package!=SIZE_MAX && member!=SIZE_MAX)
+    {
+     for(size_t n=name_count;n>0;n--)
+      if(names[n-1].scope==package && hint_token_equal(source,tokens,names[n-1].name,member))
+      {
+       unsigned char native=names[n-1].native;
+       if(name_count==name_capacity) {name_capacity*=2;names=pigen_resize(names,name_capacity*sizeof(*names));}
+       names[name_count++]=(hint_name){member,scope,native};break;
+      }
+    }
+    entry+=3;if(entry>=tokens->count || !token_is_text(source,&tokens->items[entry],",")) break;entry++;
+   }
+  }
+  if(token_is_text(source,token,"typedef"))
+  {
+   size_t end=at+1,name=tokens->count,depth=0;
+   unsigned char native=0;
+   for(;end<tokens->count;end++)
+   {
+    const pigen_token *part=&tokens->items[end];
+    if(!depth && token_is_text(source,part,";")) break;
+    if(!depth && token_is_identifier(part)) name=end;
+    if(token_is_text(source,part,"[") || token_is_text(source,part,"(") || token_is_text(source,part,"{")) depth++;
+    else if(depth && (token_is_text(source,part,"]") || token_is_text(source,part,")") || token_is_text(source,part,"}"))) depth--;
+   }
+   if(end==tokens->count || name==tokens->count) continue;
+   /* The first payload token may itself be a native alias. */
+   const pigen_token *base=&tokens->items[at+1];
+   for(size_t owner=scope;;owner=scopes[owner].parent)
+   {
+    int found=0;
+    for(size_t n=name_count;n>0;n--)
+    {
+     const hint_name *known=&names[n-1];
+     const pigen_token *defined=&tokens->items[known->name];
+     size_t length=defined->span.end-defined->span.start;
+     if(known->scope==owner && length==base->span.end-base->span.start &&
+        !memcmp(source+defined->span.start,source+base->span.start,length))
+     {native=known->native;found=1;break;}
+    }
+    if(!found) native=imported_native_hint(source,tokens,at+1,owner,imports,import_count,names,name_count,&found);
+    if(found || !owner) break;
+   }
+   if(qualified_native_hint(source,tokens,at+1,scopes,scope_count,names,name_count)) native=1;
+   depth=0;
+   for(size_t t=at+1;t<name;t++)
+   {
+    const pigen_token *part=&tokens->items[t];
+    if(!depth && token_is_protocol(source,part)) native=1;
+    if(token_is_text(source,part,"[") || token_is_text(source,part,"(") || token_is_text(source,part,"{")) depth++;
+    else if(depth && (token_is_text(source,part,"]") || token_is_text(source,part,")") || token_is_text(source,part,"}"))) depth--;
+   }
+   if(name_count==name_capacity) {name_capacity*=2;names=pigen_resize(names,name_capacity*sizeof(*names));}
+   names[name_count++]=(hint_name){name,scope,native};
+   at=end;continue;
+  }
+  const char *close=NULL;
+  if(token_is_text(source,token,"module")) close="endmodule";
+  else if(token_is_text(source,token,"begin")) close="end";
+  else if(token_is_text(source,token,"generate")) close="endgenerate";
+  else if(token_is_text(source,token,"function")) close="endfunction";
+  else if(token_is_text(source,token,"task")) close="endtask";
+  else if(token_is_text(source,token,"package")) close="endpackage";
+  else if(token_is_text(source,token,"class")) close="endclass";
+  else if(token_is_text(source,token,"fork")) close="join";
+  if(close)
+  {
+   size_t package_name=SIZE_MAX;
+   if(token_is_text(source,token,"package"))
+   {package_name=at+1;if(token_is_text(source,&tokens->items[package_name],"automatic") || token_is_text(source,&tokens->items[package_name],"static")) package_name++;}
+   scopes[scope_count]=(hint_scope){scope,close,package_name};scope=scope_count++;
+  }
+  else if(scope && (token_is_text(source,token,scopes[scope].close) ||
+    (!strcmp(scopes[scope].close,"end") && (token_is_text(source,token,"endfabric") || token_is_text(source,token,"endpipeline"))) ||
+    (!strcmp(scopes[scope].close,"join") && (token_is_text(source,token,"join_any") || token_is_text(source,token,"join_none")))))
+  {
+   if(!strcmp(scopes[scope].close,"endpackage"))
+   {
+    /* Conservative exported-name hints only; semantic exports decide which
+     * wildcard candidates were actually imported and preserve canonical IDs. */
+    for(size_t e=0;e<export_count;e++) if(exports[e].scope==scope)
+     for(size_t i=0;i<import_count;i++) if(imports[i].scope==scope &&
+      (exports[e].package_scope==SIZE_MAX || exports[e].package_scope==imports[i].package_scope))
+     {
+      size_t count=name_count;
+      for(size_t n=0;n<count;n++)
+      {
+       hint_name candidate=names[n];
+       if(candidate.scope!=imports[i].package_scope ||
+        (imports[i].member!=SIZE_MAX && !hint_token_equal(source,tokens,imports[i].member,candidate.name)) ||
+        (exports[e].member!=SIZE_MAX && !hint_token_equal(source,tokens,exports[e].member,candidate.name))) continue;
+       int found=0;
+       for(size_t prior=0;prior<name_count;prior++)
+        if(names[prior].scope==scope && hint_token_equal(source,tokens,names[prior].name,candidate.name)) {found=1;break;}
+       if(found) continue;
+       if(name_count==name_capacity) {name_capacity*=2;names=pigen_resize(names,name_capacity*sizeof(*names));}
+       names[name_count++]=(hint_name){candidate.name,scope,candidate.native};
+      }
+     }
+   }
+   scope=scopes[scope].parent;
+  }
+ }
+ free(exports);free(imports);free(names);free(scopes);return hints;
+}
+
+static int numerical_construct_at(const char *source,const pigen_tokens *tokens,
+	size_t at,size_t last)
+{
+	int numerical=token_is_text(source,&tokens->items[at],"uint") || token_is_text(source,&tokens->items[at],"int");
+	if ((!numerical && !token_is_text(source,&tokens->items[at],"bit")) || at+1>=last ||
+		!token_is_text(source,&tokens->items[at+1],"[") ||
+		(at && (token_is_text(source,&tokens->items[at-1],".") || token_is_text(source,&tokens->items[at-1],"::")))) return 0;
+	size_t next=at+1;int count=numerical;
+	while (next<last && token_is_text(source,&tokens->items[next],"["))
+	{
+		size_t close=find_matching(source,tokens,next,"[","]",last);
+		if (close==last) return 1;
+		size_t depth=0;int range=0;
+		for(size_t t=next+1;t<close;t++)
+		{
+			if(token_is_text(source,&tokens->items[t],"(") || token_is_text(source,&tokens->items[t],"[") || token_is_text(source,&tokens->items[t],"{")) depth++;
+			else if(token_is_text(source,&tokens->items[t],")") || token_is_text(source,&tokens->items[t],"]") || token_is_text(source,&tokens->items[t],"}")) {if(depth) depth--;}
+			else if(!depth && token_is_text(source,&tokens->items[t],":")) range=1;
+		}
+		count|=!range;next=close+1;
+	}
+	if(next+1<last && token_is_text(source,&tokens->items[next],"'") && token_is_text(source,&tokens->items[next+1],"(")) return 1;
+	return count && next<last && token_is_identifier(&tokens->items[next]) &&
+		!token_is_text(source,&tokens->items[next],"inside") && !token_is_text(source,&tokens->items[next],"dist") &&
+		!token_is_text(source,&tokens->items[next],"with") && !token_is_text(source,&tokens->items[next],"matches") && !token_is_text(source,&tokens->items[next],"iff");
+}
+
 static int module_has_pigen(const char *source, const pigen_tokens *tokens,
-	size_t first, size_t last)
+	size_t first, size_t last, const unsigned char *native_types)
 {
 	static const char *const words[] = {
 		"buf", "port", "fifo", "skid", "pipeline", "fsm", "transfer",
@@ -103,8 +355,12 @@ static int module_has_pigen(const char *source, const pigen_tokens *tokens,
 	};
 
 	for (size_t at = first; at < last; at++)
+	{
+		if (token_is_protocol(source, &tokens->items[at]) || native_types[at]) return 1;
+		if (numerical_construct_at(source,tokens,at,last)) return 1;
 		for (size_t k = 0; k < sizeof words / sizeof *words; k++)
 			if (token_is_text(source, &tokens->items[at], words[k])) return 1;
+	}
 	return 0;
 }
 
@@ -226,9 +482,12 @@ static int parse_buffered_ports(const char *source, const pigen_tokens *tokens,
 
 		end = list_entry_end(source, tokens, at, port_close);
 		for (size_t k = at; k < end; k++)
+		{
+			if (token_is_protocol(source, &tokens->items[k]) || module->native_types[k]) buffered = 1;
 			for (size_t t = 0; t < sizeof transfers / sizeof *transfers; t++)
 				if (token_is_text(source, &tokens->items[k], transfers[t]))
 					buffered = 1;
+		}
 		for (size_t k = end; k > at; k--)
 			if (token_is_identifier(&tokens->items[k - 1]))
 			{
@@ -253,12 +512,28 @@ static int parse_buffered_ports(const char *source, const pigen_tokens *tokens,
 static void parse_module_localparams(const char *source,
 	const pigen_tokens *tokens, spec_module *module, size_t first, size_t last)
 {
+	size_t block_depth = 0;
 	for (size_t at = first; at < last; at++)
 	{
 		size_t semi, equals, name;
 		char *parameter_name, *expr;
 		int exists = 0;
 
+		if (token_is_text(source, &tokens->items[at], "begin"))
+		{
+			block_depth++;
+			continue;
+		}
+		if (token_is_text(source, &tokens->items[at], "end") ||
+			token_is_text(source, &tokens->items[at], "endfabric") ||
+			token_is_text(source, &tokens->items[at], "endpipeline"))
+		{
+			if (block_depth) block_depth--;
+			continue;
+		}
+		/* Lexical block constants are resolved after specialization. They
+		 * must never become module-wide textual substitution candidates. */
+		if (block_depth) continue;
 		if (!token_is_text(source, &tokens->items[at], "localparam")) continue;
 		for (semi = at + 1; semi < last; semi++)
 			if (token_is_text(source, &tokens->items[semi], ";")) break;
@@ -293,7 +568,7 @@ static void parse_module_localparams(const char *source,
 }
 
 static int collect_modules(const char *source, const pigen_tokens *tokens,
-	spec_module **modules, size_t *module_count)
+	spec_module **modules, size_t *module_count, const unsigned char *native_types)
 {
 	spec_module *out = NULL;
 	size_t count = 0;
@@ -305,8 +580,18 @@ static int collect_modules(const char *source, const pigen_tokens *tokens,
 		spec_module module = {0};
 		size_t name = at + 1;
 
-		if (!token_is_text(source, &tokens->items[at], "module") ||
+		int typed_fabric = token_is_text(source, &tokens->items[at], "fabric");
+		if ((!token_is_text(source, &tokens->items[at], "module") && !typed_fabric) ||
 			!token_is_identifier(&tokens->items[name])) continue;
+		if (typed_fabric)
+		{
+			size_t port = name + 1;
+			if (token_is_text(source, &tokens->items[port], "#") &&
+				token_is_text(source, &tokens->items[port + 1], "("))
+				port = find_matching(source, tokens, port + 1, "(", ")", tokens->count) + 1;
+			if (port >= tokens->count || !token_is_text(source, &tokens->items[port], "(")) continue;
+		}
+
 		for (header_end = name + 1; header_end < tokens->count; header_end++)
 		{
 			if (token_is_text(source, &tokens->items[header_end], "("))
@@ -314,11 +599,11 @@ static int collect_modules(const char *source, const pigen_tokens *tokens,
 			else if (token_is_text(source, &tokens->items[header_end], ")") &&
 				paren_depth) paren_depth--;
 			else if (!paren_depth &&
-				token_is_text(source, &tokens->items[header_end], ";")) break;
+				token_is_text(source, &tokens->items[header_end], typed_fabric ? "begin" : ";")) break;
 		}
 		if (header_end == tokens->count) continue;
 		for (endmodule = header_end + 1; endmodule < tokens->count; endmodule++)
-			if (token_is_text(source, &tokens->items[endmodule], "endmodule"))
+			if (token_is_text(source, &tokens->items[endmodule], typed_fabric ? "endfabric" : "endmodule"))
 				break;
 		if (endmodule == tokens->count) continue;
 		{
@@ -326,13 +611,14 @@ static int collect_modules(const char *source, const pigen_tokens *tokens,
 			int parameterized = name + 2 < header_end &&
 				token_is_text(source, &tokens->items[name + 1], "#") &&
 				token_is_text(source, &tokens->items[name + 2], "(");
-			int pigen = module_has_pigen(source, tokens, at, endmodule);
+			int pigen = module_has_pigen(source, tokens, at, endmodule, native_types);
 
 			if (!parameterized && !pigen) continue;
 			module.module_token = at;
 			module.name_token = name;
 			module.endmodule_token = endmodule;
 			module.pigen = pigen;
+			module.native_types = native_types;
 			if (parameterized)
 			{
 				size_t close = find_matching(source, tokens, name + 2, "(", ")",
@@ -370,6 +656,90 @@ static int collect_modules(const char *source, const pigen_tokens *tokens,
 	return 1;
 }
 
+/* Parameter replacement must respect the loop-local binding. These ranges
+ * preserve the authored generate tree; branch selection and unrolling remain
+ * semantic operations. */
+typedef struct {
+	size_t name, first, last;
+} spec_loop_binding;
+
+static size_t find_statement_end(const char *source,
+	const pigen_tokens *tokens, size_t first, size_t limit);
+
+static spec_loop_binding *module_loop_bindings(const char *source,
+	const pigen_tokens *tokens, const spec_module *module, size_t *count)
+{
+	spec_loop_binding *bindings = NULL;
+	*count = 0;
+	for (size_t at = module->module_token; at + 4 < module->endmodule_token; at++)
+	{
+		if (!token_is_text(source, &tokens->items[at], "for") ||
+			!token_is_text(source, &tokens->items[at + 1], "(") ||
+			!token_is_text(source, &tokens->items[at + 2], "genvar") ||
+			!token_is_identifier(&tokens->items[at + 3])) continue;
+		size_t close = find_matching(source, tokens, at + 1, "(", ")",
+			module->endmodule_token);
+		if (close == module->endmodule_token) continue;
+		size_t last = find_statement_end(source, tokens, close + 1,
+			module->endmodule_token);
+		if (last == module->endmodule_token) continue;
+		bindings = pigen_resize(bindings, (*count + 1) * sizeof(*bindings));
+		bindings[(*count)++] = (spec_loop_binding){at + 3, at + 3, last};
+	}
+	/* Separately declared genvars bind in their containing generate/module
+	 * scope. They are not module-parameter references in later loop headers. */
+	for(size_t at=module->module_token;at<module->endmodule_token;at++)
+	{
+		if(!token_is_text(source,&tokens->items[at],"genvar") ||
+			(at>=2 && token_is_text(source,&tokens->items[at-1],"(") && token_is_text(source,&tokens->items[at-2],"for"))) continue;
+		size_t last=module->endmodule_token,nesting=0,open=module->module_token;
+		for(size_t back=at;back>module->module_token;)
+		{
+			back--;
+			if(token_is_text(source,&tokens->items[back],"end") || token_is_text(source,&tokens->items[back],"endfabric") || token_is_text(source,&tokens->items[back],"endpipeline")) nesting++;
+			else if(token_is_text(source,&tokens->items[back],"begin"))
+			{
+				if(!nesting) {open=back;break;}
+				nesting--;
+			}
+		}
+		if(open!=module->module_token)
+		{
+			nesting=0;
+			for(size_t end=open;end<module->endmodule_token;end++)
+			{
+				if(token_is_text(source,&tokens->items[end],"begin")) nesting++;
+				else if((token_is_text(source,&tokens->items[end],"end") || token_is_text(source,&tokens->items[end],"endfabric") || token_is_text(source,&tokens->items[end],"endpipeline")) && !--nesting)
+				{last=end;break;}
+			}
+		}
+		for(size_t name=at+1;name<module->endmodule_token && token_is_identifier(&tokens->items[name]);name+=2)
+		{
+			bindings=pigen_resize(bindings,(*count+1)*sizeof(*bindings));
+			bindings[(*count)++]=(spec_loop_binding){name,name,last};
+			if(name+1>=module->endmodule_token || !token_is_text(source,&tokens->items[name+1],",")) break;
+		}
+	}
+	return bindings;
+}
+
+static int loop_binding_shadows(const char *source, const pigen_tokens *tokens,
+	const spec_loop_binding *bindings, size_t count, size_t at)
+{
+	const pigen_token *token = &tokens->items[at];
+	for (size_t i = 0; i < count; i++)
+	{
+		const spec_loop_binding *binding = &bindings[i];
+		const pigen_token *name = &tokens->items[binding->name];
+		size_t length = name->span.end - name->span.start;
+		if (at >= binding->first && at <= binding->last &&
+			token->span.end - token->span.start == length &&
+			!memcmp(source + token->span.start, source + name->span.start, length))
+			return 1;
+	}
+	return 0;
+}
+
 static char *build_specialized_module(const char *source,
 	const pigen_tokens *tokens, const spec_module *module,
 	const spec_parameter *values, size_t value_count, const char *clone_name)
@@ -378,7 +748,8 @@ static char *build_specialized_module(const char *source,
 	size_t last = tokens->items[module->module_token].span.start;
 	size_t skip_first = tokens->items[module->parameter_hash_token].span.start;
 	size_t skip_last = tokens->items[module->parameter_close_token].span.end;
-	size_t at;
+	size_t at, binding_count = 0;
+	spec_loop_binding *bindings = module_loop_bindings(source, tokens, module, &binding_count);
 
 	for (at = module->module_token; at <= module->endmodule_token; at++)
 	{
@@ -399,6 +770,7 @@ static char *build_specialized_module(const char *source,
 			replaced = 1;
 		}
 		else if (token_is_identifier(token) &&
+			!loop_binding_shadows(source, tokens, bindings, binding_count, at) &&
 			!(at > module->module_token && token_is_text(source, &tokens->items[at - 1], ".")))
 		{
 			for (size_t p = 0; p < value_count; p++)
@@ -415,6 +787,7 @@ static char *build_specialized_module(const char *source,
 	}
 	pigen_append_range(&out, source + last,
 		tokens->items[module->endmodule_token].span.end - last);
+	free(bindings);
 	return out.data ? out.data : pigen_copy_range("", 0);
 }
 
@@ -646,15 +1019,25 @@ static int statement_is_pigen(const char *source, const pigen_tokens *tokens,
 
 	for (size_t i = first; i < last; i++)
 	{
+		if (token_is_protocol(source, &tokens->items[i]) || (module && module->native_types[i])) return 1;
 		for (size_t k = 0; k < sizeof words / sizeof *words; k++)
 			if (token_is_text(source, &tokens->items[i], words[k])) return 1;
 	}
 	if (module)
 	{
 		for (size_t i = first; i + 1 < last; i++)
-			if (token_is_identifier(&tokens->items[i]) &&
-				token_is_text(source, &tokens->items[i + 1], "<="))
+			if (token_is_identifier(&tokens->items[i]))
 			{
+				size_t after=i+1;
+				while(after+1<last && (token_is_text(source,&tokens->items[after],".") ||
+					token_is_text(source,&tokens->items[after],"[")))
+				{
+					if(token_is_text(source,&tokens->items[after],"."))
+					{if(!token_is_identifier(&tokens->items[after+1])) break;after+=2;}
+					else
+					{size_t close=find_matching(source,tokens,after,"[","]",last);if(close==last) break;after=close+1;}
+				}
+				if(after>=last || !token_is_text(source,&tokens->items[after],"<=")) continue;
 				char *name = token_text(source, &tokens->items[i]);
 				int found = buffered_port(module, name);
 
@@ -1200,6 +1583,13 @@ static size_t find_statement_end(const char *source,
 			end += 2;
 		return end;
 	}
+	if (token_is_text(source, &tokens->items[first], "for"))
+	{
+		if (first + 1 >= limit || !token_is_text(source, &tokens->items[first + 1], "("))
+			return limit;
+		size_t close = find_matching(source, tokens, first + 1, "(", ")", limit);
+		return close == limit ? limit : find_statement_end(source, tokens, close + 1, limit);
+	}
 	if (token_is_text(source, &tokens->items[first], "if"))
 	{
 		size_t close, end;
@@ -1407,6 +1797,8 @@ static int rewrite_clocked_cases(const char *source, const pigen_tokens *tokens,
 	spec_replacement **replacements, size_t *replacement_count)
 {
 	int count = 0;
+	spec_function_names functions={0};
+	collect_function_names(source,tokens,&functions);
 
 	for (size_t i = 0; i + 4 < tokens->count; i++)
 	{
@@ -1433,6 +1825,13 @@ static int rewrite_clocked_cases(const char *source, const pigen_tokens *tokens,
 		if (end == tokens->count) continue;
 		for (size_t at = body + 1; at < end; at++)
 			if (is_case_keyword(source, &tokens->items[at])) has_case = 1;
+		if (!statement_has_function(source,tokens,&functions,body+1,end)) continue;
+		int qualified=0;
+		for(size_t at=body+1;at<end;at++)
+			if(token_is_text(source,&tokens->items[at],"unique") ||
+			   token_is_text(source,&tokens->items[at],"unique0") ||
+			   token_is_text(source,&tokens->items[at],"priority")) qualified=1;
+		if(qualified) continue;
 		if (!has_case || !statement_is_pigen(source, tokens,
 			module_containing(modules, module_count, i), body + 1, end))
 			continue;
@@ -1465,6 +1864,8 @@ static int rewrite_clocked_cases(const char *source, const pigen_tokens *tokens,
 		free(decoders.data);
 		i = end;
 	}
+	for(size_t i=0;i<functions.count;i++) free(functions.names[i]);
+	free(functions.names);
 	return count;
 }
 
@@ -1542,7 +1943,10 @@ static int add_mixed_process_splits(const char *source,
 					leaves[leaf_count++] = leaf;
 					if (leaf.function) has_function = 1;
 					if (leaf.task) has_task = 1;
-					if (leaf.pigen) has_pigen = 1;
+					/* Splitting needs a distinct structured leaf. A retained
+					 * call can mention a type-spelled value/name; treating that
+					 * same leaf as both halves recreates it every round. */
+					if (leaf.pigen && !leaf.function && !leaf.task) has_pigen = 1;
 				}
 				boundary = at + 1;
 			}
@@ -1943,17 +2347,17 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 	if (error) *error = NULL;
 	if (error_offset) *error_offset = 0;
 	pigen_lex_source(source, length, &tokens);
-	collect_modules(source, &tokens, &modules, &module_count);
+	unsigned char *native_types=native_type_hints(source,&tokens);
+	collect_modules(source, &tokens, &modules, &module_count,native_types);
 	{
-		int case_rewrites = rewrite_clocked_cases(source, &tokens, modules, module_count,
-			&replacements, &replacement_count);
-		int split = 0;
-
-		changed = case_rewrites > 0;
-		if (!case_rewrites)
-			split = add_mixed_process_splits(source, &tokens, modules,
-				module_count, &replacements, &replacement_count, error,
-				error_offset);
+		/* Pure clocked transfers use typed cases. Existing unqualified
+		 * function/transfer compositions retain their established fallback. */
+		int case_rewrites=rewrite_clocked_cases(source,&tokens,modules,module_count,
+			&replacements,&replacement_count);
+		int split=0;
+		changed=case_rewrites>0;
+		if(!case_rewrites) split=add_mixed_process_splits(source,&tokens,modules,
+			module_count,&replacements,&replacement_count,error,error_offset);
 
 		if (split < 0)
 		{
@@ -1969,6 +2373,7 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 					modules[i].parameter_count);
 			}
 			free(modules);
+			free(native_types);
 			pigen_free_tokens(&tokens);
 			return NULL;
 		}
@@ -2062,6 +2467,28 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 		}
 		if (!module) { free(module_name); continue; }
 		free(module_name);
+		if(parent)
+		{
+			size_t depth=0;
+			for(size_t t=parent->module_token;t<i;t++)
+			{
+				if(token_is_text(source,&tokens.items[t],"generate")) depth++;
+				else if(depth && token_is_text(source,&tokens.items[t],"endgenerate")) depth--;
+			}
+			int implicit_control=0;
+			if(!depth)
+				for(size_t t=parent->module_token+1;t<i;t++)
+					if(token_is_text(source,&tokens.items[t],"if") || token_is_text(source,&tokens.items[t],"for") ||
+						is_case_keyword(source,&tokens.items[t]) || token_is_text(source,&tokens.items[t],"begin"))
+					{
+						size_t end=find_statement_end(source,&tokens,t,parent->endmodule_token);
+						if(end>=i && end<parent->endmodule_token) {implicit_control=1;break;}
+					}
+			int native_target=0;
+			for(size_t t=module->module_token;t<module->endmodule_token;t++)
+				if(token_is_protocol(source,&tokens.items[t]) || native_types[t]) {native_target=1;break;}
+			if(depth || implicit_control || native_target) { i=semicolon;continue; }
+		}
 		parse_instance_overrides(source, &tokens, i + 3, close,
 			parent ? parent->parameters : NULL,
 			parent ? parent->parameter_count : 0,
@@ -2204,6 +2631,7 @@ char *pigen_specialize_parameterized_instances(const char *source, size_t length
 	}
 	free(modules);
 	if (clones.data) free(clones.data);
+	free(native_types);
 	pigen_free_tokens(&tokens);
 	if (changed && output.length == length && !memcmp(output.data, source, length))
 	{

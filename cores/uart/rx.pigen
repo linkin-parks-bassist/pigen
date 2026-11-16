@@ -1,0 +1,105 @@
+// LSB-first UART receiver; match TX framing parameters. Latest frame drops on overrun.
+// Malformed parity/stop frames are rejected; errors pulse once per detected failure.
+module pigen_uart_rx #(
+    parameter int[32] CLKS_PER_BIT = 16,
+    parameter int[32] DATA_BITS = 8,
+    parameter int[32] PARITY = 0,
+    parameter int[32] STOP_BITS = 1
+) (
+    input wire clk,
+    input wire reset,
+    input wire rx,
+    output bit[DATA_BITS] buf data,
+    output bit reg framing_error,
+    output bit reg parity_error,
+    output bit reg overrun
+);
+    initial if (CLKS_PER_BIT < 4 || DATA_BITS < 5 || DATA_BITS > 9 ||
+                PARITY < 0 || PARITY > 2 || STOP_BITS < 1 || STOP_BITS > 2)
+        $fatal(1, "UART requires CLKS_PER_BIT >= 4, DATA_BITS 5..9, PARITY 0..2, STOP_BITS 1..2");
+
+    bit reg sync_first;
+    bit reg sync_second;
+    bit[DATA_BITS] reg shift;
+    int[32] reg timer;
+    int[5] reg index;
+    int[3] reg stop_index;
+    bit reg parity_bad;
+
+    always @(posedge clk) begin
+        if (reset) begin
+            sync_first <= 1;
+            sync_second <= 1;
+        end else begin
+            sync_first <= rx;
+            sync_second <= sync_first;
+        end
+    end
+
+    fsm @(posedge clk) begin
+        if (reset) begin
+            framing_error <= 0;
+            parity_error <= 0;
+            overrun <= 0;
+            goto idle;
+        end
+        framing_error <= 0;
+        parity_error <= 0;
+        overrun <= 0;
+        state idle:
+            if (!sync_second) begin
+                timer <= (CLKS_PER_BIT >> 1) - 1;
+                goto start;
+            end
+        state start:
+            if (timer == 0) begin
+                if (sync_second) goto idle;
+                timer <= CLKS_PER_BIT - 1;
+                index <= 0;
+                shift <= 0;
+                parity_bad <= 0;
+                stop_index <= 0;
+                goto receive;
+            end else timer <= timer - 1;
+        state receive:
+            if (timer == 0) begin
+                shift <= {sync_second, shift[DATA_BITS-1:1]};
+                timer <= CLKS_PER_BIT - 1;
+                if (index == DATA_BITS - 1) begin
+                    if (PARITY != 0) goto check_parity;
+                    goto stop;
+                end
+                index <= index + 1;
+            end else timer <= timer - 1;
+        state check_parity:
+            if (timer == 0) begin
+                if (sync_second != ((^shift) ^ (PARITY == 2))) begin
+                    parity_bad <= 1;
+                    parity_error <= 1;
+                end
+                timer <= CLKS_PER_BIT - 1;
+                goto stop;
+            end else timer <= timer - 1;
+        state stop:
+            if (timer == 0) begin
+                if (!sync_second) begin
+                    framing_error <= 1;
+                    goto recover;
+                end
+                if (stop_index + 1 < STOP_BITS) begin
+                    stop_index <= stop_index + 1;
+                    timer <= CLKS_PER_BIT - 1;
+                    goto stop;
+                end
+                goto publish;
+            end else timer <= timer - 1;
+        state publish: begin
+            if (parity_bad) goto idle;
+            when (data <= shift) goto idle;
+            overrun <= 1;
+            goto idle;
+        end
+        state recover:
+            if (sync_second) goto idle;
+    end
+endmodule

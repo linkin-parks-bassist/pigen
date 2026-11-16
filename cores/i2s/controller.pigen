@@ -1,0 +1,61 @@
+// Continuous-clock, full-duplex I2S controller: 16-bit left then 16-bit right.
+// samples/received = {left[15:0],right[15:0]}, MSB first, one-bit WS lead.
+// HALF_PERIOD >= 2. Missing transmit frames become silence; full receive
+// buffer drops the new frame and pulses overrun. No clock-domain crossing.
+module pigen_i2s_controller #(parameter integer HALF_PERIOD = 4) (
+    input wire clk,
+    input wire reset,
+    input bit[32] buf samples,
+    output bit[32] buf received,
+    input wire serial_in,
+    output bit reg serial_out,
+    output bit reg bclk,
+    output bit reg word_select,
+    output bit reg underrun,
+    output bit reg overrun
+);
+    initial if (HALF_PERIOD < 2) $fatal(1, "I2S requires HALF_PERIOD >= 2");
+
+    bit[32] reg tx_shift;
+    bit[32] reg rx_shift;
+    int[32] reg timer;
+    int[7] reg slot;
+    always @(posedge clk) begin
+        if (reset) begin
+            bclk <= 0;
+            word_select <= 0;
+            serial_out <= 0;
+            tx_shift <= 0;
+            rx_shift <= 0;
+            slot <= 0;
+            timer <= HALF_PERIOD - 1;
+            underrun <= 0;
+            overrun <= 0;
+        end else begin
+            underrun <= 0;
+            overrun <= 0;
+            if (timer == 0) begin
+                timer <= HALF_PERIOD - 1;
+                if (!bclk) begin
+                    bclk <= 1;
+                    rx_shift <= {rx_shift[30:0],serial_in};
+                    if (slot == 31) begin
+                        received <= {rx_shift[30:0],serial_in};
+                        if (!ready(received)) overrun <= 1;
+                        when (tx_shift <= samples) underrun <= 0;
+                        if (!valid(samples)) begin
+                            tx_shift <= 0;
+                            underrun <= 1;
+                        end
+                        slot <= 0;
+                    end else slot <= slot + 1;
+                end else begin
+                    bclk <= 0;
+                    serial_out <= tx_shift[31];
+                    tx_shift <= tx_shift << 1;
+                    word_select <= slot >= 15 && slot < 31;
+                end
+            end else timer <= timer - 1;
+        end
+    end
+endmodule

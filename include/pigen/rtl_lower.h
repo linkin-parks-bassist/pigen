@@ -62,6 +62,14 @@ typedef struct {
 } pigen_rtl_storage_drive;
 
 typedef struct {
+	pigen_protocol_endpoint_id endpoint;
+	pigen_protocol_channel channel;
+	pigen_rtl_object_id fields[PIGEN_FIELD_COUNT];
+	pigen_rtl_object_id valid;
+	pigen_rtl_object_id ready;
+} pigen_rtl_protocol_channel_ports;
+
+typedef struct {
 	pigen_semantic_model *semantics;
 	pigen_rtl_model *rtl;
 	pigen_rtl_type_id *lowered_types;
@@ -76,7 +84,16 @@ typedef struct {
 	pigen_rtl_storage_drive *storage_drives;
 	size_t storage_drive_count;
 	size_t storage_drive_capacity;
+	pigen_rtl_protocol_channel_ports *protocol_ports;
+	size_t protocol_port_count;
+	size_t protocol_port_capacity;
+	pigen_rtl_object_id *retained_observation_objects;
+	size_t retained_observation_count;
 } pigen_rtl_lowering;
+
+const pigen_rtl_protocol_channel_ports *pigen_lowered_protocol_ports(
+	const pigen_rtl_lowering *lowering, pigen_protocol_endpoint_id endpoint,
+	pigen_protocol_channel channel);
 
 /* Zeroes the record and leaves all three memo maps empty (no handles
  * allocated). The semantics and rtl pointers are stored as given; the maps
@@ -85,7 +102,7 @@ typedef struct {
 void pigen_rtl_lowering_init(pigen_rtl_lowering *lowering,
 	pigen_semantic_model *semantics, pigen_rtl_model *rtl);
 
-/* Releases the three memo maps and zeroes the record. The owned semantic and
+/* Releases owned memo maps/tables and zeroes the record. The semantic and
  * RTL models are not released by this call; the caller keeps them. */
 void pigen_rtl_lowering_free(pigen_rtl_lowering *lowering);
 
@@ -127,6 +144,8 @@ int pigen_lower_rtl_module_declarations(pigen_rtl_lowering *lowering,
  * RTL model. */
 /* After all structural wiring, tie undriven generated child inputs inactive. */
 int pigen_lower_rtl_endpoint_defaults(pigen_rtl_lowering *lowering,
+	pigen_module_id module);
+int pigen_lower_rtl_generated_instances(pigen_rtl_lowering *lowering,
 	pigen_module_id module);
 int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 	pigen_module_id module);

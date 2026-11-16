@@ -145,6 +145,44 @@ const pigen_predicate_atom *pigen_predicate_atoms(
 	return model->predicate_atoms + known->first_atom;
 }
 
+/* A sufficient implication proof, not a Boolean reinterpretation of SV X/Z.
+ * Facts describe conditions which must be exactly true/false to execute a
+ * guard. Logical AND/OR/NOT preserve these implications in four-state SV.
+ * Comparisons and conversions remain opaque atoms. Bound recursive work. */
+static int condition_implied(const pigen_semantic_model *model,
+ pigen_predicate_id facts,pigen_expr_id condition,int expected,size_t *budget)
+{
+ if(!*budget) return 0;
+ --*budget;
+ const pigen_predicate *predicate=pigen_predicate_get(model,facts);
+ const pigen_predicate_atom *atoms=pigen_predicate_atoms(model,facts);
+ const pigen_semantic_expr *node=pigen_expr_get(model,condition);
+ if(!predicate || !node) return 0;
+ if(predicate->impossible) return 1;
+ for(size_t i=0;i<predicate->atom_count;i++)
+  if(atoms[i].condition.index==condition.index) return atoms[i].expected==expected;
+ if(node->kind==PIGEN_EXPR_INTEGER && node->as.integer<=1)
+  return (node->as.integer!=0)==expected;
+ if(node->kind==PIGEN_EXPR_GROUP)
+  return condition_implied(model,facts,node->as.group.operand,expected,budget);
+ if(node->kind==PIGEN_EXPR_EVALUATED_VALUE)
+  return condition_implied(model,facts,node->as.evaluation.value,expected,budget);
+ if(node->kind==PIGEN_EXPR_UNARY && node->as.unary.operation.operator==PIGEN_UNARY_LOGICAL_NOT)
+  return condition_implied(model,facts,node->as.unary.operand,!expected,budget);
+ if(node->kind==PIGEN_EXPR_BINARY)
+ {
+  pigen_binary_operator op=node->as.binary.operation.operator;
+  if(op==PIGEN_BINARY_LOGICAL_AND || op==PIGEN_BINARY_LOGICAL_OR)
+  {
+   int left=condition_implied(model,facts,node->as.binary.left,expected,budget);
+   if((op==PIGEN_BINARY_LOGICAL_AND)==expected)
+    return left && condition_implied(model,facts,node->as.binary.right,expected,budget);
+   return left || condition_implied(model,facts,node->as.binary.right,expected,budget);
+  }
+ }
+ return 0;
+}
+
 int pigen_predicates_mutually_exclusive(const pigen_semantic_model *model,
 	pigen_predicate_id left_id, pigen_predicate_id right_id)
 {
@@ -172,6 +210,18 @@ int pigen_predicates_mutually_exclusive(const pigen_semantic_model *model,
 			i++;
 			j++;
 		}
+	}
+	/* A later loop iteration excludes accumulated exit conditions. Prove
+	 * their defining conjunction/disjunction from the earlier guard facts. */
+	for(i=0;i<left->atom_count;i++)
+	{
+		size_t budget=1024;
+		if(condition_implied(model,right_id,left_atoms[i].condition,!left_atoms[i].expected,&budget)) return 1;
+	}
+	for(j=0;j<right->atom_count;j++)
+	{
+		size_t budget=1024;
+		if(condition_implied(model,left_id,right_atoms[j].condition,!right_atoms[j].expected,&budget)) return 1;
 	}
 	return 0;
 }

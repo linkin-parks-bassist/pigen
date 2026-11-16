@@ -7,6 +7,7 @@
 #include "pigen/data_type.h"
 #include "pigen/integer.h"
 #include "pigen/operation.h"
+#include "pigen/protocol.h"
 #include "pigen/source.h"
 #include "pigen/transfer_type.h"
 
@@ -19,7 +20,15 @@ typedef enum {
 	PIGEN_SYMBOL_STAGE,
 	PIGEN_SYMBOL_FSM,
 	PIGEN_SYMBOL_FABRIC,
-	PIGEN_SYMBOL_INSTANCE
+	PIGEN_SYMBOL_INSTANCE,
+	PIGEN_SYMBOL_PROTOCOL_ENDPOINT,
+	PIGEN_SYMBOL_PROTOCOL_ARRAY,
+	PIGEN_SYMBOL_GENVAR,
+	PIGEN_SYMBOL_PROCEDURAL_SCOPE,
+	PIGEN_SYMBOL_PROTOCOL_TYPE,
+	PIGEN_SYMBOL_PACKAGE,
+	PIGEN_SYMBOL_RETAINED_SUBROUTINE,
+	PIGEN_SYMBOL_RETAINED_LOCAL
 } pigen_symbol_kind;
 
 typedef enum {
@@ -38,7 +47,9 @@ typedef enum {
 	PIGEN_EXPR_ACCEPTS,
 	PIGEN_EXPR_VALID,
 	PIGEN_EXPR_READY,
-	PIGEN_EXPR_PEEK
+	PIGEN_EXPR_PEEK,
+	PIGEN_EXPR_EVALUATED_VALUE,
+	PIGEN_EXPR_ARRAY_PATTERN
 } pigen_semantic_expr_kind;
 
 typedef enum {
@@ -106,6 +117,7 @@ typedef struct {
 	pigen_symbol_id last_symbol;
 	/* Invalid for synthetic or cross-file scopes such as a compilation unit. */
 	pigen_source_span span;
+	int is_procedural; /* Private static block locals need distinct RTL names. */
 } pigen_scope;
 
 typedef struct {
@@ -115,6 +127,7 @@ typedef struct {
 	pigen_data_type_id data_type;
 	pigen_source_span name;
 	pigen_source_span declaration;
+	pigen_symbol_id alias_of; /* Lexical binding to a canonical procedural symbol. */
 	union {
 		pigen_module_id module;
 		pigen_parameter_id parameter;
@@ -124,6 +137,10 @@ typedef struct {
 		pigen_fsm_id fsm;
 		pigen_fabric_id fabric;
 		pigen_instance_id instance;
+		pigen_protocol_endpoint_id protocol_endpoint;
+		pigen_protocol_array_id protocol_array;
+		pigen_protocol_type_id protocol_type;
+		pigen_scope_id scope;
 	} object;
 } pigen_symbol;
 
@@ -134,6 +151,8 @@ typedef struct {
 	pigen_source_span span;
 	pigen_const_expr_id constant;
 	pigen_lvalue_id lvalue;
+	int is_context_cast; /* Explicit cast boundary in a case operand. */
+	int unbased_fill; /* 1 + bit state, or zero for a normal value. */
 	union {
 		uint64_t integer;
 		pigen_integer_id exact_integer;
@@ -168,11 +187,14 @@ typedef struct {
 			pigen_expr_id left;
 			pigen_expr_id right;
 			pigen_select_kind kind;
+			int is_member;
+			pigen_source_span member_name;
 		} select;
 		struct {
 			size_t first_child;
 			size_t child_count;
 		} sequence;
+		struct { pigen_expr_id value, evaluated; int before; } evaluation;
 		struct {
 			pigen_lvalue_id destination;
 			pigen_expr_id source;
@@ -276,6 +298,10 @@ typedef struct {
 	pigen_symbol_id symbol;
 	pigen_scope_id scope;
 	pigen_source_span span;
+	/* A selected instance may elaborate a fresh module from this template. */
+	pigen_module_id specialization_of;
+	pigen_module_id specialization_parent;
+	int is_external;
 } pigen_semantic_module;
 
 typedef struct {
@@ -288,11 +314,42 @@ typedef struct {
 } pigen_semantic_parameter;
 
 typedef struct {
+	pigen_syntax_id syntax;
+	pigen_syntax_id control;
+	pigen_module_id module;
+	pigen_scope_id scope;
+	pigen_source_span name;
+	/* Owned external-interface metadata; never an authored scope name. */
+	char *external_name;
+	size_t external_ordinal;
+	pigen_symbol_id iterator;
+	int is_iteration;
+	int64_t index;
+	pigen_source_span span;
+} pigen_semantic_generate_scope;
+
+typedef struct {
+	pigen_syntax_id syntax;
+	pigen_module_id module;
+	pigen_scope_id scope;
+	pigen_generate_scope_id owner;
+} pigen_semantic_generate_item;
+
+typedef struct {
 	pigen_symbol_id owner;
 	pigen_source_span name;
 	pigen_data_type_id data_type;
 	size_t offset;
 } pigen_semantic_struct_member;
+
+/* A packed record declaration has identity even without an authored typedef.
+ * Token extent distinguishes several records in one macro expansion span. */
+typedef struct {
+	pigen_scope_id scope;
+	pigen_source_span declaration;
+	pigen_token_id first, after;
+	pigen_data_type_id data_type;
+} pigen_semantic_record_type;
 
 typedef struct {
 	pigen_syntax_id syntax;
@@ -305,7 +362,64 @@ typedef struct {
 	pigen_semantic_direction direction;
 	pigen_clock_domain_id domain;
 	pigen_source_span span;
+	pigen_expr_id initial_value; /* Static declaration initialization, before processes. */
+	int is_automatic;
+	pigen_expr_id entry_value; /* Explicit automatic initializer, executed on entry. */
 } pigen_semantic_signal;
+
+typedef struct {
+	pigen_syntax_id syntax;
+	pigen_module_id module;
+	pigen_symbol_id symbol;
+	pigen_protocol_type_id type;
+	pigen_protocol_role role;
+	int is_port;
+	int is_instance_view;
+	pigen_instance_id instance;
+	pigen_protocol_endpoint_id child_endpoint;
+	pigen_signal_id channels[PIGEN_CHANNEL_COUNT];
+	struct {
+		int is_bound;
+		pigen_clock_domain_id domain;
+		pigen_symbol_id reset_symbol;
+		int reset_active_low;
+	} binding;
+	pigen_source_span span;
+} pigen_semantic_protocol_endpoint;
+
+typedef struct {
+	int64_t left;
+	int64_t right;
+	size_t count;
+} pigen_protocol_array_dimension;
+
+/* A structural collection of independently handshaken scalar endpoints.
+ * Elements are stored in row-major declaration order, left bound first. */
+typedef struct {
+	pigen_syntax_id syntax;
+	pigen_module_id module;
+	pigen_symbol_id symbol;
+	pigen_protocol_type_id type;
+	pigen_protocol_role role;
+	int is_port;
+	pigen_shape_id shape;
+	size_t first_dimension;
+	size_t dimension_count;
+	size_t first_element;
+	size_t element_count;
+	pigen_source_span span;
+} pigen_semantic_protocol_array;
+
+typedef struct {
+	pigen_syntax_id syntax;
+	pigen_module_id module;
+	pigen_protocol_endpoint_id source;
+	pigen_protocol_endpoint_id destination;
+	int direct;
+	pigen_source_span span;
+	int has_window;
+	uint64_t address_base,address_limit;
+} pigen_semantic_protocol_fabric_edge;
 
 typedef struct {
 	pigen_symbol_id clock_symbol;
@@ -324,7 +438,41 @@ typedef struct {
 	pigen_clock_domain_id domain;
 	pigen_expr_id clock;
 	pigen_source_span span;
+	int is_continuous; /* Static, ungated combinational assignments. */
+	int is_combinational; /* Ordered blocking statements, no transfer clock. */
+	pigen_procedural_id body;
 } pigen_semantic_process;
+
+typedef enum {
+	PIGEN_PROCEDURAL_BLOCK,
+	PIGEN_PROCEDURAL_IF,
+	PIGEN_PROCEDURAL_ASSIGN,
+	PIGEN_PROCEDURAL_CASE,
+	PIGEN_PROCEDURAL_CASEZ,
+	PIGEN_PROCEDURAL_CASEX,
+	PIGEN_PROCEDURAL_CASE_ITEM,
+	PIGEN_PROCEDURAL_WHILE,
+	PIGEN_PROCEDURAL_REPEAT,
+	PIGEN_PROCEDURAL_FOR,
+	PIGEN_PROCEDURAL_DO_WHILE,
+	PIGEN_PROCEDURAL_FOREVER,
+	PIGEN_PROCEDURAL_BREAK,
+	PIGEN_PROCEDURAL_CONTINUE
+} pigen_procedural_kind;
+
+typedef struct {
+	pigen_procedural_kind kind;
+	pigen_process_id process;
+	pigen_expr_id condition;
+	pigen_transfer_id assignment;
+	size_t first_child, child_count;
+	pigen_source_span span;
+	/* This label continues the preceding comma-separated case item. */
+	int case_continuation;
+	pigen_case_qualifier case_qualifier;
+	int else_if;
+} pigen_semantic_procedural;
+
 
 typedef struct {
 	pigen_syntax_id syntax;
@@ -396,6 +544,30 @@ typedef struct {
 	size_t limb_count;
 } pigen_integer;
 
+typedef struct {
+ pigen_scope_id scope,package_scope;
+ pigen_symbol_id target;
+ int wildcard; /* 1: candidate package; 0: explicit; 2: activated wildcard name. */
+ size_t at; /* Expanded-token order; SIZE_MAX is an end-of-scope API use. */
+ pigen_source_span span;
+} pigen_semantic_import;
+
+/* Canonical namespace choice for a retained SV callee token. */
+typedef struct {
+	pigen_token_id name;
+	pigen_symbol_id package,target;
+	int bare;
+} pigen_semantic_retained_call;
+
+/* Read-only channel payload observation in retained ordinary SV. */
+typedef struct {
+	pigen_module_id module;
+	pigen_signal_id signal;
+	size_t first,after;
+	pigen_expr_id value;
+} pigen_semantic_retained_observation;
+
+
 struct pigen_semantic_model {
 	const pigen_source_manager *sources;
 	pigen_integer *integers;
@@ -419,6 +591,12 @@ struct pigen_semantic_model {
 	pigen_scope *scopes;
 	size_t scope_count;
 	size_t scope_capacity;
+	pigen_semantic_import *imports;
+	size_t import_count,import_capacity;
+	pigen_semantic_retained_call *retained_calls;
+	size_t retained_call_count,retained_call_capacity;
+	pigen_semantic_retained_observation *retained_observations;
+	size_t retained_observation_count;
 	pigen_symbol *symbols;
 	size_t symbol_count;
 	size_t symbol_capacity;
@@ -446,6 +624,8 @@ struct pigen_semantic_model {
 	pigen_semantic_struct_member *struct_members;
 	size_t struct_member_count;
 	size_t struct_member_capacity;
+	pigen_semantic_record_type *record_types;
+	size_t record_type_count, record_type_capacity;
 	pigen_semantic_lvalue *lvalues;
 	size_t lvalue_count;
 	size_t lvalue_capacity;
@@ -458,12 +638,40 @@ struct pigen_semantic_model {
 	pigen_semantic_parameter *parameters;
 	size_t parameter_count;
 	size_t parameter_capacity;
+	pigen_semantic_generate_scope *generate_scopes;
+	size_t generate_scope_count;
+	size_t generate_scope_capacity;
+	pigen_semantic_generate_item *generate_items;
+	size_t generate_item_count;
+	size_t generate_item_capacity;
 	pigen_semantic_signal *signals;
 	size_t signal_count;
 	size_t signal_capacity;
+	pigen_protocol *protocol_types;
+	size_t protocol_type_count;
+	size_t protocol_type_capacity;
+	pigen_semantic_protocol_endpoint *protocol_endpoints;
+	size_t protocol_endpoint_count;
+	size_t protocol_endpoint_capacity;
+	pigen_semantic_protocol_array *protocol_arrays;
+	size_t protocol_array_count;
+	size_t protocol_array_capacity;
+	pigen_protocol_array_dimension *protocol_array_dimensions;
+	size_t protocol_array_dimension_count;
+	size_t protocol_array_dimension_capacity;
+	pigen_protocol_endpoint_id *protocol_array_elements;
+	size_t protocol_array_element_count;
+	size_t protocol_array_element_capacity;
+	pigen_semantic_protocol_fabric_edge *protocol_fabric_edges;
+	size_t protocol_fabric_edge_count;
+	size_t protocol_fabric_edge_capacity;
 	pigen_semantic_clock_domain *clock_domains;
 	size_t clock_domain_count;
 	size_t clock_domain_capacity;
+	pigen_semantic_procedural *procedural;
+	size_t procedural_count, procedural_capacity;
+	pigen_procedural_id *procedural_children;
+	size_t procedural_child_count, procedural_child_capacity;
 	pigen_semantic_process *processes;
 	size_t process_count;
 	size_t process_capacity;
@@ -512,6 +720,9 @@ const pigen_semantic_shape *pigen_shape_get(
 	const pigen_semantic_model *model, pigen_shape_id shape);
 const pigen_shape_dimension *pigen_shape_dimensions(
 	const pigen_semantic_model *model, pigen_shape_id shape);
+/* Fixed bounds in declaration order; rejects symbolic/overflowing extents. */
+int pigen_shape_dimension_bounds(pigen_semantic_model *model,pigen_shape_id shape,
+	size_t dimension,int64_t *left,int64_t *right,size_t *count);
 pigen_shape_id pigen_shape_element(pigen_semantic_model *model,
 	pigen_shape_id shape);
 pigen_const_expr_id pigen_const_expr_intern_integer(
@@ -571,6 +782,14 @@ int pigen_const_expr_evaluate_u64(pigen_semantic_model *model,
 /* Signed coordinate evaluation; unknown, unsupported or overflowing values fail. */
 int pigen_const_expr_evaluate_i64(pigen_semantic_model *model,
 	pigen_const_expr_id expression, int64_t *value);
+/* One in-range bit of a concrete integral constant; preserves X/Z. */
+int pigen_const_expr_evaluate_bit(pigen_semantic_model *model,
+	pigen_const_expr_id expression, uint64_t bit, pigen_bit_state *state);
+/* Exact four-state comparison after case-wide sizing. Unsupported constant
+ * operations fail; unknown bits are data, never an evaluation failure. */
+int pigen_const_expr_case_equal(pigen_semantic_model *model,
+	pigen_const_expr_id left,pigen_const_expr_id right,size_t width,
+	int signed_comparison,int *equal);
 int pigen_const_expr_is_symbolic(const pigen_semantic_model *model,
 	pigen_const_expr_id expression);
 pigen_const_expr_id pigen_const_expr_normalize_count(
@@ -607,6 +826,20 @@ pigen_expr_id pigen_expr_add_index(pigen_semantic_model *model,
 pigen_expr_id pigen_expr_add_select(pigen_semantic_model *model,
 	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
 	pigen_select_kind kind, pigen_source_span span);
+/* Preserve the analysis-owned member type for an equal-width/state projection. */
+pigen_expr_id pigen_expr_add_typed_select(pigen_semantic_model *model,
+	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
+	pigen_select_kind kind, pigen_data_type_id result_type, pigen_source_span span);
+pigen_expr_id pigen_expr_add_member_select(pigen_semantic_model *model,
+	pigen_expr_id base, pigen_expr_id left, pigen_expr_id right,
+	pigen_data_type_id result_type, pigen_source_span name, pigen_source_span span);
+/* Preserve an evaluated operand contributing no result bits. Never constant-fold. */
+pigen_expr_id pigen_expr_add_evaluated_value(pigen_semantic_model *model,
+	pigen_expr_id value,pigen_expr_id evaluated,int before,pigen_source_span span);
+/* One converted child per immediate unpacked element; never packed bits. */
+pigen_expr_id pigen_expr_add_array_pattern(pigen_semantic_model *model,
+	pigen_data_type_id type,pigen_shape_id shape,const pigen_expr_id *children,
+	size_t count,pigen_source_span span);
 pigen_expr_id pigen_expr_add_concatenation(pigen_semantic_model *model,
 	const pigen_expr_id *children, size_t count, pigen_source_span span);
 pigen_expr_id pigen_expr_add_accepts(pigen_semantic_model *model,
@@ -643,6 +876,10 @@ int pigen_struct_member_add(pigen_semantic_model *model,
 const pigen_semantic_struct_member *pigen_struct_member_find(
 	const pigen_semantic_model *model, pigen_symbol_id owner,
 	pigen_source_span name);
+/* Resolve a packed record member through typedef alias chains. */
+const pigen_semantic_struct_member *pigen_struct_member_for_type(
+	const pigen_semantic_model *model, pigen_data_type_id type,
+	pigen_source_span name);
 const pigen_lvalue_id *pigen_lvalue_children(
 	const pigen_semantic_model *model, size_t first, size_t count);
 pigen_scope_id pigen_scope_add(pigen_semantic_model *model,
@@ -653,8 +890,44 @@ pigen_declare_result pigen_symbol_declare(pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_symbol_kind kind, pigen_data_type_id type,
 	pigen_source_span name, pigen_source_span declaration,
 	pigen_symbol_id *declared, pigen_symbol_id *shadowed);
+/* Bind the same static declaration in another specialization of its process.
+ * Both scopes must share a procedural root; lookup returns the canonical ID. */
+pigen_declare_result pigen_symbol_bind_procedural_alias(pigen_semantic_model *model,
+	pigen_scope_id scope,pigen_symbol_id target,pigen_symbol_id *declared);
 pigen_symbol_id pigen_symbol_lookup(const pigen_semantic_model *model,
 	pigen_scope_id scope, pigen_source_span name);
+/* Pure source-position namespace probes; wildcard candidates are not activated. */
+pigen_symbol_id pigen_symbol_lookup_at(const pigen_semantic_model *model,
+ pigen_scope_id scope,pigen_source_span name,size_t at);
+pigen_symbol_id pigen_symbol_lookup_text_at(const pigen_semantic_model *model,
+ pigen_scope_id scope,const char *text,size_t length,size_t at);
+/* Direct members only, following canonical aliases without outward lookup. */
+pigen_symbol_id pigen_symbol_lookup_local(const pigen_semantic_model *model,
+	pigen_scope_id scope,pigen_source_span name);
+pigen_declare_result pigen_import_package(pigen_semantic_model *model,pigen_scope_id scope,
+ pigen_symbol_id package,pigen_source_span member,int wildcard,size_t at,pigen_source_span span);
+/* Export only actual imports; a named export also activates a candidate. An
+ * invalid package with wildcard=1 denotes export *::* . */
+pigen_declare_result pigen_export_package(pigen_semantic_model *model,
+ pigen_scope_id scope,pigen_symbol_id package,pigen_source_span member,
+ int wildcard,size_t at,pigen_source_span span);
+
+/* Resolving a use activates a wildcard candidate; pure lookup does not. */
+pigen_symbol_id pigen_symbol_resolve(pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name);
+pigen_symbol_id pigen_symbol_resolve_at(pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name,size_t at);
+pigen_symbol_id pigen_symbol_resolve_text_at(pigen_semantic_model *model,pigen_scope_id scope,const char *text,size_t length,size_t at);
+/* Retained SV calls see bound names through each scope's end, but wildcard
+ * candidates only before the call. Publishes activation at the call position. */
+pigen_symbol_id pigen_symbol_resolve_call_text_at(pigen_semantic_model *model,
+ pigen_scope_id scope,const char *text,size_t length,size_t at,int *ambiguous);
+int pigen_retained_call_bind(pigen_semantic_model *model,pigen_token_id name,pigen_symbol_id target,int bare);
+int pigen_symbol_import_ambiguous(const pigen_semantic_model *model,pigen_scope_id scope,pigen_source_span name,size_t at);
+int pigen_symbol_bind_package_scope(pigen_semantic_model *model,
+ pigen_symbol_id symbol,pigen_scope_id scope);
+pigen_symbol_id pigen_symbol_lookup_package_member(const pigen_semantic_model *model,
+ pigen_scope_id scope,pigen_source_span package,pigen_source_span member);
+int pigen_symbol_bind_procedural_scope(pigen_semantic_model *model,
+	pigen_symbol_id symbol,pigen_scope_id scope);
 pigen_symbol_id pigen_symbol_lookup_text(pigen_semantic_model *model,
 	pigen_scope_id scope, const char *text, size_t length);
 const pigen_symbol *pigen_symbol_get(const pigen_semantic_model *model,
@@ -665,6 +938,12 @@ pigen_module_id pigen_module_add(pigen_semantic_model *model,
 pigen_parameter_id pigen_parameter_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
 	pigen_expr_id value, int is_local, pigen_source_span span);
+pigen_generate_scope_id pigen_generate_scope_add(pigen_semantic_model *model,
+	const pigen_semantic_generate_scope *scope);
+const pigen_semantic_generate_scope *pigen_generate_scope_get(
+	const pigen_semantic_model *model, pigen_generate_scope_id scope);
+int pigen_generate_item_add(pigen_semantic_model *model,
+	const pigen_semantic_generate_item *item);
 pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_symbol_id symbol,
 	pigen_data_type_id data_type, pigen_shape_id shape,
@@ -673,6 +952,50 @@ pigen_signal_id pigen_signal_add(pigen_semantic_model *model,
 	pigen_source_span span);
 int pigen_signal_bind_domain(pigen_semantic_model *model,
 	pigen_signal_id signal, pigen_clock_domain_id domain);
+/* A native type alias pairs the payload data type with a full field contract. */
+int pigen_symbol_bind_protocol_type(pigen_semantic_model *model,
+	pigen_symbol_id symbol,pigen_protocol_type_id type);
+pigen_protocol_type_id pigen_symbol_protocol_type(const pigen_semantic_model *model,
+	pigen_symbol_id symbol);
+pigen_protocol_type_id pigen_protocol_type_intern(pigen_semantic_model *model,
+	const pigen_protocol *protocol);
+const pigen_protocol *pigen_protocol_type_get(const pigen_semantic_model *model,
+	pigen_protocol_type_id type);
+/* Channels retain their own storage, direction, shape and handshake identities.
+ * Supply INVALID for channels outside the protocol. A payload-free channel uses
+ * a one-bit carrier signal for its handshake; it has no protocol payload fields.
+ * Each channel belongs to exactly one endpoint. Invalid additions do not bind. */
+pigen_protocol_endpoint_id pigen_protocol_endpoint_add(pigen_semantic_model *model,
+	const pigen_semantic_protocol_endpoint *endpoint);
+const pigen_semantic_protocol_endpoint *pigen_protocol_endpoint_get(
+	const pigen_semantic_model *model, pigen_protocol_endpoint_id endpoint);
+pigen_protocol_endpoint_id pigen_symbol_protocol_endpoint(
+	const pigen_semantic_model *model, pigen_symbol_id symbol);
+pigen_protocol_endpoint_id pigen_protocol_endpoint_for_signal(
+	const pigen_semantic_model *model, pigen_signal_id signal,
+	pigen_protocol_channel *channel);
+pigen_protocol_endpoint_id pigen_instance_protocol_endpoint(
+	const pigen_semantic_model *model, pigen_instance_id instance,
+	pigen_protocol_endpoint_id child_endpoint);
+int pigen_protocol_array_shape_size(pigen_semantic_model *model,
+	pigen_shape_id shape, size_t *count);
+pigen_protocol_array_id pigen_protocol_array_add(pigen_semantic_model *model,
+	const pigen_semantic_protocol_array *array,
+	const pigen_protocol_endpoint_id *elements, size_t element_count);
+const pigen_semantic_protocol_array *pigen_protocol_array_get(
+	const pigen_semantic_model *model, pigen_protocol_array_id array);
+pigen_protocol_array_id pigen_symbol_protocol_array(
+	const pigen_semantic_model *model, pigen_symbol_id symbol);
+pigen_protocol_endpoint_id pigen_protocol_array_element(
+	const pigen_semantic_model *model, pigen_protocol_array_id array,
+	const int64_t *coordinates, size_t coordinate_count);
+pigen_protocol_array_id pigen_protocol_array_for_endpoint(
+	const pigen_semantic_model *model, pigen_protocol_endpoint_id endpoint, size_t *ordinal);
+int pigen_protocol_arrays_can_connect(const pigen_semantic_model *model,
+	pigen_protocol_array_id source, pigen_protocol_array_id destination);
+int pigen_protocol_endpoint_bind(pigen_semantic_model *model,
+	pigen_protocol_endpoint_id endpoint, pigen_clock_domain_id domain,
+	pigen_symbol_id reset_symbol, int reset_active_low);
 pigen_clock_domain_id pigen_clock_domain_intern(
 	pigen_semantic_model *model, pigen_symbol_id clock_symbol,
 	pigen_semantic_edge edge);
@@ -683,6 +1006,10 @@ pigen_process_id pigen_process_add(pigen_semantic_model *model,
 /* Storage-free structural transfers have no clock or domain. */
 pigen_process_id pigen_structural_process_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_source_span span);
+pigen_procedural_id pigen_procedural_add(pigen_semantic_model *model,
+	pigen_process_id process, pigen_procedural_kind kind,
+	pigen_expr_id condition, pigen_transfer_id assignment,
+	const pigen_procedural_id *children, size_t count, pigen_source_span span);
 pigen_transfer_id pigen_transfer_add(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module, pigen_process_id process,
 	pigen_lvalue_id destination, pigen_expr_id value,

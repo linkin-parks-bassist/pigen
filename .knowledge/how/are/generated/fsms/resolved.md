@@ -1,0 +1,12 @@
+---
+status: green
+revised_at: "2026-11-16T15:21:10+11:00"
+---
+
+Generated FSMs use the normal synchronous FSM resolver in each selected lexical generate scope. src/resolve.c collects FSM syntax as a supported generated module item and invokes resolve_fsm with the item's expression_scope. Clock lookup, the state-register declaration and body expressions use that scope rather than the module root. Immutable genvars, local parameters, local signals and native AXI lanes therefore resolve through the existing lexical lookup owner.
+
+An anonymous FSM's synthetic register name is based on the source syntax identity. Repeated elaborations of that template declare separate symbols in their separate generated scopes. Shared RTL naming qualifies local signals by semantic scope, so state and lane counters remain independent. Legacy named headers retain their existing compatibility path; requested anonymous syntax is owned by how/to/write/fsm/states.md.
+
+FSM clocks must resolve to a static signal. A buffered token is rejected as a clock. FSM bodies retain ordinary level-zero code, reset/goto termination, state guards and normal native transfer ownership/timing semantics. Qualified if checks use the same state and entry-termination rules (how/are/qualified/if/statements/represented.md). Branch selection precedes resolution; unselected but syntactically valid FSM bodies do not publish processes or resolve endpoint references. Syntax checks such as undeclared goto targets still apply to all parsed source.
+
+Evidence: tests/native_array_test.py explicit/implicit generated-FSM variants transport every standard channel/field for Stream/Lite/full AXI through independent stalled/reset scoreboards. Lane-local counters use genvar-dependent startup delays. qualified_fsm_generate_tests adds eighteen explicit/implicit profiles across all families/qualifiers, passing compiler ASan/UBSan and assertion-enabled standard-pin simulations (/tmp/pigen-qualified-generated-fsm-asan-final.log). Negative cases reject unknown goto targets and buffered clocks while preserving output. tests/generate_semantic_test.c checks repeated-template state symbols in distinct scopes and excludes an unselected invalid endpoint reference. The full make verify suite and targeted semantic ASan/UBSan test pass. examples/native_axi_generated.pigen includes native_axis_fsm_bank and passes warnings-fatal lint. Generated pipelines also use lexical scopes (how/are/generated/pipelines/resolved.md). Retained-SV integration remains work (how/are/structured/generate/scopes/elaborated.md).

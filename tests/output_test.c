@@ -718,6 +718,7 @@ int main(int argc, char **argv)
 			REQUIRE(r.ok == 0 && r.reason == PIGEN_OUTPUT_COVERAGE_INVALID);
 			pigen_free_output_model(&model);
 		}
+		pigen_free_sources(&manager);
 	}
 
 	SECTION("t9-build-walk") {
@@ -735,9 +736,8 @@ int main(int argc, char **argv)
 		 * source_add, preprocess, parse_syntax, resolve_semantics,
 		 * rtl_lowering_init, then lower_rtl_transfers + lower_rtl_module so the
 		 * lowering memo maps and the RTL records are published before the walk.
-		 * On main the build walk is a stub (0 with zero items), so the
-		 * assertions below that depend on the walked model are RED; the NULL
-		 * model guard and the witness-construction pins hold. */
+		 * The test checks source identity, nesting and retained trivia through
+		 * the public output-model API. */
 		const char *text =
 			"module top;\n"
 			"  logic clk, d;\n"
@@ -830,7 +830,17 @@ int main(int argc, char **argv)
 		n = pigen_output_item_count(&model);
 		lay = pigen_output_item_layout(&model, 0);
 		REQUIRE(lay.first > 0 && lay.count > 0 &&
-			lay.first + lay.count == n);
+			lay.first + lay.count < n);
+		/* Root-level trailing trivia stays outside the module's child range. */
+		for (i = lay.first + lay.count; i < n; i++)
+		{
+			pigen_output_item tail = pigen_output_item_get(&model, i);
+			const pigen_syntax_node *module_syntax = pigen_syntax_get(&syntax,
+				smodule->syntax);
+			REQUIRE(tail.kind == PIGEN_OUTPUT_OPAQUE);
+			REQUIRE(module_syntax && tail.as.span.start >=
+				module_syntax->location.source_span.end);
+		}
 		/* The nested run holds the module's constructs in order; OPAQUE
 		 * separators legitimately nest inside the module scope (the
 		 * owner-managed range counts them), so the range may contain
@@ -1031,6 +1041,8 @@ int main(int argc, char **argv)
 			REQUIRE(err.span.start == w.module_node->location.source_span.start);
 			REQUIRE(err.span.end == w.module_node->location.source_span.end);
 			pigen_free_output_model(&model);
+			/* Restore hidden owned records before arena destruction. */
+			w.rtl.module_count = 1;
 			mi_free(&w);
 		}
 

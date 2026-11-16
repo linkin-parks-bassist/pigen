@@ -1,15 +1,11 @@
 ---
 status: green
-revised_at: "2026-10-26T09:37:48+11:00"
+revised_at: "2026-11-15T14:53:18+11:00"
 checked_at: "2026-10-01T18:31:08+10:00"
 ---
 
-Pipeline verification no longer fails on Icarus: with Icarus Verilog 13.0 installed at `~/.local/bin` (source build of tag v13_0, ahead of the Ubuntu 12.0 package `/usr/bin/iverilog` on PATH) and Verilator 5.020 installed, the pipeline targets' iverilog/vvp and Verilator stages elaborate and simulate correctly. `make verify` is nevertheless red on master, but for a different reason: it stops at the first corpus target (fabric-test, "pigen: RTL naming failed", exit 2) because the corpus .pigen files use the prototype dialect the structured frontend diagnoses by design; those targets go red as per-subsystem migration debt (what/is/broken.md), with the structured C test targets green.
+Pipeline verification passes with the structured production compiler and the installed Icarus Verilog 13 and Verilator 5.020. The complete make verify gate passes, including the pipeline and corpus gates. Current acceptance boundaries belong to what/is/broken.md and the verification procedure to how/to/run/repository/verification.md.
 
-Why the Ubuntu 12.0 package fails, so it is not used again: Icarus 12 does not evaluate `$bits(<signal>)` in a declaration range. The prototype emits ingress endpoints that lower to `logic [($bits(source))-1:0] name__pigen_packet_in;` plus a continuous assign; that form segfaults ivl in elaboration (NetNet::test_and_set_part_driver, exit 139), and every alternative spelling (`wire`, a localparam, always_comb) silently simulates z/x. Only `$bits(<typedef>)` works. Minimal reproducer:
+Icarus 12 is unsuitable for the historical signal-width reproducer: `module m(input logic [7:0] s); logic [$bits(s)-1:0] p; assign p=s; endmodule`. Its elaborator failed on a signal-derived declaration range, while alternative spellings could simulate unknown/high-impedance values. The installed Icarus 13 handles that case. Keep the newer simulator on PATH; changing the spelling of legal SV to evade an older simulator defect is not a compiler semantics fix.
 
-```systemverilog
-module m(input logic [7:0] s); logic [$bits(s)-1:0] p; assign p = s; endmodule
-```
-
-The generated SV is legal. Icarus 13.0 and master handle the reproducer and all variants correctly; no upstream issue exists for it.
+Evidence: make verify builds and runs the pipeline corpus, examples, output models and ordinary fabric regressions. Its covered targets and installed tool versions are specified in how/to/run/repository/verification.md. An old failure on a different checkout or simulator version is not evidence that the current pipeline gate fails.

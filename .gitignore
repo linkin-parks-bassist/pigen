@@ -5,5 +5,14 @@
 *.sv
 !rtl/*.sv
 !examples/*_tb.sv
+!examples/native_axi_external_ip.sv
 !tests/*_tb.sv
 PLAN.md
+/build/
+!cores/**/*.sv
+!tests/cores/*.sv
+
+__pycache__/
+/backend.csv
+/checks.csv
+/trace.csv

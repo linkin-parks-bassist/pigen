@@ -6,10 +6,10 @@
 #include "pigen/semantic.h"
 #include "pigen/syntax.h"
 
-/* Lower inline parent-owned fabric blocks into wiring equations over the
- * parent signals connected to child instance ports. The child instantiation
- * text itself remains emitted verbatim; this pass binds instance.port endpoints
- * through the resolved semantic instance records. */
+/* Lower resolved inline fabrics into parent-owned wiring and arbitration.
+ * Native edges carry aggregate protocol identities; ordinary edges resolve
+ * through scalar child-connection records. Child pin mapping belongs to the
+ * output builder rather than this routing pass. */
 int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 	const pigen_syntax_tree *syntax);
 

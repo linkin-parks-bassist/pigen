@@ -155,6 +155,17 @@ int main(int argc, char **argv)
 			name = pigen_rtl_name_get(&rtl, head);
 			REQUIRE(name != 0 && strcmp(name->text, "a") == 0);
 			render_is(&rtl, expr, name->text);
+			pigen_rtl_expr_id high=pigen_rtl_expr_add_integer(&rtl,t,31,span);
+			pigen_rtl_expr_id low=pigen_rtl_expr_add_integer(&rtl,t,0,span);
+			char field[]="field";
+			pigen_rtl_expr_id member=pigen_rtl_expr_add_member_select(&rtl,t,expr,high,low,field,span);
+			field[0]='X'; /* Prepared names must not borrow the caller's buffer. */
+			render_is(&rtl,member,"a.field");
+			render_is(&rtl,pigen_rtl_expr_add_index(&rtl,t,member,low,span),"a.field[0]");
+			render_is(&rtl,pigen_rtl_expr_add_member_select(&rtl,t,expr,high,low,"\\part.name",span),"a.\\part.name ");
+			size_t count=rtl.expression_count;
+			REQUIRE(pigen_rtl_expr_add_member_select(&rtl,t,expr,high,low,"",span).index==PIGEN_INVALID_ID);
+			REQUIRE(rtl.expression_count==count);
 		}
 
 		/* UNARY: each of the four spelling cases renders its SV form. */
@@ -305,7 +316,7 @@ int main(int argc, char **argv)
 			cv.kind = PIGEN_CONVERSION_INTEGER_RESIZE;
 			render_is(&rtl,
 				pigen_rtl_expr_add_conversion(&rtl, t64, &cv, operand, span),
-				"signed'(1)");
+				"signed'(64'(1))");
 		}
 
 		/* INDEX: `base[idx]`. */
@@ -573,6 +584,168 @@ int main(int argc, char **argv)
 		pigen_free_rtl_model(&rtl);
 		pigen_free_sources(&sources);
 	}
+
+	SECTION("t10-combinational") {
+        pigen_source_manager sources={0};pigen_rtl_model rtl={0};
+        pigen_source_span span={(pigen_source_id){PIGEN_INVALID_ID},0,0};
+        pigen_rtl_module_id module=pigen_rtl_module_add_with_owner(&rtl,(pigen_module_id){0},span);
+        rtl.modules[module.index].name=malloc(5);memcpy(rtl.modules[module.index].name,"comb",5);
+        pigen_rtl_type_id type=vec_type(&rtl,PIGEN_SIGN_UNSIGNED);
+        pigen_rtl_object_id object=pigen_rtl_object_add_with_owner(&rtl,module,PIGEN_RTL_OBJECT_VARIABLE,
+            type,PIGEN_SEMANTIC_INTERNAL,(pigen_signal_id){PIGEN_INVALID_ID},span);
+        rtl.objects[object.index].name=malloc(2);memcpy(rtl.objects[object.index].name,"x",2);
+        pigen_rtl_expr_id destination=pigen_rtl_expr_add_object(&rtl,type,object,span);
+        pigen_rtl_expr_id value=pigen_rtl_expr_add_integer(&rtl,type,1,span);
+        pigen_rtl_procedural_id assignment=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_ASSIGN,
+            destination,value,INVALID_EXPR,NULL,0,span);
+        pigen_rtl_procedural_id block=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_BLOCK,
+            INVALID_EXPR,INVALID_EXPR,INVALID_EXPR,&assignment,1,span);
+        pigen_rtl_process_id process=pigen_rtl_combinational_process_add(&rtl,module,block,span);
+        REQUIRE(process.index!=PIGEN_INVALID_ID);
+        /* This isolated renderer fixture supplies a finished layout, as
+         * the golden fixture does; it does not link the output builder. */
+        pigen_output_item items[3]={0};
+        items[0].kind=PIGEN_OUTPUT_MODULE;items[0].as.module=module;
+        items[0].layout=(pigen_rtl_record_range){1,2};
+        items[1].kind=PIGEN_OUTPUT_RTL_OBJECT;items[1].as.object=object;
+        items[2].kind=PIGEN_OUTPUT_RTL_PROCESS;items[2].as.process=process;
+        pigen_output_model layout={0};layout.items=items;layout.item_count=3;
+        renders(&sources,&layout,&rtl);
+        rtl.processes[process.index].body.index=PIGEN_INVALID_ID;near_valid(&sources,&layout,&rtl);
+        rtl.processes[process.index].body=block;
+        rtl.procedural[assignment.index].value=INVALID_EXPR;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[assignment.index].value=value;
+        pigen_rtl_procedural_id saved_body=rtl.processes[process.index].body;
+        pigen_rtl_expr_id evaluated=pigen_rtl_expr_add_evaluated_value(&rtl,type,value,destination,1,span);
+        REQUIRE(evaluated.index!=PIGEN_INVALID_ID);
+        rtl.procedural[assignment.index].value=evaluated;renders(&sources,&layout,&rtl);
+        rtl.expressions[evaluated.index].as.evaluation.before=2;near_valid(&sources,&layout,&rtl);
+        rtl.expressions[evaluated.index].as.evaluation.before=0;renders(&sources,&layout,&rtl);
+        rtl.expressions[evaluated.index].child_count=1;near_valid(&sources,&layout,&rtl);
+        rtl.expressions[evaluated.index].child_count=2;
+        pigen_rtl_type_id other_evaluation_type=vec_type(&rtl,PIGEN_SIGN_SIGNED);
+        rtl.expressions[evaluated.index].type=other_evaluation_type;near_valid(&sources,&layout,&rtl);
+        REQUIRE(pigen_rtl_expr_add_evaluated_value(&rtl,other_evaluation_type,value,destination,1,span).index==PIGEN_INVALID_ID);
+        rtl.expressions[evaluated.index].type=type;
+
+        REQUIRE(pigen_rtl_expr_add_evaluated_value(&rtl,type,value,destination,2,span).index==PIGEN_INVALID_ID);
+        rtl.procedural[assignment.index].value=value;
+        rtl.processes[process.index].body=saved_body;
+
+        rtl.procedural_children[rtl.procedural[block.index].first_child].index=PIGEN_INVALID_ID;
+        near_valid(&sources,&layout,&rtl);
+        rtl.procedural_children[rtl.procedural[block.index].first_child]=assignment;
+        renders(&sources,&layout,&rtl);
+        pigen_rtl_procedural_id label=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_CASE_ITEM,
+            INVALID_EXPR,INVALID_EXPR,value,&block,1,span);
+        pigen_rtl_procedural_id selection=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_CASEZ,
+            INVALID_EXPR,INVALID_EXPR,destination,&label,1,span);
+        REQUIRE(label.index!=PIGEN_INVALID_ID && selection.index!=PIGEN_INVALID_ID);
+        rtl.processes[process.index].body=selection;renders(&sources,&layout,&rtl);
+        rtl.procedural[selection.index].case_qualifier=PIGEN_CASE_PRIORITY;
+        renders(&sources,&layout,&rtl);
+        rtl.procedural[selection.index].case_qualifier=(pigen_case_qualifier)99;
+        near_valid(&sources,&layout,&rtl);
+        REQUIRE(pigen_rtl_combinational_process_add(&rtl,module,selection,span).index==PIGEN_INVALID_ID);
+        rtl.procedural[selection.index].case_qualifier=PIGEN_CASE_UNQUALIFIED;
+        rtl.procedural[block.index].case_qualifier=PIGEN_CASE_UNIQUE;
+        near_valid(&sources,&layout,&rtl);
+        REQUIRE(pigen_rtl_combinational_process_add(&rtl,module,selection,span).index==PIGEN_INVALID_ID);
+        rtl.procedural[block.index].case_qualifier=PIGEN_CASE_UNQUALIFIED;
+
+        pigen_rtl_procedural_id tail_if=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_IF,
+            INVALID_EXPR,INVALID_EXPR,value,&block,1,span);
+        pigen_rtl_procedural_id if_branches[]={block,tail_if};
+        pigen_rtl_procedural_id chain=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_IF,
+            INVALID_EXPR,INVALID_EXPR,value,if_branches,2,span);
+        REQUIRE(chain.index!=PIGEN_INVALID_ID);
+        rtl.procedural[chain.index].case_qualifier=PIGEN_CASE_UNIQUE;
+        rtl.procedural[chain.index].else_if=1;
+        rtl.processes[process.index].body=chain;renders(&sources,&layout,&rtl);
+        rtl.procedural[chain.index].else_if=2;near_valid(&sources,&layout,&rtl);
+        REQUIRE(pigen_rtl_combinational_process_add(&rtl,module,chain,span).index==PIGEN_INVALID_ID);
+        rtl.procedural[chain.index].else_if=1;
+        rtl.procedural_children[rtl.procedural[chain.index].first_child+1]=block;
+        near_valid(&sources,&layout,&rtl);
+        REQUIRE(pigen_rtl_combinational_process_add(&rtl,module,chain,span).index==PIGEN_INVALID_ID);
+        rtl.procedural_children[rtl.procedural[chain.index].first_child+1]=tail_if;
+        rtl.procedural[block.index].else_if=1;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[block.index].else_if=0;
+        rtl.procedural[chain.index].case_qualifier=(pigen_case_qualifier)99;
+        near_valid(&sources,&layout,&rtl);
+        rtl.procedural[chain.index].case_qualifier=PIGEN_CASE_UNIQUE;
+        rtl.processes[process.index].body=selection;
+
+        pigen_rtl_procedural_id next_label=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_CASE_ITEM,
+            INVALID_EXPR,INVALID_EXPR,value,&block,1,span);
+        pigen_rtl_procedural_id comma_labels[]={label,next_label};
+        pigen_rtl_procedural_id comma_case=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_CASE,
+            INVALID_EXPR,INVALID_EXPR,destination,comma_labels,2,span);
+        REQUIRE(comma_case.index!=PIGEN_INVALID_ID);
+        rtl.processes[process.index].body=comma_case;
+        char *comma_output=NULL;
+        REQUIRE(pigen_emit_systemverilog(&sources,&layout,&rtl,&comma_output)==0);
+        REQUIRE(strstr(comma_output,", ")==NULL);free(comma_output);
+        rtl.procedural[next_label.index].case_continuation=1;
+        REQUIRE(pigen_emit_systemverilog(&sources,&layout,&rtl,&comma_output)==0);
+        REQUIRE(strstr(comma_output,", ")!=NULL);free(comma_output);
+        REQUIRE(pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_CASE,
+            INVALID_EXPR,INVALID_EXPR,destination,&next_label,1,span).index==PIGEN_INVALID_ID);
+        rtl.procedural[label.index].case_continuation=1;near_valid(&sources,&layout,&rtl);
+        REQUIRE(pigen_rtl_combinational_process_add(&rtl,module,comma_case,span).index==PIGEN_INVALID_ID);
+        rtl.procedural[label.index].case_continuation=0;
+        rtl.procedural[next_label.index].case_continuation=2;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[next_label.index].case_continuation=1;
+        rtl.procedural[next_label.index].condition=INVALID_EXPR;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[next_label.index].condition=value;
+        rtl.procedural_children[rtl.procedural[next_label.index].first_child]=assignment;
+        near_valid(&sources,&layout,&rtl);
+        rtl.procedural_children[rtl.procedural[next_label.index].first_child]=block;
+        renders(&sources,&layout,&rtl);
+        rtl.procedural[block.index].case_continuation=1;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[block.index].case_continuation=0;
+        rtl.processes[process.index].body=selection;
+
+        rtl.procedural[label.index].condition=INVALID_EXPR;renders(&sources,&layout,&rtl);
+        pigen_rtl_procedural_id duplicate[]={label,label};
+        REQUIRE(pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_CASE,
+            INVALID_EXPR,INVALID_EXPR,destination,duplicate,2,span).index==PIGEN_INVALID_ID);
+        rtl.procedural[label.index].condition=value;
+        pigen_rtl_type_id signed_type=vec_type(&rtl,PIGEN_SIGN_SIGNED);
+        pigen_rtl_expr_id mismatched=pigen_rtl_expr_add_integer(&rtl,signed_type,1,span);
+        rtl.procedural[label.index].condition=mismatched;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[label.index].condition=value;
+        rtl.procedural[selection.index].condition=INVALID_EXPR;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[selection.index].condition=destination;
+        rtl.processes[process.index].body=label;near_valid(&sources,&layout,&rtl);
+        rtl.processes[process.index].body=selection;renders(&sources,&layout,&rtl);
+        pigen_rtl_procedural_id phases[]={block,block,selection};
+        pigen_rtl_procedural_id for_loop=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_FOR,
+            INVALID_EXPR,INVALID_EXPR,value,phases,3,span);
+        REQUIRE(for_loop.index!=PIGEN_INVALID_ID);
+        rtl.processes[process.index].body=for_loop;renders(&sources,&layout,&rtl);
+        rtl.procedural[for_loop.index].child_count=2;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[for_loop.index].child_count=3;
+        rtl.procedural[for_loop.index].condition=INVALID_EXPR;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[for_loop.index].condition=value;
+        rtl.procedural_children[rtl.procedural[for_loop.index].first_child+1]=selection;
+        near_valid(&sources,&layout,&rtl);
+        rtl.procedural_children[rtl.procedural[for_loop.index].first_child+1]=block;
+        renders(&sources,&layout,&rtl);
+        pigen_rtl_procedural_id exit=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_CONTINUE,
+            INVALID_EXPR,INVALID_EXPR,INVALID_EXPR,NULL,0,span);
+        pigen_rtl_procedural_id loop=pigen_rtl_procedural_add(&rtl,module,PIGEN_PROCEDURAL_DO_WHILE,
+            INVALID_EXPR,INVALID_EXPR,value,&exit,1,span);
+        REQUIRE(loop.index!=PIGEN_INVALID_ID);
+        rtl.processes[process.index].body=loop;renders(&sources,&layout,&rtl);
+        rtl.processes[process.index].body=exit;near_valid(&sources,&layout,&rtl);
+        rtl.processes[process.index].body=loop;
+        rtl.procedural[exit.index].child_count=1;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[exit.index].child_count=0;
+        rtl.procedural[loop.index].kind=PIGEN_PROCEDURAL_FOREVER;near_valid(&sources,&layout,&rtl);
+        rtl.procedural[loop.index].condition=INVALID_EXPR;renders(&sources,&layout,&rtl);
+        pigen_free_rtl_model(&rtl);pigen_free_sources(&sources);
+    }
 
 	SECTION("t10-golden") {
 

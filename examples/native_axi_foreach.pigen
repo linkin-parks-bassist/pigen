@@ -1,0 +1,46 @@
+// Every lane and channel retains its own ready/valid handshake.
+module native_axis_foreach #(
+    parameter LANES=4, parameter DATA_W=32
+)(
+    input wire clk, input wire reset,
+    input uint[DATA_W] axi4_stream[keep=1,last=1] fifo[3] s[LANES],
+    output uint[DATA_W] axi4_stream[keep=1,last=1] skid m[LANES]
+);
+    always @(posedge clk) if(!reset)
+        foreach(s[lane]) m[lane] <= s[lane];
+endmodule
+
+module native_axil_foreach #(
+    parameter LANES=4, parameter DATA_W=32, parameter ADDRESS_BITS=40
+)(
+    input wire clk, input wire reset,
+    input uint[DATA_W] axi4_lite[addr=ADDRESS_BITS] fifo[3] s[LANES],
+    output uint[DATA_W] axi4_lite[addr=ADDRESS_BITS] skid m[LANES]
+);
+    always @(posedge clk) if(!reset)
+        foreach(s[lane]) begin
+            m[lane].aw <= s[lane].aw;
+            m[lane].w <= s[lane].w;
+            s[lane].b <= m[lane].b;
+            m[lane].ar <= s[lane].ar;
+            s[lane].r <= m[lane].r;
+        end
+endmodule
+
+module native_axi4_foreach #(
+    parameter LANES=4, parameter DATA_W=32,
+    parameter ADDRESS_BITS=40, parameter ID_BITS=4
+)(
+    input wire clk, input wire reset,
+    input uint[DATA_W] axi4[addr=ADDRESS_BITS,id=ID_BITS] fifo[3] s[LANES],
+    output uint[DATA_W] axi4[addr=ADDRESS_BITS,id=ID_BITS] skid m[LANES]
+);
+    always @(posedge clk) if(!reset)
+        foreach(s[lane]) begin
+            m[lane].aw <= s[lane].aw;
+            m[lane].w <= s[lane].w;
+            s[lane].b <= m[lane].b;
+            m[lane].ar <= s[lane].ar;
+            s[lane].r <= m[lane].r;
+        end
+endmodule

@@ -1,0 +1,10 @@
+module child(input wire clk, input wire reset, input bit[8] buf data, output bit[8] buf result);
+    always @(posedge clk) result <= data;
+endmodule
+module concat_wrapper(input wire clk, input wire reset,
+    input bit[8] wire value, input wire value_valid, output wire value_ready,
+    output wire [3:0] upper, output wire [3:0] lower,
+    output wire result_valid, input wire result_ready);
+    child u(.clk(clk), .reset(reset), .data(value), .data_valid(value_valid), .data_ready(value_ready),
+        .result({upper,lower}), .result_valid(result_valid), .result_ready(result_ready));
+endmodule

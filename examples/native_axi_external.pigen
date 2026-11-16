@@ -1,0 +1,14 @@
+// The separate SV implementation supplies these standard AXI-Stream pins.
+// This declaration supplies the native contract and emits no module body.
+extern module external_axis_register #(parameter uint[32] DATA_W=32)(
+    input wire clk, input wire reset,
+    input uint[DATA_W] axi4_stream s_axis,
+    output uint[DATA_W] axi4_stream m_axis);
+
+module native_external_axis #(parameter uint[32] WIDTH=64)(
+    input wire clk, input wire reset,
+    input uint[WIDTH] axi4_stream s,
+    output uint[WIDTH] axi4_stream m);
+    external_axis_register #(.DATA_W(WIDTH)) core(
+        .clk(clk), .reset(reset), .s_axis(s), .m_axis(m));
+endmodule

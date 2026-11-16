@@ -1,0 +1,86 @@
+// AXI4-Lite register endpoint: four 32-bit RW words at byte addresses 0,4,8,12.
+// Separate AW/W buffers accept either arrival order. Misaligned/unmapped accesses
+// return DECERR (3); zero write strobes are successful no-ops. Reset clears words.
+// Reads snapshot during lookup; coincident word update returns pre-write data.
+module pigen_axil_registers (
+    input wire clk,
+    input wire reset,
+    input uint[32] axi4_lite[addr=32] s_axi
+);
+    bit[32] buf aw;
+    bit[36] buf wd;
+    bit[32] reg address;
+    bit[36] reg data;
+    bit[2] reg status;
+    bit[34] reg read_value;
+    bit[32] reg word0;
+    bit[32] reg word1;
+    bit[32] reg word2;
+    bit[32] reg word3;
+    always @(posedge clk) begin
+        if (!reset) begin
+            aw <= s_axi.aw.addr;
+            wd <= {s_axi.w.strb,s_axi.w.data};
+        end
+    end
+    fsm @(posedge clk) begin
+        if (reset) begin
+            word0 <= 0;
+            word1 <= 0;
+            word2 <= 0;
+            word3 <= 0;
+            goto capture;
+        end
+        state capture:
+            when ({address, data} <= {aw, wd}) goto execute;
+        state execute: begin
+            status <= 3;
+            if (address == 32'd0) begin
+                status <= 0;
+                if (data[32]) word0[7:0] <= data[7:0];
+                if (data[33]) word0[15:8] <= data[15:8];
+                if (data[34]) word0[23:16] <= data[23:16];
+                if (data[35]) word0[31:24] <= data[31:24];
+            end
+            if (address == 32'd4) begin
+                status <= 0;
+                if (data[32]) word1[7:0] <= data[7:0];
+                if (data[33]) word1[15:8] <= data[15:8];
+                if (data[34]) word1[23:16] <= data[23:16];
+                if (data[35]) word1[31:24] <= data[31:24];
+            end
+            if (address == 32'd8) begin
+                status <= 0;
+                if (data[32]) word2[7:0] <= data[7:0];
+                if (data[33]) word2[15:8] <= data[15:8];
+                if (data[34]) word2[23:16] <= data[23:16];
+                if (data[35]) word2[31:24] <= data[31:24];
+            end
+            if (address == 32'd12) begin
+                status <= 0;
+                if (data[32]) word3[7:0] <= data[7:0];
+                if (data[33]) word3[15:8] <= data[15:8];
+                if (data[34]) word3[23:16] <= data[23:16];
+                if (data[35]) word3[31:24] <= data[31:24];
+            end
+            goto reply;
+        end
+        state reply:
+            when (s_axi.b <= '{resp:uint[2]'(status)}) goto capture;
+    end
+    fsm @(posedge clk) begin
+        if (reset) goto request;
+        state request:
+            when (read_value <= s_axi.ar.addr) goto lookup;
+        state lookup: begin
+            read_value <= {2'b11, 32'b0};
+            if (read_value[31:0] == 32'd0) read_value <= {2'b00, word0};
+            if (read_value[31:0] == 32'd4) read_value <= {2'b00, word1};
+            if (read_value[31:0] == 32'd8) read_value <= {2'b00, word2};
+            if (read_value[31:0] == 32'd12) read_value <= {2'b00, word3};
+            goto publish;
+        end
+        state publish:
+            when (s_axi.r <= '{data:uint[32]'(read_value[31:0]),resp:uint[2]'(read_value[33:32])}) goto request;
+    end
+endmodule

@@ -9,11 +9,11 @@
 #include "pigen/transfer_type.h"
 
 /* The pipeline identifier identity owner: the owner seam that turns a parsed
- * pipeline (PIGEN_SYNTAX_PIPELINE) into a module-scope buf output packet
- * identity in the resolved semantic model.
+ * pipeline (PIGEN_SYNTAX_PIPELINE) into a BUF packet identity. The default
+ * entries use module scope; scoped entries use an explicit lexical scope.
  *
- * A pipeline's identifier token (as.pipeline.name on the pipeline node) is a
- * module-scope signal. This owner establishes that signal in the model: one
+ * With the default entries, the identifier token names a module-scope signal.
+ * This owner establishes that signal in the model: one
  * pigen_semantic_signal with transfer_type = PIGEN_TRANSFER_TYPE_BUF and
  * direction = PIGEN_SEMANTIC_OUTPUT, bound to a module-scope symbol (the
  * identifier), carrying a data_type that is the outgoing packet aggregate and
@@ -43,8 +43,8 @@
  * different owner and is not touched. */
 
 /* The established identity of one pipeline's outgoing buf output packet.
- * signal is the module-scope buf output pigen_semantic_signal established in
- * the model; symbol is the bound module-scope symbol (the identifier);
+ * signal is the BUF packet signal established in the requested scope;
+ * symbol is its local symbol (the identifier);
  * data_type is the outgoing packet aggregate, the concatenation of the
  * outgoing field data types in source order and the buf output signal's
  * data_type; span is the original span anchored at the pipeline identifier.
@@ -71,8 +71,7 @@ typedef struct {
  * that symbol, then fills *identity. Returns 0 on success and -1 on error; a
  * failed call reports the error and the compile stops - it may leave partial
  * state behind, and no test asserts that a failure left the model unchanged.
- * SKELETON: returns -1 and leaves *identity invalid until the
- * implementation stage. */
+ */
 int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module,
 	const pigen_syntax_node *pipeline,
@@ -86,12 +85,24 @@ int pigen_pipeline_identifier_establish(pigen_semantic_model *model,
  * signal, symbol, outgoing packet aggregate data type and identifier span.
  * Returns 0 on success and -1 when the identity has not been established or
  * the arguments are invalid; a failed call reports the error and the
- * compile stops. SKELETON: returns -1 and leaves *identity invalid until
- * the implementation stage. */
+ * compile stops. */
 int pigen_pipeline_identifier_of(pigen_semantic_model *model,
 	pigen_syntax_id syntax, pigen_module_id module,
 	const pigen_syntax_node *pipeline,
 	const pigen_expanded_source *expanded,
+	pigen_pipeline_identifier *identity);
+
+/* Scoped production entries declare/recover the packet in an explicit module
+ * descendant scope. Nested packets are INTERNAL; the module-scope wrappers
+ * above retain their OUTPUT identity contract. Lookup requires a direct local
+ * binding, and both entries reject scopes outside the owning module. */
+int pigen_pipeline_identifier_establish_in_scope(pigen_semantic_model *model,
+	pigen_syntax_id syntax,pigen_module_id module,pigen_scope_id scope,
+	const pigen_syntax_node *pipeline,const pigen_expanded_source *expanded,
+	pigen_pipeline_identifier *identity);
+int pigen_pipeline_identifier_of_in_scope(pigen_semantic_model *model,
+	pigen_syntax_id syntax,pigen_module_id module,pigen_scope_id scope,
+	const pigen_syntax_node *pipeline,const pigen_expanded_source *expanded,
 	pigen_pipeline_identifier *identity);
 
 #endif

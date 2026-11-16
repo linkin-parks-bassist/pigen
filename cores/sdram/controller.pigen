@@ -1,0 +1,158 @@
+// SDR SDRAM, x16, 4 banks x 8192 rows x 512 columns; single-word closed-page access.
+// Request = {write, byte_strobes[1:0], word_address[23:0], data[15:0]}.
+// Address = {bank[1:0], row[12:0], column[8:0]}; response = {write, read_data}.
+// Write acknowledgement data is zero. Reset discards requests/responses; memory
+// contents are unspecified across reset. Assert reset at startup. Shared pin clock
+// samples registered command outputs on the next rising edge; input data is sampled
+// at READ + CAS_LATENCY. Board I/O timing and clock phase require qualification.
+module pigen_sdram_controller #(
+    parameter int[32] INIT_CYCLES = 20000,
+    parameter int[32] CAS_LATENCY = 3,
+    parameter int[32] T_RP = 2,
+    parameter int[32] T_RCD = 2,
+    parameter int[32] T_RAS = 5,
+    parameter int[32] T_WR = 2,
+    parameter int[32] T_RFC = 7,
+    parameter int[32] T_MRD = 2,
+    parameter int[32] REFRESH_INTERVAL = 700
+) (
+    input wire clk,
+    input wire reset,
+    input bit[43] buf request,
+    output bit[17] buf response,
+    output bit reg initialized,
+    output bit[4] reg command,
+    output bit[13] reg address,
+    output bit[2] reg bank,
+    output bit[2] reg dqm,
+    output bit[16] reg dq_out,
+    output bit reg dq_oe,
+    input wire [15:0] dq_in
+);
+    // Conservative budget lets refresh win before a transaction could miss its
+    // deadline. Caller must choose the interval for the actual temperature grade.
+    localparam int[32] ACCESS_BUDGET = T_RCD + CAS_LATENCY + T_RAS + T_WR + T_RP + 20;
+    initial if (INIT_CYCLES < 1 || CAS_LATENCY < 2 || CAS_LATENCY > 3 ||
+                T_RP < 1 || T_RCD < 1 || T_RAS < 1 || T_WR < 1 ||
+                T_RFC < 1 || T_MRD < 2 || REFRESH_INTERVAL <= ACCESS_BUDGET + T_RFC + 4)
+        $fatal(1, "SDRAM requires positive timing, CAS 2/3, MRD >= 2 and sufficient refresh interval");
+    bit[43] reg active;
+    bit[17] reg result;
+    bit reg pending;
+    int[32] reg timer;
+    int[32] reg refresh_timer;
+
+    fsm @(posedge clk) begin
+        // {CS_n,RAS_n,CAS_n,WE_n}: 0111=NOP, 0011=ACT, 0101=READ,
+        // 0100=WRITE, 0010=PRECHARGE, 0001=REFRESH, 0000=MODE.
+        command <= 4'b0111;
+        dq_oe <= 0;
+        dqm <= 0;
+        if (reset) begin
+            command <= 4'b0111;
+            address <= 0;
+            bank <= 0;
+            dq_out <= 0;
+            initialized <= 0;
+            pending <= 0;
+            timer <= INIT_CYCLES;
+            refresh_timer <= REFRESH_INTERVAL;
+            goto powerup;
+        end
+        if (refresh_timer > 0) refresh_timer <= refresh_timer - 1;
+        if (pending) when (response <= result) pending <= 0;
+        state powerup:
+            if (timer == 0) begin
+                command <= 4'b0010;
+                address <= 13'h400;
+                timer <= T_RP;
+                goto init_precharge;
+            end else timer <= timer - 1;
+        state init_precharge:
+            if (timer == 0) begin
+                command <= 4'b0001;
+                timer <= T_RFC;
+                goto init_refresh_one;
+            end else timer <= timer - 1;
+        state init_refresh_one:
+            if (timer == 0) begin
+                command <= 4'b0001;
+                timer <= T_RFC;
+                goto init_refresh_two;
+            end else timer <= timer - 1;
+        state init_refresh_two:
+            if (timer == 0) begin
+                command <= 4'b0000;
+                bank <= 0;
+                address <= 13'h200 | (CAS_LATENCY << 4);
+                timer <= T_MRD;
+                goto init_mode;
+            end else timer <= timer - 1;
+        state init_mode:
+            if (timer == 0) begin
+                initialized <= 1;
+                refresh_timer <= REFRESH_INTERVAL;
+                goto idle;
+            end else timer <= timer - 1;
+        state idle: begin
+            if (refresh_timer <= ACCESS_BUDGET) begin
+                command <= 4'b0001;
+                refresh_timer <= REFRESH_INTERVAL;
+                timer <= T_RFC;
+                goto refresh_wait;
+            end
+            if (!pending) when (active <= request) goto activate;
+        end
+        state refresh_wait:
+            if (timer == 0) goto idle;
+            else timer <= timer - 1;
+        state activate: begin
+            bank <= active[39:38];
+            address <= active[37:25];
+            command <= 4'b0011;
+            timer <= T_RCD;
+            goto activate_wait;
+        end
+        state activate_wait:
+            if (timer == 0) goto access_word;
+            else timer <= timer - 1;
+        state access_word: begin
+            address <= {4'b0000, active[24:16]};
+            if (active[42]) begin
+                command <= 4'b0100;
+                dq_out <= active[15:0];
+                dq_oe <= 1;
+                dqm <= ~active[41:40];
+                timer <= T_WR + T_RAS;
+                result <= {1'b1, 16'b0};
+                goto write_recovery;
+            end
+            command <= 4'b0101;
+            timer <= CAS_LATENCY;
+            goto read_latency;
+        end
+        state read_latency:
+            if (timer == 0) begin
+                result <= {1'b0, dq_in};
+                timer <= T_RAS;
+                goto read_recovery;
+            end else timer <= timer - 1;
+        state read_recovery:
+            if (timer == 0) goto precharge;
+            else timer <= timer - 1;
+        state write_recovery:
+            if (timer == 0) goto precharge;
+            else timer <= timer - 1;
+        state precharge: begin
+            command <= 4'b0010;
+            address <= 0;
+            timer <= T_RP;
+            goto precharge_wait;
+        end
+        state precharge_wait:
+            if (timer == 0) begin
+                pending <= 1;
+                goto idle;
+            end else timer <= timer - 1;
+    end
+endmodule

@@ -85,6 +85,7 @@ pigen_rtl_type_id pigen_rtl_type_intern(pigen_rtl_model *model,
 	{
 		record = &model->types[i];
 		if (record->signedness == descriptor->signedness &&
+			record->sv_keyword == descriptor->sv_keyword &&
 			record->state_domain == descriptor->state_domain &&
 			(descriptor->width_expression.index != PIGEN_INVALID_ID ||
 			record->width == descriptor->width) &&
@@ -356,7 +357,7 @@ pigen_rtl_expr_id pigen_rtl_expr_add_conversion(pigen_rtl_model *model,
 	node.origin = origin;
 	if (!conversion ||
 		conversion->kind == PIGEN_CONVERSION_INVALID ||
-		conversion->kind > PIGEN_CONVERSION_INTEGER_TO_VECTOR)
+		conversion->kind > PIGEN_CONVERSION_FOUR_TO_TWO)
 		return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	child = operand;
 	node.as.conversion.conversion = *conversion;
@@ -393,6 +394,45 @@ pigen_rtl_expr_id pigen_rtl_expr_add_select(pigen_rtl_model *model,
 	children[2] = right;
 	node.as.select.kind = kind;
 	return expr_append(model, &node, children, 3);
+}
+
+pigen_rtl_expr_id pigen_rtl_expr_add_member_select(pigen_rtl_model *model,
+	pigen_rtl_type_id type, pigen_rtl_expr_id base, pigen_rtl_expr_id left,
+	pigen_rtl_expr_id right, const char *name, pigen_source_span origin)
+{
+	if (!name || !*name) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	pigen_rtl_expr_id result = pigen_rtl_expr_add_select(model,type,base,left,right,
+		PIGEN_SEMANTIC_SELECT_RANGE,origin);
+	if (result.index != PIGEN_INVALID_ID)
+		model->expressions[result.index].as.select.member_name = pigen_copy_range(name,strlen(name));
+	return result;
+}
+
+pigen_rtl_expr_id pigen_rtl_expr_add_evaluated_value(pigen_rtl_model *model,
+	pigen_rtl_type_id type,pigen_rtl_expr_id value,pigen_rtl_expr_id evaluated,
+	int before,pigen_source_span origin)
+{
+	const pigen_rtl_expr *v=pigen_rtl_expr_get(model,value),*e=pigen_rtl_expr_get(model,evaluated);
+	const pigen_rtl_type *vt=v ? pigen_rtl_type_get(model,v->type) : NULL,*et=e ? pigen_rtl_type_get(model,e->type) : NULL;
+	if (!v || !e || v->type.index!=type.index || !vt || !et || (!vt->width && vt->width_expression.index==PIGEN_INVALID_ID) ||
+		(!et->width && et->width_expression.index==PIGEN_INVALID_ID) ||
+		(before!=0 && before!=1)) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	pigen_rtl_expr node={0};node.kind=PIGEN_RTL_EXPR_EVALUATED_VALUE;
+	node.type=type;node.origin=origin;node.as.evaluation.before=before;
+	pigen_rtl_expr_id children[]={value,evaluated};
+	return expr_append(model,&node,children,2);
+}
+
+pigen_rtl_expr_id pigen_rtl_expr_add_array_pattern(pigen_rtl_model *model,
+ pigen_rtl_type_id type,const pigen_rtl_expr_id *children,size_t count,pigen_source_span origin)
+{
+ if(!model || !children || !count) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+ for(size_t i=0;i<count;i++)
+ {
+  const pigen_rtl_expr *child=pigen_rtl_expr_get(model,children[i]);
+  if(!child || child->type.index!=type.index) return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+ }
+ return expr_add_children(model,PIGEN_RTL_EXPR_ARRAY_PATTERN,type,origin,children,count);
 }
 
 pigen_rtl_expr_id pigen_rtl_expr_add_concatenation(pigen_rtl_model *model,
@@ -436,6 +476,7 @@ pigen_rtl_object_id pigen_rtl_object_add(pigen_rtl_model *model,
 	result.index = (uint32_t)model->object_count;
 	record = &model->objects[model->object_count++];
 	*record = (pigen_rtl_object){0};
+	record->initial_value = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	record->origin = origin;
 	return result;
 }
@@ -468,6 +509,7 @@ pigen_rtl_instance_id pigen_rtl_instance_add(pigen_rtl_model *model,
 	record = &model->instances[model->instance_count++];
 	*record = (pigen_rtl_instance){0};
 	record->origin = origin;
+	record->semantic_instance = (pigen_instance_id){PIGEN_INVALID_ID};
 	return result;
 }
 
@@ -561,7 +603,7 @@ pigen_rtl_process_id pigen_rtl_process_add(pigen_rtl_model *model,
 	}
 	result.index = (uint32_t)model->process_count;
 	record = &model->processes[model->process_count++];
-	*record = (pigen_rtl_process){0};
+	*record = (pigen_rtl_process){.body={PIGEN_INVALID_ID}};
 	record->origin = origin;
 	return result;
 }
@@ -594,6 +636,7 @@ pigen_rtl_module_id pigen_rtl_module_add(pigen_rtl_model *model,
 	record = &model->modules[model->module_count++];
 	*record = (pigen_rtl_module){0};
 	record->origin = origin;
+	record->semantic_module=(pigen_module_id){PIGEN_INVALID_ID};
 	return result;
 }
 
@@ -662,7 +705,7 @@ pigen_rtl_object_id pigen_rtl_object_add_with_owner(pigen_rtl_model *model,
 	pigen_rtl_object_id result;
 
 	if (!model || !pigen_rtl_type_get(model, type) ||
-		kind < PIGEN_RTL_OBJECT_VARIABLE || kind > PIGEN_RTL_OBJECT_MEMORY ||
+		kind < PIGEN_RTL_OBJECT_VARIABLE || kind > PIGEN_RTL_OBJECT_PARAMETER ||
 		direction < PIGEN_SEMANTIC_INTERNAL ||
 		direction > PIGEN_SEMANTIC_INOUT ||
 		model->object_count == PIGEN_INVALID_ID)
@@ -683,6 +726,7 @@ pigen_rtl_object_id pigen_rtl_object_add_with_owner(pigen_rtl_model *model,
 	result.index = (uint32_t)model->object_count;
 	record = &model->objects[model->object_count++];
 	*record = (pigen_rtl_object){0};
+	record->initial_value = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
 	record->origin = span;
 	record->kind = kind;
 	record->type = type;
@@ -735,26 +779,244 @@ pigen_rtl_equation_id pigen_rtl_equation_add_with_owner(
 	return result;
 }
 
+/* A concatenated target belongs to every leaf object. Its first object is
+ * retained only as the equation's compatibility bookkeeping destination. */
+static int equation_lvalue_owner(const pigen_rtl_model *model,
+	pigen_rtl_module_id module, pigen_rtl_expr_id id,
+	pigen_rtl_object_id *first, size_t depth)
+{
+	const pigen_rtl_expr *base = pigen_rtl_expr_get(model, id);
+	if (!base || depth > model->expression_count) return 0;
+	if (base->kind == PIGEN_RTL_EXPR_CONCATENATION)
+	{
+		if (!base->child_count || base->first_child > model->expression_child_count ||
+			base->child_count > model->expression_child_count - base->first_child) return 0;
+		for (size_t i = 0; i < base->child_count; i++)
+			if (!equation_lvalue_owner(model, module,
+				model->expression_children[base->first_child+i], first, depth+1)) return 0;
+		return 1;
+	}
+	while (base && (base->kind == PIGEN_RTL_EXPR_INDEX || base->kind == PIGEN_RTL_EXPR_SELECT))
+	{
+		if (++depth > model->expression_count || !base->child_count ||
+			base->first_child >= model->expression_child_count) return 0;
+		base = pigen_rtl_expr_get(model, model->expression_children[base->first_child]);
+	}
+	if (!base || base->kind != PIGEN_RTL_EXPR_OBJECT) return 0;
+	const pigen_rtl_object *object = pigen_rtl_object_get(model, base->object);
+	if (!object || object->module.index != module.index) return 0;
+	if (first->index == PIGEN_INVALID_ID) *first = base->object;
+	return 1;
+}
+
 pigen_rtl_equation_id pigen_rtl_equation_add_projection_with_owner(
 	pigen_rtl_model *model, pigen_rtl_module_id module,
 	pigen_rtl_expr_id destination, pigen_rtl_expr_id value,
 	pigen_source_span span)
 {
-	const pigen_rtl_expr *base = pigen_rtl_expr_get(model, destination);
-	while (base && (base->kind == PIGEN_RTL_EXPR_INDEX ||
-		base->kind == PIGEN_RTL_EXPR_SELECT))
-	{
-		if (!base->child_count || base->first_child >= model->expression_child_count)
-			return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
-		base = pigen_rtl_expr_get(model, model->expression_children[base->first_child]);
-	}
-	if (!base || base->kind != PIGEN_RTL_EXPR_OBJECT)
+	pigen_rtl_object_id first = {PIGEN_INVALID_ID};
+	if (!equation_lvalue_owner(model, module, destination, &first, 0))
 		return (pigen_rtl_equation_id){PIGEN_INVALID_ID};
 	pigen_rtl_equation_id result = pigen_rtl_equation_add_with_owner(model,
-		module, base->object, value, span);
+		module, first, value, span);
 	if (result.index != PIGEN_INVALID_ID)
 		model->equations[result.index].destination_expression = destination;
 	return result;
+}
+
+static int equation_lvalue_contains(const pigen_rtl_model *model,
+	pigen_rtl_expr_id id, pigen_rtl_object_id object, size_t depth)
+{
+	const pigen_rtl_expr *expression = pigen_rtl_expr_get(model, id);
+	if (!expression || depth > model->expression_count) return 0;
+	if (expression->kind == PIGEN_RTL_EXPR_OBJECT) return expression->object.index == object.index;
+	if (expression->kind != PIGEN_RTL_EXPR_CONCATENATION &&
+		expression->kind != PIGEN_RTL_EXPR_INDEX && expression->kind != PIGEN_RTL_EXPR_SELECT) return 0;
+	if (expression->first_child > model->expression_child_count ||
+		expression->child_count > model->expression_child_count-expression->first_child) return 0;
+	size_t count = expression->child_count;
+	if (expression->kind != PIGEN_RTL_EXPR_CONCATENATION && count) count = 1;
+	for (size_t i = 0; i < count; i++)
+		if (equation_lvalue_contains(model, model->expression_children[expression->first_child+i], object, depth+1)) return 1;
+	return 0;
+}
+
+int pigen_rtl_equation_drives_object(const pigen_rtl_model *model,
+	pigen_rtl_equation_id id, pigen_rtl_object_id object)
+{
+	const pigen_rtl_equation *equation = pigen_rtl_equation_get(model, id);
+	if (!equation || !pigen_rtl_object_get(model, object)) return 0;
+	if (equation->destination_expression.index == PIGEN_INVALID_ID)
+		return equation->destination.index == object.index;
+	return equation_lvalue_contains(model, equation->destination_expression, object, 0);
+}
+
+pigen_rtl_procedural_id pigen_rtl_procedural_add(pigen_rtl_model *model,
+	pigen_rtl_module_id module, pigen_procedural_kind kind,
+	pigen_rtl_expr_id destination, pigen_rtl_expr_id value, pigen_rtl_expr_id condition,
+	const pigen_rtl_procedural_id *children, size_t count, pigen_source_span span)
+{
+	pigen_rtl_procedural_id invalid={PIGEN_INVALID_ID};
+	if (!pigen_rtl_module_get(model,module) || (unsigned)kind>PIGEN_PROCEDURAL_CONTINUE ||
+		(count && !children) || model->procedural_count==PIGEN_INVALID_ID ||
+		count>SIZE_MAX-model->procedural_child_count ||
+		model->procedural_child_count+count>SIZE_MAX/sizeof(*children)) return invalid;
+	if (kind==PIGEN_PROCEDURAL_IF &&
+		(!pigen_rtl_expr_get(model,condition) || count<1 || count>2)) return invalid;
+	if ((kind==PIGEN_PROCEDURAL_WHILE || kind==PIGEN_PROCEDURAL_REPEAT || kind==PIGEN_PROCEDURAL_DO_WHILE) &&
+		(!pigen_rtl_expr_get(model,condition) || count!=1)) return invalid;
+	if (kind==PIGEN_PROCEDURAL_FOREVER && (count!=1 || condition.index!=PIGEN_INVALID_ID)) return invalid;
+	if ((kind==PIGEN_PROCEDURAL_BREAK || kind==PIGEN_PROCEDURAL_CONTINUE) &&
+		(count || condition.index!=PIGEN_INVALID_ID || destination.index!=PIGEN_INVALID_ID || value.index!=PIGEN_INVALID_ID)) return invalid;
+	int selection=kind>=PIGEN_PROCEDURAL_CASE && kind<=PIGEN_PROCEDURAL_CASEX;
+	if (selection && !pigen_rtl_expr_get(model,condition)) return invalid;
+	if (kind==PIGEN_PROCEDURAL_CASE_ITEM && (count!=1 ||
+		(condition.index!=PIGEN_INVALID_ID && !pigen_rtl_expr_get(model,condition)))) return invalid;
+	if (kind==PIGEN_PROCEDURAL_ASSIGN)
+	{
+		pigen_rtl_object_id first={PIGEN_INVALID_ID};
+		if (count || !pigen_rtl_expr_get(model,value) ||
+			!equation_lvalue_owner(model,module,destination,&first,0)) return invalid;
+	}
+	int defaults=0;
+	for (size_t i=0;i<count;i++)
+	{
+		if (children[i].index>=model->procedural_count ||
+			model->procedural[children[i].index].module.index!=module.index) return invalid;
+		const pigen_rtl_procedural *child=&model->procedural[children[i].index];
+		if ((child->kind==PIGEN_PROCEDURAL_CASE_ITEM)!=selection) return invalid;
+		if ((unsigned)child->case_qualifier>PIGEN_CASE_PRIORITY ||
+			(child->case_qualifier!=PIGEN_CASE_UNQUALIFIED && child->kind!=PIGEN_PROCEDURAL_IF && (child->kind<PIGEN_PROCEDURAL_CASE || child->kind>PIGEN_PROCEDURAL_CASEX))) return invalid;
+		if (child->else_if && (child->else_if!=1 || child->kind!=PIGEN_PROCEDURAL_IF || child->child_count!=2 ||
+			child->first_child>model->procedural_child_count || 2>model->procedural_child_count-child->first_child ||
+			model->procedural_children[child->first_child+1].index>=model->procedural_count ||
+			model->procedural[model->procedural_children[child->first_child+1].index].kind!=PIGEN_PROCEDURAL_IF)) return invalid;
+		if (child->case_continuation)
+		{
+			if (!selection || !i || child->case_continuation!=1 || child->condition.index==PIGEN_INVALID_ID ||
+				child->child_count!=1 || child->first_child>=model->procedural_child_count) return invalid;
+			const pigen_rtl_procedural *previous=&model->procedural[children[i-1].index];
+			if (previous->condition.index==PIGEN_INVALID_ID || previous->child_count!=1 ||
+				previous->first_child>=model->procedural_child_count ||
+				model->procedural_children[previous->first_child].index!=model->procedural_children[child->first_child].index) return invalid;
+		}
+		if (selection && child->condition.index==PIGEN_INVALID_ID && ++defaults>1) return invalid;
+		if (selection && child->condition.index!=PIGEN_INVALID_ID)
+		{
+			const pigen_rtl_expr *selector=pigen_rtl_expr_get(model,condition),*label=pigen_rtl_expr_get(model,child->condition);
+			const pigen_rtl_type *st=selector ? pigen_rtl_type_get(model,selector->type) : NULL,*lt=label ? pigen_rtl_type_get(model,label->type) : NULL;
+			if (!st || !lt || !st->width || st->width!=lt->width || st->signedness!=lt->signedness) return invalid;
+		}
+	}
+	if (kind==PIGEN_PROCEDURAL_FOR)
+	{
+		if (count!=3 || !pigen_rtl_expr_get(model,condition) ||
+			model->procedural[children[0].index].kind!=PIGEN_PROCEDURAL_BLOCK ||
+			model->procedural[children[1].index].kind!=PIGEN_PROCEDURAL_BLOCK) return invalid;
+		for(size_t phase=0;phase<2;phase++)
+		{
+			const pigen_rtl_procedural *step=&model->procedural[children[phase].index];
+			for(size_t i=0;i<step->child_count;i++)
+				if (model->procedural[model->procedural_children[step->first_child+i].index].kind!=PIGEN_PROCEDURAL_ASSIGN) return invalid;
+		}
+	}
+	pigen_rtl_procedural_id *copy=count ? pigen_resize(NULL,count*sizeof(*children)) : NULL;
+	if (count) memcpy(copy,children,count*sizeof(*children));
+	if (model->procedural_count==model->procedural_capacity)
+	{
+		model->procedural_capacity=model->procedural_capacity ? model->procedural_capacity*2 : 16;
+		model->procedural=pigen_resize(model->procedural,model->procedural_capacity*sizeof(*model->procedural));
+	}
+	size_t first=model->procedural_child_count,needed=first+count;
+	if (needed>model->procedural_child_capacity)
+	{
+		model->procedural_child_capacity=needed;
+		model->procedural_children=pigen_resize(model->procedural_children,needed*sizeof(*children));
+	}
+	if (count) memcpy(model->procedural_children+first,copy,count*sizeof(*children));
+	free(copy);
+	model->procedural_child_count=needed;
+	pigen_rtl_procedural_id result={(uint32_t)model->procedural_count++};
+	model->procedural[result.index]=(pigen_rtl_procedural){kind,module,destination,value,condition,first,count,span,0,PIGEN_CASE_UNQUALIFIED,0};
+	return result;
+}
+
+static int procedural_loop_controls_valid(const pigen_rtl_model *model,
+	pigen_rtl_procedural_id id,size_t loops,size_t depth)
+{
+	if (id.index>=model->procedural_count || depth>128) return 0;
+	const pigen_rtl_procedural *node=&model->procedural[id.index];
+	if (node->case_continuation && (node->kind!=PIGEN_PROCEDURAL_CASE_ITEM || node->case_continuation!=1)) return 0;
+	if ((unsigned)node->case_qualifier>PIGEN_CASE_PRIORITY ||
+		(node->case_qualifier!=PIGEN_CASE_UNQUALIFIED && node->kind!=PIGEN_PROCEDURAL_IF && (node->kind<PIGEN_PROCEDURAL_CASE || node->kind>PIGEN_PROCEDURAL_CASEX))) return 0;
+	if (node->kind==PIGEN_PROCEDURAL_BREAK || node->kind==PIGEN_PROCEDURAL_CONTINUE)
+		return loops && !node->child_count;
+	if (node->first_child>model->procedural_child_count || node->child_count>model->procedural_child_count-node->first_child) return 0;
+	if (node->else_if && (node->else_if!=1 || node->kind!=PIGEN_PROCEDURAL_IF || node->child_count!=2 ||
+		model->procedural_children[node->first_child+1].index>=model->procedural_count ||
+		model->procedural[model->procedural_children[node->first_child+1].index].kind!=PIGEN_PROCEDURAL_IF)) return 0;
+	for(size_t i=0;i<node->child_count;i++)
+	{
+		pigen_rtl_procedural_id child_id=model->procedural_children[node->first_child+i];
+		if (child_id.index>=model->procedural_count) return 0;
+		const pigen_rtl_procedural *child=&model->procedural[child_id.index];
+		if (child->case_continuation)
+		{
+			if (node->kind<PIGEN_PROCEDURAL_CASE || node->kind>PIGEN_PROCEDURAL_CASEX || !i ||
+				child->condition.index==PIGEN_INVALID_ID || child->child_count!=1 || child->first_child>=model->procedural_child_count) return 0;
+			const pigen_rtl_procedural *previous=&model->procedural[model->procedural_children[node->first_child+i-1].index];
+			if (previous->condition.index==PIGEN_INVALID_ID || previous->child_count!=1 ||
+				previous->first_child>=model->procedural_child_count ||
+				model->procedural_children[previous->first_child].index!=model->procedural_children[child->first_child].index) return 0;
+		}
+		int body=node->kind>=PIGEN_PROCEDURAL_WHILE && node->kind<=PIGEN_PROCEDURAL_FOREVER &&
+			(node->kind!=PIGEN_PROCEDURAL_FOR || i==2);
+		if (!procedural_loop_controls_valid(model,model->procedural_children[node->first_child+i],loops+(size_t)body,depth+1)) return 0;
+	}
+	return 1;
+}
+
+pigen_rtl_process_id pigen_rtl_combinational_process_add(pigen_rtl_model *model,
+	pigen_rtl_module_id module, pigen_rtl_procedural_id body, pigen_source_span span)
+{
+	pigen_rtl_process_id invalid={PIGEN_INVALID_ID};
+	if (!pigen_rtl_module_get(model,module) || body.index>=model->procedural_count ||
+		model->procedural[body.index].module.index!=module.index ||
+		model->procedural[body.index].kind==PIGEN_PROCEDURAL_CASE_ITEM ||
+		!procedural_loop_controls_valid(model,body,0,0) ||
+		model->process_count==PIGEN_INVALID_ID ||
+		model->modules[module.index].processes.first+model->modules[module.index].processes.count!=model->process_count) return invalid;
+	pigen_rtl_process_id result=pigen_rtl_process_add(model,span);
+	model->processes[result.index].module=module;
+	model->processes[result.index].clock=(pigen_rtl_expr_id){PIGEN_INVALID_ID};
+	model->processes[result.index].is_combinational=1;
+	model->processes[result.index].body=body;
+	model->processes[result.index].updates=(pigen_rtl_record_range){model->update_count,0};
+	model->modules[module.index].processes.count++;return result;
+}
+
+static int procedural_drives_object(const pigen_rtl_model *model,
+	pigen_rtl_procedural_id id,pigen_rtl_object_id object,size_t depth)
+{
+	if (id.index>=model->procedural_count || depth>model->procedural_count) return 0;
+	const pigen_rtl_procedural *node=&model->procedural[id.index];
+	if (node->kind==PIGEN_PROCEDURAL_ASSIGN) return equation_lvalue_contains(model,node->destination,object,0);
+	if (node->first_child>model->procedural_child_count || node->child_count>model->procedural_child_count-node->first_child) return 0;
+	for (size_t i=0;i<node->child_count;i++)
+		if (procedural_drives_object(model,model->procedural_children[node->first_child+i],object,depth+1)) return 1;
+	return 0;
+}
+
+int pigen_rtl_process_drives_object(const pigen_rtl_model *model,
+	pigen_rtl_process_id id,pigen_rtl_object_id object)
+{
+	const pigen_rtl_process *process=pigen_rtl_process_get(model,id);
+	if (!process || !pigen_rtl_object_get(model,object)) return 0;
+	if (process->is_combinational) return procedural_drives_object(model,process->body,object,0);
+	if (process->updates.first>model->update_count || process->updates.count>model->update_count-process->updates.first) return 0;
+	for (size_t i=0;i<process->updates.count;i++)
+		if (model->updates[process->updates.first+i].destination.index==object.index) return 1;
+	return 0;
 }
 
 pigen_rtl_instance_id pigen_rtl_instance_add_with_owner(
@@ -946,7 +1208,7 @@ pigen_rtl_process_id pigen_rtl_process_add_with_owner(
 	}
 	result.index = (uint32_t)model->process_count;
 	record = &model->processes[model->process_count++];
-	*record = (pigen_rtl_process){0};
+	*record = (pigen_rtl_process){.body={PIGEN_INVALID_ID}};
 	record->origin = span;
 	record->clock = clock_expression;
 	record->edge = edge;
@@ -988,6 +1250,22 @@ pigen_rtl_record_range pigen_rtl_connection_range_add(pigen_rtl_model *model,
 		model->connection_count++;
 	}
 	return range;
+}
+
+int pigen_rtl_primitive_port_is_output(pigen_rtl_primitive primitive, const char *port)
+{
+	if (!port || primitive == PIGEN_RTL_PRIMITIVE_INVALID) return 0;
+	if (primitive == PIGEN_RTL_PRIMITIVE_AXI_MERGE || primitive == PIGEN_RTL_PRIMITIVE_AXI_DEMUX)
+	{
+		static const char *outputs[] = {"s_aw_ready", "s_w_ready", "s_b_valid", "s_b_payload",
+			"s_ar_ready", "s_r_valid", "s_r_payload", "m_aw_valid", "m_aw_payload",
+			"m_w_valid", "m_w_payload", "m_b_ready", "m_ar_valid", "m_ar_payload", "m_r_ready"};
+		for (size_t i = 0; i < sizeof(outputs)/sizeof(*outputs); i++)
+			if (!strcmp(port, outputs[i])) return 1;
+		return 0;
+	}
+	return !strcmp(port, "packet_out") || !strcmp(port, "out_valid") || !strcmp(port, "in_ready") ||
+		(primitive == PIGEN_RTL_PRIMITIVE_MERGE2 && (!strcmp(port, "i0_ready") || !strcmp(port, "i1_ready")));
 }
 
 int pigen_rtl_instance_set_primitive(pigen_rtl_model *model,
@@ -1033,12 +1311,69 @@ int pigen_rtl_object_set_shape(pigen_rtl_model *model,
 	return 1;
 }
 
+size_t pigen_rtl_source_reference_add(pigen_rtl_model *model,
+	const pigen_rtl_source_reference *reference)
+{
+	if(!model || !reference || reference->role<PIGEN_RTL_SOURCE_SCOPE ||
+		reference->role>PIGEN_RTL_SOURCE_INSTANCE_PORT ||
+		!pigen_rtl_module_get(model,reference->module) || reference->scope.index==PIGEN_INVALID_ID ||
+		!reference->source_path || !reference->source_path[0] ||
+		!reference->emitted_name || !reference->emitted_name[0]) return SIZE_MAX;
+	const pigen_rtl_object *object=pigen_rtl_object_get(model,reference->object);
+	const pigen_rtl_instance *instance=pigen_rtl_instance_get(model,reference->instance);
+	if(reference->role==PIGEN_RTL_SOURCE_SCOPE)
+	{
+		if(reference->object.index!=PIGEN_INVALID_ID || reference->instance.index!=PIGEN_INVALID_ID) return SIZE_MAX;
+	}
+	else if(reference->role==PIGEN_RTL_SOURCE_INSTANCE || reference->role==PIGEN_RTL_SOURCE_INSTANCE_PORT)
+	{
+		if(!instance || instance->module.index!=reference->module.index || reference->object.index!=PIGEN_INVALID_ID) return SIZE_MAX;
+	}
+	else if(!object || object->module.index!=reference->module.index || reference->instance.index!=PIGEN_INVALID_ID) return SIZE_MAX;
+	for(size_t i=0;i<model->source_reference_count;i++)
+	{
+		const pigen_rtl_source_reference *other=&model->source_references[i];
+		if(other->role==reference->role && other->module.index==reference->module.index &&
+			other->scope.index==reference->scope.index && other->signal.index==reference->signal.index &&
+			other->object.index==reference->object.index && other->instance.index==reference->instance.index &&
+			!strcmp(other->source_path,reference->source_path))
+			return !strcmp(other->emitted_name,reference->emitted_name) ? i : SIZE_MAX;
+	}
+	pigen_rtl_source_reference copy=*reference;
+	copy.source_path=pigen_copy_range(reference->source_path,strlen(reference->source_path));
+	copy.emitted_name=pigen_copy_range(reference->emitted_name,strlen(reference->emitted_name));
+	if(model->source_reference_count==model->source_reference_capacity)
+	{
+		model->source_reference_capacity=model->source_reference_capacity ? model->source_reference_capacity*2 : 32;
+		model->source_references=pigen_resize(model->source_references,
+			model->source_reference_capacity*sizeof(*model->source_references));
+	}
+	size_t index=model->source_reference_count++;
+	model->source_references[index]=copy;return index;
+}
+
+const pigen_rtl_source_reference *pigen_rtl_source_reference_get(
+	const pigen_rtl_model *model,size_t index)
+{
+	return model && index<model->source_reference_count ? &model->source_references[index] : NULL;
+}
+
 void pigen_free_rtl_model(pigen_rtl_model *model)
 {
+    for(size_t i=0;i<model->source_reference_count;i++)
+    {
+        free(model->source_references[i].source_path);
+        free(model->source_references[i].emitted_name);
+    }
+    free(model->source_references);
 	for (size_t i = 0; i < model->type_count; ++i)
 		free((void *)model->types[i].dimensions);
 	for (size_t i = 0; i < model->expression_count; ++i)
+	{
 		free((void *)model->expressions[i].literal_words);
+		if (model->expressions[i].kind == PIGEN_RTL_EXPR_SELECT)
+			free(model->expressions[i].as.select.member_name);
+	}
 	for (size_t i = 0; i < model->name_count; ++i)
 		free(model->names[i].text);
 	for (size_t i = 0; i < model->connection_count; ++i)
@@ -1047,9 +1382,13 @@ void pigen_free_rtl_model(pigen_rtl_model *model)
 	{
 		free(model->objects[i].name);
 		free(model->objects[i].shape);
+		free(model->objects[i].declaration_type);
 	}
 	for (size_t i = 0; i < model->instance_count; ++i)
+	{
 		free(model->instances[i].name);
+		free(model->instances[i].definition);
+	}
 	for (size_t i = 0; i < model->module_count; ++i)
 		free(model->modules[i].name);
 	free(model->connections);
@@ -1060,6 +1399,8 @@ void pigen_free_rtl_model(pigen_rtl_model *model)
 	free(model->instances);
 	free(model->equations);
 	free(model->updates);
+	free(model->procedural);
+	free(model->procedural_children);
 	free(model->processes);
 	free(model->modules);
 	free(model->instance_parameters);

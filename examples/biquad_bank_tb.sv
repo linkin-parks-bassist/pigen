@@ -1,3 +1,5 @@
+module biquad_bank_tb;
+	// Keep independent scoreboard types local to avoid compilation-unit DUT names.
 typedef struct packed {
 	logic [2:0] handle;
 	logic signed [15:0] sample;
@@ -12,7 +14,6 @@ typedef struct packed {
 	logic signed [89:0] coefs;
 } biquad_coef_write_req;
 
-module biquad_bank_tb;
 	/* Keep the Verilator VCD intentionally human-scale. Only the explicitly
 	 * re-enabled probe declarations below are traced. */
 	/*verilator tracing_off*/

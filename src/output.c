@@ -441,6 +441,104 @@ static char *expanded_span_text(const pigen_syntax_tree *syntax,
 	return text.data;
 }
 
+static char *expanded_retained_text(const pigen_syntax_tree *syntax,const pigen_syntax_node *node)
+{
+ size_t first=node->location.extent.first.index,after=node->location.extent.after.index;
+ if(first>after || after>syntax->expanded->token_count) return NULL;
+ pigen_string text={0};int macro=0;
+ for(size_t i=first;i<after;i++)
+ {
+  const pigen_expanded_token *token=&syntax->expanded->tokens[i];
+  const pigen_token_origin *origin=pigen_origin_get(syntax->expanded,token->origin);
+  if(!origin || origin->kind!=PIGEN_ORIGIN_SOURCE) macro=1;
+  size_t n=0;const char *word=pigen_expanded_token_text(syntax->expanded,token,&n);
+  if(word && n) {if(text.length) pigen_append(&text," ");pigen_append_range(&text,word,n);}
+ }
+ if(!macro || !text.length) {free(text.data);return NULL;}
+ /* Several retained items can share one macro invocation's written span.
+  * Their extents own distinct token sequences and need a lexical separator. */
+ pigen_append(&text,"\n");return text.data;
+}
+
+static char *package_expression_text(const pigen_syntax_tree *syntax,const pigen_syntax_expr *expression)
+{
+ if(!expression) return NULL;
+ /* Several subexpressions can share one macro invocation's source span.
+  * Their expanded token extents, rather than that span, own the text. */
+ pigen_string expanded={0};int has_macro=0;
+ size_t first=expression->location.extent.first.index,after=expression->location.extent.after.index;
+ if(first<=after && after<=syntax->expanded->token_count)
+  for(size_t i=first;i<after;i++)
+  {
+   const pigen_expanded_token *token=&syntax->expanded->tokens[i];
+   const pigen_token_origin *origin=pigen_origin_get(syntax->expanded,token->origin);
+   size_t n=0;const char *word=pigen_expanded_token_text(syntax->expanded,token,&n);
+   if(!origin || origin->kind!=PIGEN_ORIGIN_SOURCE) has_macro=1;
+   if(word && n) {if(expanded.length)pigen_append(&expanded," ");pigen_append_range(&expanded,word,n);}
+  }
+ if(has_macro && expanded.length) return expanded.data;
+ free(expanded.data);
+ size_t n=0;const char *raw=pigen_source_span_text(syntax->expanded->sources,expression->location.source_span,&n);
+ if(!raw) return NULL;
+ pigen_string text={0};pigen_append_range(&text,raw,n);return text.data;
+}
+
+static void append_package_token(pigen_string *text,const pigen_syntax_tree *syntax,pigen_token_id id)
+{
+ const pigen_expanded_token *token=pigen_expanded_token_get(syntax->expanded,id);
+ size_t n=0;const char *word=pigen_expanded_token_text(syntax->expanded,token,&n);
+ if(word) pigen_append_range(text,word,n);
+}
+
+static int append_typedef_type(pigen_string *text,const pigen_syntax_tree *syntax,pigen_syntax_type_id id,size_t depth)
+{
+ const pigen_syntax_type *type=pigen_syntax_type_get(&syntax->types,id);
+ if(!type || depth>128) return 0;
+ if(type->is_packed_struct)
+ {
+  pigen_append(text,"struct packed { ");
+  const pigen_syntax_struct_member *members=pigen_syntax_type_members(&syntax->types,type->first_member,type->member_count);
+  for(size_t i=0;i<type->member_count;i++)
+  {
+   if(!members || !append_typedef_type(text,syntax,members[i].type,depth+1)) return 0;
+   pigen_append(text," ");append_package_token(text,syntax,members[i].name);pigen_append(text,"; ");
+  }
+  pigen_append(text,"}");return 1;
+ }
+ const pigen_expanded_token *base=pigen_expanded_token_get(syntax->expanded,type->base);
+ size_t n=0;const char *word=pigen_expanded_token_text(syntax->expanded,base,&n);
+ int numerical=!type->has_package && type->argument_count && word &&
+  ((n==3 && !memcmp(word,"int",3)) || (n==4 && !memcmp(word,"uint",4)));
+ if(numerical) pigen_append(text,"bit");
+ else
+ {
+  if(type->has_package) {append_package_token(text,syntax,type->package);pigen_append(text,"::");}
+  append_package_token(text,syntax,type->base);
+ }
+ if(type->signedness==PIGEN_SYNTAX_SIGN_SIGNED || (numerical && n==3 && type->signedness!=PIGEN_SYNTAX_SIGN_UNSIGNED)) pigen_append(text," signed");
+ else if(type->signedness==PIGEN_SYNTAX_SIGN_UNSIGNED) pigen_append(text," unsigned");
+ const pigen_syntax_type_argument *arguments=pigen_syntax_type_arguments(&syntax->types,type->first_argument,type->argument_count);
+ for(size_t i=0;i<type->argument_count;i++)
+ {
+  if(!arguments) return 0;
+  pigen_syntax_expr_id left=arguments[i].kind==PIGEN_SYNTAX_TYPE_COUNT ? arguments[i].as.count : arguments[i].as.range.left;
+  const pigen_syntax_expr *expression=pigen_syntax_expr_get(&syntax->expressions,left);
+  char *value=package_expression_text(syntax,expression);
+  if(!value) return 0;
+  pigen_append(text," [");
+  if(arguments[i].kind==PIGEN_SYNTAX_TYPE_COUNT) {pigen_append(text,"(");pigen_append(text,value);pigen_append(text,")-1:0");}
+  else
+  {
+   pigen_append(text,value);pigen_append(text,":");
+   const pigen_syntax_expr *right=pigen_syntax_expr_get(&syntax->expressions,arguments[i].as.range.right);
+   char *end=package_expression_text(syntax,right);
+   if(!end) {free(value);return 0;}pigen_append(text,end);free(end);
+  }
+  free(value);pigen_append(text,"]");
+ }
+ return 1;
+}
+
 static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	const pigen_rtl_lowering *lowering, uint32_t node_index,
 	pigen_rtl_module_id module, int in_module, pigen_output_error *error);
@@ -466,6 +564,153 @@ static void append_semantic_span(pigen_string *text, const pigen_semantic_model 
 	if (bytes) pigen_append_range(text, bytes, length);
 }
 
+static const pigen_semantic_retained_call *retained_call_at(const pigen_semantic_model *sem,size_t token)
+{
+ if(!sem) return NULL;
+ for(size_t i=0;i<sem->retained_call_count;i++)
+  if(sem->retained_calls[i].name.index==token) return &sem->retained_calls[i];
+ return NULL;
+}
+
+static int append_retained_callee(pigen_string *text,const pigen_semantic_model *sem,
+ const pigen_semantic_retained_call *call)
+{
+ const pigen_symbol *package=pigen_symbol_get(sem,call->package),*target=pigen_symbol_get(sem,call->target);
+ if(!package || package->kind!=PIGEN_SYMBOL_PACKAGE || !target || target->kind!=PIGEN_SYMBOL_RETAINED_SUBROUTINE ||
+  package->object.scope.index!=target->scope.index) return 0;
+ const pigen_symbol *parts[]={package,target};
+ for(size_t i=0;i<2;i++)
+ {
+  size_t n=0;const char *name=pigen_source_span_text(sem->sources,parts[i]->name,&n);
+  if(!name || !n) return 0;
+  if(i) pigen_append(text,"::");
+  pigen_append_range(text,name,n);
+  if(name[0]=='\\') pigen_append(text," ");
+ }
+ if(call->bare) pigen_append(text,"()");
+ return 1;
+}
+
+/* Preserve ordinary body bytes except bound callees and native observations.
+ * Macro-bearing spans already render expanded tokens; qualify within that
+ * stream so a function-like macro's arguments cannot be lost. */
+static const pigen_semantic_retained_observation *retained_observation_at(const pigen_rtl_lowering *lowering,
+ pigen_rtl_module_id module,size_t token)
+{
+ const pigen_rtl_module *owner=pigen_rtl_module_get(lowering->rtl,module);
+ if(!owner) return NULL;
+ for(size_t i=0;i<lowering->semantics->retained_observation_count;i++)
+ {
+  const pigen_semantic_retained_observation *use=&lowering->semantics->retained_observations[i];
+  if(use->module.index==owner->semantic_module.index && use->first==token) return use;
+ }
+ return NULL;
+}
+
+static int append_retained_observation(pigen_string *text,const pigen_rtl_lowering *lowering,
+ const pigen_semantic_retained_observation *use)
+{
+ size_t index=(size_t)(use-lowering->semantics->retained_observations);
+ if(index>=lowering->retained_observation_count) return 0;
+ const pigen_rtl_object *object=pigen_rtl_object_get(lowering->rtl,lowering->retained_observation_objects[index]);
+ if(!object || !object->name) return 0;
+ pigen_append(text,object->name);if(object->name[0]=='\\') pigen_append(text," ");return 1;
+}
+
+static int retained_subroutine_text(const pigen_syntax_tree *syntax,const pigen_rtl_lowering *lowering,
+ pigen_rtl_module_id module,const pigen_syntax_node *node,char **result)
+{
+ const pigen_semantic_model *sem=lowering->semantics;
+ *result=NULL;
+ size_t first=node->location.extent.first.index,after=node->location.extent.after.index;
+ int bound=0;
+ for(size_t at=first;at<after;at++) if(retained_call_at(sem,at) || retained_observation_at(lowering,module,at)) {bound=1;break;}
+ if(!bound) {*result=expanded_retained_text(syntax,node);return 1;}
+ char *expanded=expanded_retained_text(syntax,node);
+ int tokens=expanded!=NULL;free(expanded);
+ size_t length=0,cursor=0;
+ const char *raw=pigen_source_span_text(syntax->expanded->sources,node->location.source_span,&length);
+ if(!tokens && !raw) return 0;
+ pigen_string text={0};
+ for(size_t at=first;at<after;at++)
+ {
+  const pigen_semantic_retained_call *call=retained_call_at(sem,at);
+  const pigen_semantic_retained_observation *observation=retained_observation_at(lowering,module,at);
+  const pigen_expanded_token *token=pigen_expanded_token_get(syntax->expanded,(pigen_token_id){(uint32_t)at});
+  if(tokens)
+  {
+   size_t n=0;const char *word=pigen_expanded_token_text(syntax->expanded,token,&n);
+   if(!word || !n) continue;
+   if(text.length) pigen_append(&text," ");
+   if(observation)
+   {if(!append_retained_observation(&text,lowering,observation)) goto invalid;at=observation->after-1;}
+   else if(call) {if(!append_retained_callee(&text,sem,call)) goto invalid;}
+   else pigen_append_range(&text,word,n);
+  }
+  else if(call || observation)
+  {
+   pigen_source_span span=pigen_origin_expansion_span(syntax->expanded,token->origin);
+   if(observation)
+   {
+    const pigen_expanded_token *last=pigen_expanded_token_get(syntax->expanded,(pigen_token_id){(uint32_t)(observation->after-1)});
+    pigen_source_span end=pigen_origin_expansion_span(syntax->expanded,last->origin);
+    if(end.source.index!=span.source.index || end.end<span.start) goto invalid;
+    span.end=end.end;
+   }
+   if(span.source.index!=node->location.source_span.source.index || span.start<node->location.source_span.start ||
+    span.end>node->location.source_span.end) goto invalid;
+   size_t start=span.start-node->location.source_span.start,end=span.end-node->location.source_span.start;
+   if(start<cursor || end<start) goto invalid;
+   pigen_append_range(&text,raw+cursor,start-cursor);
+   if(observation)
+   {if(!append_retained_observation(&text,lowering,observation)) goto invalid;at=observation->after-1;}
+   else if(!append_retained_callee(&text,sem,call)) goto invalid;
+   cursor=end;
+  }
+ }
+ if(!tokens) pigen_append_range(&text,raw+cursor,length-cursor);
+ else if(text.length) pigen_append(&text,"\n");
+ *result=text.data;return 1;
+invalid:
+ free(text.data);return 0;
+}
+
+static int prepare_retained_package_imports(pigen_output_model *model,const pigen_syntax_tree *syntax,
+ const pigen_semantic_model *sem,const pigen_syntax_node *node)
+{
+ if(!sem || !sem->import_count) return 1;
+ const pigen_expanded_token *name=pigen_expanded_token_get(syntax->expanded,node->as.module.name);
+ size_t n=0;const char *word=pigen_expanded_token_text(syntax->expanded,name,&n);
+ const pigen_symbol *owner=pigen_symbol_get(sem,pigen_symbol_lookup_text_at(sem,sem->compilation_scope,word,n,SIZE_MAX));
+ if(!owner || owner->kind!=PIGEN_SYMBOL_PACKAGE) return 0;
+ pigen_scope_id scope=owner->object.scope;
+ pigen_string text={0};
+ for(size_t i=0;i<sem->import_count;i++)
+ {
+  const pigen_semantic_import *import=&sem->imports[i];
+  if(import->scope.index!=scope.index || import->wildcard==1) continue;
+  const pigen_symbol *target=pigen_symbol_get(sem,import->target);
+  if(!target || target->kind!=PIGEN_SYMBOL_RETAINED_SUBROUTINE) continue;
+  int prior=0;
+  for(size_t j=0;j<i;j++)
+   if(sem->imports[j].scope.index==scope.index && sem->imports[j].wildcard!=1 &&
+    sem->imports[j].target.index==import->target.index) {prior=1;break;}
+  if(prior) continue;
+  pigen_symbol_id package={PIGEN_INVALID_ID};
+  for(size_t p=0;p<sem->symbol_count;p++)
+   if(sem->symbols[p].kind==PIGEN_SYMBOL_PACKAGE && sem->symbols[p].object.scope.index==target->scope.index)
+   {package=(pigen_symbol_id){(uint32_t)p};break;}
+  pigen_semantic_retained_call binding={{PIGEN_INVALID_ID},package,import->target,0};
+  pigen_append(&text," import ");
+  if(!append_retained_callee(&text,sem,&binding)) {free(text.data);return 0;}
+  pigen_append(&text,";");
+ }
+ if(!text.length) {free(text.data);return 1;}
+ pigen_output_item item={0};item.kind=PIGEN_OUTPUT_RETAINED;
+ item.as.span=node->location.source_span;item.text=text.data;
+ return pigen_output_item_add(model,item)!=PIGEN_INVALID_ID;
+}
+
 static int append_endpoint_view_name(pigen_string *text,
 	const pigen_rtl_lowering *lowering, const pigen_symbol *symbol, const char *suffix)
 {
@@ -487,6 +732,45 @@ static int append_endpoint_view_name(pigen_string *text,
 	const pigen_rtl_object *record=pigen_rtl_object_get(lowering->rtl,object);
 	if(!record || !record->name) return 0;
 	pigen_append(text,record->name);
+	return 1;
+}
+
+static int append_protocol_instance_channel(pigen_string *text,
+	const pigen_rtl_lowering *lowering,
+	const pigen_semantic_instance_connection *connection,
+	const pigen_symbol *symbol, int comma)
+{
+	pigen_protocol_channel channel;
+	pigen_protocol_endpoint_id id = pigen_protocol_endpoint_for_signal(
+		lowering->semantics, connection->port_signal, &channel);
+	if (id.index == PIGEN_INVALID_ID || !symbol) return 0;
+	const pigen_semantic_protocol_endpoint *endpoint =
+		pigen_protocol_endpoint_get(lowering->semantics, id);
+	const pigen_protocol *protocol = pigen_protocol_type_get(
+		lowering->semantics, endpoint->type);
+	const pigen_rtl_protocol_channel_ports *ports =
+		pigen_lowered_protocol_ports(lowering, id, channel);
+	pigen_protocol_channel_layout layout;
+	if (!ports || !pigen_protocol_layout(protocol, channel, &layout)) return 0;
+	for (size_t f = 0; f < layout.field_count + 2; f++)
+	{
+		const pigen_protocol_field_layout *field = f < layout.field_count ?
+			&layout.fields[f] : NULL;
+		pigen_rtl_object_id pin = field ? ports->fields[field->field] :
+			f == layout.field_count ? ports->valid : ports->ready;
+		const pigen_rtl_object *object = pigen_rtl_object_get(lowering->rtl, pin);
+		if (comma || f) pigen_append(text, ", ");
+		pigen_append_format(text, ".%s(", object->name);
+		const char *suffix = field ? NULL : f == layout.field_count ? "_valid" : "_ready";
+		if (!append_endpoint_view_name(text, lowering, symbol, suffix))
+		{
+			append_semantic_span(text, lowering->semantics, symbol->name);
+			if (suffix) pigen_append(text, suffix);
+		}
+		if (field) pigen_append_format(text, "[%zu:%zu]",
+			field->offset + field->bits - 1, field->offset);
+		pigen_append(text, ")");
+	}
 	return 1;
 }
 
@@ -538,6 +822,7 @@ static char *endpoint_instance_text(const pigen_syntax_tree *syntax,
 		payload=payload || (name && base && name_length==base_length && !memcmp(name,base,name_length));
 		while(value && value->kind==PIGEN_EXPR_CONVERSION) value=pigen_expr_get(sem,value->as.conversion.operand);
 		if(value && value->kind==PIGEN_EXPR_SYMBOL) symbol=pigen_symbol_get(sem,value->as.symbol);
+		if (append_protocol_instance_channel(&text, lowering, connection, symbol, c != 0)) continue;
 		if(c) pigen_append(&text,", ");
 		pigen_append(&text,".");append_semantic_span(&text,sem,port_name);pigen_append(&text,"(");
 		if(symbol) { if (!append_endpoint_view_name(&text,lowering,symbol,NULL)) append_semantic_span(&text,sem,symbol->name); }
@@ -593,8 +878,197 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	node = pigen_syntax_get(syntax, (pigen_syntax_id){node_index});
 	if (!node)
 		return -1;
+    if(node->kind==PIGEN_SYNTAX_PACKAGE)
+    {
+        /* Exports may precede imports in source. Emit their canonical SV
+         * declarations after package items, before the closing wrapper, for
+         * tools that require the corresponding import to be seen first. */
+        for(pigen_syntax_id child=node->first_child;child.index!=PIGEN_INVALID_ID;)
+        {
+            const pigen_syntax_node *entry=pigen_syntax_get(syntax,child);
+            if(child.index==node->last_child.index)
+                for(pigen_syntax_id exported=node->first_child;exported.index!=PIGEN_INVALID_ID;)
+                {
+                    const pigen_syntax_node *definition=pigen_syntax_get(syntax,exported);
+                    if(definition->kind==PIGEN_SYNTAX_EXPORT &&
+                        emit_node(model,syntax,lowering,exported.index,module,in_module,error)) return -1;
+                    exported=definition->next_sibling;
+                }
+            if(entry->kind==PIGEN_SYNTAX_EXPORT && !entry->as.package_import.wildcard)
+            {
+                const pigen_expanded_token *p=pigen_expanded_token_get(syntax->expanded,entry->as.package_import.package);
+                const pigen_expanded_token *n=pigen_expanded_token_get(syntax->expanded,entry->as.package_import.member);
+                pigen_symbol_id target=pigen_symbol_lookup_package_member(lowering->semantics,lowering->semantics->compilation_scope,
+                    pigen_origin_spelling_span(syntax->expanded,p->origin),pigen_origin_spelling_span(syntax->expanded,n->origin));
+                const pigen_symbol *symbol=pigen_symbol_get(lowering->semantics,target);
+                if(symbol && symbol->kind!=PIGEN_SYMBOL_PROTOCOL_TYPE)
+                {
+                    pigen_string text={0};pigen_append(&text,"import ");append_package_token(&text,syntax,entry->as.package_import.package);
+                    pigen_append(&text,"::");append_package_token(&text,syntax,entry->as.package_import.member);pigen_append(&text,";");
+                    pigen_output_item binding={0};binding.kind=PIGEN_OUTPUT_RETAINED;
+                    binding.as.span=entry->location.source_span;binding.text=text.data;
+                    if(pigen_output_item_add(model,binding)==PIGEN_INVALID_ID) return -1;
+                }
+            }
+            if(entry->kind!=PIGEN_SYNTAX_EXPORT && emit_node(model,syntax,lowering,child.index,module,in_module,error)) return -1;
+            /* Routine imports have scope-end visibility for calls. Establish
+             * canonical identities before backend wildcard/export lookup. */
+            if(child.index==node->first_child.index &&
+             !prepare_retained_package_imports(model,syntax,lowering->semantics,node)) return -1;
+            child=entry->next_sibling;
+        }
+        return 0;
+    }
+	if (node->kind == PIGEN_SYNTAX_MODULE && node->as.module.is_external) return 0;
+	/* Selected generated hardware is published from semantic arenas. The
+	 * source template contains both unselected and repeated occurrences. */
+	if (node->kind == PIGEN_SYNTAX_GENERATE_REGION || node->kind == PIGEN_SYNTAX_COMBINATIONAL_PROCESS) return 0;
+	if(node->kind==PIGEN_SYNTAX_INSTANCE && node->as.instance.has_parameters) return 0;
+	if (node->kind == PIGEN_SYNTAX_PARAMETER || node->kind == PIGEN_SYNTAX_INSTANCE)
+	{
+		const pigen_rtl_module *rtl_owner=in_module ? pigen_rtl_module_get(lowering->rtl,module) : NULL;
+		const pigen_semantic_module *semantic_owner=rtl_owner ?
+			pigen_module_get(lowering->semantics,rtl_owner->semantic_module) : NULL;
+		if(semantic_owner && semantic_owner->specialization_of.index!=PIGEN_INVALID_ID) return 0;
+	}
+	if(node->kind==PIGEN_SYNTAX_GENVAR)
+	{
+		size_t length=0;const pigen_expanded_token *token=pigen_expanded_token_get(syntax->expanded,node->as.genvar.name);
+		const char *name=pigen_expanded_token_text(syntax->expanded,token,&length);
+		if(!name) return -1;
+		pigen_string text={0};pigen_append(&text,"genvar ");pigen_append_range(&text,name,length);pigen_append(&text,";");
+		item.kind=PIGEN_OUTPUT_RETAINED;item.as.span=node->location.source_span;item.text=text.data;
+		return (in_module ? pigen_output_item_add_child(model,module,item) : pigen_output_item_add(model,item))==PIGEN_INVALID_ID ? -1 : 0;
+	}
+	if(node->kind==PIGEN_SYNTAX_IMPORT || node->kind==PIGEN_SYNTAX_EXPORT)
+	{
+        const pigen_syntax_node *parent=pigen_syntax_get(syntax,node->parent);
+        /* Procedural imports feed compile-time bindings; lowered expressions
+         * carry canonical types/values and must not leak imports into modules. */
+        if(parent && parent->kind==PIGEN_SYNTAX_PROCEDURAL_BLOCK) return 0;
+		if(node->as.package_import.is_structured && !node->as.package_import.wildcard)
+		{
+			const pigen_expanded_token *p=pigen_expanded_token_get(syntax->expanded,node->as.package_import.package);
+			const pigen_expanded_token *n=pigen_expanded_token_get(syntax->expanded,node->as.package_import.member);
+			pigen_symbol_id target=pigen_symbol_lookup_package_member(lowering->semantics,lowering->semantics->compilation_scope,
+			 pigen_origin_spelling_span(syntax->expanded,p->origin),pigen_origin_spelling_span(syntax->expanded,n->origin));
+			const pigen_symbol *symbol=pigen_symbol_get(lowering->semantics,target);
+			if(symbol && symbol->kind==PIGEN_SYMBOL_PROTOCOL_TYPE) return 0;
+		}
+		pigen_string text={0};pigen_append(&text,node->kind==PIGEN_SYNTAX_EXPORT ? "export " : "import ");append_package_token(&text,syntax,node->as.package_import.package);
+		pigen_append(&text,"::");append_package_token(&text,syntax,node->as.package_import.member);pigen_append(&text,";");
+		if(node->kind==PIGEN_SYNTAX_IMPORT && node->as.package_import.is_structured && node->as.package_import.wildcard)
+		{
+			const pigen_semantic_model *sem=lowering->semantics;
+			pigen_scope_id scope=sem->compilation_scope;
+			if(in_module)
+			{
+				const pigen_rtl_module *rtl_owner=pigen_rtl_module_get(lowering->rtl,module);
+				const pigen_semantic_module *owner=rtl_owner ? pigen_module_get(sem,rtl_owner->semantic_module) : NULL;
+				if(owner) scope=owner->scope;
+			}
+			else
+			{
+				const pigen_syntax_node *parent=pigen_syntax_get(syntax,node->parent);
+				if(parent && parent->kind==PIGEN_SYNTAX_PACKAGE)
+				{
+					const pigen_expanded_token *name=pigen_expanded_token_get(syntax->expanded,parent->as.module.name);
+					const pigen_symbol *owner=pigen_symbol_get(sem,pigen_symbol_lookup(sem,sem->compilation_scope,pigen_origin_spelling_span(syntax->expanded,name->origin)));
+					if(owner) scope=owner->object.scope;
+				}
+			}
+			const pigen_expanded_token *package=pigen_expanded_token_get(syntax->expanded,node->as.package_import.package);
+			pigen_source_span package_name=pigen_origin_spelling_span(syntax->expanded,package->origin);
+			for(size_t i=0;i<sem->import_count;i++)
+			{
+				const pigen_semantic_import *binding=&sem->imports[i];
+				if(binding->wildcard==1 || binding->scope.index!=scope.index) continue;
+				const pigen_symbol *symbol=pigen_symbol_get(sem,binding->target);
+				if(!symbol || symbol->kind==PIGEN_SYMBOL_PROTOCOL_TYPE ||
+				 pigen_symbol_lookup_package_member(sem,sem->compilation_scope,package_name,symbol->name).index!=binding->target.index) continue;
+				int duplicate=0;
+				for(size_t j=0;j<i;j++) if(sem->imports[j].wildcard!=1 && sem->imports[j].scope.index==scope.index && sem->imports[j].target.index==binding->target.index) duplicate=1;
+				if(duplicate) continue;
+				pigen_append(&text," import ");append_package_token(&text,syntax,node->as.package_import.package);pigen_append(&text,"::");
+				append_semantic_span(&text,sem,symbol->name);pigen_append(&text,";");
+			}
+		}
+		item.kind=PIGEN_OUTPUT_RETAINED;item.as.span=node->location.source_span;item.text=text.data;
+		return (in_module ? pigen_output_item_add_child(model,module,item) : pigen_output_item_add(model,item))==PIGEN_INVALID_ID ? -1 : 0;
+	}
+	if(node->kind==PIGEN_SYNTAX_TYPEDEF && node->as.type_definition.protocol.family==PIGEN_PROTOCOL_NONE)
+	{
+		pigen_string text={0};pigen_append(&text,"typedef ");
+		if(!append_typedef_type(&text,syntax,node->as.type_definition.type,0)) {free(text.data);return -1;}
+		pigen_append(&text," ");append_package_token(&text,syntax,node->as.type_definition.name);pigen_append(&text,";");
+		item.kind=PIGEN_OUTPUT_RETAINED;item.as.span=node->location.source_span;item.text=text.data;
+		return (in_module ? pigen_output_item_add_child(model,module,item) : pigen_output_item_add(model,item))==PIGEN_INVALID_ID ? -1 : 0;
+	}
+	if (node->kind == PIGEN_SYNTAX_PARAMETER)
+	{
+		/* Structured modules are specialized. Retained SV still needs names
+		 * for its constant references, so preserve them as localparams. */
+		pigen_string text = {0};
+		const pigen_expanded_source *expanded = syntax->expanded;
+		const pigen_expanded_token *name = pigen_expanded_token_get(expanded,
+			node->as.parameter.name);
+		const pigen_syntax_expr *value = pigen_syntax_expr_get(
+			&syntax->expressions, node->as.parameter.value);
+		pigen_append(&text, "localparam ");
+		if (node->as.parameter.has_type)
+		{
+			const pigen_syntax_type *type = pigen_syntax_type_get(
+				&syntax->types, node->as.parameter.data_type);
+			const pigen_expanded_token *base = type ? pigen_expanded_token_get(
+				expanded, type->base) : NULL;
+			size_t length = 0;
+			const char *word = base ? pigen_expanded_token_text(expanded, base, &length) : NULL;
+			int numeric = type && type->argument_count && word &&
+				((length == 3 && (!memcmp(word, "int", 3) || !memcmp(word, "bit", 3))) ||
+				(length == 4 && !memcmp(word, "uint", 4)));
+			if (numeric)
+			{
+				pigen_append(&text, length == 3 && !memcmp(word, "int", 3) ?
+					"bit signed " : "bit unsigned ");
+				const pigen_syntax_type_argument *arguments = pigen_syntax_type_arguments(
+					&syntax->types, type->first_argument, type->argument_count);
+				for (size_t i = 0; arguments && i < type->argument_count; i++)
+				{
+					if (arguments[i].kind == PIGEN_SYNTAX_TYPE_COUNT)
+					{
+						const pigen_syntax_expr *count = pigen_syntax_expr_get(
+							&syntax->expressions, arguments[i].as.count);
+						pigen_append(&text, "[(");
+						if (count) append_semantic_span(&text, lowering->semantics, count->location.source_span);
+						pigen_append(&text, ")-1:0] ");
+					}
+					else append_semantic_span(&text, lowering->semantics, arguments[i].location.source_span);
+				}
+			}
+			else if (type) append_semantic_span(&text, lowering->semantics, type->location.source_span);
+			pigen_append(&text, " ");
+		}
+		size_t name_length = 0;
+		const char *name_text = name ? pigen_expanded_token_text(expanded, name, &name_length) : NULL;
+		if (name_text) pigen_append_range(&text, name_text, name_length);
+		pigen_append(&text, " = ");
+		char *expanded_value = value ? expanded_span_text(syntax, value->location.source_span) : NULL;
+		if (expanded_value) { pigen_append(&text, expanded_value); free(expanded_value); }
+		else if (value) append_semantic_span(&text, lowering->semantics, value->location.source_span);
+		pigen_append(&text, ";");
+		item.kind = PIGEN_OUTPUT_RETAINED;
+		item.as.span = node->location.source_span;
+		item.text = text.data;
+		return (in_module ? pigen_output_item_add_child(model, module, item) :
+			pigen_output_item_add(model, item)) == PIGEN_INVALID_ID ? -1 : 0;
+	}
 	if (node->kind == PIGEN_SYNTAX_INSTANCE)
 	{
+		for (size_t i = 0; i < lowering->semantics->instance_count; i++) {
+			const pigen_semantic_instance *instance = &lowering->semantics->instances[i];
+			if (instance->syntax.index == node_index &&
+				pigen_module_get(lowering->semantics, instance->child_module)->is_external) return 0;
+		}
 		item.kind = PIGEN_OUTPUT_RETAINED;
 		item.as.span = node->location.source_span;
 		item.text = endpoint_instance_text(syntax, lowering, node, node_index);
@@ -609,7 +1083,7 @@ static int emit_node(pigen_output_model *model, const pigen_syntax_tree *syntax,
 	{
 		item.kind = PIGEN_OUTPUT_RETAINED;
 		item.as.span = node->location.source_span;
-		item.text = expanded_span_text(syntax, item.as.span);
+		if(!retained_subroutine_text(syntax,lowering,module,node,&item.text)) return -1;
 		if (in_module)
 			return pigen_output_item_add_child(model, module, item) ==
 				PIGEN_INVALID_ID ? -1 : 0;
@@ -689,8 +1163,19 @@ int pigen_build_output_model(pigen_output_model *model,
 	root = pigen_syntax_get(syntax, (pigen_syntax_id){0});
 	if (!root)
 		return -1;
-	return emit_node(model, syntax, lowering, 0, (pigen_rtl_module_id){PIGEN_INVALID_ID}, 0,
-		error);
+	if(emit_node(model, syntax, lowering, 0, (pigen_rtl_module_id){PIGEN_INVALID_ID}, 0,error)) return -1;
+	for(size_t i=0;i<lowering->rtl->module_count;i++)
+	{
+		const pigen_rtl_module *rtl_owner=&lowering->rtl->modules[i];
+		const pigen_semantic_module *owner=pigen_module_get(lowering->semantics,rtl_owner->semantic_module);
+		if(!owner || owner->is_external || owner->specialization_of.index==PIGEN_INVALID_ID) continue;
+		pigen_output_item item={0};item.kind=PIGEN_OUTPUT_MODULE;item.as.module=(pigen_rtl_module_id){(uint32_t)i};
+		if(pigen_output_item_open(model,item)==PIGEN_INVALID_ID) return -1;
+		const pigen_syntax_node *template=pigen_syntax_get(syntax,owner->syntax);
+		if(emit_children(model,syntax,lowering,template,item.as.module,1,error) ||
+			emit_module_records(model,lowering,item.as.module)) return -1;
+	}
+	return 0;
 }
 
 void pigen_free_output_model(pigen_output_model *model)
