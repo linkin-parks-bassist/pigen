@@ -1,3 +1,5 @@
+// Native AXI fabric modules in this file are retained, not in use.
+// Module-boundary examples remain reference material; fabric links are quarantined.
 // Native protocol endpoints preserve all selected fields through independent
 // channel transfers. input/output select the target/initiator role of a bus.
 module native_axis_relay #(

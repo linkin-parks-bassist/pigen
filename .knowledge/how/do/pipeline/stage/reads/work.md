@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-17T12:04:47+11:00"
+revised_at: "2026-11-17T12:39:56+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -17,4 +17,4 @@ tests/pipeline_packet_test.py passes fourteen profiles of 257 packets covering r
 
 The complete driver passes normally (/tmp/pigen-pipeline-final-focused.log) and under compiler ASan/UBSan with leak detection (/tmp/pigen-pipeline-final-sanitizers.log). Procedural exits and lexical resets pass normal and sanitizer liveness suites (/tmp/pigen-pipeline-liveness.log; /tmp/pigen-pipeline-final-liveness-asan.log). Eighteen qualified/generated all-family profiles pass in /tmp/pigen-final-generated-pipelines-vqr4nytv. Generated-scope C models and existing pipeline syntax/scope tests also pass.
 
-The broader repository gate passes with the separately checked native-protocol target excluded (/tmp/pigen-pipeline-verify.log). Final focused tests and sanitizers cover subsequent localized refinements. Current compiler SHA-256 is 566ed4f7fb838029ee923b0decff503be5e15ee9145264e7103fafc1f743dbd2. README examples compile and pass fatal lint (/tmp/pigen-pipeline-readme-juttj21c/result.json). Native AXI acceptance is owned separately by what/is/the/native/axi/acceptance/status.md.
+The broader repository gate passes with the separately checked native-protocol target excluded (/tmp/pigen-pipeline-verify.log). Final focused tests and sanitizers cover subsequent localized refinements. Pre-quarantine pipeline checkpoint compiler SHA-256 is 566ed4f7fb838029ee923b0decff503be5e15ee9145264e7103fafc1f743dbd2. Current complete README module/fabric snippets pass compilation and fatal lint (/tmp/pigen-quarantine-readme-j3adkrrm). Native whole-interface fabric integration witnesses are quarantined; the active pipeline liveness suite retains thirty-six direct/child profiles. Native AXI acceptance is owned separately by what/is/the/native/axi/acceptance/status.md.

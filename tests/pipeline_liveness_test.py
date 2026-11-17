@@ -71,13 +71,13 @@ initial begin #30000;$fatal(1,"pipeline liveness timeout");end endmodule
 
 def native_liveness(root,tool):
     for family in ('axi4_stream','axi4_lite','axi4'):
-        for mode in ('direct','aggregate','fabric_child'):
+        for mode in ('direct','aggregate'):
             for exit_kind in ('continue','break','goto','continue_after','break_after','goto_after'):
                 directory=root/f'{family}_{mode}_{exit_kind}'
                 directory.mkdir()
                 case(directory,family,mode,native_alias=True,
                      clocked_foreach='pipeline_'+exit_kind,compiler=tool)
-    print('PASS 54 native pipeline exit profiles: prior/later effects, ingress capacities, child/fabric queues',flush=True)
+    print('PASS 36 native pipeline exit profiles: prior/later effects, ingress capacities and child queues',flush=True)
 
 
 def reset_isolation(root,tool):

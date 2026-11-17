@@ -1,11 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-17T10:33:29+11:00"
+revised_at: "2026-11-17T12:35:05+11:00"
 ---
 
 Pigen must support AXI4-Stream, AXI4-Lite and full AXI4 as native transfer types alongside existing transfers. Earlier AXI versions are outside this requirement. Declarations, transfers and child-module connections should feel natural within Pigen's implicit handshake model.
 
-David prioritizes module inputs/outputs and fabrics. AXI declarations are restricted to module/fabric input/output boundaries because complete protocol endpoints are heavy for internal datapaths. The design must still let parent logic drive and consume a child's AXI channels and unpack channel records into ordinary transfer types. Standalone internal AXI declarations are forbidden. Parent code uses existing child.port endpoint access without declaring a second internal bus. Preserve type aliases for boundary contracts and remove unsupported internal-storage role exceptions and test/example modes. what/is/the/proposed/native/axi/type/model.md owns the model.
+David prioritizes native AXI module inputs/outputs. Native AXI fabrics are quarantined, disconnected from compiler entry points and removed from the README pending his architectural review. AXI declarations are restricted to module/fabric input/output boundaries because complete protocol endpoints are heavy for internal datapaths. The design must still let parent logic drive and consume a child's AXI channels and unpack channel records into ordinary transfer types. Standalone internal AXI declarations are forbidden. Parent code uses existing child.port endpoint access without declaring a second internal bus. Preserve type aliases for boundary contracts and remove unsupported internal-storage role exceptions and test/example modes. what/is/the/proposed/native/axi/type/model.md owns the model.
 
 General SystemVerilog expansion is separate work unless a concrete module-boundary or fabric use establishes a dependency. Do not make broader compatibility work an AXI completion gate.
 
@@ -13,7 +13,7 @@ An AXI endpoint carries a complete protocol contract: channel directions, payloa
 
 AXI4-Lite and AXI4 have independent address, data and response channels, including return channels. Preserve independent handshakes and protocol obligations. AXI4-Stream carries enabled sidebands with each beat. Whole transactions have protocol sequencing beyond a single atomic transfer.
 
-Fabric composition must preserve contracts, write address/data association and response ownership under contention and backpressure. Verify generated standard pins, child connections and fabric routes for every family. Address windows accept compile-time parameters and per-instance overrides.
+Preserve generated standard-pin and child-connection verification for every family. Any future reactivation of native fabrics requires explicit review of contracts, write address/data association, response ownership, contention, backpressure and address parameterization. The existing work is retained as inactive reference material.
 
 Memory-mapped AXI4/Lite interconnects require address-map and transaction-routing semantics distinct from Stream routing. A separate fabric spelling remains an open design choice.
 

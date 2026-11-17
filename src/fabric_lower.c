@@ -597,6 +597,8 @@ static pigen_syntax_id next_fabric_edge(const pigen_syntax_tree *syntax,
 	return (pigen_syntax_id){PIGEN_INVALID_ID};
 }
 
+/* Quarantined native AXI fabric lowering: not connected to production. */
+#if 0
 static pigen_rtl_expr_id fabric_integer(pigen_rtl_lowering *lowering,
 	size_t value, pigen_source_span span)
 {
@@ -1110,6 +1112,8 @@ static int lower_protocol_fabrics(pigen_rtl_lowering *lowering,
 	free(routes);return ok;
 }
 
+#endif
+
 int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 	const pigen_syntax_tree *syntax)
 {
@@ -1136,7 +1140,8 @@ int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 			break;
 		}
 	if (rtl_module.index == PIGEN_INVALID_ID) return -1;
-	if (!lower_protocol_fabrics(lowering, module, rtl_module)) return -1;
+	/* Native protocol fabric edges cannot be produced by active resolution. */
+	if (model->protocol_fabric_edge_count) return -1;
 
 	for (child = module_node->first_child; child.index != PIGEN_INVALID_ID; )
 	{

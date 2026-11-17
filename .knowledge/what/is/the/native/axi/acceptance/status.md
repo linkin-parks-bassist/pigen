@@ -1,20 +1,12 @@
 ---
 status: green
-revised_at: "2026-11-17T12:04:48+11:00"
+revised_at: "2026-11-17T12:35:10+11:00"
 ---
 
-Native AXI4-Stream, AXI4-Lite and full AXI4 support module/fabric input/output ports, child views and protocol-aware fabrics. Standalone internal AXI declarations reject, including native aliases, arrays, selected generate scopes and procedural bodies. Complete contracts and boundary channel storage remain native transfer semantics (what/are/the/native/axi/transfer/requirements.md).
+Native AXI4-Stream, AXI4-Lite and full AXI4 module boundary declarations, child bindings and channel transfers remain active. Native AXI fabrics are quarantined: direct/routed, generated and typed-standalone whole-interface links diagnose before semantic publication. Native fabric lowering is excluded from production compilation. Standalone internal AXI declarations remain forbidden.
 
-Boundary-policy checkpoint compiler SHA-256: a6db03056c440b518bbbc880cb27bbd6583f39d6c1415c9f937f3f04e602089a.
+tests/native_fabric_quarantine_test.py checks twelve rejected native fabric cases across the three families, preservation of existing output files, and positive module channel-transfer/child-binding compilation with warnings-fatal lint. make native-protocol-test runs this active gate.
 
-Acceptance evidence:
-- tests/native_boundary_policy_test.py passes 30 rejection cases, all-family child/sibling/routed transport, and 97 ordinary Lite read requests/replies through a real child with DATA/RESP unpacking, stalls and decode errors (/tmp/pigen-boundary-policy.log).
-- Native declaration/typing/record/payload checks pass in phases: functions before external_axi_tests are covered by /tmp/pigen-boundary-protocol-rerun.log; the corrected external-boundary profiles and remaining main recipe pass in /tmp/pigen-boundary-protocol-tail.log. The first log terminates at an obsolete generated-external test assumption and is not an uninterrupted suite pass.
-- tests/native_array_test.py passes all retained scalar/collection, generated child, typed-standalone and boundary profiles (/tmp/pigen-boundary-array-rerun.log). Internal-storage profiles were removed rather than retained as supported syntax.
-- Stream merge/demux/routing, memory-mapped merge/demux, projections and real-core contention scripts exit zero in /tmp/pigen-boundary-batches-hzm9v61e/status.json. Its protocol/array/core-fabric entries contain superseded runner/fixture failures; use the dedicated passing evidence above and /tmp/pigen-boundary-core-fabric.log for 63 real-core direct/routed/multi-hop/standalone profiles.
-- Generated-scope and source-reference model fixtures use ordinary local buffers and pass focused checks (/tmp/pigen-boundary-models-rerun.log and the generated-instance result in /tmp/pigen-boundary-models.log).
-- All native example files compile after migrating local buses to boundary storage and child bindings (/tmp/pigen-boundary-examples-77yi5eop).
+The former broad native integration recipe is retained as archived-native-protocol-test. It includes inactive fabric witnesses and is not expected to pass against the quarantined compiler. Its older passing fabric evidence establishes the retained implementation's tested profile, not current feature availability. Boundary-only portions may be run independently; reactivating interconnects requires David's architectural review.
 
-The broader repository gate passes with the separately checked native-protocol target excluded (/tmp/pigen-pipeline-verify.log); the dedicated clocked-case run also exits zero (/tmp/pigen-boundary-clocked-case.log). Current boundary-policy rejection and child transport checks pass again after pipeline integration (/tmp/pigen-pipeline-boundaries.log). Eighteen qualified/generated pipeline profiles pass in /tmp/pigen-final-generated-pipelines-vqr4nytv, and forty-eight authored example tops pass compilation and warnings-fatal lint (/tmp/pigen-final-example-lint-6qi6tn_y/result.json). This is phased native coverage plus a passing broader gate, rather than an uninterrupted invocation including the native target. Production pipeline semantics and current compiler sanitizer evidence are owned by how/do/pipeline/stage/reads/work.md.
-
-Verified profiles include independent handshakes, complete fields, buf/fifo/skid capacity, X/Z and signed DATA, reset, exact child contracts, parameterized address maps, ID provenance, legal bursts, contention and independent switched-target progress. Limits remain exact contracts except defined ID adaptation, synchronous reset, global addresses and start-of-burst target selection. Memory-mapped and Stream routing remain separate implementations sharing fabric syntax. Broader retained-SV compatibility remains separate work.
+The retained fabric design and implementation locations are owned by how/are/native/axi/fabrics/connected/and/arbitrated.md. Ordinary scalar routing and three-port source-routed fabrics remain active. Standard native core verification is independent of whole-interface fabric generation. Production pipeline laws remain owned by how/do/pipeline/stage/reads/work.md.

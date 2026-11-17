@@ -176,7 +176,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='pigen-native-foreach-') as temporary:
         root=Path(temporary)
         for family in ('axi4_stream','axi4_lite','axi4'):
-            for mode in ('direct','named','automatic','array_initializer','child','generated_child','unbraced_child','fabric'):
+            for mode in ('direct','named','automatic','array_initializer','child','generated_child','unbraced_child'):
                 directory=root/(family+'_'+mode);directory.mkdir();case(directory,family,mode)
         negatives(root)
 

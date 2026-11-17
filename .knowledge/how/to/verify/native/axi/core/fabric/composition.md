@@ -1,9 +1,13 @@
 ---
 status: green
-revised_at: "2026-11-17T10:33:01+11:00"
+revised_at: "2026-11-17T12:38:35+11:00"
 ---
 
-Run make native-protocol-test. Composition checks use real native cores, independent standard-pin masters/scoreboards, warnings-fatal Verilator lint and Icarus simulation. They supplement synthetic transport/arbitration and make cores-test.
+Native AXI fabric integration is quarantined and not in use. The design below describes retained inactive code and pre-quarantine witnesses; it is not current compiler support. Module boundaries remain active. Quarantine ownership: how/are/native/axi/fabrics/connected/and/arbitrated.md.
+
+## Retained design and witnesses
+
+The archived-native-protocol-test recipe requires a pre-quarantine compiler for these fabric witnesses. Composition checks use real native cores, independent standard-pin masters/scoreboards, warnings-fatal Verilator lint and Icarus simulation. They supplement synthetic transport/arbitration and make cores-test.
 
 - tests/native_axi_core_fabric_test.py runs Stream FIFO, Lite registers and full bridge through direct, routed, two-hop, parent-boundary and parameterized typed standalone fabrics. Three transaction/stall seeds per profile cover 63 boundary/hierarchy designs. Internal bus storage profiles are removed under the boundary-only AXI declaration policy. Typed standalone WIDTH is overridden from 64 to 32. Existing independent core transaction oracles check memory-mapped behavior. Source, RTL, benches, commands and CSV/VCD evidence remain in build/native-core-fabrics.
 - tests/native_core_contention_test.py includes three-master fan-in into the actual Lite register bank/full bridge at three seeds. Full AXI has colliding two-bit source IDs, four-bit target IDs, independent AW/W offers, four/eight-beat FIXED/INCR/WRAP, all byte masks, zero strobes and invalid descriptors. Per-source golden memory is independent of the backend. Every backend write/read checks address, order and count; writes also check payload/strobes. B/R data, IDs, status, RLAST and stalled stability are scored. Shared reset flushes accepted pending traffic.

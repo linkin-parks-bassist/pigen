@@ -6479,6 +6479,13 @@ static int add_fabric_protocol_edge(resolver *resolver,pigen_module_id module,pi
 	pigen_syntax_id syntax, const pigen_syntax_node *edge,
 	pigen_protocol_endpoint_id source, pigen_protocol_endpoint_id destination)
 {
+	/* Native AXI fabrics are quarantined pending architectural review. Keep
+	 * the former implementation below as reference, outside the active path. */
+	(void)module; (void)scope; (void)syntax; (void)source; (void)destination;
+	return fail_location(resolver, edge->location,
+		"native AXI fabrics are not in use; connect module boundaries with child bindings or channel transfers");
+#if 0
+
 	pigen_semantic_model *model = resolver->model;
 	const pigen_semantic_protocol_endpoint *src = pigen_protocol_endpoint_get(model, source);
 	const pigen_semantic_protocol_endpoint *dst = pigen_protocol_endpoint_get(model, destination);
@@ -6569,6 +6576,7 @@ static int add_fabric_protocol_edge(resolver *resolver,pigen_module_id module,pi
 		.direct=edge->as.fabric_connection.direct,.span=edge->location.source_span,
 		.has_window=has_window,.address_base=address_base,.address_limit=address_limit};
 	return 1;
+#endif
 }
 
 /* Whole collections zip by equal evaluated coordinates. Publish the same

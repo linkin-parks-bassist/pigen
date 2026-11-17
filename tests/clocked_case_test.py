@@ -96,8 +96,8 @@ def native_transport(root):
     for family in ("axi4_stream", "axi4_lite", "axi4"):
         for qualifier in ("unique", "unique0", "priority"):
             for storage,hierarchy,kind in (("buf",False,"case"),
-                                           ("fifo[3]","fabric_routed","casez"),
-                                           ("skid","fabric_routed","case")):
+                                           ("fifo[3]","aggregate","casez"),
+                                           ("skid","aggregate","case")):
                 for construction in (False,"fsm"):
                     directory=root/f"native_{family}_{qualifier}_{storage}_{hierarchy}_{construction}"
                     directory.mkdir()
@@ -110,8 +110,8 @@ def consuming_selectors(root):
     # token. This is the clocked transfer rule; combinational cases need peek.
     for family in ("axi4_stream","axi4_lite","axi4"):
         for storage,hierarchy,qualifier in (("buf",False,"unique"),
-                                            ("fifo[3]","fabric_routed","unique0"),
-                                            ("skid","fabric_routed","priority")):
+                                            ("fifo[3]","aggregate","unique0"),
+                                            ("skid","aggregate","priority")):
             for construction in (False,"fsm"):
                 directory=root/f"consuming_{family}_{storage}_{construction}"
                 directory.mkdir()

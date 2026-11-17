@@ -2,6 +2,7 @@
 """Typed foreach behavior against native and independent explicit traversal."""
 from pathlib import Path
 import subprocess
+import re
 import tempfile
 from native_protocol_test import ROOT, run
 
@@ -16,12 +17,17 @@ def main():
         output = run(['vvp', sim], directory)
         assert 'PASS foreach:' in output
         print(output.strip())
-        run([ROOT/'pigen', ROOT/'examples/native_axi_generated.pigen', '-o', sv, '--no-diagram'], directory)
+        # Compile the boundary-only examples independently of inactive fabrics.
+        example_text = (ROOT/'examples/native_axi_generated.pigen').read_text()
+        example_text = '\n'.join(m.group(0) for m in re.finditer(r'\bmodule\s+native_axis_foreach_(?:data|bank)\b.*?\bendmodule\b', example_text, re.S))
+        example_source = directory/'boundary_foreach.pigen'
+        example_source.write_text(example_text)
+        run([ROOT/'pigen', example_source, '-o', sv, '--no-diagram'], directory)
         run(['verilator', '--lint-only', '--top-module', 'native_axis_foreach_data', sv, ROOT/'rtl/pigen_primitives.sv'], directory)
         run(['verilator', '--lint-only', '--top-module', 'native_axis_foreach_bank', sv, ROOT/'rtl/pigen_primitives.sv'], directory)
         parameter_source=directory/'parameterized.pigen'
         parameter_sv=directory/'parameterized.sv'
-        parameter_source.write_text((ROOT/'examples/native_axi_generated.pigen').read_text()+"""
+        parameter_source.write_text(example_text+"""
 module parameterized_foreach(input wire clk,input wire reset,
  input uint[32] axi4_stream fifo[3] s2[2],input uint[32] axi4_stream fifo[3] s3[3],
  output uint[32] wire q2,output uint[32] wire q3,output bit[2] wire v2,output bit[3] wire v3);

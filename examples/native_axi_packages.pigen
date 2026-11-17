@@ -1,3 +1,5 @@
+// Native AXI fabric modules in this file are retained, not in use.
+// Module-boundary examples remain reference material; fabric links are quarantined.
 package data_configuration;
     localparam int DATA_BITS=32, ADDRESS_BITS=40, ID_BITS=4;
     typedef struct packed {bit[15:0] hi; bit[15:0] lo;} word_t;

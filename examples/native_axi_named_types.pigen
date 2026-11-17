@@ -1,3 +1,5 @@
+// Native AXI fabric modules in this file are retained, not in use.
+// Module-boundary examples remain reference material; fabric links are quarantined.
 typedef bit[32] axi4_stream[keep=1,last=1] stream_word_t;
 
 module native_axis_named_types(

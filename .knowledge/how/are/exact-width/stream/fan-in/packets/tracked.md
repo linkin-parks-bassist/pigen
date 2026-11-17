@@ -1,7 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-15T17:27:38+11:00"
+revised_at: "2026-11-17T12:38:08+11:00"
 ---
+
+Native AXI fabric integration is quarantined and not in use. The design below describes retained inactive code and pre-quarantine witnesses; it is not current compiler support. Module boundaries remain active. Quarantine ownership: how/are/native/axi/fabrics/connected/and/arbitrated.md.
+
+## Retained design and witnesses
 
 A native Stream merge with unchanged TID width and TLAST retains one input grant until that input's entire open packet set closes. A stream key is the complete (TID,TDEST) pair. Each accepted non-last beat opens its key if necessary; a matching TLAST closes it. A single-beat packet does not close another key. The first TLAST alone cannot release a grant while other keys remain open, preventing different origins from merging into one packet.
 

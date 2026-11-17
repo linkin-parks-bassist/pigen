@@ -1,7 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-17T10:33:28+11:00"
+revised_at: "2026-11-17T12:35:07+11:00"
 ---
+
+Native AXI fabrics are quarantined and not in use. The compiler rejects native whole-interface fabric edges; src/resolve.c:add_fabric_protocol_edge no longer publishes them, and native lowering in src/fabric_lower.c is excluded with #if 0. Module boundary declarations, child bindings and channel transfers remain active. David will review whether the interconnect work has a useful future scope before any reactivation.
+
+## Retained inactive design
 
 Declare a standalone fabric with typed module-style ports and a connection body:
 

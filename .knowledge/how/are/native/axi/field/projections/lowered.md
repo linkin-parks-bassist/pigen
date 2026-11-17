@@ -1,13 +1,13 @@
 ---
 status: green
-revised_at: "2026-11-16T12:59:46+11:00"
+revised_at: "2026-11-17T12:40:59+11:00"
 ---
 
 Native AXI fields retain their semantic member types and local coordinates, including signed numerical DATA and multidimensional packed DATA. Constant numerical subranges and bit indices compose into the containing record. Native field boundaries use typed combinational aliases before further selection, preserving legal SV primary expressions. Object-rooted INDEX chains that read procedural locals remain inline, so ordered iterator writes are immediately visible. A continuous alias of an intermediate field[row] would sample row outside the process and change loop behavior.
 
 src/rtl_lower.c projection_operand handles non-primary operands rooted in native channels or buffered records, plus immutable computed records. It preserves the lowered operand's complete RTL type, resolves the owning module from referenced RTL objects or semantic source containment for pure constants, and creates a synthetic internal object/equation named through the allocator as __pigen_projection_<object ID>. projection_is_indexed_primary and projection_reads_procedural_local identify legal chains that must remain inside ordered evaluation. name_object consumes an owned string. These aliases add no storage, handshakes or token dependencies. They preserve the field's own bounds and packed dimensions instead of offsetting a dynamic index into neighbouring protocol fields. Native projected writes remain forbidden; the helper does not change ordinary mutable static-struct write lowering. Computed constant selections use the same legal operand lowering instead of returning an unnormalized constant select tree.
 
-make native-protocol-test includes tests/native_projection_test.py. Eighteen standard-pin cases cover Stream/Lite/full AXI, uint[32], int[32] and bit[4][8], directly and through child projections. Independent shift-based scoreboards check runtime bit indices, indexed +:/-: slices and nonzero-offset KEEP/STRB fields, with 512 final-epoch results per case, stalls and queued reset. Synthesizable designs pass warnings-fatal lint; generated sources, RTL, benches and command logs remain in build/native-projections.
+The archived-native-protocol-test recipe includes tests/native_projection_test.py. Eighteen standard-pin cases cover Stream/Lite/full AXI, uint[32], int[32] and bit[4][8], directly and through child projections. Independent shift-based scoreboards check runtime bit indices, indexed +:/-: slices and nonzero-offset KEEP/STRB fields, with 512 final-epoch results per case, stalls and queued reset. Synthesizable designs pass warnings-fatal lint; generated sources, RTL, benches and command logs remain in build/native-projections.
 
 tests/foreach_test.py also uses warnings-fatal Verilator simulation to check 1024 words through native_axis_foreach_data, including buffered peek retention and runtime multidimensional packed indices. Icarus 13 rejects variable first-dimension packed lvalues in this example, so it is not the oracle for that form. Loop semantics: how/are/combinational/foreach/loops/represented.md.
 

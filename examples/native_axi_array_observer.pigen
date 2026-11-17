@@ -1,3 +1,5 @@
+// Native AXI fabric modules in this file are retained, not in use.
+// Module-boundary examples remain reference material; fabric links are quarantined.
 // Pattern entries snapshot both observations on every foreach body entry.
 module native_axis_array_observer #(parameter LANES=2)(
     input wire clk, input wire reset,

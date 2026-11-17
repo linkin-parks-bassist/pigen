@@ -1,7 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-15T17:26:16+11:00"
+revised_at: "2026-11-17T12:35:07+11:00"
 ---
+
+Native AXI fabrics are quarantined and not in use. The compiler rejects native whole-interface fabric edges; src/resolve.c:add_fabric_protocol_edge no longer publishes them, and native lowering in src/fabric_lower.c is excluded with #if 0. Module boundary declarations, child bindings and channel transfers remain active. David will review whether the interconnect work has a useful future scope before any reactivation.
+
+## Retained inactive design
 
 Native Stream fabrics route one source to several destinations with repeated `->` links. TDEST values 0, 1, … select destinations in source-elaboration order. Root items follow module source order; each generate region contributes selected iteration/body occurrences at that position. Disabled branches contribute no routes. Single-link sources keep point-to-point behavior. Fan-out requires sufficient TDEST space and supports at most 32 destinations. Switched merges require target TID provenance space (how/are/native/stream/fabric/identities/preserved.md). Direct links remain exclusive; duplicates, incompatible contracts/timing and competing local/child owners reject. Memory-mapped address routing has its own mechanism (how/does/native/memory/mapped/address/routing/work.md).
 
@@ -11,4 +15,4 @@ rtl/pigen_primitives.sv:pigen_axis_demux uses packet_out[i*W +: W] lanes. A two-
 
 TDEST's routing role follows Arm IHI 0051B §2.7 ([protocol](https://documentation-service.arm.com/static/64819f1516f0f201aa6b963c)); source-local ordinals are Pigen policy. Tagged switched graphs pass interleaving and two-stage hierarchy profiles. Exact-ID interleaving and progress/storage limits belong to how/are/exact-width/stream/fan-in/packets/tracked.md.
 
-Evidence: tests/native_axis_demux_test.py checks 1/2/3/5 outputs, nonzero offsets, 79-bit records, stalls, unmapped routes, capacity/reset and 33-bit TDEST. tests/native_axis_routing_test.py scores standard pins for one-to-many/many-to-many routes, parent/child/standalone/generated/collection contexts, complete fields, order, TID/TDEST interleaving, colliding/absent IDs, source-elaboration order and reset. Five/seven-source hierarchical cases check cumulative tags through standalone children and outer arbitration. Its masters advance only after sampled acceptance and are checked for stalled stability. Negatives cover encodings, route limits, direct links, duplicates, contracts, timing, ownership, unannotated memory-mapped fan-out and output preservation. Warnings-fatal Verilator lint and Icarus simulations pass; make native-protocol-test includes both scripts. examples/native_axi_relay.pigen supplies native_axis_switch2x3.
+Evidence: tests/native_axis_demux_test.py checks 1/2/3/5 outputs, nonzero offsets, 79-bit records, stalls, unmapped routes, capacity/reset and 33-bit TDEST. tests/native_axis_routing_test.py scores standard pins for one-to-many/many-to-many routes, parent/child/standalone/generated/collection contexts, complete fields, order, TID/TDEST interleaving, colliding/absent IDs, source-elaboration order and reset. Five/seven-source hierarchical cases check cumulative tags through standalone children and outer arbitration. Its masters advance only after sampled acceptance and are checked for stalled stability. Negatives cover encodings, route limits, direct links, duplicates, contracts, timing, ownership, unannotated memory-mapped fan-out and output preservation. Warnings-fatal Verilator lint and Icarus simulations pass; the archived-native-protocol-test recipe includes both scripts. examples/native_axi_relay.pigen supplies native_axis_switch2x3.

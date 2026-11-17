@@ -1,7 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-15T10:20:38+11:00"
+revised_at: "2026-11-17T12:38:07+11:00"
 ---
+
+Native AXI fabric integration is quarantined and not in use. The design below describes retained inactive code and pre-quarantine witnesses; it is not current compiler support. Module boundaries remain active. Quarantine ownership: how/are/native/axi/fabrics/connected/and/arbitrated.md.
+
+## Retained design and witnesses
 
 src/resolve.c add_fabric_protocol_arrays resolves both fabric expressions through native collection views in the active lexical scope (how/are/native/axi/collection/selections/resolved.md). It requires equal rank, element count and evaluated left/right bounds in every dimension. Coordinates retain their declared direction. A scalar/collection pair rejects; the link does not broadcast or reshape collections. When neither operand is a collection, normal scalar/ordinary fabric resolution continues.
 

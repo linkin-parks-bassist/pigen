@@ -1,7 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-15T17:25:24+11:00"
+revised_at: "2026-11-17T12:38:07+11:00"
 ---
+
+Native AXI fabric integration is quarantined and not in use. The design below describes retained inactive code and pre-quarantine witnesses; it is not current compiler support. Module boundaries remain active. Quarantine ownership: how/are/native/axi/fabrics/connected/and/arbitrated.md.
+
+## Retained design and witnesses
 
 A native Stream fabric can widen TID while preserving the source ID in its low bits. High bits hold the source's ordinal within the destination's incoming edge group, following source-elaboration order across root items and selected generate occurrences. A target needs source ID width plus ceil(log2(source count)) bits; extra high bits zero-extend. Omitted source IDs contribute zero low bits. Other fields retain identity/value. Child connections and ordinary channel copies require exact contracts.
 

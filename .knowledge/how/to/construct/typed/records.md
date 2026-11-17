@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-16T11:01:49+11:00"
+revised_at: "2026-11-17T12:40:59+11:00"
 ---
 
 Use a named assignment pattern where the destination supplies a packed struct or native channel type:
@@ -18,4 +18,4 @@ expression.h/expression.c represent RECORD and ordered RECORD_FIELD children wit
 
 Supported contexts include direct/grouped assignment RHS values, conditional arms, nested member patterns and when/FSM values. Context propagates recursively through ternaries and types both arms; compatible existing records may appear as arms. Ordinary ternaries retain intrinsic typing. A named cast also supplies context: `pair'('{high:a,low:b})`. Casts support conditional patterns, nested aliases and typed member reads; cast values participate in concatenations, replications and bitwise expressions. Normal raw-vector/numerical conversion rules still apply. Other contexts and packed-record positional conversion remain work. Native child collections use a separate identity binder (how/are/native/axi/collection/assignment/patterns/resolved.md). Owned typedefs rewrite Pigen numerical members into SV (how/are/data/typedefs/emitted.md).
 
-make native-protocol-test checks all AXI families under stalls: defaults, signed DATA, normal/when/FSM values, malformed fields, conditional/mixed-record arms, ternaries, casts/operators and 256 nested records with conditional signed fields. Six anonymous nested-DATA reconstruction profiles also check direct and child/fabric paths with independent standard-pin scoreboards. Source declarations are owned by how/to/write/native/axi/declarations.md.
+The retained pre-quarantine suite checks all AXI families under stalls: defaults, signed DATA, normal/when/FSM values, malformed fields, conditional/mixed-record arms, ternaries, casts/operators and 256 nested records with conditional signed fields. Six anonymous nested-DATA reconstruction profiles also check direct and child/fabric paths with independent standard-pin scoreboards. Source declarations are owned by how/to/write/native/axi/declarations.md.

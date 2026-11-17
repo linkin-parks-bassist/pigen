@@ -25,6 +25,12 @@ protocol-semantic-test:
 	rm -rf $$dir; exit $$status
 
 native-protocol-test: pigen
+	python3 tests/native_fabric_quarantine_test.py
+
+# Retained pre-quarantine integration recipes include inactive AXI fabrics.
+# Review/repartition these witnesses before reconnecting them to verification.
+.PHONY: archived-native-protocol-test
+archived-native-protocol-test: pigen
 	python3 tests/native_boundary_policy_test.py
 	python3 tests/native_protocol_test.py
 	python3 tests/native_array_test.py
@@ -1444,7 +1450,7 @@ lint-fatal-test: pigen
 verify: output-model-test coslice-typedef-test coslice-xprop-test cli-diagnostics-test lint-fatal-test
 
 .PHONY: native-routing-compile-test
-test: native-routing-compile-test
+archived-native-protocol-test: native-routing-compile-test
 native-routing-compile-test:
 	@dir=$$(mktemp -d); \
 	$(CC) $(CFLAGS) -o $$dir/test tests/native_routing_compile_test.c src/compile.c src/source.c src/util.c src/lexer.c src/preprocess.c src/syntax.c src/type_syntax.c src/expression.c src/transfer_type.c src/protocol.c src/integer.c src/data_type.c src/semantic.c src/operation.c src/predicate.c src/resolve.c src/type_resolve.c src/expression_analysis.c src/expression_resolve.c src/expression_use.c src/rtl.c src/rtl_lower.c src/output.c src/sv_emit.c src/rtl_name.c src/blocks.c src/assignments.c src/declarations.c src/procedural.c src/transfer.c src/pipeline.c src/fsm.c src/pipeline_identity.c src/pipeline_stage.c src/pipeline_lower.c src/fsm_identity.c src/fsm_lower.c src/fabric_lower.c src/specialize.c $(LDLIBS) && $$dir/test; status=$$?; rm -rf $$dir; exit $$status

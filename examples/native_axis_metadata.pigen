@@ -1,3 +1,5 @@
+// Native AXI fabric modules in this file are retained, not in use.
+// Module-boundary examples remain reference material; fabric links are quarantined.
 // Stream beats can carry metadata without a TDATA field.
 typedef void axi4_stream[last=1,id=4,dest=3,user=7] metadata_t;
 

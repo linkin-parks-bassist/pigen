@@ -65,6 +65,7 @@ endmodule
 
 // One outstanding write and read per target. Independent ownership permits
 // W before AW and keeps the complete write burst associated with its B route.
+// Retained AXI fabric primitive; compiler fabric generation is not in use.
 module pigen_axi_merge #(
 	parameter integer N=2, AW_W=1, W_W=1, B_W=1, AR_W=1, R_W=1,
 	parameter integer FULL=0, WLAST_BIT=0, RLAST_BIT=0
@@ -464,6 +465,7 @@ endmodule
 // Per-source queues isolate both interface directions from arbitration.
 // Switched graphs disable packet locks: interleaved destinations can otherwise
 // form cycles of grants waiting for each other's packet tails.
+// Retained AXI fabric primitive; compiler fabric generation is not in use.
 module pigen_axis_merge #(
 	parameter type PAYLOAD_T = logic,
 	parameter integer N = 2,
@@ -573,6 +575,7 @@ endmodule
 
 // Route complete Stream beats by TDEST. Unmapped destinations retain the head
 // beat and propagate backpressure; reset discards queued beats synchronously.
+// Retained AXI fabric primitive; compiler fabric generation is not in use.
 module pigen_axis_demux #(
 	parameter type PAYLOAD_T = logic,
 	parameter integer N = 2,
@@ -626,6 +629,7 @@ endmodule
 
 // One source, independently owned write/read transactions, address windows.
 // Requests keep their original addresses; unmapped transactions complete locally.
+// Retained AXI fabric primitive; compiler fabric generation is not in use.
 module pigen_axi_demux #(
 	parameter integer N=1, AW_W=1, W_W=1, B_W=2, AR_W=1, R_W=2,
 	parameter integer ADDR_W=1, AW_ADDR_LSB=0, AR_ADDR_LSB=0,

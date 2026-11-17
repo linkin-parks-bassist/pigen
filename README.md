@@ -240,10 +240,8 @@ endfabric
 
 A fabric can connect parent ports, child endpoints and ordinary internal storage. `->`
 selects buffered routing, while `>` selects an exclusive direct connection.
-Ordinary elastic merges arbitrate round-robin. Typed standalone fabrics have
-module-style ports and parameters so an interconnect can itself be a child.
-The standalone routing-tree form generates the interconnect hardware from your
-connection list. Pigen builds a balanced, pruned tree of three-port routers,
+Ordinary elastic merges arbitrate round-robin. The standalone routing-tree form
+generates the interconnect hardware from your connection list. Pigen builds a balanced, pruned tree of three-port routers,
 keeping the number of router hops logarithmic as the network grows. Each router
 chooses between just two onward directions using one route bit per hop, with
 small round-robin arbiters resolving contention. Two-entry input buffers and
@@ -260,10 +258,10 @@ endfabric
 This parameter-only standalone form emits a complete module and an SVG of its
 routing tree; `--diagram PATH` selects the diagram path. It supports the declared
 connections between compatible endpoints. Inline fabrics use buffered links and
-round-robin merges, while native AXI fabrics use protocol-aware switches and
-arbiters. The three-port tree is the ordinary source-routed fabric architecture.
+round-robin merges. The three-port tree is the ordinary source-routed fabric
+architecture.
 
-AXI declarations belong on module and fabric input/output ports. Parent logic
+AXI declarations belong on module input/output ports. Parent logic
 accesses a child boundary through `child.bus`, then constructs or unpacks channel
 records using ordinary transfers. Standalone internal AXI declarations are rejected.
 
@@ -302,43 +300,7 @@ s.r  <= m.r;
 
 Whole-interface child bindings connect those channels together with their
 correct directions. [Native declarations](.knowledge/how/to/write/native/axi/declarations.md)
-cover channel records, storage and clock/reset configuration; the
-[relay examples](examples/native_axi_relay.pigen) show all three families.
-
-### Memory-mapped fabrics
-
-AXI4-Lite and AXI4 interconnects route transactions through address windows.
-Address maps accept parameters and per-instance overrides:
-
-```systemverilog
-module register_map #(
-    parameter BASE0 = 32'h0000_0000,
-    parameter BASE1 = 32'h0001_0000,
-    parameter WINDOW_BYTES = 32'h0000_1000
-) (
-    input wire clk,
-    input wire reset,
-    input uint[32] axi4_lite[addr=32] s,
-    output uint[32] axi4_lite[addr=32] m[2]
-);
-    fabric begin
-        s -> m[0] at [BASE0:BASE0+WINDOW_BYTES-1];
-        s -> m[1] at [BASE1:BASE1+WINDOW_BYTES-1];
-    endfabric
-endmodule
-```
-
-Windows are inclusive and disjoint. Routing preserves global addresses and
-selects the target from the transaction's starting address. Arbitration preserves
-write address/data association and returns responses to their source; unmapped
-requests receive DECERR. The current implementation allows one outstanding write
-and an independent read per target, with full AXI4 bursts held through completion.
-See [address routing](.knowledge/how/does/native/memory/mapped/address/routing/work.md)
-for the detailed contract.
-
-AXI4-Stream fabrics route by TDEST and retain packet ownership through arbitration.
-Stream and memory-mapped interconnects currently share the `fabric` spelling,
-with distinct routing implementations for their protocol semantics.
+cover channel records, storage and clock/reset configuration.
 
 ## FSM blocks
 
@@ -412,8 +374,6 @@ cycles. Supported forms and remaining language-context work are described in
 - [Language specification](.knowledge/what/is/the/spec.md)
 - [Declarations](.knowledge/how/to/write/runnable/prototype/declarations.md)
 - [Native AXI declarations and connections](.knowledge/how/to/write/native/axi/declarations.md)
-- [Memory-mapped address routing](.knowledge/how/does/native/memory/mapped/address/routing/work.md)
-- [Typed standalone fabrics](.knowledge/how/to/write/typed/standalone/fabrics.md)
 - [Pipeline stages](.knowledge/how/to/write/pipeline/stages.md)
 - [FSMs and transfer events](.knowledge/how/to/write/fsm/states.md)
 - [Native AXI acceptance and limits](.knowledge/what/is/the/native/axi/acceptance/status.md)

@@ -12,8 +12,8 @@ def native_transport(root):
     for family in ('axi4_stream','axi4_lite','axi4'):
         for mode,form in (('direct','flat'),('aggregate','nested'),
                           ('projection','qualified'),('parameter','flat'),
-                          ('fabric_child','fsm'),('scalar_binding','nested')):
-            directory=root/f'{family}_{mode}'
+                          ('aggregate','fsm'),('scalar_binding','nested')):
+            directory=root/f'{family}_{mode}_{form}'
             directory.mkdir()
             case(directory,family,mode,native_alias=True,clocked_foreach=form)
     print('PASS 18 clocked native foreach profiles',flush=True)
@@ -98,7 +98,7 @@ end $display("PASS clocked loop exits: 1024 edges, multidimensional/nested targe
          '--Mdir',directory/'obj','-o',directory/'native_sim',sv,oracle,native_tb],directory)
     assert 'PASS clocked loop exits' in run([directory/'native_sim'],directory)
     for family in ('axi4_stream','axi4_lite','axi4'):
-        for mode in ('direct','aggregate','fabric_child'):
+        for mode in ('direct','aggregate'):
             child=root/f'exits_{family}_{mode}'
             child.mkdir()
             case(child,family,mode,native_alias=True,clocked_foreach='exits')
