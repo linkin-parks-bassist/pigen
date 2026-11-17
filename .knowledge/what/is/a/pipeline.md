@@ -1,9 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-17T10:14:08+11:00"
+revised_at: "2026-11-17T12:05:08+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-A pipeline describes elastic travelling-packet storage inside a parent clocked process. Its fixed field namespace expresses procedural-looking transformations across successive stages: the same x names a different physical stage register at each boundary. Every field has buf transfer type; omission is canonical and explicit buf is equivalent. Each stage reads immutable incoming fields and computes outgoing fields for the next stage, while yield exposes the final packet.
+A pipeline expresses elastic travelling-packet computation inside a clocked process using a fixed field namespace. The same x refers to a different stage register at each boundary. Reads see immutable incoming state; <= defines outgoing state for the next stage. Unwritten initialized fields travel forward with the packet, and related fields advance together under one handshake event.
 
-This is the language contract. Production currently rejects a later-stage x <= x + 1 because field versions share one semantic signal, as detailed in how/do/pipeline/stage/reads/work.md. Distinct-name examples exercise only partial pipeline support and must not be presented as evidence that the fixed-namespace contract works.
+Fields have buf transfer behavior; omission is canonical and explicit buf is equivalent. A final yield exposes the final stage result as a buffered source without adding another stage after that boundary. Several packets can occupy different stages concurrently. Guards and backpressure control advancement; reset clears generated validity.
+
+Production versioning and packet transfer construction are implemented in src/resolve.c. how/do/pipeline/stage/reads/work.md owns the detailed laws and current independent simulation evidence. The separate structural pipeline service is not the production path.

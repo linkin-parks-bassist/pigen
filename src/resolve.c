@@ -88,6 +88,10 @@ typedef struct {
 	int in_fsm;
 	pigen_expr_id fsm_terminated;
 	int in_pipeline_stage;
+	pigen_scope_id pipeline_destination_scope;
+	pigen_signal_id *pipeline_locals;
+	pigen_expr_id *pipeline_local_values;
+	size_t pipeline_local_count;
 	pending_pipeline_reset *reset_bindings;
 	size_t reset_binding_count;
 	size_t reset_binding_capacity;
@@ -1344,13 +1348,8 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 	pigen_syntax_id assignment_id, const pigen_syntax_node *assignment,
 	pigen_predicate_id guard);
 
-/* Resolve one pipeline statement (already parsed as field declarations, stage
- * assignments and a yield) into ordinary semantic signals and transfers. The
- * pipeline-level fields become internal buf signals in their own scope; each
- * stage's local declarations become internal static signals in a nested scope;
- * stage assignments become transfers in the enclosing process; the yield
- * writes the established pipeline output signal. The shared transfer and
- * storage lowering then produces the hardware. */
+/* Flush the yielded packet and every buffered stage version below the lexical
+ * field root. Static templates and combinational stage locals have no tokens. */
 static int apply_pipeline_reset(resolver *resolver,
 	pigen_module_id module_id, pigen_process_id process,
 	pigen_clock_domain_id domain, const pending_pipeline_reset *reset,
@@ -1381,216 +1380,428 @@ static int apply_pipeline_reset(resolver *resolver,
 	return 1;
 }
 
+typedef struct {
+	pigen_signal_id original;
+	pigen_source_span name;
+} pipeline_field;
+
+/* Definite assignment is checked before static intrinsics can fold away a
+ * field reference. Type/shape inquiries do not read the packet's value. */
+static int pipeline_check_reads(resolver *resolver,pigen_scope_id scope,
+	const pipeline_field *fields,size_t count,pigen_syntax_expr_id id)
+{
+	const pigen_syntax_expr *expr=pigen_syntax_expr_get(&resolver->syntax->expressions,id);
+	if(!expr) return 1;
+	pigen_syntax_expr_id a=INVALID_ID(pigen_syntax_expr_id),b=a,c=a;
+	size_t first=0,n=0;
+	switch(expr->kind)
+	{
+	case PIGEN_SYNTAX_EXPR_NAME:
+	{
+		pigen_symbol_id symbol=pigen_symbol_lookup(resolver->model,scope,
+			declaration_name_span(resolver,expr->as.atom.token));
+		for(size_t i=0;i<count;i++) if(symbol.index==resolver->model->signals[fields[i].original.index].symbol.index)
+			return fail_location(resolver,expr->location,"pipeline field read before initialization in an earlier stage");
+		return 1;
+	}
+	case PIGEN_SYNTAX_EXPR_GROUP:a=expr->as.group.operand;break;
+	case PIGEN_SYNTAX_EXPR_UNARY:a=expr->as.unary.operand;break;
+	case PIGEN_SYNTAX_EXPR_BINARY:a=expr->as.binary.left;b=expr->as.binary.right;break;
+	case PIGEN_SYNTAX_EXPR_CONDITIONAL:
+		a=expr->as.conditional.condition;b=expr->as.conditional.when_true;c=expr->as.conditional.when_false;break;
+	case PIGEN_SYNTAX_EXPR_MEMBER:
+	case PIGEN_SYNTAX_EXPR_RECORD_FIELD:a=expr->as.member.base;break;
+	case PIGEN_SYNTAX_EXPR_INDEX:a=expr->as.index.base;b=expr->as.index.index;break;
+	case PIGEN_SYNTAX_EXPR_SELECT:a=expr->as.select.base;b=expr->as.select.left;c=expr->as.select.right;break;
+	case PIGEN_SYNTAX_EXPR_CAST:
+		a=expr->as.cast.value;if(expr->as.cast.is_size) b=expr->as.cast.size;break;
+	case PIGEN_SYNTAX_EXPR_CALL:
+	{
+		const pigen_syntax_expr *callee=pigen_syntax_expr_get(&resolver->syntax->expressions,expr->as.call.callee);
+		if(callee && callee->kind==PIGEN_SYNTAX_EXPR_NAME)
+		{
+			pigen_source_span name=declaration_name_span(resolver,callee->as.atom.token);
+			size_t length=0;
+			const char *text=pigen_source_span_text(resolver->model->sources,name,&length);
+			const char *queries[]={"$bits","$left","$right","$low","$high","$size","$increment","$dimensions","$unpacked_dimensions"};
+			for(size_t q=0;q<sizeof(queries)/sizeof(queries[0]);q++)
+				if(text && length==strlen(queries[q]) && !memcmp(text,queries[q],length)) return 1;
+		}
+		first=expr->as.call.first_argument;n=expr->as.call.argument_count;break;
+	}
+	case PIGEN_SYNTAX_EXPR_REPLICATION:
+	case PIGEN_SYNTAX_EXPR_ARRAY_PATTERN_REPLICATION:
+		a=expr->as.replication.count;first=expr->as.replication.first_child;n=expr->as.replication.child_count;break;
+	case PIGEN_SYNTAX_EXPR_CONCATENATION:
+	case PIGEN_SYNTAX_EXPR_RECORD:
+	case PIGEN_SYNTAX_EXPR_ARRAY_PATTERN:
+		first=expr->as.sequence.first_child;n=expr->as.sequence.child_count;break;
+	default:break;
+	}
+	if(!pipeline_check_reads(resolver,scope,fields,count,a) ||
+	   !pipeline_check_reads(resolver,scope,fields,count,b) ||
+	   !pipeline_check_reads(resolver,scope,fields,count,c)) return 0;
+	const pigen_syntax_expr_id *children=pigen_syntax_expr_children(&resolver->syntax->expressions,first,n);
+	for(size_t i=0;children && i<n;i++) if(!pipeline_check_reads(resolver,scope,fields,count,children[i])) return 0;
+	return 1;
+}
+
+/* Yield reads the final stage's outgoing equations at that same boundary. */
+static pigen_expr_id pipeline_inline_fields(pigen_semantic_model *model,
+	const pigen_signal_id *fields, const pigen_expr_id *values, size_t count,
+	pigen_expr_id value)
+{
+	const pigen_semantic_expr *original=pigen_expr_get(model,value);
+	if(!original) return value;
+	pigen_semantic_expr expr=*original;
+	if(expr.kind==PIGEN_EXPR_SYMBOL)
+	{
+		pigen_signal_id signal=pigen_symbol_signal(model,expr.as.symbol);
+		for(size_t i=0;i<count;i++)
+			if(signal.index==fields[i].index && values[i].index!=PIGEN_INVALID_ID) return values[i];
+		return value;
+	}
+	pigen_expr_id a, b, c;
+	switch (expr.kind)
+	{
+	case PIGEN_EXPR_INDEX:
+		a=pipeline_inline_fields(model,fields,values,count,expr.as.index.base);
+		b=pipeline_inline_fields(model,fields,values,count,expr.as.index.index);
+		return pigen_expr_add_index(model,a,b,expr.span);
+	case PIGEN_EXPR_SELECT:
+		a=pipeline_inline_fields(model,fields,values,count,expr.as.select.base);
+		b=pipeline_inline_fields(model,fields,values,count,expr.as.select.left);
+		c=pipeline_inline_fields(model,fields,values,count,expr.as.select.right);
+		return expr.as.select.is_member ?
+			pigen_expr_add_member_select(model,a,b,c,expr.data_type,expr.as.select.member_name,expr.span) :
+			pigen_expr_add_typed_select(model,a,b,c,expr.as.select.kind,expr.data_type,expr.span);
+	case PIGEN_EXPR_GROUP:
+		a = pipeline_inline_fields(model, fields, values, count, expr.as.group.operand);
+		return a.index == expr.as.group.operand.index ? value : pigen_expr_add_group(model, a, expr.span);
+	case PIGEN_EXPR_CONVERSION:
+		a = pipeline_inline_fields(model, fields, values, count, expr.as.conversion.operand);
+		return a.index == expr.as.conversion.operand.index ? value :
+			pigen_expr_add_conversion(model, expr.as.conversion.conversion, a, expr.span);
+	case PIGEN_EXPR_UNARY:
+		a = pipeline_inline_fields(model, fields, values, count, expr.as.unary.operand);
+		return a.index == expr.as.unary.operand.index ? value :
+			pigen_expr_add_unary(model, expr.as.unary.operation, a, expr.span);
+	case PIGEN_EXPR_BINARY:
+		a = pipeline_inline_fields(model, fields, values, count, expr.as.binary.left);
+		b = pipeline_inline_fields(model, fields, values, count, expr.as.binary.right);
+		return a.index == expr.as.binary.left.index && b.index == expr.as.binary.right.index ? value :
+			pigen_expr_add_binary(model, expr.as.binary.operation, a, b, expr.span);
+	case PIGEN_EXPR_CONDITIONAL:
+		a = pipeline_inline_fields(model, fields, values, count, expr.as.conditional.condition);
+		b = pipeline_inline_fields(model, fields, values, count, expr.as.conditional.when_true);
+		c = pipeline_inline_fields(model, fields, values, count, expr.as.conditional.when_false);
+		return a.index == expr.as.conditional.condition.index &&
+			b.index == expr.as.conditional.when_true.index && c.index == expr.as.conditional.when_false.index ? value :
+			pigen_expr_add_conditional(model, expr.as.conditional.operation, a, b, c, expr.span);
+	case PIGEN_EXPR_PEEK:
+		a = pipeline_inline_fields(model, fields, values, count, expr.as.peek.source);
+		return a.index == expr.as.peek.source.index ? value : pigen_expr_add_peek(model, a, expr.span);
+	case PIGEN_EXPR_EVALUATED_VALUE:
+		a=pipeline_inline_fields(model,fields,values,count,expr.as.evaluation.value);
+		b=pipeline_inline_fields(model,fields,values,count,expr.as.evaluation.evaluated);
+		return a.index==expr.as.evaluation.value.index && b.index==expr.as.evaluation.evaluated.index ? value :
+			pigen_expr_add_evaluated_value(model,a,b,expr.as.evaluation.before,expr.span);
+	case PIGEN_EXPR_ARRAY_PATTERN:
+	case PIGEN_EXPR_CONCATENATION:
+	{
+		size_t child_count = expr.as.sequence.child_count;
+		pigen_expr_id *children = malloc(child_count * sizeof *children);
+		if (!children && child_count) return INVALID_ID(pigen_expr_id);
+		const pigen_expr_id *old = pigen_expr_children(model, expr.as.sequence.first_child, child_count);
+		if (child_count) memcpy(children, old, child_count * sizeof *children);
+		int changed = 0;
+		for (size_t i = 0; i < child_count; i++)
+		{
+			a = pipeline_inline_fields(model, fields, values, count, children[i]);
+			changed |= a.index != children[i].index;
+			children[i] = a;
+		}
+		a = changed ? (expr.kind==PIGEN_EXPR_ARRAY_PATTERN ?
+			pigen_expr_add_array_pattern(model,expr.data_type,expr.shape,children,child_count,expr.span) :
+			pigen_expr_add_concatenation(model, children, child_count, expr.span)) : value;
+		free(children);
+		return a;
+	}
+	default:
+		return value;
+	}
+}
+
+
+/* A stage-local wire initializer is a lexical combinational value. Expand it
+ * into field equations so its buffered dependencies share the stage fire. */
+static int resolve_pipeline_local(resolver *resolver,pigen_module_id module,
+	pigen_scope_id scope,const pigen_syntax_node *node,const pipeline_field *fields,size_t field_count)
+{
+	const pigen_syntax_node *decl=pigen_syntax_get(resolver->syntax,node->first_child);
+	if(node->as.signal_declaration.direction!=PIGEN_DIRECTION_INTERNAL)
+		return fail_location(resolver,node->location,"pipeline stage locals cannot be ports");
+	if(decl && decl->as.signal_declarator.has_initializer &&
+	   !pipeline_check_reads(resolver,scope,fields,field_count,decl->as.signal_declarator.initializer)) return 0;
+	if(!decl || !decl->as.signal_declarator.has_initializer ||
+	   node->as.signal_declaration.transfer_type.transfer_type!=PIGEN_TRANSFER_TYPE_WIRE)
+		return add_signal_declaration_in_scope(resolver,module,scope,node);
+	pigen_semantic_model *model=resolver->model;
+	pigen_data_type_id type=pigen_resolve_type(resolver->syntax,model,scope,
+		node->as.signal_declaration.data_type,resolver->error);
+	pigen_shape_id shape=resolve_shape(resolver,scope,decl);
+	pigen_symbol_id symbol;
+	if(type.index==PIGEN_INVALID_ID || shape.index==PIGEN_INVALID_ID ||
+	   pigen_symbol_declare(model,scope,PIGEN_SYMBOL_SIGNAL,type,
+		   declaration_name_span(resolver,decl->as.signal_declarator.name),
+		   node->location.source_span,&symbol,NULL)!=PIGEN_DECLARE_OK) return 0;
+	pigen_signal_id signal=pigen_signal_add(model,node->first_child,module,symbol,type,shape,
+		INVALID_ID(pigen_expr_id),PIGEN_TRANSFER_TYPE_WIRE,PIGEN_SEMANTIC_INTERNAL,node->location.source_span);
+	if(signal.index==PIGEN_INVALID_ID) return 0;
+	pigen_expr_id value=pigen_resolve_shaped_assignment_value(resolver->syntax,model,scope,
+		decl->as.signal_declarator.initializer,type,shape,resolver->policy,resolver->error);
+	if(value.index==PIGEN_INVALID_ID) return 0;
+	if(resolve_expr_references_symbol(model,value,symbol))
+		return fail_location(resolver,decl->location,"pipeline local initializer cannot refer to itself");
+	value=pipeline_inline_fields(model,resolver->pipeline_locals,resolver->pipeline_local_values,
+		resolver->pipeline_local_count,value);
+	if(value.index==PIGEN_INVALID_ID) return 0;
+	size_t count=resolver->pipeline_local_count+1;
+	resolver->pipeline_locals=pigen_resize(resolver->pipeline_locals,count*sizeof(*resolver->pipeline_locals));
+	resolver->pipeline_local_values=pigen_resize(resolver->pipeline_local_values,count*sizeof(*resolver->pipeline_local_values));
+	resolver->pipeline_locals[count-1]=signal;resolver->pipeline_local_values[count-1]=value;
+	resolver->pipeline_local_count=count;
+	return 1;
+}
+
+/* Pipeline fields have one version per boundary. All outgoing fields share
+ * one atomic transfer, including carried fields and unused incoming values. */
 static int resolve_pipeline(resolver *resolver, pigen_module_id module_id,
 	pigen_process_id process, pigen_clock_domain_id domain,
 	pigen_syntax_id pipeline_id, const pigen_syntax_node *pipeline,
 	pigen_predicate_id guard)
 {
-	pigen_semantic_model *model = resolver->model;
-	const pigen_semantic_module *module = pigen_module_get(model, module_id);
+	pigen_semantic_model *model=resolver->model;
+	pigen_scope_id saved_scope=resolver->expression_scope;
+	pigen_scope_id pipeline_scope=INVALID_ID(pigen_scope_id);
 	pigen_pipeline_identifier ident;
-	pigen_scope_id pipeline_scope;
-	pigen_scope_id saved_scope = resolver->expression_scope;
-	pigen_syntax_id child;
-	int ok = 1;
+	pipeline_field *fields=NULL;
+	pigen_signal_id *incoming=NULL,*outgoing=NULL;
+	pigen_expr_id *values=NULL,*destinations=NULL;
+	unsigned char *live=NULL,*written=NULL;
+	size_t field_count=0,stage_count=0,stage_index=0;
+	int ok=0;
 
-	if (!module || !resolver->syntax->expanded)
-		return fail_location(resolver, pipeline->location,
-			"pipeline requires expanded source");
-	if (pigen_pipeline_identifier_establish_in_scope(model, pipeline_id, module_id, saved_scope,
-		pipeline, resolver->syntax->expanded, &ident) != 0)
-		return fail_location(resolver, pipeline->location,
-			"cannot establish the pipeline output identity");
-	pipeline_scope = pigen_scope_add(model, saved_scope,
-		pipeline->location.source_span);
-	if (pipeline_scope.index == PIGEN_INVALID_ID)
-		return fail_location(resolver, pipeline->location,
-			"cannot create the pipeline scope");
-
-	/* Declare the pipeline fields in the pipeline scope. */
-	for (child = pipeline->first_child; child.index != PIGEN_INVALID_ID; )
+	if(!resolver->syntax->expanded ||
+	   pigen_pipeline_identifier_establish_in_scope(model,pipeline_id,module_id,saved_scope,
+		   pipeline,resolver->syntax->expanded,&ident)!=0)
+		return fail_location(resolver,pipeline->location,"cannot establish the pipeline output identity");
+	pipeline_scope=pigen_scope_add(model,saved_scope,pipeline->location.source_span);
+	if(pipeline_scope.index==PIGEN_INVALID_ID) goto done;
+	model->scopes[pipeline_scope.index].is_procedural=1;
+	model->signals[ident.signal.index].direction=PIGEN_SEMANTIC_INTERNAL;
+	for(pigen_syntax_id child=pipeline->first_child;child.index!=PIGEN_INVALID_ID;)
 	{
-		const pigen_syntax_node *node = pigen_syntax_get(resolver->syntax,
-			child);
-
-		if (node && node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION &&
-			!add_signal_declaration_in_scope(resolver, module_id,
-				pipeline_scope, node))
-			ok = 0;
-		if (!node) break;
-		child = node->next_sibling;
+		const pigen_syntax_node *node=pigen_syntax_get(resolver->syntax,child);
+		if(!node) goto done;
+		if(node->kind==PIGEN_SYNTAX_STAGE) stage_count++;
+		if(node->kind==PIGEN_SYNTAX_SIGNAL_DECLARATION)
+		{
+			if(node->as.signal_declaration.direction!=PIGEN_DIRECTION_INTERNAL)
+			{fail_location(resolver,node->location,"pipeline fields cannot be ports");goto done;}
+			if(!add_signal_declaration_in_scope(resolver,module_id,pipeline_scope,node)) goto done;
+			const pigen_syntax_node *decl=pigen_syntax_get(resolver->syntax,node->first_child);
+			pigen_source_span name=declaration_name_span(resolver,decl->as.signal_declarator.name);
+			pigen_symbol_id symbol=pigen_symbol_lookup(model,pipeline_scope,name);
+			pigen_signal_id signal=pigen_symbol_signal(model,symbol);
+			if(signal.index==PIGEN_INVALID_ID) goto done;
+			/* Type-only templates are never packet storage or valid inputs. */
+			model->signals[signal.index].transfer_type=PIGEN_TRANSFER_TYPE_WIRE;
+			fields=pigen_resize(fields,(field_count+1)*sizeof(*fields));
+			fields[field_count++]=(pipeline_field){signal,name};
+		}
+		child=node->next_sibling;
 	}
-	if (!ok) return 0;
+	if(!field_count || !stage_count)
+	{fail_location(resolver,pipeline->location,"pipeline requires fields and stages");goto done;}
+	incoming=pigen_resize(NULL,field_count*sizeof(*incoming));
+	outgoing=pigen_resize(NULL,field_count*sizeof(*outgoing));
+	values=pigen_resize(NULL,field_count*sizeof(*values));
+	destinations=pigen_resize(NULL,field_count*sizeof(*destinations));
+	live=pigen_resize(NULL,field_count);written=pigen_resize(NULL,field_count);
+	memset(live,0,field_count);
+	for(size_t f=0;f<field_count;f++) incoming[f]=fields[f].original;
+	pigen_scope_id incoming_scope=pipeline_scope;
 
-	/* Apply any pipeline_reset bindings already seen for this pipeline, and
-	 * remember the resolved pipeline so later reset statements can bind too. */
+	/* Keep the lexical root for forward and later reset bindings. */
+	if(resolver->pipeline_count==resolver->pipeline_capacity)
 	{
-		pigen_source_span pipeline_name = token_spelling(resolver,
-			pipeline->as.pipeline.name);
-		size_t r;
-
-		for (r = 0; r < resolver->reset_binding_count; r++)
-		{
-			pending_pipeline_reset *reset = &resolver->reset_bindings[r];
-
-			if (reset->consumed ||
-				reset->module.index != module_id.index ||
-				reset->process.index != process.index ||
-				!spelling_text_equal(resolver, reset->name, pipeline_name) ||
-				pigen_symbol_lookup(model,reset->scope,reset->name).index!=ident.symbol.index)
-				continue;
-			if (!apply_pipeline_reset(resolver, module_id, process, domain,
-				reset, ident.signal, pipeline_scope))
-				return fail_location(resolver, pipeline->location,
-					"invalid pipeline reset binding");
-			reset->consumed = 1;
-		}
-		if (resolver->pipeline_count == resolver->pipeline_capacity)
-		{
-			resolver->pipeline_capacity = resolver->pipeline_capacity ?
-				resolver->pipeline_capacity * 2 : 8;
-			resolver->pipelines = pigen_resize(resolver->pipelines,
-				resolver->pipeline_capacity * sizeof(*resolver->pipelines));
-		}
-		resolver->pipelines[resolver->pipeline_count++] =
-			(resolved_pipeline_reset){module_id, process, domain,
-				pipeline_name, pipeline->location.source_span, ident.signal, pipeline_scope};
+		resolver->pipeline_capacity=resolver->pipeline_capacity ? resolver->pipeline_capacity*2 : 8;
+		resolver->pipelines=pigen_resize(resolver->pipelines,resolver->pipeline_capacity*sizeof(*resolver->pipelines));
 	}
+	resolver->pipelines[resolver->pipeline_count++]=(resolved_pipeline_reset){module_id,process,domain,
+		token_spelling(resolver,pipeline->as.pipeline.name),pipeline->location.source_span,ident.signal,pipeline_scope};
 
-	/* Stage-local declarations live in a nested scope; stage assignments are
-	 * transfers resolved in that scope. */
-	for (child = pipeline->first_child; ok && child.index != PIGEN_INVALID_ID; )
+	for(pigen_syntax_id child=pipeline->first_child;child.index!=PIGEN_INVALID_ID;)
 	{
-		const pigen_syntax_node *stage = pigen_syntax_get(resolver->syntax,
-			child);
-		pigen_scope_id stage_scope;
-		pigen_syntax_id item;
-
-		if (!stage) break;
-		if (stage->kind != PIGEN_SYNTAX_STAGE)
+		pigen_syntax_id stage_id=child;
+		const pigen_syntax_node *stage=pigen_syntax_get(resolver->syntax,child);
+		child=stage->next_sibling;
+		if(stage->kind!=PIGEN_SYNTAX_STAGE) continue;
+		stage_index++;
+		resolver->pipeline_local_count=0;
+		int final=stage_index==stage_count;
+		memset(written,0,field_count);
+		for(size_t f=0;f<field_count;f++)
+		{outgoing[f]=INVALID_ID(pigen_signal_id);values[f]=INVALID_ID(pigen_expr_id);}
+		/* Only complete field writes are legal. Separate writes share a fire. */
+		for(pigen_syntax_id item=stage->first_child;item.index!=PIGEN_INVALID_ID;)
 		{
-			child = stage->next_sibling;
-			continue;
+			const pigen_syntax_node *node=pigen_syntax_get(resolver->syntax,item);item=node->next_sibling;
+			if(node->kind!=PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT) continue;
+			const pigen_syntax_expr *lhs=pigen_syntax_expr_get(&resolver->syntax->expressions,node->as.nonblocking_assignment.destination);
+			size_t f=0;
+			pigen_source_span name=lhs && lhs->kind==PIGEN_SYNTAX_EXPR_NAME ? declaration_name_span(resolver,lhs->as.atom.token) : (pigen_source_span){0};
+			for(;f<field_count;f++) if(spelling_text_equal(resolver,name,fields[f].name)) break;
+			if(f==field_count)
+			{fail_location(resolver,node->location,"pipeline stage destination must be a complete pipeline field");goto done;}
+			written[f]=1;
 		}
-		stage_scope = pigen_scope_add(model, pipeline_scope,
-			stage->location.source_span);
-		if (stage_scope.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, stage->location,
-				"cannot create the pipeline stage scope");
-		for (item = stage->first_child; item.index != PIGEN_INVALID_ID; )
+		pigen_scope_id output_scope=pigen_scope_add(model,pipeline_scope,stage->location.source_span);
+		pigen_scope_id stage_scope=pigen_scope_add(model,incoming_scope,stage->location.source_span);
+		if(output_scope.index==PIGEN_INVALID_ID || stage_scope.index==PIGEN_INVALID_ID) goto done;
+		model->scopes[output_scope.index].is_procedural=1;
+		model->scopes[stage_scope.index].is_procedural=1;
+		for(size_t f=0;f<field_count;f++) if(live[f] || written[f])
 		{
-			const pigen_syntax_node *node = pigen_syntax_get(
-				resolver->syntax, item);
-
-			if (!node) break;
-			if (node->kind == PIGEN_SYNTAX_SIGNAL_DECLARATION &&
-				!add_signal_declaration_in_scope(resolver, module_id,
-					stage_scope, node))
+			pigen_semantic_signal field=model->signals[fields[f].original.index];
+			pigen_symbol_id symbol;
+			if(pigen_symbol_declare(model,output_scope,PIGEN_SYMBOL_SIGNAL,field.data_type,
+				fields[f].name,field.span,&symbol,NULL)!=PIGEN_DECLARE_OK) goto done;
+			outgoing[f]=pigen_signal_add(model,field.syntax,module_id,symbol,field.data_type,field.shape,
+				INVALID_ID(pigen_expr_id),PIGEN_TRANSFER_TYPE_BUF,PIGEN_SEMANTIC_INTERNAL,field.span);
+			if(outgoing[f].index==PIGEN_INVALID_ID) goto done;
+		}
+		for(pigen_syntax_id item=stage->first_child;item.index!=PIGEN_INVALID_ID;)
+		{
+			const pigen_syntax_node *node=pigen_syntax_get(resolver->syntax,item);item=node->next_sibling;
+			if(node->kind==PIGEN_SYNTAX_SIGNAL_DECLARATION &&
+			   !resolve_pipeline_local(resolver,module_id,stage_scope,node,fields,field_count)) goto done;
+		}
+		size_t first_transfer=model->transfer_count,first_use=model->transfer_signal_use_count;
+		resolver->expression_scope=stage_scope;
+		resolver->pipeline_destination_scope=output_scope;
+		resolver->in_pipeline_stage=1;
+		for(pigen_syntax_id item=stage->first_child;item.index!=PIGEN_INVALID_ID;)
+		{
+			const pigen_syntax_node *node=pigen_syntax_get(resolver->syntax,item);
+			pigen_syntax_id id=item;item=node->next_sibling;
+			if(node->kind==PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT &&
+			   (!pipeline_check_reads(resolver,stage_scope,fields,field_count,node->as.nonblocking_assignment.value) ||
+				!resolve_assignment(resolver,module_id,process,domain,id,node,guard))) goto done;
+		}
+		resolver->in_pipeline_stage=0;
+		pigen_transfer_signal_use *uses=NULL;size_t use_count=0,use_capacity=0;
+		for(size_t t=first_transfer;t<model->transfer_count;t++)
+		{
+			const pigen_semantic_transfer *transfer=&model->transfers[t];
+			const pigen_semantic_lvalue *lhs=pigen_lvalue_get(model,transfer->destination);
+			size_t f=0;
+			for(;f<field_count;f++) if(outgoing[f].index==lhs->as.projection.signal.index) break;
+			if(f==field_count) {free(uses);goto done;}
+			values[f]=transfer->value;
+			const pigen_transfer_signal_use *reads=pigen_transfer_signal_uses(model,(pigen_transfer_id){(uint32_t)t});
+			for(size_t u=0;u<transfer->signal_use_count;u++)
 			{
-				ok = 0;
-				break;
+				for(size_t q=0;q<field_count;q++) if(!live[q] && reads[u].signal.index==fields[q].original.index)
+				{free(uses);fail_location(resolver,stage->location,"pipeline field read before initialization in an earlier stage");goto done;}
+				if(!(reads[u].roles & PIGEN_TRANSFER_PRODUCER))
+					add_transfer_signal_use(&uses,&use_count,&use_capacity,reads[u].signal,reads[u].roles);
 			}
-			item = node->next_sibling;
 		}
-		for (item = stage->first_child; ok && item.index != PIGEN_INVALID_ID; )
+		/* Consuming the entire incoming packet also retires overwritten fields. */
+		for(size_t f=0;f<field_count;f++) if(live[f])
 		{
-			const pigen_syntax_node *node = pigen_syntax_get(
-				resolver->syntax, item);
-
-			if (!node) break;
-			if (node->kind == PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT)
+			add_transfer_signal_use(&uses,&use_count,&use_capacity,incoming[f],PIGEN_TRANSFER_CONSUMER|PIGEN_TRANSFER_SIGNAL_READ);
+			if(!written[f])
 			{
-				resolver->expression_scope = stage_scope;
-				resolver->in_pipeline_stage = 1;
-				if (!resolve_assignment(resolver, module_id, process,
-					domain, item, node, guard))
-				{
-					resolver->in_pipeline_stage = 0;
-					ok = 0;
-					break;
-				}
-				resolver->in_pipeline_stage = 0;
+				const pigen_semantic_signal *signal=pigen_signal_get(model,incoming[f]);
+				values[f]=pigen_expr_add_symbol(model,signal->symbol,signal->data_type,stage->location.source_span);
 			}
-			item = node->next_sibling;
 		}
-		child = stage->next_sibling;
-	}
-	resolver->expression_scope = saved_scope;
-	if (!ok) return 0;
-
-	/* The final yield writes the established pipeline output signal. A
-	 * single-field yield adopts the field's data type so the pipeline output
-	 * has the same type as the field (a multi-member yield keeps the
-	 * concatenation aggregate). */
-	{
-		pigen_expr_id destination_expression;
-		pigen_lvalue_id destination;
-		const pigen_semantic_expr *destination_value;
-		pigen_expr_id raw_value;
-		const pigen_semantic_expr *raw_expression;
-		pigen_expr_id value;
-		const pigen_semantic_expr *source_value;
-		pigen_transfer_signal_use *signal_uses = NULL;
-		size_t signal_use_count = 0;
-		pigen_transfer_id transfer;
-
-		resolver->expression_scope = pipeline_scope;
-		raw_value = pigen_resolve_expression(resolver->syntax, model,
-			pipeline_scope, pipeline->as.pipeline.yield, resolver->policy,
-			resolver->error);
-		resolver->expression_scope = saved_scope;
-		raw_expression = pigen_expr_get(model, raw_value);
-		if (raw_expression && raw_expression->data_type.index !=
-			PIGEN_INVALID_ID)
+		/* Draft assignments become one packet transfer. No draft IDs escape. */
+		model->transfer_count=first_transfer;model->transfer_signal_use_count=first_use;
+		pigen_expr_id value; pigen_lvalue_id destination;
+		if(final)
 		{
-			const pigen_symbol *out_symbol = pigen_symbol_get(model,
-				ident.symbol);
-			pigen_semantic_signal *out_signal =
-				&model->signals[ident.signal.index];
-
-			out_signal->direction = PIGEN_SEMANTIC_INTERNAL;
-			out_signal->data_type = raw_expression->data_type;
-			if (out_symbol)
-				model->symbols[ident.symbol.index].data_type =
-					raw_expression->data_type;
-			ident.data_type = raw_expression->data_type;
+			resolver->expression_scope=output_scope;
+			if(!pipeline_check_reads(resolver,output_scope,fields,field_count,pipeline->as.pipeline.yield))
+			{free(uses);fail_location(resolver,pipeline->location,"pipeline yield reads an uninitialized field");goto done;}
+			value=pigen_resolve_expression(resolver->syntax,model,output_scope,pipeline->as.pipeline.yield,resolver->policy,resolver->error);
+			if(value.index==PIGEN_INVALID_ID) {free(uses);goto done;}
+			for(size_t f=0;f<field_count;f++) if(outgoing[f].index==PIGEN_INVALID_ID &&
+				resolve_expr_references_symbol(model,value,model->signals[fields[f].original.index].symbol))
+			{free(uses);fail_location(resolver,pipeline->location,"pipeline yield reads an uninitialized field");goto done;}
+			value=pipeline_inline_fields(model,outgoing,values,field_count,value);
+			const pigen_semantic_expr *yield=pigen_expr_get(model,value);
+			if(!yield) {free(uses);goto done;}
+			model->signals[ident.signal.index].data_type=yield->data_type;
+			model->symbols[ident.symbol.index].data_type=yield->data_type;
+			pigen_expr_id target=pigen_expr_add_symbol(model,ident.symbol,yield->data_type,pipeline->location.source_span);
+			destination=pigen_lvalue_resolve(model,target);
+			pigen_transfer_signal_use *yield_uses=NULL;size_t yield_count=0;
+			if(!analyze_transfer(resolver,destination,value,guard,domain,stage->location.source_span,&yield_uses,&yield_count))
+			{free(uses);goto done;}
+			for(size_t u=0;u<yield_count;u++)
+				add_transfer_signal_use(&uses,&use_count,&use_capacity,yield_uses[u].signal,yield_uses[u].roles);
+			free(yield_uses);
+			for(size_t f=0;f<field_count;f++) if(outgoing[f].index!=PIGEN_INVALID_ID)
+				model->signals[outgoing[f].index].transfer_type=PIGEN_TRANSFER_TYPE_WIRE;
 		}
-		destination_expression = pigen_expr_add_symbol(model, ident.symbol,
-			ident.data_type, ident.span);
-		if (destination_expression.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, pipeline->location,
-				"invalid pipeline output expression");
-		destination = pigen_lvalue_resolve(model, destination_expression);
-		destination_value = pigen_expr_get(model, destination_expression);
-		if (destination.index == PIGEN_INVALID_ID || !destination_value)
-			return fail_location(resolver, pipeline->location,
-				"invalid pipeline output destination");
-		resolver->expression_scope = pipeline_scope;
-		value = pigen_resolve_assignment_value(resolver->syntax, model,
-			pipeline_scope, pipeline->as.pipeline.yield,
-			destination_value->data_type, resolver->policy,
-			resolver->error);
-		resolver->expression_scope = saved_scope;
-		if (value.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, pipeline->location,
-				"pipeline yield requires a compatible expression");
-		source_value = pigen_expr_get(model, value);
-		if (!source_value)
-			return fail_location(resolver, pipeline->location,
-				"invalid pipeline yield value");
-		if (!analyze_transfer(resolver, destination, value, guard, domain,
-			pipeline->location.source_span, &signal_uses,
-			&signal_use_count))
-			return 0;
-		transfer = pigen_transfer_add(model, pipeline_id, module_id,
-			process, destination, value, guard, domain, signal_uses,
-			signal_use_count, pipeline->location.source_span);
-		free(signal_uses);
-		if (transfer.index == PIGEN_INVALID_ID)
-			return fail_location(resolver, pipeline->location,
-				"invalid pipeline yield transfer");
+		else
+		{
+			size_t n=0;
+			pigen_expr_id *rhs=pigen_resize(NULL,field_count*sizeof(*rhs));
+			for(size_t f=0;f<field_count;f++) if(outgoing[f].index!=PIGEN_INVALID_ID)
+			{
+				const pigen_semantic_signal *signal=pigen_signal_get(model,outgoing[f]);
+				destinations[n]=pigen_expr_add_symbol(model,signal->symbol,signal->data_type,stage->location.source_span);
+				rhs[n++]=values[f];
+				add_transfer_signal_use(&uses,&use_count,&use_capacity,outgoing[f],PIGEN_TRANSFER_PRODUCER|PIGEN_TRANSFER_SIGNAL_WRITE);
+				if(!pigen_signal_bind_domain(model,outgoing[f],domain)) {free(rhs);free(uses);goto done;}
+			}
+			pigen_expr_id target=n==1 ? destinations[0] : pigen_expr_add_concatenation(model,destinations,n,stage->location.source_span);
+			value=n==1 ? rhs[0] : pigen_expr_add_concatenation(model,rhs,n,stage->location.source_span);
+			free(rhs);destination=pigen_lvalue_resolve(model,target);
+		}
+		if(!pigen_signal_bind_domain(model,ident.signal,domain) ||
+		   pigen_transfer_add(model,final ? pipeline_id : stage_id,module_id,process,destination,value,guard,domain,
+			   uses,use_count,stage->location.source_span).index==PIGEN_INVALID_ID)
+		{free(uses);fail_location(resolver,stage->location,"invalid atomic pipeline stage");goto done;}
+		free(uses);
+		for(size_t f=0;f<field_count;f++) if(outgoing[f].index!=PIGEN_INVALID_ID)
+		{live[f]=1;incoming[f]=outgoing[f];}
+		incoming_scope=output_scope;
 	}
-	return 1;
+	/* Forward reset bindings must include every generated stage version. */
+	for(size_t r=0;r<resolver->reset_binding_count;r++)
+	{
+		pending_pipeline_reset *reset=&resolver->reset_bindings[r];
+		if(!reset->consumed && reset->module.index==module_id.index && reset->process.index==process.index &&
+		   spelling_text_equal(resolver,reset->name,token_spelling(resolver,pipeline->as.pipeline.name)) &&
+		   pigen_symbol_lookup(model,reset->scope,reset->name).index==ident.symbol.index)
+		{
+			if(!apply_pipeline_reset(resolver,module_id,process,domain,reset,ident.signal,pipeline_scope)) goto done;
+			reset->consumed=1;
+		}
+	}
+	ok=1;
+done:
+	resolver->in_pipeline_stage=0;resolver->expression_scope=saved_scope;
+	free(resolver->pipeline_locals);free(resolver->pipeline_local_values);
+	resolver->pipeline_locals=NULL;resolver->pipeline_local_values=NULL;resolver->pipeline_local_count=0;
+	free(fields);free(incoming);free(outgoing);free(values);free(destinations);free(live);free(written);
+	return ok;
 }
 
 static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
@@ -2304,7 +2515,7 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 		}
 	}
 	pigen_expr_id destination_expression = pigen_resolve_expression(
-		resolver->syntax, model, resolver->expression_scope,
+		resolver->syntax, model, resolver->in_pipeline_stage ? resolver->pipeline_destination_scope : resolver->expression_scope,
 		assignment->as.nonblocking_assignment.destination, resolver->policy,
 		resolver->error);
 	pigen_lvalue_id destination = pigen_lvalue_resolve(model,
@@ -2390,6 +2601,12 @@ static int resolve_assignment(resolver *resolver, pigen_module_id module_id,
 			(array_assignment && resolver->error && resolver->error->message)) return 0;
 		return fail_location(resolver, assignment->location,
 			"transfer value requires a compatible expression");
+	}
+	if (resolver->in_pipeline_stage)
+	{
+		value=pipeline_inline_fields(model,resolver->pipeline_locals,resolver->pipeline_local_values,
+			resolver->pipeline_local_count,value);
+		if(value.index==PIGEN_INVALID_ID) return 0;
 	}
 	if (!validate_protocol_copy(resolver, destination, value,
 		assignment->as.nonblocking_assignment.value, assignment->location)) return 0;

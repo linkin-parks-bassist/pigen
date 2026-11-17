@@ -1,11 +1,13 @@
 ---
 status: green
-revised_at: "2026-11-16T10:42:30+11:00"
+revised_at: "2026-11-17T11:51:38+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
-Packed data typedef aliases follow the model below. Native endpoint typedefs instead carry payload and complete canonical protocol contracts and cannot be used as packed data types (how/are/native/axi/type/aliases/represented.md).
+Packed DATA typedef aliases retain a canonical typedef symbol ID and resolved target type ID separately. Width, projection, state and operation queries follow the target without repeating symbol lookup. pigen_struct_member_for_type follows alias chains to the packed record schema. Capability checks are alias-transparent while preserving operations can retain exact alias identity. Source-order eligibility and lexical shadows remain syntax facts.
 
-A canonical alias stores typedef symbol ID and resolved target type ID separately. Width/projection/state/operation queries follow stored target without another symbol lookup. pigen_struct_member_for_type follows alias targets to the owning packed record schema, so member reads also work through typedef chains and constructed values. Capability checks are alias-transparent while exact alias identity can survive preserving operations. Source-order lexical eligibility/shadow barriers are syntax facts, distinct from canonical semantic targets.
+Owned scalar and packed-record DATA typedefs emit parsed SV at compilation-unit, module and package scope, retaining names for ordinary helpers and rewriting numerical widths/signedness. how/are/packed/struct/typedefs/represented/and/read.md owns emission and independent evidence.
 
-Owned scalar and packed-record DATA typedefs emit valid SV from parsed structure at compilation-unit, module and package scope, preserving type names for retained helpers. Numerical widths and signedness are rewritten rather than copying Pigen spellings; emission and independent helper/native-pin evidence are owned by how/are/packed/struct/typedefs/represented/and/read.md.
+Native endpoint typedefs instead carry DATA and a complete protocol contract; they are not packed DATA types (how/are/native/axi/type/aliases/represented.md).
+
+A current ordinary-SV compatibility gap concerns a DATA typedef named axi4. The valid SV declaration typedef logic [7:0] axi4; is interpreted as a native protocol qualifier and rejects with "typedef requires a name". Verilator accepts the independent ordinary module in /tmp/pigen-ordinary-protocol-names-5v6s7ub6/source.sv, while ./pigen rejects source.pigen before the boundary-only retained-declaration check. Disambiguating a typedef name from a protocol qualifier belongs to general namespace/parser compatibility work; it does not block the checked AXI boundary or pipeline profiles.

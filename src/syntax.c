@@ -2198,8 +2198,12 @@ static int parse_pipeline_stage_item(syntax_parser *parser,
 	node.as.signal_declaration.has_transfer_type = 1;
 	node.as.signal_declaration.transfer_type = transfer;
 	declaration = add_node(parser, node);
-	if (add_signal_declarator(parser, declaration, name, semicolon,
-		&at).index == PIGEN_INVALID_ID) return 0;
+	int saved_combinational=parser->combinational_body;
+	parser->combinational_body=1;
+	pigen_syntax_id local=add_signal_declarator(parser,declaration,name,semicolon,&at);
+	parser->combinational_body=saved_combinational;
+	if(local.index==PIGEN_INVALID_ID) return 0;
+	if(at!=semicolon) return fail(parser,at,"unexpected token after pipeline stage declaration");
 	add_child(parser, stage, declaration);
 	{
 		pigen_token_id name_token = (pigen_token_id){(uint32_t)name};

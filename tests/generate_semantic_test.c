@@ -371,7 +371,7 @@ static void check_scoped_pipelines(int reset_after)
 	assert(pigen_parse_syntax(&pre.expanded,&syntax,&se));
 	int ok=pigen_resolve_semantics(&syntax,&sem,&policy,&error);
 	if(!ok) fprintf(stderr,"scoped pipeline: %s\n",error.message ? error.message : "none");
-	assert(ok && sem.process_count==2 && sem.generate_scope_count==2 && sem.action_count==6);
+	assert(ok && sem.process_count==2 && sem.generate_scope_count==2 && sem.action_count==4);
 	for(size_t i=0;i<2;i++)
 	{
 		pigen_scope_id scope=sem.generate_scopes[i].scope;
@@ -416,7 +416,7 @@ static void check_foreach_pipeline_resets(int reset_after)
  assert(pigen_preprocess(&sources,input,NULL,&pre,&pe));assert(pigen_parse_syntax(&pre.expanded,&syntax,&se));
  int ok=pigen_resolve_semantics(&syntax,&sem,&policy,&error);
  if(!ok)fprintf(stderr,"foreach pipeline reset: %s\n",error.message ? error.message : "none");
- assert(ok && sem.process_count==1 && sem.action_count==6);
+ assert(ok && sem.process_count==1 && sem.action_count==4);
  for(size_t a=0;a<sem.action_count;a++)
  {
   pigen_semantic_action action=sem.actions[a];
@@ -426,7 +426,7 @@ static void check_foreach_pipeline_resets(int reset_after)
   assert(lane.index!=PIGEN_INVALID_ID && sem.symbols[lane.index].kind==PIGEN_SYMBOL_PARAMETER);
   int64_t coordinate;
   assert(pigen_const_expr_evaluate_i64(&sem,pigen_const_expr_intern_symbol(&sem,lane,
-   sem.symbols[lane.index].data_type),&coordinate) && coordinate==(int64_t)(a/3));
+   sem.symbols[lane.index].data_type),&coordinate) && coordinate==(int64_t)(a/2));
  }
  pigen_free_semantic_model(&sem);pigen_free_syntax_tree(&syntax);pigen_free_preprocess_result(&pre);pigen_free_sources(&sources);
 }

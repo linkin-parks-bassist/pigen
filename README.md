@@ -200,7 +200,7 @@ state directly.
 
 A pipeline uses a fixed field namespace to describe successive transformations.
 Each stage reads the value of `x` at that point in the pipeline, and a transfer
-into `x` defines the value passed to the following stage. The language model is:
+into `x` defines the value passed to the following stage:
 
 ```systemverilog
 pipeline packet begin
@@ -222,14 +222,10 @@ Within a stage, reads see its incoming packet; writes become visible in the next
 stage. Several packets can occupy different stages at once, each carrying its
 own value of `x`. Elastic handshakes control their progress through stalls.
 Pipeline fields use `buf` storage, which their declarations may omit, and `yield`
-exposes the final value as a buffered transfer source.
-
-**Current implementation gap:** the compiler rejects the repeated-field example
-above with “buffered transfer cannot source its destination.” Production currently
-resolves those stage versions to one semantic signal. Distinct-name pipeline
-examples run, but do not establish this defining behavior. The
-[pipeline stage contract and implementation gap](.knowledge/how/do/pipeline/stage/reads/work.md)
-tracks the required correction.
+exposes the final value as a buffered transfer source. Unwritten initialized
+fields carry forward with the packet, and every stage advances its fields
+together. The [complete example](examples/pipeline_fields.pigen) uses the same
+`x` through all three stages.
 
 ## Module connections and fabrics
 
@@ -400,6 +396,7 @@ cycles. Supported forms and remaining language-context work are described in
 - [Native AXI declarations and connections](.knowledge/how/to/write/native/axi/declarations.md)
 - [Memory-mapped address routing](.knowledge/how/does/native/memory/mapped/address/routing/work.md)
 - [Typed standalone fabrics](.knowledge/how/to/write/typed/standalone/fabrics.md)
+- [Pipeline stages](.knowledge/how/to/write/pipeline/stages.md)
 - [FSMs and transfer events](.knowledge/how/to/write/fsm/states.md)
 - [Native AXI acceptance and limits](.knowledge/what/is/the/native/axi/acceptance/status.md)
 - [Core library and verification profiles](.knowledge/what/is/the/standard/cores/library.md)

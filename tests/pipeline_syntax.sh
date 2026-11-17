@@ -24,7 +24,7 @@ if "$tool" tests/pipeline_wire_transfer_error.pigen \
 	echo 'stage-local wire transfer unexpectedly compiled' >&2
 	exit 1
 fi
-grep -q 'wire is not a transfer destination' "$temporary/wire-transfer.err"
+grep -q 'pipeline stage destination must be a complete pipeline field' "$temporary/wire-transfer.err"
 
 if "$tool" tests/pipeline_export_error.pigen -o "$temporary/export.sv" \
 	2>"$temporary/export.err"; then
@@ -38,7 +38,7 @@ if "$tool" tests/pipeline_first_stage_field_error.pigen \
 	echo 'first-stage pipeline-local read unexpectedly compiled' >&2
 	exit 1
 fi
-grep -q 'buffered transfer cannot source its destination' \
+grep -q 'pipeline field read before initialization' \
 	"$temporary/first-stage.err"
 
 

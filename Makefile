@@ -965,6 +965,11 @@ pipeline-alias-test: pigen
 pipeline-syntax-test: pigen
 	./tests/pipeline_syntax.sh ./pigen
 
+.PHONY: pipeline-packet-test
+test: pipeline-packet-test
+pipeline-packet-test: pigen
+	python3 tests/pipeline_packet_test.py
+
 biquad-bank-test: pigen
 	./pigen examples/biquad_bank.pigen -o /tmp/pigen-biquad-bank.sv
 	iverilog -g2012 -o /tmp/pigen-biquad-bank-vvp rtl/pigen_primitives.sv /tmp/pigen-biquad-bank.sv examples/biquad_bank_tb.sv

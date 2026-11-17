@@ -9,18 +9,16 @@ module pipeline(
         if (enable) begin
             pipeline pipe begin
                 bit[8] value;
-                bit[8] rejoined;
-                bit[8] result;
                 stage begin
                     value <= source;
                 end
                 stage begin
-                    rejoined <= value;
+                    value <= value;
                 end
                 stage begin
-                    result <= rejoined + 8'd1;
+                    value <= value + 8'd1;
                 end
-                yield result;
+                yield value;
             endpipeline
             destination <= pipe;
         end

@@ -1,0 +1,18 @@
+// Each stage transforms the current packet's x in the same field namespace.
+module pipeline_fields (
+    input wire clk,
+    input wire reset,
+    input uint[32] buf incoming,
+    output uint[32] buf outgoing
+);
+    always @(posedge clk) if (!reset) begin
+        pipeline packet begin
+            uint[32] x;
+            stage begin x <= incoming; end
+            stage begin x <= x + 32'd1; end
+            stage begin x <= x * 32'd2; end
+            yield x;
+        endpipeline
+        outgoing <= packet;
+    end
+endmodule

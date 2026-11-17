@@ -8,36 +8,9 @@
 #include "pigen/pipeline_stage.h"
 #include "pigen/preprocess.h"
 
-/* The pipeline parent-module lowering owner (step (c3), the (c) boundary of
- * the pipeline step (c) parent-module lowering). This file lowers one
- * PIGEN_SYNTAX_PIPELINE statement (a pipeline body inside a clocked process)
- * through the common RTL model, publishing into the parent module's RTL model:
- *
- *   - the pipeline's one-entry buf stage storage: one dedicated one-entry buf
- *     primitive instance per stage boundary (what/is/a/buf.md);
- *   - the per-stage combinational next-value equations: for each stage, the
- *     outgoing fields' values computed as combinational equations over the
- *     immutable incoming fields the stage is handed by the earlier stages
- *     (how/do/pipeline/stage/reads/work.md);
- *   - the guarded ready/valid handshake: the complete enclosing procedural
- *     guard enables the pipeline, and a false guard holds all storage and
- *     disables both handshakes (how/to/reset/and/enable/a/pipeline.md);
- *   - the final yield to the outgoing-packet write: the yield's outgoing
- *     fields written into the parent module's outgoing packet, which the
- *     step-(a) owner has established as the pipeline's module-scope buf output
- *     packet identity, with the member order in source order (the first
- *     yielded field the MSB, does/the/concatenation/data/type/keying/keep/
- *     member/order.md).
- *
- * This owner consumes the step-(a) outgoing-packet identity
- * (pigen_pipeline_identifier_of) and the step-(b) per-stage execution-law
- * views (pigen_pipeline_stage_laws) only as validated inputs, and composes and
- * publishes its RTL records through the common RTL model (pigen_rtl_*) owned
- * by the parent module record (what/is/elastic/rtl/task/eight.md: a module
- * record is composed from already-published state). A failed call returns -1
- * and the compile stops; it may leave partial state behind, and nothing uses
- * the model after a failed compile, so no caller or test asserts that a
- * failure left the model unchanged (how/should/compiler/builders/fail.md). */
+/* Legacy structural scaffold for API shape/provenance tests. The equations
+ * below deliberately contain placeholder stage values. Production packet
+ * lowering, including field versions and atomic advancement, is in resolve.c. */
 
 #define INVALID_ID(type) ((type){PIGEN_INVALID_ID})
 #define INVALID_SPAN \
