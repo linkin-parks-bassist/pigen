@@ -234,15 +234,22 @@ list into a routing fabric, generating the routers, buffers, arbitration and
 backpressure paths for you:
 
 ```systemverilog
-fabric audio_system #(parameter integer PAYLOAD_W = 32) begin
-    input_left.samples.main  -> mixer.samples.left;
-    input_right.samples.main -> mixer.samples.right;
-    synthesizer.samples.main -> mixer.samples.synth;
-    mixer.output.monitor     -> monitor.samples.mixer;
-    mixer.output.recorder    -> recorder.samples.mixer;
-    analyser.status.level    -> display.telemetry.analyser;
+fabric control_network #(parameter integer PAYLOAD_W = 32) begin
+    ui.commands.filter         -> filter.commands;
+    automation.commands.filter -> filter.commands;
+    sequencer.commands.filter  -> filter.commands;
+    ui.commands.mixer          -> mixer.commands;
+    automation.commands.mixer  -> mixer.commands;
+    filter.status.display      -> display.events;
+    mixer.status.display       -> display.events;
 endfabric
 ```
+
+Here the UI, automation and sequencer all compete for `filter.commands`.
+The mixer also accepts commands from multiple producers, while the display
+collects status from both processing blocks. Pigen shares the routing network
+between these paths and arbitrates contention as it arises; each consumer can
+apply backpressure through its normal handshake.
 
 The generated network is a balanced, pruned tree of simple, lightweight
 **three-port (ternary) routing nodes**. Each node needs just one route bit to

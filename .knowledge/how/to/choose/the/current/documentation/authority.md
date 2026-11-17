@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-17T15:04:12+11:00"
+revised_at: "2026-11-17T15:44:47+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -8,7 +8,7 @@ The local knowledge tree is the sole internal project documentation and architec
 
 README.md is the public hardware-facing introduction. Its central idea is that the primitive transfer operation automatically and implicitly incorporates handshakes. Present wire/reg/logic, buf/port/fifo/skid and native AXI as transfer types in the same model. Preserve the hardware-facing structure and voice of the human README at d14aef2. Introduce native AXI module interfaces within that transfer explanation. Omit quarantined AXI fabrics from the README. Pipelines demonstrate a fixed field namespace whose names refer to successive stage registers, with immutable incoming reads and outgoing writes.
 
-The Fabrics section leads with a complete multi-connection standalone example and explains the design-level payoff: author the connections and let Pigen generate a balanced lightweight three-port tree, buffering, local arbitration and backpressure. Make this benefit visible before implementation details. Distinguish inline links/merges from the standalone tree. The audio_system README example passes compilation, warnings-fatal lint and SVG emission (/tmp/pigen-readme-fabrics-jis8dl8l).
+The Fabrics section leads with a complete multi-connection standalone example and explains the design-level payoff: author the connections and let Pigen generate a balanced lightweight three-port tree, buffering, local arbitration and backpressure. Make this benefit visible before implementation details. Distinguish inline links/merges from the standalone tree. The initial example must visibly show contention at shared consumers, using identical destination spellings rather than source-recognition suffixes that resemble separate ports. control_network has seven routes into three shared consumers; it passes compilation, warnings-fatal lint and SVG emission (/tmp/pigen-readme-shared-fabric-6wev9bvd).
 
 Use the user's requested style: no scarecrowing and no parataxis. Explain hardware behavior in connected prose. Keep frontend migration reports and task narration out of the introduction. Detailed guides and the specification live in .knowledge; root SPEC.md and USER_GUIDE.md are absent.
 
