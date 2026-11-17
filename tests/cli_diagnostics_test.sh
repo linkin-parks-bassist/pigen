@@ -17,11 +17,12 @@ with tempfile.TemporaryDirectory() as name:
     assert result.stderr==('invalid.pigen:2:5: data type must precede the transfer type\n'
                           '        buf bit[8] stage;\n        ^\n'),result.stderr
     assert not (directory/'invalid.sv').exists()
-    # A zero-width EOF diagnostic takes the driver's bare-prefix fallback.
+    # The structured parser attributes an unfinished unit to its opening token.
     (directory/'unfinished.pigen').write_text('module unfinished;\n')
     result=invoke('unfinished.pigen')
     assert result.returncode==1 and result.stdout==''
-    assert result.stderr=='pigen: unterminated SystemVerilog design unit\n',result.stderr
+    assert result.stderr.startswith('unfinished.pigen:1:1: module requires `endmodule`\n'),result.stderr
+    assert '    module unfinished;\n    ^\n' in result.stderr,result.stderr
     assert not (directory/'unfinished.sv').exists()
     # Diagnostics cannot overwrite an existing output artifact.
     (directory/'kept.sv').write_text('sentinel\n')
@@ -31,5 +32,5 @@ with tempfile.TemporaryDirectory() as name:
     result=invoke('good.pigen','-o','good.sv')
     assert result.returncode==0 and result.stdout=='' and result.stderr=='',result
     assert (directory/'good.sv').stat().st_size>0
-print('PASS CLI spanned/EOF diagnostics, silent success and failed-output preservation')
+print('PASS CLI malformed-unit diagnostics, silent success and failed-output preservation')
 PYTHON

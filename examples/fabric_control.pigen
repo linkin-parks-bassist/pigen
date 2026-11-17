@@ -1,0 +1,62 @@
+// Each endpoint below is an actual declared child-module port.
+module dual_command_source (
+    input wire clk,
+    input wire reset,
+    input uint[32] buf primary,
+    input uint[32] buf secondary,
+    output uint[32] buf tx,
+    output uint[32] buf auxiliary
+);
+    always @(posedge clk) begin
+        tx <= primary;
+        auxiliary <= secondary;
+    end
+endmodule
+
+module command_stage (
+    input wire clk,
+    input wire reset,
+    input uint[32] buf commands,
+    output uint[32] buf status
+);
+    always @(posedge clk) status <= commands;
+endmodule
+
+module event_stage (
+    input wire clk,
+    input wire reset,
+    input uint[32] buf events,
+    output uint[32] buf result
+);
+    always @(posedge clk) result <= events;
+endmodule
+
+module control_network (
+    input wire clk,
+    input wire reset,
+    input uint[32] buf ui_primary,
+    input uint[32] buf ui_secondary,
+    input uint[32] buf automatic_primary,
+    input uint[32] buf automatic_secondary,
+    input uint[32] buf sequencer_commands,
+    output uint[32] buf telemetry
+);
+    dual_command_source ui(.clk(clk), .reset(reset),
+        .primary(ui_primary), .secondary(ui_secondary));
+    dual_command_source automation(.clk(clk), .reset(reset),
+        .primary(automatic_primary), .secondary(automatic_secondary));
+    command_stage sequencer(.clk(clk), .reset(reset), .commands(sequencer_commands));
+    command_stage filter(.clk(clk), .reset(reset));
+    command_stage mixer(.clk(clk), .reset(reset));
+    event_stage display(.clk(clk), .reset(reset), .result(telemetry));
+
+    fabric controls begin
+        ui.tx                -> filter.commands;
+        automation.tx        -> filter.commands;
+        sequencer.status     -> filter.commands;
+        ui.auxiliary         -> mixer.commands;
+        automation.auxiliary -> mixer.commands;
+        filter.status        -> display.events;
+        mixer.status         -> display.events;
+    endfabric
+endmodule

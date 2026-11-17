@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 
+#include "pigen/blocks.h"
 #include "pigen/source.h"
 #include "pigen/ids.h"
 
@@ -18,8 +19,9 @@ typedef struct {
     const char *message;
 } pigen_compile_error;
 
-/* Compiled result: contains the generated SystemVerilog output. */
+/* Owned SystemVerilog and SVG artifacts from the same resolved fabric topology. */
 typedef struct {
+    pigen_fabric_diagrams fabric_diagrams;
     char *systemverilog;
     size_t length;
 } pigen_compile_result;
@@ -39,8 +41,8 @@ typedef struct {
  * returns:
  *   0 on success, -1 on failure
  *
- * On success, result->systemverilog points to allocated memory that must be
- * freed via pigen_free_compile_result(). On failure, result is zeroed and
+ * On success, result owns the SystemVerilog text and fabric diagram array;
+ * release both with pigen_free_compile_result(). On failure, result is zeroed and
  * error (if provided) contains the diagnostic.
  */
 int pigen_compile_source(pigen_source_manager *sources,

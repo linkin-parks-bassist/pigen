@@ -1,16 +1,26 @@
 ---
 status: green
-revised_at: "2026-11-17T16:30:28+11:00"
+revised_at: "2026-11-17T18:00:32+11:00"
 ---
 
-Ordinary fabrics provide active inline routing and parameter-only standalone router trees. Native AXI fabric links are disconnected from the compiler; how/are/native/axi/fabrics/connected/and/arbitrated.md owns the quarantine.
+A fabric is an inline parent-module block connecting actual declared child ports:
 
-Inline `fabric <name> begin ... endfabric` or anonymous `fabric begin ... endfabric` inside a module: each connection is `instance.port -> instance.port` (routed) or `instance.port > instance.port` (direct). Endpoints resolve through semantic child-instance records, unwrapping connection conversions to the parent payload net; child module and port signals are checked, and parent nets connected to the port and its `<port>_valid` / `<port>_ready` siblings are wired. Direct links are exclusive combinational equations. One routed link uses one `pigen_skid`. Two routed sources to one destination use registered `pigen_merge2`; three or more use `pigen_merge` with packed valid/ready/payload vectors and a rotating last-grant index. Both are round-robin, so continuous contention alternates. Omitted child ports can use generated parent endpoint nets; explicit connections remain supported. Boundary controls are recovered from typed output views, semantic endpoints or explicit sibling connections for single links and merge sources. Packed ready indices match each source's payload/valid lane. See how/to/connect/child/ports.md for endpoint syntax and remaining coverage.
+```systemverilog
+fabric commands begin
+    ui.tx -> filter.commands;
+    automation.tx -> filter.commands;
+    filter.status > display.events;
+endfabric
+```
 
-Typed standalone headers remain parsed, but native AXI connection bodies reject. Their inactive design is described in how/to/write/typed/standalone/fabrics.md.
+Both named and anonymous begin/endfabric blocks work. Each consuming output has one destination; several routed outputs can share an input. Types come from resolved ports, and normal assignment conversions are checked per edge. Producers and consumers expose only their own payload/valid/ready interfaces. Handles, source-recognition suffixes, exposed route words and the old top-level PAYLOAD_W dialect are rejected. Sender identity, if needed, belongs in packet DATA; use an explicit splitter child for one-to-many selection. what/are/fabric/connection/laws.md owns this contract.
 
-Legacy parameter-only top-level `fabric` blocks are synthesized by the compiler driver through `pigen_lower_blocks` (src/blocks.c and src/fabric_svg.inc are production). They generate a module, a balanced, pruned tree of three-port routers with logarithmic hop counts, one relative route bit per hop, and two-entry registered input occupancy, round-robin grants, buffered skid hops, path metadata and deterministic SVG (`OUTPUT.sv.svg`, or `OUTPUT.sv.FABRIC.svg` for several). `--diagram PATH` is valid only for one fabric; `--no-diagram` suppresses SVG. `fabric_router_fair_tb`, `fabric_merge_fair_tb` and `fabric_merge3_tb` hold all competing sources continuously valid under backpressure and require balanced service.
+src/resolve.c validates direction, payload compatibility, complete compatible handshake interfaces, scalar port shape, source/destination ownership and exclusive direct destinations across parent fabric blocks. Generated ordinary fabric blocks and unpacked whole-port shapes diagnose. Routed buffered children must use the parent's rising-edge clk and synchronous reset bindings. Explicit payload/control wires and omitted ports retain typed endpoint views (how/to/connect/child/ports.md).
 
-The legacy standalone emitter uses instance.port.handle sources, optional recognized-source destination suffixes and exposed path outputs. Destination equality ignores the suffix, so such labels share a physical input; labels emit delivered-route constants. This interface violates SPEC.md at d14aef2, Fabric blocks, which requires source-blind actual module ports and replacing the fixed-width dialect outright. David reaffirmed that contract: sender identity belongs in packet DATA, producers need no consumer knowledge, and endpoint aliases must not conceal shared readiness. what/are/fabric/connection/laws.md owns these requirements. Current inline lowering uses skids/merges rather than the specified shared tree; the tree engine and correct endpoint interface still need integration.
+src/fabric_lower.c coalesces the parent's fabric blocks into one resolved network. Routed connections use a balanced, pruned tree of three-port pigen_tree_router primitives. src/blocks.c:pigen_build_fabric_tree supplies the checked topology and forward/reverse route verification. Each source receives fixed internal route bits; source and sink endpoints have two-entry skids, and every router ingress has two-entry registered occupancy. Assignment conversion occurs before ingress packing. Mixed widths share an internal payload container sized to the widest routed destination; sinks unpack their own DATA width.
 
-Ordinary inline routed groups are limited to 32 sources and grouped by destination spelling across all parent fabric blocks. Direct destinations are exclusive across blocks and declaration order. Broader aliases and retained ordinary-SV driver ownership remain unaudited; see what/is/an/inline/fabric.md. make fabric-implicit-merge-test checks ordered delivery under stalls for omitted ports and payload aliases.
+Routers advance one relative route bit per hop and arbitrate locally round-robin, retaining the selected beat during output stalls. Local arbitration does not promise equal bandwidth for all leaves. Shared FIFO head-of-line blocking remains possible; separate physical ports have separate endpoint queues. A plain > bypasses routed storage and remains exclusive. Ordinary static non-consuming wiring retains its existing fanout rules.
+
+The same topology renders a deterministic SVG. One network defaults to OUTPUT.sv.svg; multiple parent networks use OUTPUT.sv.MODULE.svg. --diagram PATH requires exactly one network, and --no-diagram suppresses publication. The compile result owns SV and diagrams together; how/does/compilation/release/temporary/models.md owns lifetime details.
+
+make fabric-test runs tests/inline_fabric_tree_test.py: shared consumers, thirteen-source/five-sink routing, mixed 16/33/129-bit DATA, signed/record/four-state payloads, widening, reset, stalls, independent ports, router stability/fairness/throughput, diagram checks and rejected legacy interfaces. examples/fabric_control.pigen is the complete public example. Native AXI whole-interface fabrics remain quarantined.

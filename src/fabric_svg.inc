@@ -77,8 +77,8 @@ static const char *svg_endpoint_instance(const fabric_endpoint *endpoint)
 static void svg_append_endpoint_name(pigen_string *output, const fabric_endpoint *endpoint)
 {
 	if (endpoint->direction)
-		pigen_append_format(output, "%s.%s.%s", endpoint->source.instance,
-			endpoint->source.port, endpoint->source.handle);
+		pigen_append_format(output, "%s.%s", endpoint->source.instance,
+			endpoint->source.port);
 	else
 		pigen_append_format(output, "%s.%s", endpoint->destination.instance,
 			endpoint->destination.port);
@@ -96,7 +96,7 @@ static char *svg_port_label(const fabric_endpoint *endpoint)
 	pigen_string text = {0};
 	pigen_append(&text, endpoint->direction ? "out " : "in ");
 	if (endpoint->direction)
-		pigen_append_format(&text, "%s.%s", endpoint->source.port, endpoint->source.handle);
+		pigen_append_format(&text, "%s", endpoint->source.port);
 	else
 		pigen_append(&text, endpoint->destination.port);
 	return text.data;
@@ -132,7 +132,6 @@ static int svg_connection_pointer_compare(const void *left_, const void *right_)
 	const fabric_connection *right = *(const fabric_connection *const *)right_;
 	int comparison = strcmp(left->source.instance, right->source.instance);
 	if (!comparison) comparison = strcmp(left->source.port, right->source.port);
-	if (!comparison) comparison = strcmp(left->source.handle, right->source.handle);
 	if (!comparison) comparison = strcmp(left->destination.instance, right->destination.instance);
 	if (!comparison) comparison = strcmp(left->destination.port, right->destination.port);
 	return comparison;
@@ -359,7 +358,7 @@ static void svg_build_model(svg_layout *layout)
 						-1, diagram_endpoint, port, -1});
 			}
 		}
-	qsort(direct, direct_count, sizeof(*direct), svg_connection_pointer_compare);
+	if (direct_count > 1) qsort(direct, direct_count, sizeof(*direct), svg_connection_pointer_compare);
 	for (size_t index = 0; index < direct_count; index++)
 	{
 		fabric_endpoint source = {.direction = 1, .source = direct[index]->source};
@@ -511,16 +510,16 @@ static void svg_resolve_collisions(svg_layout *layout, int rounds,
 		int adjusted = 0;
 		for (int left = 0; left < layout->node_count; left++)
 		{
-			double lx = layout->positions[left].x;
-			double ly = layout->positions[left].y;
 			for (int right = left + 1; right < layout->node_count; right++)
 			{
+				double lx = layout->positions[left].x;
+				double ly = layout->positions[left].y;
 				double rx = layout->positions[right].x;
 				double ry = layout->positions[right].y;
 				double dx = rx - lx, dy = ry - ly;
 				double distance = hypot(dx, dy);
 				double minimum = svg_clearance_radius(layout, left) +
-					svg_clearance_radius(layout, right);
+					svg_clearance_radius(layout, right) + 0.1;
 				if (distance >= minimum) continue;
 				adjusted = 1;
 				if (distance < 0.001)
@@ -795,7 +794,7 @@ static int svg_clear_of_nodes(const svg_layout *layout, int node, double x, doub
 {
 	for (int other = 0; other < layout->node_count; other++) if (other != node &&
 		hypot(x - layout->positions[other].x, y - layout->positions[other].y) <
-			svg_clearance_radius(layout, node) + svg_clearance_radius(layout, other)) return 0;
+			svg_clearance_radius(layout, node) + svg_clearance_radius(layout, other) + 0.1) return 0;
 	return 1;
 }
 
@@ -1260,6 +1259,7 @@ static void render_fabric_diagram(pigen_string *output, const fabric_block *fabr
 	svg_relax_layout(&layout);
 	svg_pack_components(&layout);
 	int crossings_before = svg_minimize_crossings(&layout);
+	svg_resolve_collisions(&layout, 600, 1);
 	int crossings = svg_crossing_count(&layout);
 	svg_fit_viewport(&layout, &width, &network_height);
 	svg_place_ports_and_labels(&layout);

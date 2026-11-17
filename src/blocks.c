@@ -1,33 +1,18 @@
-/* Lowering for top-level fabric language blocks. */
-#include <ctype.h>
+/* Balanced source-routed topology built from resolved module-port identities. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "pigen/blocks.h"
-#include "pigen/lexer.h"
 #include "pigen/util.h"
-
-typedef struct {
-	const char *source;
-	pigen_tokens tokens;
-	size_t at;
-} block_parser;
-
-typedef struct { char *name; char *value; } block_parameter;
-
-
-typedef struct { char *instance; char *port; char *handle; } fabric_source;
+typedef struct { char *instance; char *port;  } fabric_source;
 typedef struct { char *instance; char *port; } fabric_destination;
 
 typedef struct {
 	fabric_source source;
 	fabric_destination destination;
-	char *recognized_source;
 	int tier;
 	int direct;
-	size_t line;
 	unsigned long long path_word;
 	unsigned long long delivered_word;
 	int hops;
@@ -59,293 +44,18 @@ typedef struct {
 
 typedef struct {
 	char *name;
-	block_parameter *parameters;
-	size_t parameter_count;
 	fabric_connection *connections;
 	size_t connection_count;
-	int router_depth;
-	int endpoint_depth;
 } fabric_block;
-
-static const pigen_token *current(block_parser *parser)
-{
-	return &parser->tokens.items[parser->at];
-}
-
-static int token_is(block_parser *parser, size_t at, const char *text)
-{
-	return at < parser->tokens.count &&
-		pigen_token_is(parser->source, &parser->tokens.items[at], text);
-}
-
-static void position_at(block_parser *parser, size_t at)
-{
-	pigen_set_diagnostic_position(parser->source + parser->tokens.items[at].span.start);
-}
-
-static void expect(block_parser *parser, const char *text, const char *message)
-{
-	position_at(parser, parser->at);
-	if (!token_is(parser, parser->at, text))
-		pigen_fail(message);
-	parser->at++;
-}
-
-static char *token_copy(block_parser *parser, size_t at)
-{
-	pigen_span span = parser->tokens.items[at].span;
-	return pigen_copy_range(parser->source + span.start, span.end - span.start);
-}
-
-static int valid_identifier_token(block_parser *parser, size_t at)
-{
-	pigen_span span;
-	unsigned char first;
-	if (at >= parser->tokens.count) return 0;
-	span = parser->tokens.items[at].span;
-	if (span.start == span.end) return 0;
-	first = (unsigned char)parser->source[span.start];
-	return isalpha(first) || first == '_';
-}
-
-static char *trimmed_copy(const char *source, size_t start, size_t end)
-{
-	const char *first = pigen_skip_spaces(source + start, source + end);
-	const char *last = pigen_trim_end(first, source + end);
-	return pigen_copy_range(first, (size_t)(last - first));
-}
-
-static char *token_range_copy(block_parser *parser, size_t first, size_t after)
-{
-	if (first == after)
-		return pigen_copy_range("", 0);
-	return trimmed_copy(parser->source, parser->tokens.items[first].span.start,
-		parser->tokens.items[after - 1].span.end);
-}
-
-static char *parse_identifier(block_parser *parser, const char *message)
-{
-	char *result;
-	position_at(parser, parser->at);
-	if (!valid_identifier_token(parser, parser->at))
-		pigen_fail(message);
-	result = token_copy(parser, parser->at);
-	parser->at++;
-	return result;
-}
-
-static void append_parameter(block_parameter **items, size_t *count, block_parameter item)
-{
-	*items = pigen_resize(*items, (*count + 1) * sizeof(**items));
-	(*items)[(*count)++] = item;
-}
-
-static int named_parameter(block_parameter *items, size_t count, const char *name)
-{
-	for (size_t index = 0; index < count; index++)
-		if (!strcmp(items[index].name, name))
-			return 1;
-	return 0;
-}
-
-static void parse_parameters(block_parser *parser, block_parameter **items, size_t *count)
-{
-	expect(parser, "#", "expected parameter list or `begin`");
-	expect(parser, "(", "expected `(` after `#`");
-	while (!token_is(parser, parser->at, ")"))
-	{
-		block_parameter parameter;
-		size_t value_start;
-		size_t value_end;
-		int depth = 0;
-		expect(parser, "parameter", "expected `parameter integer NAME = DEFAULT`");
-		expect(parser, "integer", "block parameters must use `parameter integer`");
-		parameter.name = parse_identifier(parser, "expected parameter name");
-		if (named_parameter(*items, *count, parameter.name))
-			pigen_fail("duplicate block parameter");
-		expect(parser, "=", "expected `=` in block parameter");
-		value_start = parser->at;
-		while (current(parser)->kind != PIGEN_TOKEN_EOF)
-		{
-			if (!depth && (token_is(parser, parser->at, ",") || token_is(parser, parser->at, ")")))
-				break;
-			if (token_is(parser, parser->at, "(") || token_is(parser, parser->at, "[") || token_is(parser, parser->at, "{")) depth++;
-			if (token_is(parser, parser->at, ")") || token_is(parser, parser->at, "]") || token_is(parser, parser->at, "}")) depth--;
-			parser->at++;
-		}
-		value_end = parser->at;
-		if (value_start == value_end)
-			pigen_fail("block parameter default must not be empty");
-		parameter.value = token_range_copy(parser, value_start, value_end);
-		append_parameter(items, count, parameter);
-		if (token_is(parser, parser->at, ",")) parser->at++;
-	}
-	expect(parser, ")", "unterminated block parameter list");
-}
-
 
 static int source_equal(const fabric_source *left, const fabric_source *right)
 {
-	return !strcmp(left->instance, right->instance) && !strcmp(left->port, right->port) &&
-		!strcmp(left->handle, right->handle);
+	return !strcmp(left->instance, right->instance) && !strcmp(left->port, right->port);
 }
 
 static int destination_equal(const fabric_destination *left, const fabric_destination *right)
 {
 	return !strcmp(left->instance, right->instance) && !strcmp(left->port, right->port);
-}
-
-static fabric_source parse_fabric_source(block_parser *parser)
-{
-	fabric_source source;
-	source.instance = parse_identifier(parser, "fabric source requires `instance.port.handle`");
-	expect(parser, ".", "fabric source requires `instance.port.handle`");
-	source.port = parse_identifier(parser, "fabric source requires `instance.port.handle`");
-	expect(parser, ".", "fabric source requires `instance.port.handle`");
-	source.handle = parse_identifier(parser, "fabric source requires `instance.port.handle`");
-	return source;
-}
-
-static fabric_destination parse_fabric_destination(block_parser *parser, char **recognized)
-{
-	fabric_destination destination;
-	destination.instance = parse_identifier(parser, "fabric destination requires `instance.port`");
-	expect(parser, ".", "fabric destination requires `instance.port`");
-	destination.port = parse_identifier(parser, "fabric destination requires `instance.port`");
-	*recognized = NULL;
-	if (token_is(parser, parser->at, "."))
-	{
-		parser->at++;
-		*recognized = parse_identifier(parser, "expected recognized source name");
-	}
-	return destination;
-}
-
-static fabric_connection parse_fabric_connection(block_parser *parser)
-{
-	fabric_connection connection = {0};
-	connection.line = current(parser)->span.line;
-	connection.source = parse_fabric_source(parser);
-	if (token_is(parser, parser->at, ">"))
-	{
-		connection.direct = 1;
-		parser->at++;
-	}
-	else
-	{
-		int dashes = 0;
-		while (token_is(parser, parser->at, "-") ||
-			token_is(parser, parser->at, "--"))
-		{
-			dashes += token_is(parser, parser->at, "--") ? 2 : 1;
-			parser->at++;
-		}
-		if (token_is(parser, parser->at, "->")) { dashes++; parser->at++; }
-		else if (token_is(parser, parser->at, ">")) parser->at++;
-		else pigen_fail("fabric connection requires `>` or one or more `-` before `>`");
-		if (!dashes) pigen_fail("fabric routed connection requires an arrow such as `->`");
-		connection.tier = dashes;
-	}
-	connection.destination = parse_fabric_destination(parser, &connection.recognized_source);
-	expect(parser, ";", "fabric connection must end with semicolon");
-	return connection;
-}
-
-static int decimal_value(const char *text, int *result)
-{
-	char *end;
-	long value = strtol(text, &end, 10);
-	if (!*text || *end || value < 1 || value > 0x7fffffffL) return 0;
-	*result = (int)value;
-	return 1;
-}
-
-static void validate_fabric(const fabric_block *fabric)
-{
-	int has_payload_width = 0;
-	if (!fabric->connection_count) pigen_fail("fabric requires at least one connection");
-	for (size_t index = 0; index < fabric->parameter_count; index++)
-		if (!strcmp(fabric->parameters[index].name, "PAYLOAD_W")) has_payload_width = 1;
-	if (!has_payload_width) pigen_fail("fabric requires `parameter integer PAYLOAD_W = ...`");
-	for (size_t index = 0; index < fabric->connection_count; index++)
-	{
-		fabric_connection *connection = &fabric->connections[index];
-		for (size_t previous = 0; previous < index; previous++)
-		{
-			fabric_connection *other = &fabric->connections[previous];
-			if (source_equal(&connection->source, &other->source))
-				pigen_fail("fabric source handle is bound more than once");
-			if (connection->recognized_source && other->recognized_source &&
-				destination_equal(&connection->destination, &other->destination) &&
-				!strcmp(connection->recognized_source, other->recognized_source))
-				pigen_fail("fabric recognized source is bound more than once");
-			if (destination_equal(&connection->destination, &other->destination) &&
-				(connection->direct || other->direct))
-				pigen_fail("direct fabric destination cannot appear in another connection");
-		}
-	}
-}
-
-static fabric_block parse_fabric(block_parser *parser, size_t *source_end)
-{
-	fabric_block fabric = {0};
-	int has_router_depth = 0, has_endpoint_depth = 0, has_objective = 0;
-	fabric.router_depth = 2;
-	fabric.endpoint_depth = 2;
-	expect(parser, "fabric", "expected `fabric`");
-	fabric.name = parse_identifier(parser, "expected fabric name");
-	if (token_is(parser, parser->at, "#"))
-		parse_parameters(parser, &fabric.parameters, &fabric.parameter_count);
-	expect(parser, "begin", "expected `begin` after fabric declaration");
-	while (!token_is(parser, parser->at, "endfabric"))
-	{
-		if (token_is(parser, parser->at, "option"))
-		{
-			char *name;
-			char *value;
-			size_t value_start;
-			size_t value_end;
-			int parsed;
-			parser->at++;
-			name = parse_identifier(parser, "expected fabric option name");
-			expect(parser, "=", "expected `=` in fabric option");
-			value_start = parser->at;
-			while (!token_is(parser, parser->at, ";") && current(parser)->kind != PIGEN_TOKEN_EOF) parser->at++;
-			value_end = parser->at;
-			expect(parser, ";", "fabric option must end with semicolon");
-			if (value_start == value_end) pigen_fail("fabric option value must not be empty");
-			value = token_range_copy(parser, value_start, value_end);
-			if (!strcmp(name, "router_buffer_depth"))
-			{
-				if (has_router_depth) pigen_fail("duplicate fabric option `router_buffer_depth`");
-				if (!decimal_value(value, &parsed) || parsed != 2) pigen_fail("V0 fixes `router_buffer_depth` at 2 entries");
-				fabric.router_depth = parsed;
-				has_router_depth = 1;
-			}
-			else if (!strcmp(name, "endpoint_fifo_depth"))
-			{
-				if (has_endpoint_depth) pigen_fail("duplicate fabric option `endpoint_fifo_depth`");
-				if (!decimal_value(value, &parsed) || parsed != 2) pigen_fail("V0 fixes `endpoint_fifo_depth` at 2 entries");
-				fabric.endpoint_depth = parsed;
-				has_endpoint_depth = 1;
-			}
-			else if (!strcmp(name, "objective"))
-			{
-				if (has_objective) pigen_fail("duplicate fabric option `objective`");
-				has_objective = 1;
-			}
-			else pigen_fail("unknown fabric option");
-			free(name); free(value);
-			continue;
-		}
-		fabric.connections = pigen_resize(fabric.connections,
-			(fabric.connection_count + 1) * sizeof(*fabric.connections));
-		fabric.connections[fabric.connection_count++] = parse_fabric_connection(parser);
-	}
-	validate_fabric(&fabric);
-	*source_end = current(parser)->span.end;
-	parser->at++;
-	return fabric;
 }
 
 static int endpoint_compare(const void *left_, const void *right_)
@@ -362,7 +72,7 @@ static int endpoint_compare(const void *left_, const void *right_)
 	comparison = strcmp(left->source.instance, right->source.instance);
 	if (comparison) return comparison;
 	comparison = strcmp(left->source.port, right->source.port);
-	return comparison ? comparison : strcmp(left->source.handle, right->source.handle);
+	return comparison;
 }
 
 static int endpoint_equal(const fabric_endpoint *left, const fabric_endpoint *right)
@@ -622,362 +332,56 @@ static fabric_topology build_fabric_topology(fabric_block *fabric)
 
 #include "fabric_svg.inc"
 
-static void append_fabric_diagram(pigen_fabric_diagrams *diagrams,
-	const fabric_block *fabric, const fabric_topology *topology)
+
+int pigen_build_fabric_tree(const char *name,
+ const pigen_fabric_port *ports, size_t port_count,
+ const pigen_fabric_edge *edges, size_t edge_count, pigen_fabric_tree *tree)
 {
-	pigen_string svg = {0};
-	if (!diagrams) return;
-	render_fabric_diagram(&svg, fabric, topology);
-	diagrams->items = pigen_resize(diagrams->items,
-		(diagrams->count + 1) * sizeof(*diagrams->items));
-	diagrams->items[diagrams->count].name = pigen_copy_range(fabric->name, strlen(fabric->name));
-	diagrams->items[diagrams->count].svg = svg.data;
-	diagrams->count++;
+ if(!tree || !name || !edge_count || !ports || !edges) return 0;
+ *tree=(pigen_fabric_tree){0};
+ fabric_block fabric={.name=(char *)name};
+ fabric.connections=pigen_resize(NULL,edge_count*sizeof(*fabric.connections));
+ fabric.connection_count=edge_count;
+ for(size_t i=0;i<edge_count;i++) {
+  if(edges[i].source>=port_count || edges[i].destination>=port_count) {free(fabric.connections);return 0;}
+  const pigen_fabric_port *s=&ports[edges[i].source],*d=&ports[edges[i].destination];
+  fabric.connections[i]=(fabric_connection){.source={(char *)s->instance,(char *)s->port},
+   .destination={(char *)d->instance,(char *)d->port},.direct=edges[i].direct,.tier=(int)edges[i].tier};
+ }
+ fabric_topology topology=build_fabric_topology(&fabric);
+ tree->router_count=topology.router_count;tree->port_count=port_count;
+ tree->path_width=(size_t)topology.path_width;
+ tree->routers=pigen_resize(NULL,topology.router_count*sizeof(*tree->routers));
+ tree->port_router=pigen_resize(NULL,port_count*sizeof(*tree->port_router));
+ tree->port_number=pigen_resize(NULL,port_count*sizeof(*tree->port_number));
+ tree->paths=pigen_resize(NULL,edge_count*sizeof(*tree->paths));
+ tree->hops=pigen_resize(NULL,edge_count*sizeof(*tree->hops));
+ size_t *map=pigen_resize(NULL,topology.endpoint_count*sizeof(*map));
+ for(size_t i=0;i<port_count;i++) tree->port_router[i]=tree->port_number[i]=-1;
+ for(size_t i=0;i<topology.endpoint_count;i++) {
+  const fabric_endpoint *e=&topology.endpoints[i];
+  const char *instance=e->direction ? e->source.instance:e->destination.instance;
+  const char *port=e->direction ? e->source.port:e->destination.port;
+  size_t j=0;for(;j<port_count;j++) if(ports[j].source==e->direction &&
+    !strcmp(ports[j].instance,instance) && !strcmp(ports[j].port,port)) break;
+  if(j==port_count) pigen_fail("fabric topology lost resolved endpoint");
+  map[i]=j;tree->port_router[j]=topology.endpoint_router[i];tree->port_number[j]=topology.endpoint_port[i];
+ }
+ for(size_t r=0;r<topology.router_count;r++) for(size_t p=0;p<3;p++) {
+  fabric_attachment a=topology.routers[r].ports[p];
+  tree->routers[r].ports[p]=(pigen_fabric_attachment){a.kind,a.kind==2 ? map[a.target]:(size_t)a.target,(size_t)a.port};
+ }
+ for(size_t i=0;i<edge_count;i++) {tree->paths[i]=fabric.connections[i].path_word;tree->hops[i]=(size_t)fabric.connections[i].hops;}
+ pigen_string svg={0};render_fabric_diagram(&svg,&fabric,&topology);tree->svg=svg.data;
+ free(map);free(topology.routers);free(topology.endpoints);free(topology.endpoint_router);free(topology.endpoint_port);free(fabric.connections);
+ return 1;
 }
-
-static void append_source_text(pigen_string *output, const fabric_source *source, const char *suffix)
+void pigen_free_fabric_tree(pigen_fabric_tree *tree)
 {
-	pigen_append_format(output, "%s__%s__%s__%s", source->instance, source->port, source->handle, suffix);
+ if(!tree)return;
+ free(tree->routers);free(tree->port_router);free(tree->port_number);free(tree->paths);free(tree->hops);free(tree->svg);
+ *tree=(pigen_fabric_tree){0};
 }
-
-static void append_destination_text(pigen_string *output, const fabric_destination *destination, const char *suffix)
-{
-	pigen_append_format(output, "%s__%s__%s", destination->instance, destination->port, suffix);
-}
-
-static int destination_is_routed(const fabric_block *fabric, const fabric_destination *destination)
-{
-	for (size_t index = 0; index < fabric->connection_count; index++)
-		if (!fabric->connections[index].direct &&
-			destination_equal(&fabric->connections[index].destination, destination)) return 1;
-	return 0;
-}
-
-static int destination_first_at(const fabric_block *fabric, size_t connection)
-{
-	for (size_t index = 0; index < connection; index++)
-		if (destination_equal(&fabric->connections[index].destination,
-			&fabric->connections[connection].destination)) return 0;
-	return 1;
-}
-
-static void append_fabric_parameter_block(pigen_string *output, const fabric_block *fabric,
-	const fabric_topology *topology)
-{
-	pigen_append(output, " #(\n");
-	for (size_t index = 0; index < fabric->parameter_count; index++)
-		pigen_append_format(output, "\tparameter integer %s = %s,\n",
-			fabric->parameters[index].name, fabric->parameters[index].value);
-	if (topology->router_count)
-		pigen_append_format(output, "\tparameter integer PATH_W = %d\n", topology->path_width);
-	else
-	{
-		/* Remove the final comma when a direct-only fabric has no PATH_W. */
-		if (output->length >= 2 && output->data[output->length - 2] == ',')
-		{
-			memmove(output->data + output->length - 2, output->data + output->length - 1, 2);
-			output->length--;
-		}
-	}
-	pigen_append(output, ")");
-}
-
-static void render_fabric_skid(pigen_string *output, const fabric_block *fabric)
-{
-	pigen_append_format(output,
-		"module %s__fabric_skid #(parameter integer PACKET_W = 1)\n"
-		"\t(input logic clk, input logic reset, input logic enable, input logic in_valid, output logic in_ready, "
-		"input logic [PACKET_W-1:0] packet_in, output logic out_valid, input logic out_ready, output logic [PACKET_W-1:0] packet_out);\n"
-		"\tlogic [1:0] count; logic [PACKET_W-1:0] packet0, packet1;\n"
-		"\twire push = in_valid & in_ready; wire pop = out_valid & out_ready;\n"
-		"\tassign in_ready = enable & (count != 2); assign out_valid = enable & (count != 0); assign packet_out = packet0;\n"
-		"\talways_ff @(posedge clk) begin\n\t\tif (reset) begin count <= 0; packet0 <= '0; packet1 <= '0; end\n"
-		"\t\telse if (enable) case ({push, pop})\n"
-		"\t\t\t2'b10: begin if (count == 0) packet0 <= packet_in; else packet1 <= packet_in; count <= count + 1'b1; end\n"
-		"\t\t\t2'b01: begin if (count == 2) packet0 <= packet1; count <= count - 1'b1; end\n"
-		"\t\t\t2'b11: begin if (count == 2) begin packet0 <= packet1; packet1 <= packet_in; end else packet0 <= packet_in; end\n"
-		"\t\t\tdefault: begin end\n\t\tendcase\n\tend\nendmodule\n\n", fabric->name);
-}
-
-static void render_fabric_router(pigen_string *output, const fabric_block *fabric)
-{
-	pigen_append_format(output,
-		"module %s__fabric_router #(parameter integer PAYLOAD_W = 1, parameter integer PATH_W = 1, parameter integer PACKET_W = PAYLOAD_W + PATH_W)\n\t(\n",
-		fabric->name);
-	pigen_append(output, "\t\tinput logic clk, input logic reset, input logic enable,\n");
-	for (int port = 0; port < 3; port++)
-	{
-		pigen_append_format(output,
-			"\t\tinput logic p%d_in_valid, output logic p%d_in_ready, input logic [PACKET_W-1:0] p%d_in_packet,\n"
-			"\t\toutput logic p%d_out_valid, input logic p%d_out_ready, output logic [PACKET_W-1:0] p%d_out_packet%s\n",
-			port, port, port, port, port, port, port == 2 ? "" : ",");
-	}
-	pigen_append(output, "\t);\n\tfunction automatic [PACKET_W-1:0] forward_packet(input logic [PACKET_W-1:0] packet);\n"
-		"\t\tlogic [PATH_W-1:0] path; begin path = packet[PACKET_W-1:PAYLOAD_W]; path = path >> 1; "
-		"path[PATH_W-1] = packet[PAYLOAD_W]; forward_packet = {path, packet[PAYLOAD_W-1:0]}; end\n\tendfunction\n");
-	for (int port = 0; port < 3; port++)
-		pigen_append_format(output, "\tlogic [1:0] p%d_count; logic [PACKET_W-1:0] p%d_packet0, p%d_packet1; logic [1:0] grant%d; logic grant%d_valid, rr%d;\n",
-			port, port, port, port, port, port);
-	for (int port = 0; port < 3; port++)
-		pigen_append_format(output, "\twire p%d_remove; wire p%d_push = p%d_in_valid & p%d_in_ready; assign p%d_in_ready = enable & (p%d_count != 2);\n",
-			port, port, port, port, port, port);
-	for (int input = 0; input < 3; input++)
-		for (int target = 0; target < 3; target++) if (input != target)
-			pigen_append_format(output, "\twire p%d_to_p%d = (p%d_count != 0) & %sp%d_packet0[PAYLOAD_W];\n",
-				input, target, input, target == (input + 1) % 3 ? "~" : "", input);
-	for (int target = 0; target < 3; target++)
-	{
-		int first = (target + 2) % 3, second = (target + 1) % 3;
-		pigen_append_format(output,
-			"\talways @* begin grant%d_valid = 1'b0; grant%d = 0; p%d_out_valid = 1'b0; p%d_out_packet = '0;\n"
-			"\t\tif (p%d_to_p%d & p%d_to_p%d) begin grant%d_valid = 1'b1; grant%d = rr%d ? %d : %d; end\n"
-			"\t\telse if (p%d_to_p%d) begin grant%d_valid = 1'b1; grant%d = %d; end\n"
-			"\t\telse if (p%d_to_p%d) begin grant%d_valid = 1'b1; grant%d = %d; end\n"
-			"\t\tif (enable & grant%d_valid) begin p%d_out_valid = 1'b1; case (grant%d) 0: p%d_out_packet = forward_packet(p0_packet0); 1: p%d_out_packet = forward_packet(p1_packet0); default: p%d_out_packet = forward_packet(p2_packet0); endcase end\n\tend\n",
-			target, target, target, target, first, target, second, target, target, target, target, second, first,
-			first, target, target, target, first, second, target, target, target, second,
-			target, target, target, target, target, target);
-	}
-	for (int input = 0; input < 3; input++)
-	{
-		pigen_append_format(output, "\tassign p%d_remove = ", input);
-		for (int target = 0; target < 3; target++)
-			pigen_append_format(output, "%s(p%d_out_valid & p%d_out_ready & (grant%d == %d))",
-				target ? " | " : "", target, target, target, input);
-		pigen_append(output, ";\n");
-	}
-	for (int target = 0; target < 3; target++)
-		pigen_append_format(output, "\twire p%d_fire = p%d_out_valid & p%d_out_ready;\n", target, target, target);
-	pigen_append(output, "\talways_ff @(posedge clk) begin\n\t\tif (reset) begin\n");
-	for (int port = 0; port < 3; port++)
-		pigen_append_format(output, "\t\t\tp%d_count <= 0; p%d_packet0 <= '0; p%d_packet1 <= '0; rr%d <= 1'b0;\n", port, port, port, port);
-	pigen_append(output, "\t\tend else if (enable) begin\n");
-	for (int port = 0; port < 3; port++)
-		pigen_append_format(output,
-			"\t\t\tcase ({p%d_push, p%d_remove})\n"
-			"\t\t\t\t2'b10: begin if (p%d_count == 0) p%d_packet0 <= p%d_in_packet; else p%d_packet1 <= p%d_in_packet; p%d_count <= p%d_count + 1'b1; end\n"
-			"\t\t\t\t2'b01: begin if (p%d_count == 2) p%d_packet0 <= p%d_packet1; p%d_count <= p%d_count - 1'b1; end\n"
-			"\t\t\t\t2'b11: begin if (p%d_count == 2) begin p%d_packet0 <= p%d_packet1; p%d_packet1 <= p%d_in_packet; end else p%d_packet0 <= p%d_in_packet; end\n"
-			"\t\t\t\tdefault: begin end\n\t\t\tendcase\n",
-			port, port, port, port, port, port, port, port, port, port, port, port, port, port, port, port, port, port, port, port, port);
-	for (int target = 0; target < 3; target++)
-		pigen_append_format(output, "\t\t\tif (p%d_fire) rr%d <= (grant%d == %d);\n",
-			target, target, target, (target + 2) % 3);
-	pigen_append(output, "\t\tend\n\tend\nendmodule\n\n");
-}
-
-static void render_fabric(pigen_string *output, fabric_block *fabric,
-	pigen_fabric_diagrams *diagrams)
-{
-	fabric_topology topology = build_fabric_topology(fabric);
-	append_fabric_diagram(diagrams, fabric, &topology);
-	pigen_append_format(output, "\n// Pigen fabric block `%s`.\n", fabric->name);
-	pigen_append_format(output, "// route manifest: payload=PAYLOAD_W path_width=%d\n", topology.path_width);
-	for (size_t index = 0; index < fabric->connection_count; index++)
-	{
-		fabric_connection *connection = &fabric->connections[index];
-		pigen_append_format(output, "//   %s.%s.%s ", connection->source.instance,
-			connection->source.port, connection->source.handle);
-		if (connection->direct) pigen_append(output, "> ");
-		else
-		{
-			for (int dash = 0; dash < connection->tier; dash++) pigen_append(output, "-");
-			pigen_append(output, "> ");
-		}
-		pigen_append_format(output, "%s.%s", connection->destination.instance,
-			connection->destination.port);
-		if (connection->recognized_source)
-			pigen_append_format(output, ".%s", connection->recognized_source);
-		if (connection->direct) pigen_append(output, " direct\n");
-		else pigen_append_format(output, " hops=%d path=%llu delivered=%llu\n",
-			connection->hops, connection->path_word, connection->delivered_word);
-	}
-	render_fabric_skid(output, fabric);
-	if (topology.router_count) render_fabric_router(output, fabric);
-	pigen_append_format(output, "module %s", fabric->name);
-	append_fabric_parameter_block(output, fabric, &topology);
-	pigen_append(output, "\n\t(\n\t\tinput logic clk,\n\t\tinput logic reset,\n\t\tinput logic enable");
-	for (size_t index = 0; index < fabric->connection_count; index++)
-	{
-		fabric_source *source = &fabric->connections[index].source;
-		pigen_append(output, ",\n\t\tinput logic "); append_source_text(output, source, "valid");
-		pigen_append(output, ",\n\t\toutput logic "); append_source_text(output, source, "ready");
-		pigen_append(output, ",\n\t\tinput logic [PAYLOAD_W-1:0] "); append_source_text(output, source, "payload");
-	}
-	for (size_t index = 0; index < fabric->connection_count; index++) if (destination_first_at(fabric, index))
-	{
-		fabric_destination *destination = &fabric->connections[index].destination;
-		pigen_append(output, ",\n\t\toutput logic "); append_destination_text(output, destination, "valid");
-		pigen_append(output, ",\n\t\tinput logic "); append_destination_text(output, destination, "ready");
-		pigen_append(output, ",\n\t\toutput logic [PAYLOAD_W-1:0] "); append_destination_text(output, destination, "payload");
-		if (destination_is_routed(fabric, destination))
-		{
-			pigen_append(output, ",\n\t\toutput logic [PATH_W-1:0] "); append_destination_text(output, destination, "path");
-		}
-	}
-	pigen_append(output, "\n\t);\n");
-	if (topology.router_count)
-	{
-		pigen_append(output, "\tlocalparam integer PACKET_W = PATH_W + PAYLOAD_W;\n");
-		for (size_t index = 0; index < fabric->connection_count; index++) if (!fabric->connections[index].direct)
-		{
-			fabric_connection *connection = &fabric->connections[index];
-			pigen_append(output, "\tlocalparam logic [PATH_W-1:0] ROUTE__");
-			pigen_append_format(output, "%s__%s__%s = %llu;\n", connection->source.instance,
-				connection->source.port, connection->source.handle, connection->path_word);
-			if (connection->recognized_source)
-				pigen_append_format(output, "\tlocalparam logic [PATH_W-1:0] %s__%s__SOURCE__%s = %llu;\n",
-					connection->destination.instance, connection->destination.port,
-					connection->recognized_source, connection->delivered_word);
-		}
-	}
-	/* Endpoint skid queues. */
-	for (size_t index = 0; index < fabric->connection_count; index++)
-	{
-		fabric_connection *connection = &fabric->connections[index];
-		const char *width = connection->direct ? "PAYLOAD_W" : "PACKET_W";
-		pigen_append(output, "\twire ["); pigen_append(output, width); pigen_append(output, "-1:0] "); append_source_text(output, &connection->source, "packet_in"); pigen_append(output, ";\n\twire ");
-		append_source_text(output, &connection->source, "packet_valid"); pigen_append(output, ", "); append_source_text(output, &connection->source, "packet_ready");
-		pigen_append(output, ";\n\twire ["); pigen_append(output, width); pigen_append(output, "-1:0] "); append_source_text(output, &connection->source, "packet"); pigen_append(output, ";\n\tassign "); append_source_text(output, &connection->source, "packet_in"); pigen_append(output, " = ");
-		if (connection->direct) append_source_text(output, &connection->source, "payload");
-		else { pigen_append(output, "{ROUTE__"); pigen_append_format(output, "%s__%s__%s, ", connection->source.instance, connection->source.port, connection->source.handle); append_source_text(output, &connection->source, "payload"); pigen_append(output, "}"); }
-		pigen_append(output, ";\n\t"); pigen_append_format(output, "%s__fabric_skid #(.PACKET_W(%s)) u_tx__%s__%s__%s (", fabric->name, width, connection->source.instance, connection->source.port, connection->source.handle);
-		pigen_append(output, ".clk(clk), .reset(reset), .enable(enable), .in_valid("); append_source_text(output, &connection->source, "valid"); pigen_append(output, "), .in_ready("); append_source_text(output, &connection->source, "ready"); pigen_append(output, "), .packet_in("); append_source_text(output, &connection->source, "packet_in"); pigen_append(output, "), .out_valid("); append_source_text(output, &connection->source, "packet_valid"); pigen_append(output, "), .out_ready("); append_source_text(output, &connection->source, "packet_ready"); pigen_append(output, "), .packet_out("); append_source_text(output, &connection->source, "packet"); pigen_append(output, "));\n");
-	}
-	for (size_t index = 0; index < fabric->connection_count; index++) if (destination_first_at(fabric, index))
-	{
-		fabric_destination *destination = &fabric->connections[index].destination;
-		int routed = destination_is_routed(fabric, destination);
-		const char *width = routed ? "PACKET_W" : "PAYLOAD_W";
-		pigen_append(output, "\twire "); append_destination_text(output, destination, "packet_valid"); pigen_append(output, ", "); append_destination_text(output, destination, "packet_ready"); pigen_append(output, ";\n\twire ["); pigen_append(output, width); pigen_append(output, "-1:0] "); append_destination_text(output, destination, "packet"); pigen_append(output, ", "); append_destination_text(output, destination, "packet_out"); pigen_append(output, ";\n\t");
-		pigen_append_format(output, "%s__fabric_skid #(.PACKET_W(%s)) u_rx__%s__%s (", fabric->name, width, destination->instance, destination->port);
-		pigen_append(output, ".clk(clk), .reset(reset), .enable(enable), .in_valid("); append_destination_text(output, destination, "packet_valid"); pigen_append(output, "), .in_ready("); append_destination_text(output, destination, "packet_ready"); pigen_append(output, "), .packet_in("); append_destination_text(output, destination, "packet"); pigen_append(output, "), .out_valid("); append_destination_text(output, destination, "valid"); pigen_append(output, "), .out_ready("); append_destination_text(output, destination, "ready"); pigen_append(output, "), .packet_out("); append_destination_text(output, destination, "packet_out"); pigen_append(output, "));\n\tassign "); append_destination_text(output, destination, "payload"); pigen_append(output, " = "); append_destination_text(output, destination, "packet_out");
-		if (routed) pigen_append(output, "[PAYLOAD_W-1:0]");
-		pigen_append(output, ";\n");
-		if (routed) { pigen_append(output, "\tassign "); append_destination_text(output, destination, "path"); pigen_append(output, " = "); append_destination_text(output, destination, "packet_out"); pigen_append(output, "[PACKET_W-1:PAYLOAD_W];\n"); }
-	}
-	/* Router instances and physical links. */
-	for (size_t router = 0; router < topology.router_count; router++) for (int port = 0; port < 3; port++)
-		pigen_append_format(output, "\twire r%zu_p%d_in_valid, r%zu_p%d_in_ready; wire [PACKET_W-1:0] r%zu_p%d_in_packet; wire r%zu_p%d_out_valid, r%zu_p%d_out_ready; wire [PACKET_W-1:0] r%zu_p%d_out_packet;\n", router, port, router, port, router, port, router, port, router, port, router, port);
-	for (size_t router = 0; router < topology.router_count; router++)
-	{
-		pigen_append_format(output, "\t%s__fabric_router #(.PAYLOAD_W(PAYLOAD_W), .PATH_W(PATH_W)) u_r%zu (.clk(clk), .reset(reset), .enable(enable)", fabric->name, router);
-		for (int port = 0; port < 3; port++) pigen_append_format(output, ", .p%d_in_valid(r%zu_p%d_in_valid), .p%d_in_ready(r%zu_p%d_in_ready), .p%d_in_packet(r%zu_p%d_in_packet), .p%d_out_valid(r%zu_p%d_out_valid), .p%d_out_ready(r%zu_p%d_out_ready), .p%d_out_packet(r%zu_p%d_out_packet)", port, router, port, port, router, port, port, router, port, port, router, port, port, router, port, port, router, port);
-		pigen_append(output, ");\n");
-	}
-	for (size_t router = 0; router < topology.router_count; router++) for (int port = 0; port < 3; port++)
-	{
-		fabric_attachment *attachment = &topology.routers[router].ports[port];
-		if (!attachment->kind)
-			pigen_append_format(output, "\tassign r%zu_p%d_in_valid = 1'b0; assign r%zu_p%d_in_packet = '0; assign r%zu_p%d_out_ready = 1'b1;\n", router, port, router, port, router, port);
-		else if (attachment->kind == 1 && ((int)router < attachment->target || ((int)router == attachment->target && port < attachment->port)))
-		{
-			pigen_append_format(output, "\tassign r%d_p%d_in_valid = r%zu_p%d_out_valid; assign r%d_p%d_in_packet = r%zu_p%d_out_packet; assign r%zu_p%d_out_ready = r%d_p%d_in_ready;\n", attachment->target, attachment->port, router, port, attachment->target, attachment->port, router, port, router, port, attachment->target, attachment->port);
-			pigen_append_format(output, "\tassign r%zu_p%d_in_valid = r%d_p%d_out_valid; assign r%zu_p%d_in_packet = r%d_p%d_out_packet; assign r%d_p%d_out_ready = r%zu_p%d_in_ready;\n", router, port, attachment->target, attachment->port, router, port, attachment->target, attachment->port, attachment->target, attachment->port, router, port);
-		}
-		else if (attachment->kind == 2)
-		{
-			fabric_endpoint *endpoint = &topology.endpoints[attachment->target];
-			if (endpoint->direction)
-			{
-				pigen_append_format(output, "\tassign r%zu_p%d_in_valid = ", router, port); append_source_text(output, &endpoint->source, "packet_valid"); pigen_append_format(output, "; assign r%zu_p%d_in_packet = ", router, port); append_source_text(output, &endpoint->source, "packet"); pigen_append(output, "; assign "); append_source_text(output, &endpoint->source, "packet_ready"); pigen_append_format(output, " = r%zu_p%d_in_ready; assign r%zu_p%d_out_ready = 1'b1;\n", router, port, router, port);
-			}
-			else
-			{
-				pigen_append(output, "\tassign "); append_destination_text(output, &endpoint->destination, "packet_valid"); pigen_append_format(output, " = r%zu_p%d_out_valid; assign ", router, port); append_destination_text(output, &endpoint->destination, "packet"); pigen_append_format(output, " = r%zu_p%d_out_packet; assign r%zu_p%d_out_ready = ", router, port, router, port); append_destination_text(output, &endpoint->destination, "packet_ready"); pigen_append_format(output, "; assign r%zu_p%d_in_valid = 1'b0; assign r%zu_p%d_in_packet = '0;\n", router, port, router, port);
-			}
-		}
-	}
-	for (size_t index = 0; index < fabric->connection_count; index++) if (fabric->connections[index].direct)
-	{
-		fabric_connection *connection = &fabric->connections[index];
-		pigen_append(output, "\tassign "); append_destination_text(output, &connection->destination, "packet_valid"); pigen_append(output, " = "); append_source_text(output, &connection->source, "packet_valid"); pigen_append(output, "; assign "); append_destination_text(output, &connection->destination, "packet"); pigen_append(output, " = "); append_source_text(output, &connection->source, "packet"); pigen_append(output, "; assign "); append_source_text(output, &connection->source, "packet_ready"); pigen_append(output, " = "); append_destination_text(output, &connection->destination, "packet_ready"); pigen_append(output, ";\n");
-	}
-	pigen_append(output, "endmodule\n\n");
-	free(topology.routers);
-	free(topology.endpoints);
-	free(topology.endpoint_router);
-	free(topology.endpoint_port);
-}
-
-
-static int ordinary_unit_end(block_parser *parser, const char **closing)
-{
-	static const struct { const char *opening; const char *closing; } units[] = {
-		{"module", "endmodule"}, {"interface", "endinterface"},
-		{"package", "endpackage"}, {"program", "endprogram"},
-		{"class", "endclass"}, {"checker", "endchecker"}
-	};
-	for (size_t index = 0; index < sizeof(units) / sizeof(units[0]); index++)
-		if (token_is(parser, parser->at, units[index].opening))
-		{
-			*closing = units[index].closing;
-			return 1;
-		}
-	return 0;
-}
-
-char *pigen_lower_blocks(const char *source, size_t length, pigen_string *generated,
-	pigen_fabric_diagrams *diagrams)
-{
-	block_parser parser = {source, {0}, 0};
-	char *cleaned = pigen_copy_range(source, length);
-	pigen_lex_source(source, length, &parser.tokens);
-	while (current(&parser)->kind != PIGEN_TOKEN_EOF)
-	{
-		const char *closing;
-		if (ordinary_unit_end(&parser, &closing))
-		{
-			while (current(&parser)->kind != PIGEN_TOKEN_EOF &&
-				!token_is(&parser, parser.at, closing)) parser.at++;
-			if (current(&parser)->kind == PIGEN_TOKEN_EOF)
-				pigen_fail("unterminated SystemVerilog design unit");
-			parser.at++;
-			continue;
-		}
-		if (token_is(&parser, parser.at, "fabric"))
-		{
-			/* Typed port-list fabrics belong to the structured frontend. The
-			 * legacy PAYLOAD_W form has parameters but no port list. */
-			size_t header = parser.at + 2;
-			if (token_is(&parser, header, "#") && token_is(&parser, header + 1, "("))
-			{
-				int depth = 1;
-				header += 2;
-				while (depth && header < parser.tokens.count)
-				{
-					if (token_is(&parser, header, "(")) depth++;
-					if (token_is(&parser, header, ")")) depth--;
-					header++;
-				}
-			}
-			if (token_is(&parser, header, "("))
-			{
-				while (current(&parser)->kind != PIGEN_TOKEN_EOF &&
-					!token_is(&parser, parser.at, "endfabric")) parser.at++;
-				if (current(&parser)->kind == PIGEN_TOKEN_EOF) pigen_fail("typed fabric requires `endfabric`");
-				parser.at++;
-				continue;
-			}
-
-			size_t start = current(&parser)->span.start;
-			size_t end;
-			fabric_block fabric = parse_fabric(&parser, &end);
-			for (size_t index = start; index < end; index++) if (cleaned[index] != '\n') cleaned[index] = ' ';
-			render_fabric(generated, &fabric, diagrams);
-			continue;
-		}
-		if (token_is(&parser, parser.at, "pipeline"))
-		{
-			position_at(&parser, parser.at);
-			pigen_fail("a pipeline must be declared inside a clocked module process");
-		}
-		parser.at++;
-	}
-	pigen_free_tokens(&parser.tokens);
-	return cleaned;
-}
-
 void pigen_free_fabric_diagrams(pigen_fabric_diagrams *diagrams)
 {
 	if (!diagrams) return;

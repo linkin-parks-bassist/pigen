@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-17T16:30:13+11:00"
+revised_at: "2026-11-17T18:00:33+11:00"
 ---
 
 Remaining repository work.
@@ -10,8 +10,6 @@ Remaining repository work.
 3. Expand native core profiles and transaction composition beyond existing UART/SPI/I2C/I2S/Stream/Lite/SDRAM/AXI4 coverage; extend framing, widths and memory throughput. Preserve independent RTL evidence and browser acceptance. Views must expose RHS/control semantics, preserve transform ready/valid, AND combining valids, omit reset cases and separate write-enable indicators, retain assign dependencies, collapse raw SV, preserve compact layouts/uniform clocks/stable controls and pass visual checks. Board qualification needs SDRAM part/temperature/geometry/clock selection, forwarded-clock phase and FPGA I/O constraints.
 
 After substantive work, harden nested/partial/spanning and multidimensional aliases, multiword constants/powers, standalone negative typing, unresolved bounds, writer/cross-clock audits, specialization provenance, broader compatibility and independent fire/ready probes against actual update enables (what/is/elastic/rtl/task/eight.md). Preserve interrupted work.
-
-Reconcile fabric lowering with the source-blind inline contract: move the balanced three-port tree behind resolved child-port endpoints and remove the legacy fixed-width dialect/path interface. The governing direction is explicit in SPEC.md at d14aef2 and reaffirmed by David: connect exclusively actual top-level module ports; sender identity belongs in packet DATA when needed, and producers need no consumer knowledge. Preserve distinct endpoint readiness rather than hiding shared-queue dependencies behind handle-like aliases (how/to/write/prototype/fabrics.md).
 
 Open decisions: FSM startup without asserted reset; computed automatic-input validity; pipeline yield surface; fabric manifest/SVG retention; struct-like child instantiation; whether native AXI interconnects should be reactivated, redesigned or retired after David reviews the quarantined work. No AXI fabric extension is planned before that review.
 

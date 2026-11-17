@@ -23,7 +23,8 @@ module child_input_alias_tb;
   if(dut.a.o_valid && dut.a.o_ready) begin queue[0][tail[0]]=dut.a.o; tail[0]=tail[0]+1; end
   if(dut.c.o_valid && dut.c.o_ready) begin queue[1][tail[1]]=dut.c.o; tail[1]=tail[1]+1; end
   if(cycle==100) begin
-   if(head[0]<20 || head[1]<40) $fatal(1,"no progress");
+   // Routed lanes share buffered links; check progress without assuming independent-link bandwidth.
+   if(head[0]<20 || head[1]<20) $fatal(1,"no progress");
    $display("PASS child input alias ownership"); $finish;
   end
  end

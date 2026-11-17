@@ -17,16 +17,6 @@ static int token_text(const pigen_syntax_tree *syntax, pigen_token_id token,
 	return *text != NULL;
 }
 
-static int token_equal(const pigen_syntax_tree *syntax, pigen_token_id a,
-	pigen_token_id b)
-{
-	const char *at, *bt;
-	size_t al = 0, bl = 0;
-	if (!token_text(syntax, a, &at, &al) ||
-		!token_text(syntax, b, &bt, &bl)) return 0;
-	return al == bl && !memcmp(at, bt, al);
-}
-
 static const pigen_semantic_instance *find_instance(
 	pigen_semantic_model *model, pigen_module_id module,
 	const pigen_syntax_tree *syntax, pigen_token_id name)
@@ -211,22 +201,6 @@ static pigen_rtl_type_id fab_control_type(pigen_rtl_lowering *lowering)
 	return pigen_lower_rtl_type(lowering, logic_one);
 }
 
-static pigen_rtl_expr_id fab_logic(pigen_rtl_lowering *lowering,
-	pigen_binary_operator operator, pigen_rtl_expr_id left,
-	pigen_rtl_expr_id right, pigen_rtl_type_id control, pigen_source_span span)
-{
-	pigen_binary_resolution resolution;
-	pigen_data_type_id one = pigen_data_type_sized_logic(lowering->semantics,
-		1, PIGEN_SIGN_UNSIGNED);
-
-	resolution = (pigen_binary_resolution){
-		{PIGEN_CONVERSION_IDENTITY, one, one},
-		{PIGEN_CONVERSION_IDENTITY, one, one},
-		{operator, one, one, one}};
-	return pigen_rtl_expr_add_binary(lowering->rtl, control, &resolution,
-		left, right, span);
-}
-
 static pigen_rtl_expr_id fab_not(pigen_rtl_lowering *lowering,
 	pigen_rtl_expr_id operand, pigen_rtl_type_id control, pigen_source_span span)
 {
@@ -313,6 +287,46 @@ static int route_through_skid(pigen_rtl_lowering *lowering,
 	if (written > 0 && (size_t)written < sizeof(name))
 		pigen_rtl_set_name(rtl, &rtl->instances[instance.index].name, name);
 	return 1;
+}
+
+static pigen_syntax_id next_fabric_edge(const pigen_syntax_tree *syntax,
+	pigen_syntax_id module, pigen_syntax_id edge)
+{
+	const pigen_syntax_node *owner = pigen_syntax_get(syntax, module);
+	pigen_syntax_id item = owner->first_child;
+	if (edge.index != PIGEN_INVALID_ID)
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(syntax, edge);
+		if (node->next_sibling.index != PIGEN_INVALID_ID)
+			return node->next_sibling;
+		item = pigen_syntax_get(syntax, node->parent)->next_sibling;
+	}
+	while (item.index != PIGEN_INVALID_ID)
+	{
+		const pigen_syntax_node *node = pigen_syntax_get(syntax, item);
+		if (node->kind == PIGEN_SYNTAX_FABRIC &&
+			node->first_child.index != PIGEN_INVALID_ID) return node->first_child;
+		item = node->next_sibling;
+	}
+	return (pigen_syntax_id){PIGEN_INVALID_ID};
+}
+
+/* Quarantined native AXI fabric lowering: not connected to production. */
+#if 0
+static pigen_rtl_expr_id fab_logic(pigen_rtl_lowering *lowering,
+	pigen_binary_operator operator, pigen_rtl_expr_id left,
+	pigen_rtl_expr_id right, pigen_rtl_type_id control, pigen_source_span span)
+{
+	pigen_binary_resolution resolution;
+	pigen_data_type_id one = pigen_data_type_sized_logic(lowering->semantics,
+		1, PIGEN_SIGN_UNSIGNED);
+
+	resolution = (pigen_binary_resolution){
+		{PIGEN_CONVERSION_IDENTITY, one, one},
+		{PIGEN_CONVERSION_IDENTITY, one, one},
+		{operator, one, one, one}};
+	return pigen_rtl_expr_add_binary(lowering->rtl, control, &resolution,
+		left, right, span);
 }
 
 static int route_through_merge2(pigen_rtl_lowering *lowering,
@@ -575,30 +589,6 @@ static int route_through_mergeN(pigen_rtl_lowering *lowering,
 }
 
 /* Walk fabric edges in module order, crossing block boundaries. */
-static pigen_syntax_id next_fabric_edge(const pigen_syntax_tree *syntax,
-	pigen_syntax_id module, pigen_syntax_id edge)
-{
-	const pigen_syntax_node *owner = pigen_syntax_get(syntax, module);
-	pigen_syntax_id item = owner->first_child;
-	if (edge.index != PIGEN_INVALID_ID)
-	{
-		const pigen_syntax_node *node = pigen_syntax_get(syntax, edge);
-		if (node->next_sibling.index != PIGEN_INVALID_ID)
-			return node->next_sibling;
-		item = pigen_syntax_get(syntax, node->parent)->next_sibling;
-	}
-	while (item.index != PIGEN_INVALID_ID)
-	{
-		const pigen_syntax_node *node = pigen_syntax_get(syntax, item);
-		if (node->kind == PIGEN_SYNTAX_FABRIC &&
-			node->first_child.index != PIGEN_INVALID_ID) return node->first_child;
-		item = node->next_sibling;
-	}
-	return (pigen_syntax_id){PIGEN_INVALID_ID};
-}
-
-/* Quarantined native AXI fabric lowering: not connected to production. */
-#if 0
 static pigen_rtl_expr_id fabric_integer(pigen_rtl_lowering *lowering,
 	size_t value, pigen_source_span span)
 {
@@ -1114,395 +1104,184 @@ static int lower_protocol_fabrics(pigen_rtl_lowering *lowering,
 
 #endif
 
-int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
-	const pigen_syntax_tree *syntax)
+typedef struct {pigen_rtl_object_id payload,valid,ready;} tree_channel;
+typedef struct {tree_channel in[3],out[3];} tree_router;
+typedef struct {
+ pigen_fabric_port description;
+ tree_channel channel;
+ const pigen_semantic_instance_connection *connection;
+} tree_port;
+
+static pigen_rtl_type_id tree_bits(pigen_rtl_lowering *l,size_t width)
+{return pigen_lower_rtl_type(l,pigen_data_type_sized_logic(l->semantics,width,PIGEN_SIGN_UNSIGNED));}
+static pigen_rtl_expr_id tree_number(pigen_rtl_lowering *l,size_t width,uint64_t n,pigen_source_span span)
+{return pigen_rtl_expr_add_bits(l->rtl,tree_bits(l,width),n,span);}
+static pigen_rtl_expr_id tree_index(pigen_rtl_lowering *l,size_t n,pigen_source_span span)
 {
-	pigen_semantic_model *model;
-	pigen_rtl_model *rtl;
-	const pigen_semantic_module *owner;
-	pigen_rtl_module_id rtl_module = (pigen_rtl_module_id){PIGEN_INVALID_ID};
-	const pigen_syntax_node *module_node;
-	pigen_syntax_id child;
-	size_t i;
+ pigen_rtl_literal_word word={(uint64_t)n,0,0};
+ return pigen_rtl_expr_add_literal(l->rtl,PIGEN_RTL_EXPR_INTEGER,tree_bits(l,64),&word,64,0,span);
+}
+static char *tree_private_name(pigen_rtl_lowering *l,pigen_rtl_module_id m,const char *kind,uint32_t id)
+{
+ for(size_t suffix=0;;suffix++) {
+  char name[96];snprintf(name,sizeof name,"__pigen_fabric_%s_%u_%zu",kind,id,suffix);
+  int occupied=0;
+  pigen_module_id module=l->rtl->modules[m.index].semantic_module;
+  if(pigen_symbol_lookup_text(l->semantics,l->semantics->modules[module.index].scope,name,strlen(name)).index!=PIGEN_INVALID_ID)occupied=1;
+  for(size_t i=0;i<l->rtl->object_count;i++)if(l->rtl->objects[i].module.index==m.index && l->rtl->objects[i].name && !strcmp(l->rtl->objects[i].name,name))occupied=1;
+  for(size_t i=0;i<l->rtl->instance_count;i++)if(l->rtl->instances[i].module.index==m.index && l->rtl->instances[i].name && !strcmp(l->rtl->instances[i].name,name))occupied=1;
+  if(!occupied)return pigen_copy_range(name,strlen(name));
+ }
+}
+static pigen_rtl_object_id tree_wire(pigen_rtl_lowering *l,pigen_rtl_module_id m,pigen_rtl_type_id type,pigen_source_span span)
+{
+ pigen_rtl_object_id o=pigen_rtl_object_add_with_owner(l->rtl,m,PIGEN_RTL_OBJECT_VARIABLE,type,PIGEN_SEMANTIC_INTERNAL,(pigen_signal_id){PIGEN_INVALID_ID},span);
+ if(o.index==PIGEN_INVALID_ID)return o;
+ char *name=tree_private_name(l,m,"wire",o.index);pigen_rtl_set_name(l->rtl,&l->rtl->objects[o.index].name,name);free(name);return o;
+}
+static int tree_assign(pigen_rtl_lowering *l,pigen_rtl_module_id m,pigen_rtl_object_id d,pigen_rtl_expr_id v,pigen_source_span span)
+{return v.index!=PIGEN_INVALID_ID && pigen_rtl_equation_add_with_owner(l->rtl,m,d,v,span).index!=PIGEN_INVALID_ID;}
+static pigen_rtl_expr_id tree_slice(pigen_rtl_lowering *l,pigen_rtl_object_id o,pigen_rtl_type_id type,size_t low,size_t width,pigen_source_span span)
+{
+ return pigen_rtl_expr_add_select(l->rtl,type,fab_obj_expr(l,o,span),tree_index(l,low+width-1,span),tree_index(l,low,span),PIGEN_SEMANTIC_SELECT_RANGE,span);
+}
+static tree_channel tree_new_channel(pigen_rtl_lowering *l,pigen_rtl_module_id m,pigen_rtl_type_id packet,pigen_source_span span)
+{return (tree_channel){tree_wire(l,m,packet,span),tree_wire(l,m,fab_control_type(l),span),tree_wire(l,m,fab_control_type(l),span)};}
+static pigen_rtl_expr_id tree_value(pigen_rtl_lowering *l,tree_port source,tree_port destination,pigen_source_span span)
+{
+ pigen_conversion conversion;
+ pigen_data_type_id from=l->semantics->signals[source.connection->port_signal.index].data_type;
+ pigen_data_type_id to=l->semantics->signals[destination.connection->port_signal.index].data_type;
+ if(!pigen_data_type_resolve_assignment_conversion(l->semantics,from,to,&conversion))return (pigen_rtl_expr_id){PIGEN_INVALID_ID};
+ pigen_rtl_expr_id value=fab_obj_expr(l,source.channel.payload,span);
+ return conversion.kind==PIGEN_CONVERSION_IDENTITY ? value:pigen_rtl_expr_add_conversion(l->rtl,pigen_rtl_object_get(l->rtl,destination.channel.payload)->type,&conversion,value,span);
+}
+static int tree_join(pigen_rtl_lowering *l,pigen_rtl_module_id m,tree_channel destination,tree_channel source,pigen_source_span span)
+{
+ return connect(l,m,destination.payload,source.payload,span) && connect(l,m,destination.valid,source.valid,span) && connect(l,m,source.ready,destination.ready,span);
+}
+static char *tree_token_copy(const pigen_syntax_tree *s,pigen_token_id token)
+{const char *text;size_t n;if(!token_text(s,token,&text,&n))return NULL;return pigen_copy_range(text,n);}
+static size_t tree_add_port(pigen_rtl_lowering *l,const pigen_syntax_tree *syntax,pigen_module_id module,
+ pigen_token_id instance,pigen_token_id port,int source,tree_port **ports,size_t *count)
+{
+ const pigen_semantic_instance *child=find_instance(l->semantics,module,syntax,instance);
+ const pigen_semantic_instance_connection *connection=child ? find_port(l->semantics,child,syntax,port,NULL):NULL;
+ if(!connection)return SIZE_MAX;
+ for(size_t i=0;i<*count;i++)if((*ports)[i].connection==connection)return i;
+ const pigen_semantic_instance_connection *valid=find_port(l->semantics,child,syntax,port,"_valid"),*ready=find_port(l->semantics,child,syntax,port,"_ready");
+ tree_port item={{tree_token_copy(syntax,instance),tree_token_copy(syntax,port),source},
+  {connection_payload(l,connection),connection_control(l,connection,valid,0),connection_control(l,connection,ready,1)},connection};
+ *ports=pigen_resize(*ports,(*count+1)*sizeof(**ports));(*ports)[*count]=item;return (*count)++;
+}
+static int tree_make_router(pigen_rtl_lowering *l,pigen_module_id module,pigen_rtl_module_id m,
+ tree_router *router,size_t packet_width,size_t path_width,pigen_source_span span)
+{
+ pigen_rtl_type_id packet=tree_bits(l,packet_width),vector=tree_bits(l,packet_width*3),control=fab_control_type(l),three=tree_bits(l,3);
+ pigen_rtl_object_id input_ready=tree_wire(l,m,three,span),output_valid=tree_wire(l,m,three,span),output_packet=tree_wire(l,m,vector,span);
+ pigen_rtl_expr_id payloads[3],valids[3],readies[3];
+ for(size_t p=0;p<3;p++) {
+  router->in[p]=tree_new_channel(l,m,packet,span);router->out[p]=tree_new_channel(l,m,packet,span);
+  payloads[2-p]=fab_obj_expr(l,router->in[p].payload,span);valids[2-p]=fab_obj_expr(l,router->in[p].valid,span);readies[2-p]=fab_obj_expr(l,router->out[p].ready,span);
+  if(!tree_assign(l,m,router->in[p].ready,tree_slice(l,input_ready,control,p,1,span),span) ||
+   !tree_assign(l,m,router->out[p].valid,tree_slice(l,output_valid,control,p,1,span),span) ||
+   !tree_assign(l,m,router->out[p].payload,tree_slice(l,output_packet,packet,p*packet_width,packet_width,span),span))return 0;
+ }
+ pigen_signal_id clk=module_input_named(l->semantics,module,"clk"),reset=module_input_named(l->semantics,module,"reset");
+ if(clk.index==PIGEN_INVALID_ID)return 0;
+ pigen_rtl_expr_id parameters[]={tree_number(l,32,path_width,span)};
+ pigen_rtl_instance_id instance=pigen_rtl_instance_add_with_owner(l->rtl,m,module,parameters,1,NULL,0,span);
+ if(instance.index==PIGEN_INVALID_ID)return 0;
+ char *name=tree_private_name(l,m,"router",instance.index);pigen_rtl_set_name(l->rtl,&l->rtl->instances[instance.index].name,name);free(name);
+ pigen_rtl_connection c[]={
+  {"clk",l->lowered_endpoints[clk.index].payload,{PIGEN_INVALID_ID},PIGEN_SEMANTIC_INTERNAL},
+  {"reset",{PIGEN_INVALID_ID},reset.index==PIGEN_INVALID_ID ? tree_number(l,1,0,span):fab_obj_expr(l,l->lowered_endpoints[reset.index].payload,span),PIGEN_SEMANTIC_INTERNAL},
+  {"packet_in",{PIGEN_INVALID_ID},pigen_rtl_expr_add_concatenation(l->rtl,vector,payloads,3,span),PIGEN_SEMANTIC_INTERNAL},
+  {"in_valid",{PIGEN_INVALID_ID},pigen_rtl_expr_add_concatenation(l->rtl,three,valids,3,span),PIGEN_SEMANTIC_INTERNAL},
+  {"out_ready",{PIGEN_INVALID_ID},pigen_rtl_expr_add_concatenation(l->rtl,three,readies,3,span),PIGEN_SEMANTIC_INTERNAL},
+  {"in_ready",input_ready,{PIGEN_INVALID_ID},PIGEN_SEMANTIC_INTERNAL},
+  {"out_valid",output_valid,{PIGEN_INVALID_ID},PIGEN_SEMANTIC_INTERNAL},
+  {"packet_out",output_packet,{PIGEN_INVALID_ID},PIGEN_SEMANTIC_INTERNAL}};
+ pigen_rtl_record_range records=pigen_rtl_connection_range_add(l->rtl,c,sizeof c/sizeof *c);
+ return pigen_rtl_instance_set_primitive(l->rtl,instance,PIGEN_RTL_PRIMITIVE_TREE_ROUTER,packet,records);
+}
 
-	if (!lowering || !lowering->semantics || !lowering->rtl || !syntax)
-		return -1;
-	model = lowering->semantics;
-	rtl = lowering->rtl;
-	owner = pigen_module_get(model, module);
-	if (!owner) return -1;
-	module_node = pigen_syntax_get(syntax, owner->syntax);
-	if (!module_node) return -1;
-	for (i = 0; i < lowering->rtl->module_count; i++)
-		if (lowering->rtl->modules[i].semantic_module.index == module.index)
-		{
-			rtl_module = (pigen_rtl_module_id){(uint32_t)i};
-			break;
-		}
-	if (rtl_module.index == PIGEN_INVALID_ID) return -1;
-	/* Native protocol fabric edges cannot be produced by active resolution. */
-	if (model->protocol_fabric_edge_count) return -1;
-
-	for (child = module_node->first_child; child.index != PIGEN_INVALID_ID; )
-	{
-		const pigen_syntax_node *node = pigen_syntax_get(syntax, child);
-		pigen_syntax_id edge;
-
-		if (!node) break;
-		if (node->kind != PIGEN_SYNTAX_FABRIC)
-		{
-			child = node->next_sibling;
-			continue;
-		}
-		for (edge = node->first_child; edge.index != PIGEN_INVALID_ID; )
-		{
-			const pigen_syntax_node *first = pigen_syntax_get(syntax, edge);
-			pigen_syntax_id other;
-
-			if (!first) break;
-			int native_edge = 0;
-			for (size_t p = 0; p < model->protocol_fabric_edge_count; p++)
-				if (model->protocol_fabric_edges[p].syntax.index == edge.index) native_edge = 1;
-			if (native_edge) { edge = first->next_sibling; continue; }
-			if (first->kind == PIGEN_SYNTAX_FABRIC_CONNECTION)
-				for (other = next_fabric_edge(syntax, owner->syntax, edge);
-					other.index != PIGEN_INVALID_ID; )
-				{
-					const pigen_syntax_node *second = pigen_syntax_get(syntax,
-						other);
-
-					if (!second) break;
-					if (second->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
-						(first->as.fabric_connection.direct || second->as.fabric_connection.direct) &&
-						token_equal(syntax,
-							first->as.fabric_connection.right_instance,
-							second->as.fabric_connection.right_instance) &&
-						token_equal(syntax,
-							first->as.fabric_connection.right_port,
-							second->as.fabric_connection.right_port))
-						pigen_fail("direct fabric destination cannot appear in "
-							"another connection");
-					other = next_fabric_edge(syntax, owner->syntax, other);
-				}
-			edge = first->next_sibling;
-		}
-		for (edge = node->first_child; edge.index != PIGEN_INVALID_ID; )
-		{
-			const pigen_syntax_node *connection = pigen_syntax_get(syntax,
-				edge);
-			const pigen_semantic_instance *source;
-			const pigen_semantic_instance *destination;
-			const pigen_semantic_instance_connection *sp, *sv, *sr;
-			const pigen_semantic_instance_connection *dp, *dv, *dr;
-			pigen_rtl_object_id sp_obj, sv_obj, sr_obj, dp_obj, dv_obj, dr_obj;
-
-			if (!connection) break;
-			int native_edge = 0;
-			for (size_t p = 0; p < model->protocol_fabric_edge_count; p++)
-				if (model->protocol_fabric_edges[p].syntax.index == edge.index) native_edge = 1;
-			if (native_edge) { edge = connection->next_sibling; continue; }
-			if (connection->kind != PIGEN_SYNTAX_FABRIC_CONNECTION)
-			{
-				edge = connection->next_sibling;
-				continue;
-			}
-			source = find_instance(model, module, syntax,
-				connection->as.fabric_connection.left_instance);
-			destination = find_instance(model, module, syntax,
-				connection->as.fabric_connection.right_instance);
-			if (!source || !destination) return -1;
-			sp = find_port(model, source, syntax,
-				connection->as.fabric_connection.left_port, NULL);
-			sv = find_port(model, source, syntax,
-				connection->as.fabric_connection.left_port, "_valid");
-			sr = find_port(model, source, syntax,
-				connection->as.fabric_connection.left_port, "_ready");
-			dp = find_port(model, destination, syntax,
-				connection->as.fabric_connection.right_port, NULL);
-			dv = find_port(model, destination, syntax,
-				connection->as.fabric_connection.right_port, "_valid");
-			dr = find_port(model, destination, syntax,
-				connection->as.fabric_connection.right_port, "_ready");
-			if (!sp || !dp) return -1;
-			sp_obj = connection_payload(lowering, sp);
-			dp_obj = connection_payload(lowering, dp);
-			sv_obj = connection_control(lowering, sp, sv, 0);
-			dv_obj = connection_control(lowering, dp, dv, 0);
-			sr_obj = connection_control(lowering, sp, sr, 1);
-			dr_obj = connection_control(lowering, dp, dr, 1);
-			if (sp_obj.index == PIGEN_INVALID_ID ||
-				dp_obj.index == PIGEN_INVALID_ID)
-				return -1;
-			if (!connection->as.fabric_connection.direct)
-			{
-				pigen_syntax_id prior;
-				pigen_syntax_id scan;
-				size_t group_count = 0;
-				pigen_rtl_object_id sources_p[32], sources_v[32], sources_r[32];
-				pigen_source_span span = connection->location.source_span;
-
-				for (prior = next_fabric_edge(syntax, owner->syntax, (pigen_syntax_id){PIGEN_INVALID_ID}); prior.index !=
-					PIGEN_INVALID_ID && prior.index != edge.index; )
-				{
-					const pigen_syntax_node *p = pigen_syntax_get(syntax,
-						prior);
-					if (!p) break;
-					if (p->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
-						!p->as.fabric_connection.direct &&
-						token_equal(syntax,
-							p->as.fabric_connection.right_instance,
-							connection->as.fabric_connection.right_instance) &&
-						token_equal(syntax,
-							p->as.fabric_connection.right_port,
-							connection->as.fabric_connection.right_port))
-						break;
-					prior = next_fabric_edge(syntax, owner->syntax, prior);
-				}
-				if (prior.index != PIGEN_INVALID_ID &&
-					prior.index != edge.index)
-				{
-					edge = connection->next_sibling;
-					continue;
-				}
-				for (scan = edge; scan.index != PIGEN_INVALID_ID; )
-				{
-					const pigen_syntax_node *q = pigen_syntax_get(syntax, scan);
-					if (!q) break;
-					if (q->kind == PIGEN_SYNTAX_FABRIC_CONNECTION &&
-						!q->as.fabric_connection.direct &&
-						token_equal(syntax,
-							q->as.fabric_connection.right_instance,
-							connection->as.fabric_connection.right_instance) &&
-						token_equal(syntax,
-							q->as.fabric_connection.right_port,
-							connection->as.fabric_connection.right_port))
-						group_count++;
-					scan = next_fabric_edge(syntax, owner->syntax, scan);
-				}
-				if (group_count > 32) return -1;
-				if (group_count == 1)
-				{
-					if (sv_obj.index == PIGEN_INVALID_ID ||
-						dv_obj.index == PIGEN_INVALID_ID ||
-						sr_obj.index == PIGEN_INVALID_ID ||
-						dr_obj.index == PIGEN_INVALID_ID)
-						return -1;
-					if (!route_through_skid(lowering, module, rtl_module,
-						sp_obj, sv_obj, sr_obj, dp_obj, dv_obj, dr_obj,
-						span, NULL))
-						return -1;
-				}
-				else if (group_count >= 2)
-				{
-					size_t c = 0;
-
-					for (scan = edge; scan.index != PIGEN_INVALID_ID &&
-						c < group_count; )
-					{
-						const pigen_syntax_node *q = pigen_syntax_get(syntax,
-							scan);
-						const pigen_semantic_instance *sinst;
-						const pigen_semantic_instance_connection *qp, *qv, *qr;
-						pigen_rtl_object_id lsp, lsv, lsr;
-
-						if (!q) break;
-						if (q->kind != PIGEN_SYNTAX_FABRIC_CONNECTION ||
-							q->as.fabric_connection.direct ||
-							!token_equal(syntax,
-								q->as.fabric_connection.right_instance,
-								connection->as.fabric_connection.right_instance) ||
-							!token_equal(syntax,
-								q->as.fabric_connection.right_port,
-								connection->as.fabric_connection.right_port))
-						{
-							scan = next_fabric_edge(syntax, owner->syntax, scan);
-							continue;
-						}
-						sinst = find_instance(model, module, syntax,
-							q->as.fabric_connection.left_instance);
-						if (!sinst) return -1;
-						qp = find_port(model, sinst, syntax,
-							q->as.fabric_connection.left_port, NULL);
-						qv = find_port(model, sinst, syntax,
-							q->as.fabric_connection.left_port, "_valid");
-						qr = find_port(model, sinst, syntax,
-							q->as.fabric_connection.left_port, "_ready");
-						lsp = connection_payload(lowering, qp);
-						lsv = connection_control(lowering, qp, qv, 0);
-						lsr = connection_control(lowering, qp, qr, 1);
-						if (lsp.index == PIGEN_INVALID_ID ||
-							lsv.index == PIGEN_INVALID_ID ||
-							lsr.index == PIGEN_INVALID_ID)
-							return -1;
-						sources_p[c] = lsp;
-						sources_v[c] = lsv;
-						sources_r[c] = lsr;
-						c++;
-						scan = next_fabric_edge(syntax, owner->syntax, scan);
-					}
-					if (c != group_count) return -1;
-					if (group_count == 2)
-					{
-						if (!route_through_merge2(lowering, module, rtl_module,
-							sources_p[0], sources_v[0], sources_r[0],
-							sources_p[1], sources_v[1], sources_r[1],
-							dp_obj, dv_obj, dr_obj, span, NULL))
-							return -1;
-					}
-					else if (!route_through_mergeN(lowering, module,
-						rtl_module, sources_p, sources_v, sources_r,
-						group_count, dp_obj, dv_obj, dr_obj, span, NULL,1,0))
-						return -1;
-				}
-				else
-				{
-					pigen_rtl_type_id control = fab_control_type(lowering);
-					const pigen_rtl_object *dest_payload_obj =
-						pigen_rtl_object_get(rtl, dp_obj);
-					pigen_rtl_type_id dest_type = dest_payload_obj ?
-						dest_payload_obj->type :
-						(pigen_rtl_type_id){PIGEN_INVALID_ID};
-					pigen_rtl_expr_id valid = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-					pigen_rtl_expr_id payload = (pigen_rtl_expr_id){PIGEN_INVALID_ID};
-					pigen_rtl_expr_id dest_ready = fab_obj_expr(lowering,
-						dr_obj, span);
-					size_t c = 0;
-
-					if (control.index == PIGEN_INVALID_ID ||
-						dest_type.index == PIGEN_INVALID_ID ||
-						dest_ready.index == PIGEN_INVALID_ID)
-						return -1;
-					for (scan = edge; scan.index != PIGEN_INVALID_ID &&
-						c < group_count; )
-					{
-						const pigen_syntax_node *q = pigen_syntax_get(syntax,
-							scan);
-						const pigen_semantic_instance *sinst;
-						const pigen_semantic_instance_connection *qp, *qv, *qr;
-						pigen_rtl_object_id lsp, lsv, lsr;
-
-						if (!q) break;
-						if (q->kind != PIGEN_SYNTAX_FABRIC_CONNECTION ||
-							q->as.fabric_connection.direct ||
-							!token_equal(syntax,
-								q->as.fabric_connection.right_instance,
-								connection->as.fabric_connection.right_instance) ||
-							!token_equal(syntax,
-								q->as.fabric_connection.right_port,
-								connection->as.fabric_connection.right_port))
-						{
-							scan = next_fabric_edge(syntax, owner->syntax, scan);
-							continue;
-						}
-						sinst = find_instance(model, module, syntax,
-							q->as.fabric_connection.left_instance);
-						if (!sinst) return -1;
-						qp = find_port(model, sinst, syntax,
-							q->as.fabric_connection.left_port, NULL);
-						qv = find_port(model, sinst, syntax,
-							q->as.fabric_connection.left_port, "_valid");
-						qr = find_port(model, sinst, syntax,
-							q->as.fabric_connection.left_port, "_ready");
-						lsp = connection_payload(lowering, qp);
-						lsv = connection_control(lowering, qp, qv, 0);
-						lsr = connection_control(lowering, qp, qr, 1);
-						if (lsp.index == PIGEN_INVALID_ID ||
-							lsv.index == PIGEN_INVALID_ID ||
-							lsr.index == PIGEN_INVALID_ID)
-							return -1;
-						sources_p[c] = lsp;
-						sources_v[c] = lsv;
-						sources_r[c] = lsr;
-						c++;
-						scan = next_fabric_edge(syntax, owner->syntax, scan);
-					}
-					if (c != group_count) return -1;
-					for (c = 0; c < group_count; c++)
-					{
-						pigen_rtl_expr_id v = fab_obj_expr(lowering,
-							sources_v[c], span);
-						valid = valid.index == PIGEN_INVALID_ID ? v :
-							fab_logic(lowering, PIGEN_BINARY_LOGICAL_OR,
-								valid, v, control, span);
-						if (valid.index == PIGEN_INVALID_ID) return -1;
-					}
-					{
-						pigen_rtl_literal_word word = {0, 0, 0};
-						payload = pigen_rtl_expr_add_literal(rtl,
-							PIGEN_RTL_EXPR_INTEGER, dest_type, &word, 1, 0,
-							span);
-						if (payload.index == PIGEN_INVALID_ID) return -1;
-					}
-					for (c = group_count; c-- > 0; )
-					{
-						pigen_rtl_expr_id cond = fab_obj_expr(lowering,
-							sources_v[c], span);
-						pigen_conditional_resolution resolution = {0};
-						pigen_rtl_expr_id value = fab_obj_expr(lowering,
-							sources_p[c], span);
-
-						if (cond.index == PIGEN_INVALID_ID ||
-							value.index == PIGEN_INVALID_ID)
-							return -1;
-						payload = pigen_rtl_expr_add_conditional(rtl,
-							dest_type, &resolution, cond, value, payload,
-							span);
-						if (payload.index == PIGEN_INVALID_ID) return -1;
-					}
-					if (pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-						dp_obj, payload, span).index == PIGEN_INVALID_ID ||
-						pigen_rtl_equation_add_with_owner(rtl, rtl_module,
-							dv_obj, valid, span).index == PIGEN_INVALID_ID)
-						return -1;
-					{
-						pigen_rtl_expr_id earlier = (pigen_rtl_expr_id){
-							PIGEN_INVALID_ID};
-
-						for (c = 0; c < group_count; c++)
-						{
-							pigen_rtl_expr_id v = fab_obj_expr(lowering,
-								sources_v[c], span);
-							pigen_rtl_expr_id grant;
-							pigen_rtl_expr_id ready;
-
-							grant = earlier.index == PIGEN_INVALID_ID ? v :
-								fab_logic(lowering,
-									PIGEN_BINARY_LOGICAL_AND, v,
-									fab_not(lowering, earlier, control,
-										span), control, span);
-							if (grant.index == PIGEN_INVALID_ID) return -1;
-							ready = fab_logic(lowering,
-								PIGEN_BINARY_LOGICAL_AND, grant,
-								dest_ready, control, span);
-							if (ready.index == PIGEN_INVALID_ID ||
-								pigen_rtl_equation_add_with_owner(rtl,
-									rtl_module, sources_r[c], ready,
-									span).index == PIGEN_INVALID_ID)
-								return -1;
-							earlier = earlier.index == PIGEN_INVALID_ID ? v :
-								fab_logic(lowering, PIGEN_BINARY_LOGICAL_OR,
-									earlier, v, control, span);
-							if (earlier.index == PIGEN_INVALID_ID) return -1;
-						}
-					}
-				}
-			}
-			else
-			{
-				if (!connect(lowering, rtl_module, dp_obj, sp_obj,
-					connection->location.source_span)) return -1;
-				if (sv_obj.index != PIGEN_INVALID_ID &&
-					dv_obj.index != PIGEN_INVALID_ID &&
-					!connect(lowering, rtl_module, dv_obj, sv_obj,
-						connection->location.source_span)) return -1;
-				if (sr_obj.index != PIGEN_INVALID_ID &&
-					dr_obj.index != PIGEN_INVALID_ID &&
-					!connect(lowering, rtl_module, sr_obj, dr_obj,
-						connection->location.source_span)) return -1;
-			}
-			edge = connection->next_sibling;
-		}
-		child = node->next_sibling;
-	}
-	return 0;
+int pigen_fabric_lower(pigen_rtl_lowering *l,pigen_module_id module,const pigen_syntax_tree *syntax)
+{
+ if(!l || !l->semantics || !l->rtl || !syntax || l->semantics->protocol_fabric_edge_count)return -1;
+ const pigen_semantic_module *owner=pigen_module_get(l->semantics,module);if(!owner)return -1;
+ pigen_rtl_module_id m={PIGEN_INVALID_ID};for(size_t i=0;i<l->rtl->module_count;i++)if(l->rtl->modules[i].semantic_module.index==module.index)m=(pigen_rtl_module_id){(uint32_t)i};
+ if(m.index==PIGEN_INVALID_ID)return -1;
+ tree_port *ports=NULL;size_t port_count=0,edge_count=0,payload_width=0;
+ pigen_fabric_edge *edges=NULL;pigen_fabric_tree tree={0};tree_router *routers=NULL;
+ pigen_source_span span={0};int ok=0;
+ for(pigen_syntax_id edge=next_fabric_edge(syntax,owner->syntax,(pigen_syntax_id){PIGEN_INVALID_ID});edge.index!=PIGEN_INVALID_ID;edge=next_fabric_edge(syntax,owner->syntax,edge)) {
+  const pigen_syntax_node *node=pigen_syntax_get(syntax,edge);if(!node || node->kind!=PIGEN_SYNTAX_FABRIC_CONNECTION)continue;
+  span=node->location.source_span;
+  size_t s=tree_add_port(l,syntax,module,node->as.fabric_connection.left_instance,node->as.fabric_connection.left_port,1,&ports,&port_count);
+  size_t d=tree_add_port(l,syntax,module,node->as.fabric_connection.right_instance,node->as.fabric_connection.right_port,0,&ports,&port_count);
+  if(s==SIZE_MAX || d==SIZE_MAX)goto done;
+  tree_channel source=ports[s].channel,destination=ports[d].channel;
+  if(source.payload.index==PIGEN_INVALID_ID || destination.payload.index==PIGEN_INVALID_ID)goto done;
+  int direct=node->as.fabric_connection.direct;
+  int controls=(source.valid.index!=PIGEN_INVALID_ID)+(destination.valid.index!=PIGEN_INVALID_ID)+
+   (source.ready.index!=PIGEN_INVALID_ID)+(destination.ready.index!=PIGEN_INVALID_ID);
+  if(controls && controls!=4)goto done;
+  if(!controls)direct=1;
+  edges=pigen_resize(edges,(edge_count+1)*sizeof(*edges));edges[edge_count++]=(pigen_fabric_edge){s,d,node->as.fabric_connection.tier,direct};
+  if(direct) {
+   if(!tree_assign(l,m,destination.payload,tree_value(l,ports[s],ports[d],span),span))goto done;
+   if(source.valid.index!=PIGEN_INVALID_ID && destination.valid.index!=PIGEN_INVALID_ID && !connect(l,m,destination.valid,source.valid,span))goto done;
+   if(source.ready.index!=PIGEN_INVALID_ID && destination.ready.index!=PIGEN_INVALID_ID && !connect(l,m,source.ready,destination.ready,span))goto done;
+  } else {
+   size_t width=pigen_rtl_type_get(l->rtl,pigen_rtl_object_get(l->rtl,destination.payload)->type)->width;
+   if(!width)goto done;
+   if(width>payload_width)payload_width=width;
+  }
+ }
+ if(!edge_count){ok=1;goto done;}
+ pigen_fabric_port *descriptions=pigen_resize(NULL,port_count*sizeof(*descriptions));for(size_t i=0;i<port_count;i++)descriptions[i]=ports[i].description;
+ const pigen_symbol *module_symbol=pigen_symbol_get(l->semantics,owner->symbol);size_t name_length=0;
+ const char *name_text=module_symbol ? pigen_source_span_text(l->semantics->sources,module_symbol->name,&name_length):NULL;
+ char *name=name_text ? pigen_copy_range(name_text,name_length):pigen_copy_range("fabric",6);
+ int built=pigen_build_fabric_tree(name,descriptions,port_count,edges,edge_count,&tree);free(descriptions);
+ if(!built){free(name);goto done;}
+ size_t packet_width=payload_width+tree.path_width;pigen_rtl_type_id packet=tree.router_count ? tree_bits(l,packet_width):fab_control_type(l);
+ routers=pigen_resize(NULL,tree.router_count*sizeof(*routers));
+ for(size_t r=0;r<tree.router_count;r++)if(!tree_make_router(l,module,m,&routers[r],packet_width,tree.path_width,span)){free(name);goto done;}
+ for(size_t r=0;r<tree.router_count;r++)for(size_t p=0;p<3;p++) {
+  pigen_fabric_attachment a=tree.routers[r].ports[p];tree_channel in=routers[r].in[p],out=routers[r].out[p];
+  if(a.kind==1) {if(!tree_join(l,m,in,routers[a.target].out[a.port],span)){free(name);goto done;}}
+  else {
+   if(a.kind==0 || !ports[a.target].description.source) {
+    if(!tree_assign(l,m,in.payload,tree_number(l,packet_width,0,span),span) || !tree_assign(l,m,in.valid,tree_number(l,1,0,span),span)){free(name);goto done;}
+   }
+   if(a.kind==0 || ports[a.target].description.source)if(!tree_assign(l,m,out.ready,tree_number(l,1,0,span),span)){free(name);goto done;}
+  }
+ }
+ for(size_t i=0;i<port_count;i++)if(tree.port_router[i]>=0) {
+  tree_port port=ports[i];tree_channel endpoint=port.channel;size_t r=(size_t)tree.port_router[i],p=(size_t)tree.port_number[i];
+  pigen_rtl_type_id data_type=pigen_rtl_object_get(l->rtl,endpoint.payload)->type;
+  size_t width=pigen_rtl_type_get(l->rtl,data_type)->width;
+  pigen_rtl_object_id packed=tree_wire(l,m,packet,span);
+  if(port.description.source) {
+   size_t e=0;while(e<edge_count && (edges[e].direct || edges[e].source!=i))e++;
+   if(e==edge_count){free(name);goto done;}
+   width=pigen_rtl_type_get(l->rtl,pigen_rtl_object_get(l->rtl,ports[edges[e].destination].channel.payload)->type)->width;
+   pigen_rtl_expr_id parts[3];size_t n=0;parts[n++]=tree_number(l,tree.path_width,tree.paths[e],span);
+   if(width<payload_width)parts[n++]=tree_number(l,payload_width-width,0,span);
+   parts[n++]=tree_value(l,port,ports[edges[e].destination],span);
+   if(!tree_assign(l,m,packed,pigen_rtl_expr_add_concatenation(l->rtl,packet,parts,n,span),span) ||
+    !route_through_skid(l,module,m,packed,endpoint.valid,endpoint.ready,routers[r].in[p].payload,routers[r].in[p].valid,routers[r].in[p].ready,span,NULL)){free(name);goto done;}
+  } else {
+   if(!route_through_skid(l,module,m,routers[r].out[p].payload,routers[r].out[p].valid,routers[r].out[p].ready,packed,endpoint.valid,endpoint.ready,span,NULL) ||
+    !tree_assign(l,m,endpoint.payload,tree_slice(l,packed,data_type,0,width,span),span)){free(name);goto done;}
+  }
+ }
+ pigen_fabric_diagrams *diagrams=&l->rtl->fabric_diagrams;
+ diagrams->items=pigen_resize(diagrams->items,(diagrams->count+1)*sizeof(*diagrams->items));
+ diagrams->items[diagrams->count++]=(pigen_fabric_diagram){name,tree.svg};tree.svg=NULL;ok=1;
+ done:
+ for(size_t i=0;i<port_count;i++){free((void *)ports[i].description.instance);free((void *)ports[i].description.port);}
+ free(ports);free(edges);free(routers);pigen_free_fabric_tree(&tree);return ok ? 0:-1;
 }

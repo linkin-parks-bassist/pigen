@@ -1360,6 +1360,8 @@ const pigen_rtl_source_reference *pigen_rtl_source_reference_get(
 
 void pigen_free_rtl_model(pigen_rtl_model *model)
 {
+    for(size_t i=0;i<model->fabric_diagrams.count;i++) { free(model->fabric_diagrams.items[i].name); free(model->fabric_diagrams.items[i].svg); }
+    free(model->fabric_diagrams.items);
     for(size_t i=0;i<model->source_reference_count;i++)
     {
         free(model->source_references[i].source_path);

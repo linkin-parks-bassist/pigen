@@ -35,8 +35,7 @@ int pigen_compile_source(pigen_source_manager *sources,
 {
     /* Zero the result on entry. */
     if (result) {
-        result->systemverilog = NULL;
-        result->length = 0;
+        *result = (pigen_compile_result){0};
     }
 
     /* If sources is NULL, create a local source manager. */
@@ -332,6 +331,8 @@ int pigen_compile_source(pigen_source_manager *sources,
 
     /* Success. */
     if (result) {
+        result->fabric_diagrams = rtl_model.fabric_diagrams;
+        rtl_model.fabric_diagrams = (pigen_fabric_diagrams){0};
         result->systemverilog = sv_output;
         result->length = strlen(sv_output);
     } else {
@@ -352,9 +353,8 @@ int pigen_compile_source(pigen_source_manager *sources,
 
 void pigen_free_compile_result(pigen_compile_result *result)
 {
-    if (result && result->systemverilog) {
-        free(result->systemverilog);
-        result->systemverilog = NULL;
-        result->length = 0;
-    }
+    if (!result) return;
+    pigen_free_fabric_diagrams(&result->fabric_diagrams);
+    free(result->systemverilog);
+    *result = (pigen_compile_result){0};
 }

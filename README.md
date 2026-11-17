@@ -234,14 +234,14 @@ list into a routing fabric, generating the routers, buffers, arbitration and
 backpressure paths for you:
 
 ```systemverilog
-fabric control_network #(parameter integer PAYLOAD_W = 32) begin
-    ui.commands.filter         -> filter.commands;
-    automation.commands.filter -> filter.commands;
-    sequencer.commands.filter  -> filter.commands;
-    ui.commands.mixer          -> mixer.commands;
-    automation.commands.mixer  -> mixer.commands;
-    filter.status.display      -> display.events;
-    mixer.status.display       -> display.events;
+fabric controls begin
+    ui.tx                -> filter.commands;
+    automation.tx        -> filter.commands;
+    sequencer.status     -> filter.commands;
+    ui.auxiliary         -> mixer.commands;
+    automation.auxiliary -> mixer.commands;
+    filter.status        -> display.events;
+    mixer.status         -> display.events;
 endfabric
 ```
 
@@ -255,31 +255,24 @@ The generated network is a balanced, pruned tree of simple, lightweight
 **three-port (ternary) routing nodes**. Each node needs just one route bit to
 choose its next hop, with small local round-robin arbiters sharing the links.
 Hop counts grow logarithmically with the network, and buffered handshakes carry
-backpressure all the way through it. The intended inline interface keeps routing
-metadata internal. The older standalone form shown here currently exposes a
-delivered route word alongside payload/valid/ready.
+backpressure all the way through it. Route metadata stays inside the fabric;
+every child sees only its declared payload and handshake ports.
 
 You can add a producer, connect another consumer or rearrange the design by
-editing the connection list. Pigen rebuilds the routing tree and emits a complete
-SystemVerilog module, along with an SVG showing the generated topology.
-`--diagram PATH` selects the diagram path. The
-[larger mixer example](tests/mixer_fabric_block.pigen) combines sample, control
-and telemetry paths in one network.
+editing the connection list. Pigen rebuilds the routing tree inside the parent
+module and emits an SVG from that same topology. `--diagram PATH` selects the
+diagram path. The [complete control-network example](examples/fabric_control.pigen)
+shows the surrounding modules and their ports.
 
-For connections inside an existing module, an inline fabric connects compatible
-child ports and their handshakes directly from endpoint names:
+Payload types and widths come from the connected ports and are checked for each
+connection, so one fabric can carry differently sized packets. Each producer
+port has one destination; several producers can share a consumer through
+arbitration. Modules do not need to know who is on the other side. If an
+application needs sender identity, it can carry that as ordinary packet data.
 
-```systemverilog
-fabric begin
-    input_left.m  -> mixer.left;
-    input_right.m -> mixer.right;
-    mixer.m       -> output_stage.s;
-endfabric
-```
-
-Inline fabrics generate buffered links and round-robin merges. `->` selects
-buffered routing, while `>` selects an exclusive direct connection. The standalone
-form above generates the shared three-port tree.
+`->` selects buffered routing. A plain `>` makes an exclusive direct connection
+that bypasses the tree. Use a splitter module with distinct output ports when
+one input stream needs to select between several consumers.
 
 ## Module connections
 

@@ -73,16 +73,6 @@ static void usage(void)
 	exit(2);
 }
 
-static int source_has_content(const char *text, size_t length)
-{
-	size_t i;
-	for (i = 0; i < length; i++)
-		if (text[i] != ' ' && text[i] != '\t' && text[i] != '\r' &&
-			text[i] != '\n')
-			return 1;
-	return 0;
-}
-
 static char *diagram_path(const char *output, const char *fabric, int several)
 {
 	pigen_string path = {0};
@@ -169,7 +159,7 @@ int main(int argc, char **argv)
 		else
 			input_path = argv[argument];
 	}
-	if (!input_path) usage();
+	if (!input_path || (no_diagram && diagram_option)) usage();
 
 	if (!output_path)
 	{
@@ -179,10 +169,7 @@ int main(int argc, char **argv)
 
 	source = read_file(input_path, &source_length);
 
-	pigen_string generated = {0};
-	pigen_fabric_diagrams diagrams = {0};
-	char *cleaned = pigen_lower_blocks(source, source_length, &generated,
-		no_diagram ? NULL : &diagrams);
+	char *cleaned = pigen_copy_range(source, source_length);
 	{
 		const char *specialize_error = NULL;
 		size_t specialize_error_offset = 0;
@@ -204,38 +191,15 @@ int main(int argc, char **argv)
 		free(cleaned);
 		cleaned = specialized;
 	}
-	int has_content = source_has_content(cleaned, strlen(cleaned));
 
 	pigen_source_manager sources = {0};
 	pigen_source_add(&sources, input_path, source, source_length);
 
 	pigen_compile_result result = {0};
 	pigen_compile_error error = {0};
-	int ret = has_content ? pigen_compile_source(&sources, input_path,
-		cleaned, strlen(cleaned), NULL, &result, &error) : 0;
-	/* Fabric blocks may leave comment-only text behind; there is nothing
-	 * ordinary to lower when naming finds no modules. */
-	if (ret != 0 && generated.length && error.message &&
-		strstr(error.message, "RTL naming failed"))
-	{
-		ret = 0;
-		error = (pigen_compile_error){0};
-	}
-	if (ret == 0 && generated.length)
-	{
-		size_t base = result.length;
-		char *combined = pigen_resize(result.systemverilog,
-			base + generated.length + 2);
-		if (base && combined[base - 1] != '\n')
-			combined[base++] = '\n';
-		memcpy(combined + base, generated.data, generated.length);
-		base += generated.length;
-		combined[base] = 0;
-		result.systemverilog = combined;
-		result.length = base;
-	}
+	int ret = pigen_compile_source(&sources, input_path,
+		cleaned, strlen(cleaned), NULL, &result, &error);
 	free(cleaned);
-	free(generated.data);
 	free(source);
 
 	if (ret != 0)
@@ -249,6 +213,15 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+    if (diagram_option && result.fabric_diagrams.count != 1)
+    {
+        fprintf(stderr, "pigen: --diagram requires exactly one fabric network\n");
+        pigen_free_sources(&sources);
+        pigen_free_compile_result(&result);
+        free(owned_output_path);
+        return 1;
+    }
+
 	/* Silent success: write the output file, stdout empty, exit 0,
 	 * no "wrote" notice. */
 	if (!write_file(output_path, result.systemverilog, result.length))
@@ -259,18 +232,10 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	pigen_fabric_diagrams diagrams = result.fabric_diagrams;
+	result.fabric_diagrams = (pigen_fabric_diagrams){0};
 	if (!no_diagram && diagrams.count)
 	{
-		if (diagram_option && diagrams.count > 1)
-		{
-			fprintf(stderr,
-				"pigen: --diagram requires exactly one fabric block\n");
-			pigen_free_fabric_diagrams(&diagrams);
-			pigen_free_sources(&sources);
-			pigen_free_compile_result(&result);
-			free(owned_output_path);
-			return 1;
-		}
 		for (size_t i = 0; i < diagrams.count; i++)
 		{
 			char *owned = diagram_option ? NULL :

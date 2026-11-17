@@ -1051,6 +1051,7 @@ static const char *primitive_name(pigen_rtl_primitive primitive)
 	case PIGEN_RTL_PRIMITIVE_FIFO: return "pigen_fifo";
 	case PIGEN_RTL_PRIMITIVE_SKID: return "pigen_skid";
 	case PIGEN_RTL_PRIMITIVE_MERGE2: return "pigen_merge2";
+	case PIGEN_RTL_PRIMITIVE_TREE_ROUTER: return "pigen_tree_router";
 	case PIGEN_RTL_PRIMITIVE_MERGE: return "pigen_merge";
 	case PIGEN_RTL_PRIMITIVE_AXIS_MERGE: return "pigen_axis_merge";
 	case PIGEN_RTL_PRIMITIVE_AXIS_DEMUX: return "pigen_axis_demux";
@@ -1151,6 +1152,8 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 					buf_append_str(b, ".DEPTH(");
 				else if (instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE)
 					buf_append_str(b, ".N(");
+				else if (instance->primitive == PIGEN_RTL_PRIMITIVE_TREE_ROUTER)
+					buf_append_str(b, ".PATH_W(");
 				else if (instance->primitive == PIGEN_RTL_PRIMITIVE_AXIS_MERGE)
 				{
 					static const char *names[]={"N","LAST_BIT","HAS_LAST","PACKET_LOCK","TRACK_STREAMS","ID_LSB","ID_W","DEST_LSB","DEST_W"};
@@ -1175,6 +1178,7 @@ static int emit_instance(struct buf *b, const pigen_rtl_model *rtl,
 					return -1;
 				if (instance->primitive == PIGEN_RTL_PRIMITIVE_FIFO ||
 					instance->primitive == PIGEN_RTL_PRIMITIVE_MERGE ||
+					instance->primitive == PIGEN_RTL_PRIMITIVE_TREE_ROUTER ||
 					instance->primitive == PIGEN_RTL_PRIMITIVE_AXIS_MERGE ||
 					instance->primitive == PIGEN_RTL_PRIMITIVE_AXIS_DEMUX ||
 					instance->primitive == PIGEN_RTL_PRIMITIVE_AXI_MERGE ||

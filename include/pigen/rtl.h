@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "pigen/blocks.h"
 #include "pigen/data_type.h"
 #include "pigen/ids.h"
 #include "pigen/semantic.h"
@@ -115,6 +116,7 @@ typedef enum {
 	PIGEN_RTL_PRIMITIVE_FIFO,
 	PIGEN_RTL_PRIMITIVE_SKID,
 	PIGEN_RTL_PRIMITIVE_MERGE2,
+	PIGEN_RTL_PRIMITIVE_TREE_ROUTER,
 	PIGEN_RTL_PRIMITIVE_MERGE,
 	PIGEN_RTL_PRIMITIVE_AXIS_MERGE,
 	PIGEN_RTL_PRIMITIVE_AXI_MERGE,
@@ -258,6 +260,7 @@ typedef struct {
 } pigen_rtl_source_reference;
 
 typedef struct {
+	pigen_fabric_diagrams fabric_diagrams;
 	pigen_rtl_type *types;
 	size_t type_count;
 	size_t type_capacity;

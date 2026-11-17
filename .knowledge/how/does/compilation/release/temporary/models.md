@@ -1,12 +1,14 @@
 ---
 status: green
-revised_at: "2026-11-15T11:04:25+11:00"
+revised_at: "2026-11-17T17:42:00+11:00"
 ---
 
-pigen_compile_source in src/compile.c owns its preprocessing, syntax, semantic, RTL-lowering and RTL-model storage for one compilation. Every cleanup path after RTL initialization releases both pigen_rtl_lowering_free and pigen_free_rtl_model; the lowering context borrows the RTL model and does not destroy it. Output-model construction failure releases its partial output model. Normal emission releases the output model before the remaining compiler arenas.
+pigen_compile_source in src/compile.c owns preprocessing, syntax, semantic, RTL-lowering and RTL-model storage for one compilation. Every cleanup path after RTL initialization releases both pigen_rtl_lowering_free and pigen_free_rtl_model. The lowering context borrows the RTL model. Output-model failure releases its partial model; normal emission releases it before the remaining arenas.
 
-The returned pigen_compile_result owns only its generated SystemVerilog string; callers release it with pigen_free_compile_result. If no result is requested, compilation frees the emitted string itself. An internally allocated source manager releases its source files before its manager allocation. A supplied source manager remains caller-owned and retains added source files until pigen_free_sources.
+A pigen_compile_result owns its generated SystemVerilog string and pigen_fabric_diagrams array. Each diagram owns its name and SVG text. The result is zeroed completely on entry, including failures. On success, diagrams transfer from the RTL model to the result and the model's array is cleared; without a requested result, model cleanup frees the diagrams and compilation frees the emitted SV. pigen_free_compile_result releases all returned artifacts and is safe to repeat.
 
-tests/native_routing_compile_test.c exercises native Stream switching/arbitration with borrowed and internal source managers, returned and discarded output, and a fabric-lowering failure after RTL allocation. make native-routing-compile-test runs that API witness and participates in test/verify. The same target accepts sanitizer CFLAGS to check the ownership paths. The public routing example also exercises compilation through the CLI under ASan/UBSan.
+An internally allocated source manager releases source files before its manager allocation. A supplied manager remains caller-owned. Tree lowering frees temporary port descriptions, edge arrays and topology storage on success/failure; the RTL model owns published instances/equations and diagrams. src/blocks.c owns topology/SVG allocation helpers.
 
-Semantic resolution's model and temporary-table lifetimes are separate (how/to/call/semantic/resolution.md). Output/error results remain subject to their public include/pigen/compile.h contract.
+tests/fabric_compile_test.c exercises internal/borrowed source managers, returned/discarded outputs, artifact lifetime, repeated release and poisoned-result failure initialization. make fabric-compile-test runs it in test/verify and accepts sanitizer CFLAGS. tests/inline_fabric_tree_test.py also exercises the real CLI, including rejected interfaces and diagram-option failures preserving output.
+
+The former native-routing-compile-test is archived with quarantined native AXI fabric integration; it is not active API coverage. Semantic temporary-table lifetimes remain owned by how/to/call/semantic/resolution.md.

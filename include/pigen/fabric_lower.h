@@ -6,10 +6,10 @@
 #include "pigen/semantic.h"
 #include "pigen/syntax.h"
 
-/* Lower resolved inline fabrics into parent-owned wiring and arbitration.
- * Native edges carry aggregate protocol identities; ordinary edges resolve
- * through scalar child-connection records. Child pin mapping belongs to the
- * output builder rather than this routing pass. */
+/* Lower resolved child-port connections to a parent-owned source-routed tree.
+ * Payload conversions happen at ingress; route words and two-entry queues stay
+ * internal. All parent fabric blocks share endpoint ownership and topology.
+ * Native AXI whole-interface fabrics remain quarantined. */
 int pigen_fabric_lower(pigen_rtl_lowering *lowering, pigen_module_id module,
 	const pigen_syntax_tree *syntax);
 

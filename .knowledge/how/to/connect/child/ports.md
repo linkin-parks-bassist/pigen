@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-17T10:33:29+11:00"
+revised_at: "2026-11-17T17:43:35+11:00"
 ---
 
 Child ports are parent endpoints: siblings connect with `.i(a.o)`, parent transfers read `a.o` or write `b.i`, and fabrics route `a.o -> b.i`. Explicit wires remain supported. Child outputs accept concatenations of writable parent projections; read-only and overlapping destinations diagnose (does/a/child/output/support/concatenated/parent/connections.md). Output transfers stay explicit, e.g. `output uint[8] buf o`. Broadcast reset uses `input wire reset`; unqualified input bit remains abstract.
@@ -13,7 +13,7 @@ Exact aliases reuse views when type/shape match. Computed expressions also conve
 
 Constant slices/indices inside one output's raw-wire region map to that endpoint. Mapping requires scalar single-dimension bit coordinates and matching producer width. Whole-wire aliases also support runtime bit/indexed selections. Signed arithmetic of width max(64,index_width)+3 translates declared coordinates without truncation; reversed directions swap +: and -:. Index expressions resolve their own aliases, joining payload and index tokens atomically. Disjoint consumers still conflict because selection consumes whole tokens.
 
-Computed inputs resolve aliases through groups, conversions, unary/binary expressions, conditionals, concatenations and peek before atomic analysis. Changed paths are rebuilt without mutating shared expressions; selections map as units. Repeated reads deduplicate, and ternaries consume all referenced sources (how/does/an/atomic/transfer/fire.md). Structural processes have no clock; ordinary cross-instance clock compatibility remains unaudited.
+Computed inputs resolve aliases through groups, conversions, unary/binary expressions, conditionals, concatenations and peek before atomic analysis. Changed paths are rebuilt without mutating shared expressions; selections map as units. Repeated reads deduplicate, and ternaries consume all referenced sources (how/does/an/atomic/transfer/fire.md). Structural processes have no clock. Routed fabrics check parent clk/reset bindings; ordinary non-fabric cross-instance clock compatibility remains unaudited.
 
 Symbolic controls map to parent objects; selected controls use proxy observation/drive equations. Omitted controls reuse payload_valid/payload_ready or internal nets. Explicit i_ready targets observe boundary readiness. Read-only output-ready/input-valid support manual handshakes; conflicting automatic owners diagnose. Parent-input controls are observed without drivers using pigen_lvalue_is_writable. Raw-wire writes remain legal; explicit-valid gate versus replacement remains unresolved.
 

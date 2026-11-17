@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-16T14:12:50+11:00"
+revised_at: "2026-11-17T17:43:36+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -14,6 +14,7 @@ Public interfaces live in include/pigen/ and implementations in src/. ids.h owns
 - pipeline_stage.h owns a stage execution-law view: syntax ID, outgoing write and consuming read syntax IDs in source order, and incoming/outgoing packed widths. pigen_pipeline_stage_laws validates it; pigen_pipeline_stage_is_invalid checks invalid views. The implemented laws are owned by what/is/the/pipeline/stage/execution/laws/owner/seam.md.
 - pipeline_lower.h owns the separately tested structural pipeline lowering service (what/is/the/pipeline/parent/module/lowering.md). Production inline expansion runs through resolve.c and common transfer/RTL services.
 - fsm_identity.h owns pigen_fsm_identity: state type, initial state, state and transition target sets, span and owning syntax. pigen_fsm_identity_establish and pigen_fsm_identity_is_invalid provide construction/inspection. fsm_lower.h is a separately tested structural stage. Production FSM resolution uses resolve.c (how/to/write/fsm/states.md; how/are/generated/fsms/resolved.md).
+- blocks.h/blocks.c own the checked topology/SVG; fabric_lower.h/fabric_lower.c lower the inline tree. compile.h returns owned SV/diagrams ( how/does/compilation/release/temporary/models.md).
 - route.h owns retained-core direct-transfer routing: whole-unit ready-graph nodes, readiness/sizing/signedness/aggregate checks and original-span anchors, through init/free/build/check entries.
 
 protocol.h/protocol.c own AXI4-Stream, AXI4-Lite and full AXI4 channel/field contracts, exact compatibility and role direction. semantic.h/semantic.c own canonical protocol types, endpoints, channel-signal bindings and endpoint collections. pigen_symbol_bind_protocol_type/pigen_symbol_protocol_type bind/query complete native typedef contracts (how/are/native/axi/type/aliases/represented.md). semantic.h also exposes pigen_symbol_bind_package_scope/pigen_symbol_lookup_package_member; type_resolve.h exposes pigen_resolve_type_symbol for qualified/unqualified type lookup (how/are/native/axi/package/types/represented.md). semantic.h exposes pigen_import_package, pigen_symbol_resolve_at/resolve_text_at and pigen_symbol_import_ambiguous; pigen_symbol_lookup_at/lookup_text_at inspect source-point namespaces without activation (how/are/native/axi/package/imports/resolved.md). pigen_symbol_resolve_call_text_at and pigen_retained_call_bind own retained call lookup/records (how/are/retained/package/calls/bound.md). pigen_export_package provides canonical exports through structured package syntax (how/are/native/axi/package/exports/represented.md). Native integration remains work; details: how/are/native/axi/protocol/contracts/represented.md and how/are/semantic/axi/endpoint/identities/represented.md.

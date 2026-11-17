@@ -6668,6 +6668,8 @@ static int collect_region_fabrics(resolver *resolver,pigen_module_id module,pige
 				if(handled) {e=edge->next_sibling;continue;}
 				pigen_protocol_endpoint_id source=pigen_resolve_protocol_reference(resolver->syntax,model,item.scope,edge->as.fabric_connection.left_expression, resolver->policy);
 				pigen_protocol_endpoint_id destination=pigen_resolve_protocol_reference(resolver->syntax,model,item.scope,edge->as.fabric_connection.right_expression, resolver->policy);
+                if(source.index==PIGEN_INVALID_ID && destination.index==PIGEN_INVALID_ID)
+                    return fail(resolver,edge->location.source_span,"generated ordinary fabric connections are not supported");
 				if(!add_fabric_protocol_edge(resolver,item.module,item.scope,e,edge,source,destination)) return 0;
 			}
 			e=edge->next_sibling;
@@ -6676,12 +6678,93 @@ static int collect_region_fabrics(resolver *resolver,pigen_module_id module,pige
 	return 1;
 }
 
+/* Static SV data ports may explicitly declare their valid/ready companions. */
+static int fabric_handshake_kind(resolver *resolver,pigen_module_id module,
+ pigen_token_id instance_name,const pigen_semantic_instance_connection *port)
+{
+ pigen_semantic_model *model=resolver->model;
+ if(!pigen_transfer_type_descriptor_get(model->signals[port->port_signal.index].transfer_type)->is_static)return 1;
+ pigen_symbol_id id=pigen_symbol_lookup(model,model->modules[module.index].scope,token_spelling(resolver,instance_name));
+ const pigen_symbol *instance_symbol=pigen_symbol_get(model,id);
+ const pigen_semantic_instance *instance=instance_symbol && instance_symbol->kind==PIGEN_SYMBOL_INSTANCE ? pigen_instance_get(model,instance_symbol->object.instance):NULL;
+ const pigen_symbol *symbol=pigen_symbol_get(model,port->port_symbol);size_t n=0;
+ const char *name=symbol ? pigen_source_span_text(model->sources,symbol->name,&n):NULL;
+ if(!instance || !name)return -1;
+ int valid=0,ready=0;
+ for(size_t c=0;c<instance->connection_count;c++) {
+  const pigen_semantic_instance_connection *connection=&model->instance_connections[instance->first_connection+c];
+  const pigen_symbol *companion=pigen_symbol_get(model,connection->port_symbol);size_t length=0;
+  const char *text=companion ? pigen_source_span_text(model->sources,companion->name,&length):NULL;
+  if(!text || length!=n+6 || memcmp(text,name,n))continue;
+  if(!memcmp(text+n,"_valid",6))valid=1;
+  if(!memcmp(text+n,"_ready",6))ready=1;
+ }
+ return valid!=ready ? -1:valid;
+}
+
+/* The routed storage shares the parent's rising-edge clk/reset domain. */
+static int validate_fabric_child_timing(resolver *resolver,pigen_module_id module,
+ pigen_token_id instance_name,const pigen_semantic_instance_connection *port,pigen_source_span span)
+{
+ pigen_semantic_model *model=resolver->model;
+ pigen_symbol_id id=pigen_symbol_lookup(model,model->modules[module.index].scope,token_spelling(resolver,instance_name));
+ const pigen_symbol *symbol=pigen_symbol_get(model,id);
+ const pigen_semantic_instance *instance=symbol && symbol->kind==PIGEN_SYMBOL_INSTANCE ? pigen_instance_get(model,symbol->object.instance):NULL;
+ if(!instance)return 0;
+ pigen_scope_id child_scope=model->modules[instance->child_module.index].scope;
+ const pigen_semantic_signal *signal=&model->signals[port->port_signal.index];
+ const pigen_semantic_clock_domain *domain=pigen_clock_domain_get(model,signal->domain);
+ if(domain && domain->edge!=PIGEN_SEMANTIC_POSEDGE)return fail(resolver,span,"routed fabric requires rising-edge child ports");
+ for(size_t control=0;control<2;control++) {
+  const char *name=control ? "reset":"clk";size_t length=control ? 5:3;
+  pigen_symbol_id child=control || !domain ? pigen_symbol_lookup_text(model,child_scope,name,length):domain->clock_symbol;
+  pigen_signal_id child_signal=pigen_symbol_signal(model,child);
+  if(control && child_signal.index==PIGEN_INVALID_ID)continue;
+  pigen_symbol_id parent=pigen_symbol_lookup_text(model,model->modules[module.index].scope,name,length);
+  pigen_signal_id expected=pigen_symbol_signal(model,parent),actual=INVALID_ID(pigen_signal_id);
+  for(size_t c=0;c<instance->connection_count;c++) {
+   const pigen_semantic_instance_connection *connection=&model->instance_connections[instance->first_connection+c];
+   if(connection->port_symbol.index==child.index)actual=connection_signal(model,connection);
+  }
+  if(expected.index==PIGEN_INVALID_ID || actual.index!=expected.index)
+   return fail(resolver,span,"routed fabric child ports require the parent's rising-edge clk and synchronous reset bindings");
+ }
+ return 1;
+}
+
+/* Direct destinations are exclusive across all fabric blocks in the parent. */
+static int validate_direct_fabric_destinations(resolver *resolver,pigen_module_id module_id)
+{
+ pigen_semantic_model *model=resolver->model;
+ const pigen_syntax_node *module=pigen_syntax_get(resolver->syntax,model->modules[module_id.index].syntax);
+ const pigen_semantic_instance_connection **destinations=NULL;
+ const pigen_syntax_node **edges=NULL;size_t count=0;int ok=1;
+ for(pigen_syntax_id item=module->first_child;item.index!=PIGEN_INVALID_ID;) {
+  const pigen_syntax_node *fabric=pigen_syntax_get(resolver->syntax,item);item=fabric->next_sibling;
+  if(fabric->kind!=PIGEN_SYNTAX_FABRIC)continue;
+  for(pigen_syntax_id e=fabric->first_child;e.index!=PIGEN_INVALID_ID;) {
+   const pigen_syntax_node *edge=pigen_syntax_get(resolver->syntax,e);e=edge->next_sibling;
+   if(edge->kind!=PIGEN_SYNTAX_FABRIC_CONNECTION)continue;
+   const pigen_semantic_instance_connection *destination=resolved_fabric_port(resolver,module_id,edge->as.fabric_connection.right_instance,edge->as.fabric_connection.right_port);
+   if(!destination)continue;
+   for(size_t i=0;i<count;i++)if(destination==destinations[i] &&
+    (edge->as.fabric_connection.direct || edges[i]->as.fabric_connection.direct)) {
+    ok=fail(resolver,edge->location.source_span,"direct fabric destination cannot appear in another connection");goto done;
+   }
+   destinations=pigen_resize(destinations,(count+1)*sizeof(*destinations));edges=pigen_resize(edges,(count+1)*sizeof(*edges));
+   destinations[count]=destination;edges[count++]=edge;
+  }
+ }
+ done:free(destinations);free(edges);return ok;
+}
+
 static int validate_fabric_ownership(resolver *resolver)
 {
 	pigen_semantic_model *model = resolver->model;
 	for (size_t m = 0; m < model->module_count; m++)
 	{
 		const pigen_syntax_node *module = pigen_syntax_get(resolver->syntax, model->modules[m].syntax);
+		if(!validate_direct_fabric_destinations(resolver,(pigen_module_id){(uint32_t)m})) return 0;
 		for (pigen_syntax_id item = module->first_child; item.index != PIGEN_INVALID_ID; )
 		{
 			pigen_syntax_id root_item=item;
@@ -6721,11 +6804,29 @@ static int validate_fabric_ownership(resolver *resolver)
 				if (!source || !destination) return fail(resolver, edge->location.source_span, "fabric endpoint requires a resolved child port");
 				if (source->direction != PIGEN_SEMANTIC_OUTPUT || destination->direction != PIGEN_SEMANTIC_INPUT)
 					return fail(resolver, edge->location.source_span, "fabric endpoint direction must be output to input");
+                const pigen_semantic_signal *source_port=&model->signals[source->port_signal.index];
+                const pigen_semantic_signal *destination_port=&model->signals[destination->port_signal.index];
+                pigen_conversion conversion;
+                if(!pigen_data_type_resolve_assignment_conversion(model,source_port->data_type,destination_port->data_type,&conversion))
+                    return fail(resolver,edge->location.source_span,"fabric ports require transfer-compatible payload types");
+                const pigen_semantic_shape *source_shape=pigen_shape_get(model,source_port->shape);
+                const pigen_semantic_shape *destination_shape=pigen_shape_get(model,destination_port->shape);
+                if((source_shape && source_shape->dimension_count) || (destination_shape && destination_shape->dimension_count))
+                    return fail(resolver,edge->location.source_span,"fabric endpoints require complete scalar module ports");
 				pigen_signal_id src = canonical_endpoint(model, connection_signal(model, source));
 				pigen_signal_id dst = canonical_endpoint(model, connection_signal(model, destination));
 				if (src.index == PIGEN_INVALID_ID || dst.index == PIGEN_INVALID_ID)
 					return fail(resolver, edge->location.source_span, "fabric endpoint requires a signal binding");
-				int consuming = !pigen_transfer_type_descriptor_get(model->signals[source->port_signal.index].transfer_type)->is_static;
+                int source_interface=fabric_handshake_kind(resolver,(pigen_module_id){(uint32_t)m},edge->as.fabric_connection.left_instance,source);
+                int destination_interface=fabric_handshake_kind(resolver,(pigen_module_id){(uint32_t)m},edge->as.fabric_connection.right_instance,destination);
+                if(source_interface<0 || destination_interface<0 || source_interface!=destination_interface)
+                    return fail(resolver,edge->location.source_span,"fabric ports require compatible complete handshake interfaces");
+                int consuming=source_interface;
+
+                if(!edge->as.fabric_connection.direct && consuming &&
+                    (!validate_fabric_child_timing(resolver,(pigen_module_id){(uint32_t)m},edge->as.fabric_connection.left_instance,source,edge->location.source_span) ||
+                     !validate_fabric_child_timing(resolver,(pigen_module_id){(uint32_t)m},edge->as.fabric_connection.right_instance,destination,edge->location.source_span))) return 0;
+
 				if (endpoint_has_readonly_control(model, dst, PIGEN_SEMANTIC_INPUT))
 					return fail(resolver, edge->location.source_span, "automatic producer conflicts with read-only child valid binding");
 				if (consuming && endpoint_has_readonly_ready(model, src))

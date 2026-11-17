@@ -772,3 +772,62 @@ module pigen_axi_demux #(
 		end
 	end
 endmodule
+
+// Three-port source-routed node. Route bits never cross a user module boundary.
+module pigen_tree_router #(
+ parameter type PAYLOAD_T=logic[1:0],
+ parameter integer PATH_W=1,
+ parameter integer W=$bits(PAYLOAD_T), DATA_W=W-PATH_W
+)(
+ input logic clk, reset,
+ input logic[2:0] in_valid,
+ output logic[2:0] in_ready,
+ input logic[3*W-1:0] packet_in,
+ output logic[2:0] out_valid,
+ input logic[2:0] out_ready,
+ output logic[3*W-1:0] packet_out
+);
+ logic[1:0] count[3];
+ PAYLOAD_T head[3], tail[3];
+ wire[2:0] available;
+ wire[2:0] accepted[3];
+ wire[2:0] remove;
+ function automatic PAYLOAD_T forward_packet(input PAYLOAD_T packet);
+  logic[PATH_W-1:0] path;
+  path=packet[W-1:DATA_W]>>1;
+  path[PATH_W-1]=packet[DATA_W];
+  return {path,packet[DATA_W-1:0]};
+ endfunction
+ for(genvar i=0;i<3;i++) begin: ingress
+  assign in_ready[i]=(count[i]!=2);
+  assign available[i]=(count[i]!=0);
+  assign remove[i]=accepted[0][i]|accepted[1][i]|accepted[2][i];
+  wire push=in_valid[i]&&in_ready[i];
+  always_ff @(posedge clk) begin
+   if(reset) begin count[i]<=0;head[i]<='0;tail[i]<='0;end
+   else case({push,remove[i]})
+    2'b10: begin if(count[i]==0)head[i]<=packet_in[i*W+:W];else tail[i]<=packet_in[i*W+:W];count[i]<=count[i]+1'b1;end
+    2'b01: begin if(count[i]==2)head[i]<=tail[i];count[i]<=count[i]-1'b1;end
+    2'b11: begin if(count[i]==2)begin head[i]<=tail[i];tail[i]<=packet_in[i*W+:W];end else head[i]<=packet_in[i*W+:W];end
+    default: begin end
+   endcase
+  end
+ end
+ for(genvar o=0;o<3;o++) begin: egress
+  localparam integer A=(o+2)%3, B=(o+1)%3;
+  wire request_a=available[A]&&!head[A][DATA_W];
+  wire request_b=available[B]&&head[B][DATA_W];
+  logic rr,locked,held_choice;
+  wire choice=locked ? held_choice : request_a ? (request_b&&rr) : 1'b1;
+  assign out_valid[o]=locked || request_a || request_b;
+  assign packet_out[o*W+:W]=out_valid[o] ? forward_packet(choice ? head[B]:head[A]) : '0;
+  assign accepted[o]=out_valid[o]&&out_ready[o] ? (choice ? (3'b001<<B):(3'b001<<A)) : 3'b000;
+  always_ff @(posedge clk) begin
+   if(reset) begin rr<=0;locked<=0;held_choice<=0;end
+   else if(out_valid[o]) begin
+    if(out_ready[o]) begin rr<=!choice;locked<=0;end
+    else begin locked<=1;held_choice<=choice;end
+   end
+  end
+ end
+endmodule
