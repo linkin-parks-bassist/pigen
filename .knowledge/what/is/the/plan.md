@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-17T12:35:04+11:00"
+revised_at: "2026-11-17T15:48:12+11:00"
 ---
 
 Remaining repository work.
@@ -11,6 +11,6 @@ Remaining repository work.
 
 After substantive work, harden nested/partial/spanning and multidimensional aliases, multiword constants/powers, standalone negative typing, unresolved bounds, writer/cross-clock audits, specialization provenance, broader compatibility and independent fire/ready probes against actual update enables (what/is/elastic/rtl/task/eight.md). Preserve interrupted work.
 
-Open decisions: FSM startup without asserted reset; computed automatic-input validity; pipeline yield surface; fabric manifest/SVG retention; struct-like child instantiation; whether native AXI interconnects should be reactivated, redesigned or retired after David reviews the quarantined work. No AXI fabric extension is planned before that review.
+Open decisions: whether the implemented standalone fabric source-recognition labels reflect the intended design (how/to/write/prototype/fabrics.md); FSM startup without asserted reset; computed automatic-input validity; pipeline yield surface; fabric manifest/SVG retention; struct-like child instantiation; whether native AXI interconnects should be reactivated, redesigned or retired after David reviews the quarantined work. No AXI fabric extension is planned before that review.
 
 Deferred to Pigen 1.0: ready-cycle validation and route negative witnesses. Stages diagnose and stop without rollback.
