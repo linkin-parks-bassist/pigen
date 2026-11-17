@@ -227,39 +227,56 @@ fields carry forward with the packet, and every stage advances its fields
 together. The [complete example](examples/pipeline_fields.pigen) uses the same
 `x` through all three stages.
 
-## Module connections and fabrics
+## Fabrics
 
-Module ports carry their transfer type with them. Connecting compatible child
-ports connects their payload and handshake signals together:
+Hook up a whole design by describing who talks to whom. Pigen turns the connection
+list into a routing fabric, generating the routers, buffers, arbitration and
+backpressure paths for you:
+
+```systemverilog
+fabric audio_system #(parameter integer PAYLOAD_W = 32) begin
+    input_left.samples.main  -> mixer.samples.left;
+    input_right.samples.main -> mixer.samples.right;
+    synthesizer.samples.main -> mixer.samples.synth;
+    mixer.output.monitor     -> monitor.samples.mixer;
+    mixer.output.recorder    -> recorder.samples.mixer;
+    analyser.status.level    -> display.telemetry.analyser;
+endfabric
+```
+
+The generated network is a balanced, pruned tree of simple, lightweight
+**three-port (ternary) routing nodes**. Each node needs just one route bit to
+choose its next hop, with small local round-robin arbiters sharing the links.
+Hop counts grow logarithmically with the network, and buffered handshakes carry
+backpressure all the way through it. Routing metadata stays inside the fabric;
+your modules see ordinary payload/valid/ready interfaces.
+
+You can add a producer, connect another consumer or rearrange the design by
+editing the connection list. Pigen rebuilds the routing tree and emits a complete
+SystemVerilog module, along with an SVG showing the generated topology.
+`--diagram PATH` selects the diagram path. The
+[larger mixer example](tests/mixer_fabric_block.pigen) combines sample, control
+and telemetry paths in one network.
+
+For connections inside an existing module, an inline fabric connects compatible
+child ports and their handshakes directly from endpoint names:
 
 ```systemverilog
 fabric begin
-    producer.m -> consumer.s;
+    input_left.m  -> mixer.left;
+    input_right.m -> mixer.right;
+    mixer.m       -> output_stage.s;
 endfabric
 ```
 
-A fabric can connect parent ports, child endpoints and ordinary internal storage. `->`
-selects buffered routing, while `>` selects an exclusive direct connection.
-Ordinary elastic merges arbitrate round-robin. The standalone routing-tree form
-generates the interconnect hardware from your connection list. Pigen builds a balanced, pruned tree of three-port routers,
-keeping the number of router hops logarithmic as the network grows. Each router
-chooses between just two onward directions using one route bit per hop, with
-small round-robin arbiters resolving contention. Two-entry input buffers and
-buffered links carry backpressure through the network. Routing metadata stays
-inside the fabric, so connected modules see ordinary payload/valid/ready ports.
+Inline fabrics generate buffered links and round-robin merges. `->` selects
+buffered routing, while `>` selects an exclusive direct connection. The standalone
+form above generates the shared three-port tree.
 
-```systemverilog
-fabric routed_fabric #(parameter integer PAYLOAD_W = 32) begin
-    source_a.tx.to_sink -> sink.rx.a;
-    source_b.tx.to_sink -> sink.rx.b;
-endfabric
-```
+## Module connections
 
-This parameter-only standalone form emits a complete module and an SVG of its
-routing tree; `--diagram PATH` selects the diagram path. It supports the declared
-connections between compatible endpoints. Inline fabrics use buffered links and
-round-robin merges. The three-port tree is the ordinary source-routed fabric
-architecture.
+Module ports carry their transfer type with them, so compatible child connections
+carry the payload and its handshake together.
 
 AXI declarations belong on module input/output ports. Parent logic
 accesses a child boundary through `child.bus`, then constructs or unpacks channel
