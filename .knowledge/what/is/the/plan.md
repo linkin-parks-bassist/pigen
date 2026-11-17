@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-17T15:49:43+11:00"
+revised_at: "2026-11-17T16:30:13+11:00"
 ---
 
 Remaining repository work.
@@ -11,8 +11,8 @@ Remaining repository work.
 
 After substantive work, harden nested/partial/spanning and multidimensional aliases, multiword constants/powers, standalone negative typing, unresolved bounds, writer/cross-clock audits, specialization provenance, broader compatibility and independent fire/ready probes against actual update enables (what/is/elastic/rtl/task/eight.md). Preserve interrupted work.
 
-Reconcile fabric lowering with the source-blind inline contract: move the balanced three-port tree behind resolved child-port endpoints and remove the legacy fixed-width dialect/path interface. The governing direction is explicit in SPEC.md at d14aef2; David is currently reconsidering whether source-recognition should instead survive, so confirm that choice before changing the interface (how/to/write/prototype/fabrics.md).
+Reconcile fabric lowering with the source-blind inline contract: move the balanced three-port tree behind resolved child-port endpoints and remove the legacy fixed-width dialect/path interface. The governing direction is explicit in SPEC.md at d14aef2 and reaffirmed by David: connect exclusively actual top-level module ports; sender identity belongs in packet DATA when needed, and producers need no consumer knowledge. Preserve distinct endpoint readiness rather than hiding shared-queue dependencies behind handle-like aliases (how/to/write/prototype/fabrics.md).
 
-Open decisions: whether to revise the source-blind fabric contract to retain source recognition; FSM startup without asserted reset; computed automatic-input validity; pipeline yield surface; fabric manifest/SVG retention; struct-like child instantiation; whether native AXI interconnects should be reactivated, redesigned or retired after David reviews the quarantined work. No AXI fabric extension is planned before that review.
+Open decisions: FSM startup without asserted reset; computed automatic-input validity; pipeline yield surface; fabric manifest/SVG retention; struct-like child instantiation; whether native AXI interconnects should be reactivated, redesigned or retired after David reviews the quarantined work. No AXI fabric extension is planned before that review.
 
 Deferred to Pigen 1.0: ready-cycle validation and route negative witnesses. Stages diagnose and stop without rollback.
