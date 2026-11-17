@@ -242,8 +242,26 @@ A fabric can connect parent ports, child endpoints and ordinary internal storage
 selects buffered routing, while `>` selects an exclusive direct connection.
 Ordinary elastic merges arbitrate round-robin. Typed standalone fabrics have
 module-style ports and parameters so an interconnect can itself be a child.
-The parameter-only standalone form also provides balanced three-port router
-networks and SVG diagrams; `--diagram PATH` selects the output path.
+The standalone routing-tree form generates the interconnect hardware from your
+connection list. Pigen builds a balanced, pruned tree of three-port routers,
+keeping the number of router hops logarithmic as the network grows. Each router
+chooses between just two onward directions using one route bit per hop, with
+small round-robin arbiters resolving contention. Two-entry input buffers and
+buffered links carry backpressure through the network. Routing metadata stays
+inside the fabric, so connected modules see ordinary payload/valid/ready ports.
+
+```systemverilog
+fabric routed_fabric #(parameter integer PAYLOAD_W = 32) begin
+    source_a.tx.to_sink -> sink.rx.a;
+    source_b.tx.to_sink -> sink.rx.b;
+endfabric
+```
+
+This parameter-only standalone form emits a complete module and an SVG of its
+routing tree; `--diagram PATH` selects the diagram path. It supports the declared
+connections between compatible endpoints. Inline fabrics use buffered links and
+round-robin merges, while native AXI fabrics use protocol-aware switches and
+arbiters. The three-port tree is the ordinary source-routed fabric architecture.
 
 AXI declarations belong on module and fabric input/output ports. Parent logic
 accesses a child boundary through `child.bus`, then constructs or unpacks channel
