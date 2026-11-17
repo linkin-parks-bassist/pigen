@@ -255,8 +255,9 @@ The generated network is a balanced, pruned tree of simple, lightweight
 **three-port (ternary) routing nodes**. Each node needs just one route bit to
 choose its next hop, with small local round-robin arbiters sharing the links.
 Hop counts grow logarithmically with the network, and buffered handshakes carry
-backpressure all the way through it. Routing metadata stays inside the fabric;
-your modules see ordinary payload/valid/ready interfaces.
+backpressure all the way through it. The intended inline interface keeps routing
+metadata internal. The older standalone form shown here currently exposes a
+delivered route word alongside payload/valid/ready.
 
 You can add a producer, connect another consumer or rearrange the design by
 editing the connection list. Pigen rebuilds the routing tree and emits a complete
