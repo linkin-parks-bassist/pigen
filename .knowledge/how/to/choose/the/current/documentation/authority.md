@@ -1,6 +1,6 @@
 ---
 status: green
-revised_at: "2026-11-19T08:12:43+11:00"
+revised_at: "2026-11-19T08:18:14+11:00"
 checked_at: "2026-09-13T15:07:12+10:00"
 ---
 
@@ -8,7 +8,7 @@ The local knowledge tree is the sole internal project documentation and architec
 
 README.md is the public hardware-facing introduction. Its central idea is that primitive transfers automatically and implicitly incorporate handshakes. Present wire/reg/logic, buf/port/fifo/skid and native AXI as transfer types in the same model. Preserve the hardware-facing structure and voice of the human README at d14aef2. Introduce native AXI module interfaces within that explanation and omit quarantined AXI fabrics.
 
-Examples should show useful computation or sequencing at a readable scale. The opening elastic datapath computes (input + 7) * 3 through buffer/skid/FIFO storage; examples/scaled_samples.pigen is its compilable source. The FSM accepts a length and emits a counted burst, advancing only on accepted output transfers; examples/burst_counter.pigen supplies the complete module. Explain when within transfers and demonstrate it in the FSM, without a separate README section. Both examples compile, pass fatal Verilator lint and have been simulated with stalled outputs and checked values/sequences. Use ordinary always @(posedge clk) for authored sequential Pigen examples; David explicitly rejects always_ff.
+Examples should show useful computation or sequencing at a readable scale. Use plain integer literals for ordinary arithmetic where they preserve meaning; sized literals belong where width, signedness or bit patterns matter. The opening elastic datapath computes (input + 7) * 3 through buffer/skid/FIFO storage; examples/scaled_samples.pigen is its compilable source. The FSM accepts a length and emits a counted burst, advancing only on accepted output transfers; examples/burst_counter.pigen supplies the complete module. Explain when within transfers and demonstrate it in the FSM, without a separate README section. Both examples compile, pass fatal Verilator lint and have been simulated with stalled outputs and checked values/sequences. Use ordinary always @(posedge clk) for authored sequential Pigen examples; David explicitly rejects always_ff.
 
 Pipelines demonstrate a fixed field namespace whose names refer to successive stage registers, with immutable incoming reads and outgoing writes. The example reuses x across stages; how/do/pipeline/stage/reads/work.md owns its laws and independent verification, including packet-wide advancement, reset and authored-stage latency. Every packet stage uses buffered storage.
 

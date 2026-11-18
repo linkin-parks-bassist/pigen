@@ -123,8 +123,8 @@ module scaled_samples
     uint[32] fifo[8] pending;
 
     always @(posedge clk) begin
-        biased   <= incoming + 32'd7;
-        scaled   <= biased * 32'd3;
+        biased   <= incoming + 7;
+        scaled   <= biased * 3;
         pending  <= scaled;
         outgoing <= pending;
     end
@@ -200,8 +200,8 @@ pipeline packet begin
     uint[32] x;
 
     stage begin x <= incoming; end
-    stage begin x <= x + 32'd1; end
-    stage begin x <= x * 32'd2; end
+    stage begin x <= x + 1; end
+    stage begin x <= x * 2; end
 
     yield x;
 endpipeline

@@ -11,8 +11,8 @@ module scaled_samples
     uint[32] fifo[8] pending;
 
     always @(posedge clk) begin
-        biased   <= incoming + 32'd7;
-        scaled   <= biased * 32'd3;
+        biased   <= incoming + 7;
+        scaled   <= biased * 3;
         pending  <= scaled;
         outgoing <= pending;
     end
