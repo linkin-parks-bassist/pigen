@@ -163,23 +163,26 @@ be ready before anything moves. This is how one token can be deliberately
 partitioned or duplicated into correlated outputs without accidentally
 creating several independent consumers.
 
-For related updates that are clearer as statements, a transfer block says the
-same thing explicitly:
+An atomic transfer can send each result to an output buffer and a history queue
+together, even though they use different storage:
 
 ```systemverilog
-transfer begin
-    output_packet <= result;
-    history       <= result;
-end
+uint[32] buf     output_packet;
+uint[32] fifo[8] history;
+
+{output_packet, history} <= {result, result};
 ```
 
-The block fires as a unit. Either both destinations accept the value or neither
-does.
+Every accepted result enters both slots on the same clock edge, consuming
+`result` once. The output buffer holds its value until its reader takes it,
+while the history FIFO can collect and drain values at its own pace. If either
+slot cannot accept the next result, the whole transfer waits. Their different
+handshakes compose automatically, keeping both copies in step.
 
 By default, a buffered signal has one producer and one consumer. That rule
 is what makes backpressure and token ownership unambiguous. Multiple syntactic
 routes are allowed when Pigen can prove they are mutually exclusive; deliberate
-fan-out belongs in one co-sliced transfer or transfer block, where its atomicity
+fan-out belongs in one co-sliced transfer, where its atomicity
 is visible.
 
 Ordinary `if`, `else` and `case` statements can guard transfers.
