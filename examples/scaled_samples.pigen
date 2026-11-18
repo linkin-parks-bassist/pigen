@@ -1,0 +1,19 @@
+module scaled_samples
+    (
+        input  logic        clk,
+        input  logic        reset,
+        input  uint[32] buf incoming,
+        output uint[32] buf outgoing
+    );
+
+    uint[32] buf     biased;
+    uint[32] skid    scaled;
+    uint[32] fifo[8] pending;
+
+    always @(posedge clk) begin
+        biased   <= incoming + 32'd7;
+        scaled   <= biased * 32'd3;
+        pending  <= scaled;
+        outgoing <= pending;
+    end
+endmodule

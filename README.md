@@ -106,32 +106,37 @@ of hardware, but a transfer involving either means the same thing. The
 handshake may be tied high, last one cycle, or remain stalled for ten cycles;
 the surrounding logic does not need a special case.
 
-Here is a complete elastic path:
+This elastic datapath offsets each input by seven, multiplies it by three,
+and queues the result:
 
 ```systemverilog
-module packet_path
+module scaled_samples
     (
         input  logic        clk,
         input  logic        reset,
-        input  bit[32] buf  incoming,
-        output bit[32] buf  outgoing
+        input  uint[32] buf incoming,
+        output uint[32] buf outgoing
     );
 
-    bit[32] buf     decoded;
-    bit[32] skid    timing_break;
-    bit[32] fifo[8] pending;
+    uint[32] buf     biased;
+    uint[32] skid    scaled;
+    uint[32] fifo[8] pending;
 
-    always_ff @(posedge clk) begin
-        decoded      <= incoming;
-        timing_break <= decoded;
-        pending      <= timing_break;
-        outgoing     <= pending;
+    always @(posedge clk) begin
+        biased   <= incoming + 32'd7;
+        scaled   <= biased * 32'd3;
+        pending  <= scaled;
+        outgoing <= pending;
     end
 endmodule
 ```
 
-Each line says what moves where. Pigen generates the occupancy bits, enables,
-backpressure and queue control needed to make it true.
+Inputs `1, 2, 3` produce `24, 27, 30`, with arithmetic wrapping at 32 bits.
+The skid buffer breaks the ready path, and the FIFO absorbs bursts when the
+consumer pauses. Each computation advances when its operands are valid and
+its destination can accept the result. Pigen generates the occupancy bits,
+enables, backpressure and queue control. The [complete example](examples/scaled_samples.pigen)
+can be compiled directly.
 
 ## Transfers compose
 
@@ -177,24 +182,12 @@ routes are allowed when Pigen can prove they are mutually exclusive; deliberate
 fan-out belongs in one co-sliced transfer or transfer block, where its atomicity
 is visible.
 
-## Control can ask whether a transfer happened
-
-Ordinary `if`, `else` and `case` statements can guard transfers. Pigen also
-provides a compact form for the common case where control should advance only
-when a value really moved:
-
-```systemverilog
-when (destination <= source) begin
-    count <= count + 1;
-end
-```
-
-This performs the transfer and enters the branch on the cycle it is accepted.
-It is the operational counterpart of `accepts(destination, source)`, and avoids
-writing a transfer in one place and a subtly different handshake test in
-another. `valid`, `ready`, `accepts`, `peek`, `validate`, `invalidate` and
-`flush` are available when control logic needs to inspect or manage signal
-state directly.
+Ordinary `if`, `else` and `case` statements can guard transfers.
+`when (destination <= source)` performs a transfer and runs its body only when
+that transfer is accepted. The FSM below uses it to advance through a sequence
+as values arrive and results leave. `valid`, `ready`, `accepts`, `peek`,
+`validate`, `invalidate` and `flush` provide explicit access to signal state
+when needed.
 
 ## Pipeline blocks
 
@@ -322,29 +315,50 @@ cover channel records, storage and clock/reset configuration.
 
 ## FSM blocks
 
-An `fsm` describes a synchronous state register whose active state gates ordinary
-statements. Transfers use the same handshake semantics as the datapath:
+An `fsm` sequences work across clock edges. This burst counter accepts a length
+and emits that many values, starting at zero. Requests `3, 2` produce
+`0, 1, 2, 0, 1`:
 
 ```systemverilog
-fsm @(posedge clk) begin
-    if (reset) goto idle;
+module burst_counter (
+    input wire clk,
+    input wire reset,
+    input int[16] buf length,
+    output int[16] buf outgoing
+);
+    int[16] reg remaining;
+    int[16] reg next_value;
 
-    state idle:
-        if (start) goto send;
+    fsm @(posedge clk) begin
+        if (reset) goto wait_request;
 
-    state send:
-        when (destination <= source) goto idle;
-end
+        state wait_request:
+            when (remaining <= length) begin
+                next_value <= 0;
+                goto emit;
+            end
+
+        state emit: begin
+            if (remaining <= 0) goto wait_request;
+            when (outgoing <= next_value) begin
+                next_value <= next_value + 1;
+                remaining <= remaining - 1;
+            end
+        end
+    end
+endmodule
 ```
+
+`wait_request` consumes a length and initializes the counter. In `emit`, the
+counter advances only when `outgoing` accepts a value, so backpressure holds
+both the next value and the number still to send. A nonpositive length emits
+nothing. The [complete example](examples/burst_counter.pigen) can be compiled
+directly.
 
 An executed `goto` selects the next state and terminates the current invocation.
 Earlier effects remain effective, and execution restarts at the top on the next
-clock edge with the destination state active.
-
-States, reset behaviour and transitions are explicit. The useful difference is
-that the state machine speaks the same transfer language as the datapath: it
-can wait on validity, readiness or an accepted transfer without rebuilding the
-handshake by hand.
+clock edge with the destination state active. The leading reset branch returns
+the FSM to `wait_request`, abandoning any unfinished burst.
 
 ## SystemVerilog remains SystemVerilog
 

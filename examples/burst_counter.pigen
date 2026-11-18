@@ -1,0 +1,27 @@
+module burst_counter (
+    input wire clk,
+    input wire reset,
+    input int[16] buf length,
+    output int[16] buf outgoing
+);
+    int[16] reg remaining;
+    int[16] reg next_value;
+
+    fsm @(posedge clk) begin
+        if (reset) goto wait_request;
+
+        state wait_request:
+            when (remaining <= length) begin
+                next_value <= 0;
+                goto emit;
+            end
+
+        state emit: begin
+            if (remaining <= 0) goto wait_request;
+            when (outgoing <= next_value) begin
+                next_value <= next_value + 1;
+                remaining <= remaining - 1;
+            end
+        end
+    end
+endmodule

@@ -1,12 +1,12 @@
 ---
 status: green
-revised_at: "2026-11-17T17:43:04+11:00"
+revised_at: "2026-11-19T08:13:02+11:00"
 checked_at: "2026-10-04T16:19:56+11:00"
 ---
 
 Pigen v1 extends ordinary SystemVerilog with ready/valid atomic transfers, independent data and transfer types, inline module-owned pipelines/fabrics and synchronous FSMs. It is source-to-source and does not change simulation timing.
 
-Pigen showcases use int[n]/uint[n]/bit numerical types and always processes. logic serves compatibility; prefer always over always_ff. Transfers already enforce validity/readiness: avoid redundant valid guards and manual Verilog sign-extension scaffolding.
+Pigen showcases use int[n]/uint[n]/bit numerical types and ordinary always processes exclusively. logic serves compatibility. Transfers already enforce validity/readiness: avoid redundant valid guards and manual Verilog sign-extension scaffolding.
 
 A runtime signal is data type × transfer type × declarator shape. Intended declarations are data-first, e.g. `int[16] fifo[8] pending[lanes];`. Pigen primitives are two-state int[n], uint[n] and bit/bit[n]; ordinary SV byte is its own signed type. Ordinary transfers include wire/reg/logic, buf/port/fifo/skid and abstract inputs; native AXI declarations are boundary-only module/fabric input/output ports, with child.port access for parent logic; contracts/channels/pins are implemented with acceptance in how/to/write/native/axi/declarations.md. Count brackets in declaration positions lower to descending ranges; explicit ranges and expression selects retain SV meaning. Shapes remain structural and indexing consumes unpacked dimensions before packed bits.
 
