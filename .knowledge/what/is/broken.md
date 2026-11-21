@@ -1,11 +1,11 @@
 ---
 status: green
-revised_at: "2026-11-17T18:00:31+11:00"
+revised_at: "2026-11-22T08:53:33+11:00"
 ---
 
 Capability boundaries follow what/is/the/spec.md, how/to/connect/child/ports.md, what/is/elastic/rtl/task/five.md and how/to/run/repository/verification.md.
 
-Partially supported surfaces include data-first declarations, abstract inputs, static/buffered transfers, pipelines, FSMs, transfer events, handshake/peek intrinsics, validity actions, multiple modules, child endpoints, specialized instances, generated scopes, direct/routed fabrics, concatenation destinations, typed/integer parameters and contextual records. Ordinary SV preservation has witnessed interface/enum/union/struct modules, async-reset and multi-edge processes, directives, functions and declarations. Specific contracts and acceptance evidence belong to their mechanism owners; compilation alone does not establish correctness.
+Partially supported surfaces include data-first declarations, abstract inputs, static/buffered transfers, pipelines, FSMs, transfer events, handshake/peek intrinsics, validity actions, multiple modules, child endpoints, specialized instances, generated scopes, direct/routed fabrics, concatenation destinations, typed/integer parameters and contextual records. Ordinary SV preservation has witnessed interface/enum/union/struct modules, async-reset and multi-edge processes, directives, functions and declarations. Mechanism owners hold acceptance evidence.
 
 Defects and gaps:
 - **Native type aliases remain partial.** Global/local aliases pass direct/parameterized/generated child and collection witnesses across all families; native fabric witnesses are retained inactive. Packed type inquiries/casts reject. Qualified package typedefs/constants and common explicit/wildcard import contexts work. Ordinary inline package functions/tasks coexist with DATA/contracts and retain their bodies/names. Typed subroutine evaluation, classes/DPI/extern/prototypes, package variables, package enum/union typing, generated enum names, opaque imports and other retained/value-shadow contexts remain work (how/are/retained/package/namespace/uses/resolved.md; how/are/retained/package/subroutines/represented.md; how/are/native/axi/package/types/represented.md); simple named native type keys are supported in child collection patterns (how/are/native/axi/type/aliases/represented.md).
@@ -15,6 +15,7 @@ Defects and gaps:
 - **Ordinary-SV preservation is audit-driven.** Forms beyond witnessed examples need auditing; unsupported forms must be recovered rather than silently dropped or misdiagnosed.
 - **Anonymous FSM headers.** Core sources use anonymous headers, but production parsing still accepts legacy optional names. Remove that syntax and update regressions. FSM startup without asserted reset remains undecided; standalone src/fsm_lower.c is not the production route.
 - **Event limits.** when supports transfer events; other event kinds remain unspecified.
+- **Out-of-context Pigen forms are retained.** A module-level `pipeline`, `transfer begin`, `when` or bare `<=` is retained silently and emits no hardware; rejecting them remains work.
 - **Deferred to Pigen 1.0:** semantic ready-cycle validation and route negative witnesses. Verilator exposes combinational loops; lowering assumes validated identities.
 
-make verify includes co-slice, output-walk, CLI diagnostics, fatal lint and independent simulations. Concatenation destinations resize the whole RHS before splitting, including inferred placeholders. Empty when bodies still transfer. When headers preserve ternary/logical/relational RHS precedence and malformed native headers diagnose. The when-value witness checks 1536 stalled results and negatives. Verilator 5.020 and Icarus 13 are installed; lint stays warnings-fatal.
+Concatenation destinations resize the whole RHS before splitting, including inferred placeholders. Empty when bodies still transfer. When headers preserve RHS precedence and malformed native forms diagnose. Verilator 5.020 and Icarus 13 are installed; lint stays warnings-fatal.
