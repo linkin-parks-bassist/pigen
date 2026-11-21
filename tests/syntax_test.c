@@ -892,6 +892,98 @@ static void test_transactional_and_clean_break_syntax(
 		assert_syntax_failure(sources, failures[i]);
 }
 
+static void test_transfer_blocks(pigen_source_manager *sources)
+{
+	static const char text[] =
+		"module transfer_blocks\n"
+		"(\n"
+		"    input logic clk,\n"
+		"    input bit[8] buf left,\n"
+		"    input bit[8] buf right,\n"
+		"    output bit[8] buf first,\n"
+		"    output bit[8] buf second\n"
+		");\n"
+		"    always @(posedge clk) begin\n"
+		"        transfer begin\n"
+		"            first <= left;\n"
+		"            second <= right;\n"
+		"        end\n"
+		"    end\n"
+		"endmodule\n";
+	parsed_fixture fixture = {0};
+	const pigen_syntax_node *module;
+	const pigen_syntax_node *block;
+	const pigen_syntax_node *assignment;
+	const pigen_syntax_expr *destination;
+	const pigen_syntax_expr *value;
+	const pigen_syntax_expr_id *children;
+
+	assert(parse_fixture(sources, "transfer_blocks.pigen", text, &fixture));
+	module = fixture_module(&fixture);
+	assert(module);
+	block = pigen_syntax_get(&fixture.tree, module->first_child);
+	while (block && block->kind != PIGEN_SYNTAX_CLOCKED_PROCESS)
+		block = pigen_syntax_get(&fixture.tree, block->next_sibling);
+	assert(block);
+	block = pigen_syntax_get(&fixture.tree, block->first_child);
+	assert(block && block->kind == PIGEN_SYNTAX_PROCEDURAL_BLOCK);
+	assignment = pigen_syntax_get(&fixture.tree, block->first_child);
+	assert(assignment && assignment->kind ==
+		PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT);
+	assert(assignment->next_sibling.index == PIGEN_INVALID_ID);
+	destination = pigen_syntax_expr_get(&fixture.tree.expressions,
+		assignment->as.nonblocking_assignment.destination);
+	value = pigen_syntax_expr_get(&fixture.tree.expressions,
+		assignment->as.nonblocking_assignment.value);
+	assert(destination && destination->kind ==
+		PIGEN_SYNTAX_EXPR_CONCATENATION);
+	assert(value && value->kind == PIGEN_SYNTAX_EXPR_CONCATENATION);
+	assert(destination->as.sequence.child_count == 2);
+	assert(value->as.sequence.child_count == 2);
+	children = pigen_syntax_expr_children(&fixture.tree.expressions,
+		destination->as.sequence.first_child,
+		destination->as.sequence.child_count);
+	assert(children);
+	assert(expression_is(sources, &fixture.tree, children[0], "first"));
+	assert(expression_is(sources, &fixture.tree, children[1], "second"));
+	children = pigen_syntax_expr_children(&fixture.tree.expressions,
+		value->as.sequence.first_child, value->as.sequence.child_count);
+	assert(children);
+	assert(expression_is(sources, &fixture.tree, children[0], "left"));
+	assert(expression_is(sources, &fixture.tree, children[1], "right"));
+	free_fixture(&fixture);
+
+	assert_syntax_failure(sources, (syntax_failure){
+		"empty_transfer_block.pigen",
+		"module empty_transfer_block(input logic clk,"
+		"input bit[8] buf source,output bit[8] buf destination);"
+		"always @(posedge clk) begin transfer begin end end endmodule",
+		"transfer block requires at least one destination <= source member",
+		"begin", 2});
+	assert_syntax_failure(sources, (syntax_failure){
+		"short_transfer_member.pigen",
+		"module short_transfer_member(input logic clk,"
+		"input bit[8] buf source,output bit[8] buf destination);"
+		"always @(posedge clk) begin transfer begin "
+		"destination source; end end endmodule",
+		"transfer block member requires destination <= source",
+		"destination", 2});
+	assert_syntax_failure(sources, (syntax_failure){
+		"control_transfer_block.pigen",
+		"module control_transfer_block(input logic clk,"
+		"input bit[8] buf source,output bit[8] buf destination);"
+		"always @(posedge clk) begin transfer begin "
+		"if (source_valid) destination <= source; end end endmodule",
+		"transfer block permits assignment members only", "if", 1});
+	assert_syntax_failure(sources, (syntax_failure){
+		"unterminated_transfer_block.pigen",
+		"module unterminated_block(input logic clk,"
+		"input bit[8] buf source,output bit[8] buf destination);"
+		"always @(posedge clk) begin transfer begin "
+		"destination <= source; endmodule",
+		"transfer block requires a closing end", "transfer", 1});
+}
+
 static void test_process_rollback(pigen_source_manager *sources)
 {
 	const char text[] =
@@ -964,6 +1056,7 @@ int main(void)
 	test_opaque_typedef_shadow_barrier(&sources);
 	test_transactional_typedef_ownership(&sources);
 	test_transactional_and_clean_break_syntax(&sources);
+	test_transfer_blocks(&sources);
 	test_process_rollback(&sources);
 	test_missing_pigen_terminator(&sources);
 	pigen_free_sources(&sources);

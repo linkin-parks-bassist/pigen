@@ -8,7 +8,11 @@ module transfer_block
     bit[8] buf low;
     reg [7:0] history;
 
-    always_ff @(posedge clk) begin
-        {high, low, history} <= {source[15:8], source[7:0], source[7:0]};
+    always @(posedge clk) begin
+        transfer begin
+            high <= source[15:8];
+            low <= source[7:0];
+            history <= source[7:0];
+        end
     end
 endmodule

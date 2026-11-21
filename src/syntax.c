@@ -76,6 +76,7 @@ typedef struct {
 	pipeline_scope_stack pipeline_scopes;
 	int pipeline_failed;
 	int when_failed;
+	int transfer_block_failed;
 	size_t generate_depth;
 	int combinational_body;
 	size_t combinational_depth;
@@ -1697,6 +1698,19 @@ static int parse_pipeline_reset(syntax_parser *parser,
 static int parse_import(syntax_parser *parser,pigen_syntax_id scope,size_t first,
  size_t limit,syntax_cursor *cursor,size_t *after);
 
+typedef struct {
+	pigen_syntax_expr_id destination;
+	pigen_syntax_expr_id value;
+	size_t start;
+	size_t after;
+} transfer_block_member;
+
+/* Parse the members of one `transfer begin ... end` group. The caller owns
+ * the returned member array. Recognition is token-based and contextual. */
+static int parse_transfer_block_members(syntax_parser *parser, size_t start,
+	size_t limit, size_t *close, transfer_block_member **members,
+	size_t *member_count);
+
 static int parse_procedural_statement(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count);
@@ -2125,6 +2139,34 @@ static int parse_pipeline_stage(syntax_parser *parser, pigen_syntax_id pipeline,
 static int parse_pipeline_stage_item(syntax_parser *parser,
 	pigen_syntax_id stage, size_t start, size_t limit, size_t *after_item)
 {
+	if (token_is(parser, start, "transfer") &&
+		token_is(parser, start + 1, "begin"))
+	{
+		transfer_block_member *members = NULL;
+		size_t close = 0;
+		size_t count = 0;
+		size_t i;
+
+		if (!parse_transfer_block_members(parser, start, limit, &close,
+			&members, &count)) return 0;
+		for (i = 0; i < count; i++)
+		{
+			pigen_syntax_node node = {0};
+
+			node.kind = PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT;
+			node.location = range_location(parser, members[i].start,
+				members[i].after);
+			node.parent = node.first_child = node.last_child =
+				node.next_sibling = INVALID_SYNTAX;
+			node.as.nonblocking_assignment.destination =
+				members[i].destination;
+			node.as.nonblocking_assignment.value = members[i].value;
+			add_child(parser, stage, add_node(parser, node));
+		}
+		free(members);
+		*after_item = close + 1;
+		return 1;
+	}
 	size_t semicolon = top_level_token(parser, start, limit, ";");
 	size_t separator;
 	pigen_syntax_type_id data_type;
@@ -3082,6 +3124,219 @@ static int parse_procedural_case(syntax_parser *parser,pigen_syntax_id parent,
 	*after=at+1;parser->tree->nodes[selection.index].location=range_location(parser,first,*after);return 1;
 }
 
+static int transfer_block_control_keyword(syntax_parser *parser, size_t at)
+{
+	static const char *const keywords[] = {
+		"if", "else", "case", "casez", "casex", "for", "foreach", "while",
+		"repeat", "forever", "do", "begin", "end", "fork", "join", "join_any",
+		"join_none", "when", "pipeline", "goto", "break", "continue",
+		"import", "transfer", "return", "disable", "wait", "assert",
+		"assume", "cover", "unique", "unique0", "priority"
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(keywords) / sizeof(*keywords); i++)
+		if (token_is(parser, at, keywords[i])) return 1;
+	return 0;
+}
+
+/* Grow the expression arena by one concatenation of the members' destination
+ * or source expressions, preserving member source order. */
+static pigen_syntax_expr_id add_transfer_block_concatenation(
+	syntax_parser *parser, const transfer_block_member *members, size_t count,
+	int destinations, pigen_syntax_location location)
+{
+	pigen_syntax_expr_arena *arena = &parser->tree->expressions;
+	pigen_syntax_expr node = {0};
+	pigen_syntax_expr_id id;
+	size_t first_child;
+	size_t capacity;
+	size_t i;
+
+	if (!count || arena->node_count == PIGEN_INVALID_ID) return
+		INVALID_ID(pigen_syntax_expr_id);
+	if (arena->child_count + count > arena->child_capacity)
+	{
+		capacity = arena->child_capacity ? arena->child_capacity * 2 : 32;
+		while (capacity < arena->child_count + count) capacity *= 2;
+		arena->children = pigen_resize(arena->children,
+			capacity * sizeof(*arena->children));
+		arena->child_capacity = capacity;
+	}
+	if (arena->node_count == arena->node_capacity)
+	{
+		capacity = arena->node_capacity ? arena->node_capacity * 2 : 32;
+		arena->nodes = pigen_resize(arena->nodes,
+			capacity * sizeof(*arena->nodes));
+		arena->node_capacity = capacity;
+	}
+	first_child = arena->child_count;
+	for (i = 0; i < count; i++)
+		arena->children[arena->child_count++] =
+			destinations ? members[i].destination : members[i].value;
+	node.kind = PIGEN_SYNTAX_EXPR_CONCATENATION;
+	node.location = location;
+	node.as.sequence.first_child = first_child;
+	node.as.sequence.child_count = count;
+	id = (pigen_syntax_expr_id){(uint32_t)arena->node_count};
+	arena->nodes[arena->node_count++] = node;
+	return id;
+}
+
+static int parse_transfer_block_members(syntax_parser *parser, size_t start,
+	size_t limit, size_t *close, transfer_block_member **members,
+	size_t *member_count)
+{
+	transfer_block_member *list = NULL;
+	size_t count = 0;
+	size_t capacity = 0;
+	size_t depth = 0;
+	size_t end = limit;
+	size_t at;
+
+	for (at = start + 2; at < limit; at++)
+	{
+		if (token_is(parser, at, "begin")) depth++;
+		else if (token_is(parser, at, "end"))
+		{
+			if (!depth) { end = at; break; }
+			depth--;
+		}
+	}
+	if (end == limit)
+		return fail(parser, start, "transfer block requires a closing end");
+	at = start + 2;
+	while (at < end)
+	{
+		size_t segment_start = at;
+		size_t semicolon;
+		size_t separator;
+		size_t second_separator;
+		pigen_syntax_expr_id destination, value;
+
+		if (token_is(parser, at, ";"))
+			goto empty_member;
+		if (transfer_block_control_keyword(parser, at))
+			goto control_member;
+		semicolon = top_level_token(parser, at, end, ";");
+		if (semicolon == end)
+		{
+			fail(parser, segment_start,
+				"transfer block member requires a trailing semicolon");
+			goto failed;
+		}
+		separator = top_level_token(parser, at, semicolon, "<=");
+		if (separator == semicolon)
+		{
+			fail(parser, segment_start,
+				"transfer block member requires destination <= source");
+			goto failed;
+		}
+		second_separator = top_level_token(parser, separator + 1, semicolon,
+			"<=");
+		if (second_separator != semicolon)
+		{
+			fail(parser, second_separator,
+				"transfer block member requires exactly one <= separator");
+			goto failed;
+		}
+		if (separator == segment_start)
+		{
+			fail(parser, separator,
+				"transfer block member requires a destination");
+			goto failed;
+		}
+		if (separator + 1 == semicolon)
+		{
+			fail(parser, separator,
+				"transfer block member requires a source");
+			goto failed;
+		}
+		if (!pigen_parse_expression(parser->expanded, segment_start, separator,
+			&parser->tree->expressions, &parser->tree->types,
+			&destination, parser->error) ||
+			!pigen_parse_expression(parser->expanded, separator + 1, semicolon,
+				&parser->tree->expressions, &parser->tree->types,
+				&value, parser->error)) goto failed;
+		if (count == capacity)
+		{
+			capacity = capacity ? capacity * 2 : 4;
+			list = pigen_resize(list, capacity * sizeof(*list));
+		}
+		list[count++] = (transfer_block_member){destination, value,
+			segment_start, semicolon + 1};
+		at = semicolon + 1;
+		continue;
+empty_member:
+		fail(parser, at,
+			"transfer block member requires destination <= source");
+		goto failed;
+control_member:
+		fail(parser, at, "transfer block permits assignment members only");
+		goto failed;
+	}
+	if (!count)
+	{
+		fail(parser, start + 1,
+			"transfer block requires at least one destination <= source member");
+		goto failed;
+	}
+	*close = end;
+	*members = list;
+	*member_count = count;
+	return 1;
+failed:
+	free(list);
+	return 0;
+}
+
+static int parse_transfer_block(syntax_parser *parser, pigen_syntax_id parent,
+	size_t start, size_t limit, size_t *after_statement,
+	size_t *assignment_count)
+{
+	transfer_block_member *members = NULL;
+	size_t member_count = 0;
+	size_t close = 0;
+	pigen_syntax_node node = {0};
+	pigen_syntax_location location;
+
+	if (!token_is(parser, start, "transfer") ||
+		!token_is(parser, start + 1, "begin")) return 0;
+	if (!parse_transfer_block_members(parser, start, limit, &close, &members,
+		&member_count)) return 0;
+	location = range_location(parser, start, close + 1);
+	node.kind = PIGEN_SYNTAX_NONBLOCKING_ASSIGNMENT;
+	node.location = location;
+	node.parent = node.first_child = node.last_child = node.next_sibling =
+		INVALID_SYNTAX;
+	if (member_count == 1)
+	{
+		node.as.nonblocking_assignment.destination = members[0].destination;
+		node.as.nonblocking_assignment.value = members[0].value;
+	}
+	else
+	{
+		node.as.nonblocking_assignment.destination =
+			add_transfer_block_concatenation(parser, members, member_count, 1,
+				location);
+		node.as.nonblocking_assignment.value =
+			add_transfer_block_concatenation(parser, members, member_count, 0,
+				location);
+		if (node.as.nonblocking_assignment.destination.index == PIGEN_INVALID_ID ||
+			node.as.nonblocking_assignment.value.index == PIGEN_INVALID_ID)
+		{
+			free(members);
+			return fail(parser, start,
+				"transfer block cannot represent this member list");
+		}
+	}
+	free(members);
+	add_child(parser, parent, add_node(parser, node));
+	(*assignment_count)++;
+	*after_statement = close + 1;
+	return 1;
+}
+
 static int parse_procedural_statement(syntax_parser *parser,
 	pigen_syntax_id parent, size_t start, size_t limit, size_t *after_statement,
 	size_t *assignment_count)
@@ -3190,6 +3445,14 @@ static int parse_procedural_statement(syntax_parser *parser,
 	if (parser->fsm_states && token_is(parser, start, "goto"))
 		return parse_goto_statement(parser, parent, parser->fsm_states, start,
 			limit, after_statement);
+	if (token_is(parser, start, "transfer") &&
+		token_is(parser, start + 1, "begin"))
+	{
+		int parsed = parse_transfer_block(parser, parent, start, limit,
+			after_statement, assignment_count);
+		if (!parsed) parser->transfer_block_failed = 1;
+		return parsed;
+	}
 	return parse_nonblocking_assignment(parser, parent, start, limit,
 		after_statement, assignment_count);
 }
@@ -3232,7 +3495,8 @@ static int parse_clocked_process(syntax_parser *parser,
 		&process_after, &assignment_count) || !assignment_count)
 	{
 		pigen_syntax_error preserved = {0};
-		int structured_failure = parser->pipeline_failed || parser->when_failed;
+		int structured_failure = parser->pipeline_failed || parser->when_failed ||
+			parser->transfer_block_failed;
 		if (structured_failure && parser->error) preserved = *parser->error;
 		restore_checkpoint(parser, checkpoint);
 		if (structured_failure && parser->error) *parser->error = preserved;
@@ -4708,6 +4972,7 @@ static int parse_module_items(syntax_parser *parser, pigen_syntax_id module,
 			/* Speculative failures restore their diagnostic checkpoint. A
 			 * remaining error is committed and must survive retention probes. */
 			if (parser->pipeline_failed || parser->when_failed ||
+				parser->transfer_block_failed ||
 				(parser->error && parser->error->message)) return 0;
 			/* Retained native reads are bound semantically. Unsupported
 			 * transfers still fail below, and retained writes fail binding. */

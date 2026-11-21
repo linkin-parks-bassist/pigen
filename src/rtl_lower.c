@@ -3197,9 +3197,12 @@ static int drive_concat_rtl_value(pigen_rtl_lowering *lowering,
 				value_type}};
 		shifted = pigen_rtl_expr_add_binary(rtl, value_rtl_type, &shift,
 			value, low, span);
+		/* A concatenation aggregate is an ordinary packed vector even when
+		 * its members are Pigen integers. Splitting it back into those
+		 * members restores their declared types explicitly. */
 		if (child_type.index == PIGEN_INVALID_ID ||
 			shifted.index == PIGEN_INVALID_ID ||
-			!pigen_data_type_resolve_assignment_conversion(sem, value_type,
+			!pigen_data_type_resolve_explicit_conversion(sem, value_type,
 				child_data_type, &conversion))
 			return 0;
 		slice = pigen_rtl_expr_add_conversion(rtl, child_type, &conversion,
@@ -3854,7 +3857,7 @@ int pigen_lower_rtl_transfers(pigen_rtl_lowering *lowering,
 						shifted = pigen_rtl_expr_add_binary(rtl, whole_type,
 							&shift, whole, low, owner->span);
 						if (shifted.index == PIGEN_INVALID_ID ||
-							!pigen_data_type_resolve_assignment_conversion(
+							!pigen_data_type_resolve_explicit_conversion(
 								sem, value_expr->data_type,
 								child_data_type, &conversion))
 						{

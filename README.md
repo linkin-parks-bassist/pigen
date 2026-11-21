@@ -164,33 +164,39 @@ partitioned or duplicated into correlated outputs without accidentally
 creating several independent consumers.
 
 An atomic transfer can send each result to an output buffer and a history queue
-together, even though they use different storage:
+together, even though they use different storage. A `transfer begin` block
+groups the destinations into one transfer whose members run in source order:
 
 ```systemverilog
 uint[32] buf     output_packet;
 uint[32] fifo[8] history;
 
-{output_packet, history} <= {result, result};
+always @(posedge clk) begin
+    transfer begin
+        output_packet <= result;
+        history      <= result;
+    end
+end
 ```
 
 Every accepted result enters both slots on the same clock edge, consuming
 `result` once. The output buffer holds its value until its reader takes it,
-while the history FIFO can collect and drain values at its own pace. If either
-slot cannot accept the next result, the whole transfer waits. Their different
-handshakes compose automatically, keeping both copies in step.
+while the history FIFO can collect and drain values at its own pace. The two
+readers therefore drain independently, but the group shares one write
+acceptance: it admits the next result only when both slots can take it. Their
+different handshakes compose automatically, keeping both copies in step.
 
 By default, a buffered signal has one producer and one consumer. That rule
 is what makes backpressure and token ownership unambiguous. Multiple syntactic
 routes are allowed when Pigen can prove they are mutually exclusive; deliberate
-fan-out belongs in one co-sliced transfer, where its atomicity
-is visible.
+fan-out belongs in one transfer block or co-sliced transfer, where its
+atomicity is visible.
 
 Ordinary `if`, `else` and `case` statements can guard transfers.
 `when (destination <= source)` performs a transfer and runs its body only when
 that transfer is accepted. The FSM below uses it to advance through a sequence
-as values arrive and results leave. `valid`, `ready`, `accepts`, `peek`,
-`validate`, `invalidate` and `flush` provide explicit access to signal state
-when needed.
+as values arrive and results leave. `valid`, `ready`, `accepts` and `peek`
+provide explicit access to signal state when needed.
 
 ## Pipeline blocks
 

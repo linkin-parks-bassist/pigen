@@ -151,6 +151,11 @@ test: clocked-case-test
 clocked-case-test: pigen
 	python3 tests/clocked_case_test.py
 
+.PHONY: transfer-block-test
+test: transfer-block-test
+transfer-block-test: pigen
+	python3 tests/transfer_block_test.py
+
 .PHONY: generate-semantic-test
 test: generate-semantic-test
 generate-semantic-test:
