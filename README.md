@@ -205,17 +205,19 @@ Each stage reads the value of `x` at that point in the pipeline, and a transfer
 into `x` defines the value passed to the following stage:
 
 ```systemverilog
-pipeline packet begin
-    uint[32] x;
+always @(posedge clk) if (!reset) begin
+    pipeline packet begin
+        uint[32] x;
 
-    stage begin x <= incoming; end
-    stage begin x <= x + 1; end
-    stage begin x <= x * 2; end
+        stage begin x <= incoming; end
+        stage begin x <= x + 1; end
+        stage begin x <= x * 2; end
 
-    yield x;
-endpipeline
+        yield x;
+    endpipeline
 
-outgoing <= packet;
+    outgoing <= packet;
+end
 ```
 
 The same name refers to a different register at each stage boundary. This gives

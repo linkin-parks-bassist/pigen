@@ -156,6 +156,11 @@ test: transfer-block-test
 transfer-block-test: pigen
 	python3 tests/transfer_block_test.py
 
+.PHONY: readme-examples-test
+test: readme-examples-test
+readme-examples-test: pigen
+	python3 tests/readme_examples_test.py
+
 .PHONY: generate-semantic-test
 test: generate-semantic-test
 generate-semantic-test:
